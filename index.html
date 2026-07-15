@@ -1,0 +1,1017 @@
+﻿<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+  <script type="text/javascript">
+    (function(l) {
+      if (l.search.indexOf('?p=') === 0) {
+        var params = new URLSearchParams(l.search);
+        var path = (params.get('p') || '/dictionary').replace(/~and~/g, '&');
+        var query = params.get('q');
+        var base = l.pathname.replace(/\/$/, '');
+        if (path === '/' && query && query.indexOf('p=') === 0) query = '';
+        var target = (path === '/' && base ? base : base + path) +
+          (query ? '?' + query.replace(/~and~/g, '&') : '') + l.hash;
+        window.history.replaceState(null, null, target);
+        return;
+      }
+      if (l.search[1] === '/' ) {
+        var decoded = l.search.slice(1).split('&').map(function(s) { return s.replace(/~and~/g, '&') }).join('?');
+        window.history.replaceState(null, null, l.pathname.slice(0, -1) + decoded + l.hash);
+      }
+    }(window.location));
+  </script>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <!-- Google Analytics -->
+  <script async src="https://www.googletagmanager.com/gtag/js?id=G-C06S6C7JYT"></script>
+  <script>
+    window.dataLayer = window.dataLayer || [];
+    function gtag(){dataLayer.push(arguments);}
+    gtag('js', new Date());
+    gtag('config', 'G-C06S6C7JYT');
+  </script>
+
+  <title>LootLingua | قاموس الأساطير</title>
+  <meta name="description" content="LootLingua قاموس إنجليزي عربي مع قواميس Minecraft وPUBG، كويزات، XP، مستويات، وصندوق كنز يومي لتعلم الكلمات.">
+  <meta name="keywords" content="LootLingua, قاموس إنجليزي عربي, قاموس ألعاب, Minecraft dictionary, PUBG terms, تعلم الإنجليزية, كلمات إنجليزية, كويزات, XP, مستويات, صندوق كنز">
+  <meta name="author" content="LootLingua">
+  <meta name="robots" content="index, follow">
+  <meta property="og:title" content="LootLingua | قاموس الأساطير">
+  <meta property="og:description" content="قاموس إنجليزي عربي مع قواميس Minecraft وPUBG، كويزات، XP، مستويات، وصندوق كنز يومي.">
+  <meta property="og:type" content="website">
+  <meta property="og:url" content="https://lootlingua.vercel.app/">
+  <meta name="twitter:card" content="summary">
+  <meta name="twitter:title" content="LootLingua | قاموس الأساطير">
+  <meta name="twitter:description" content="تعلم الكلمات الإنجليزية عبر قاموس ألعاب، كويزات، XP، مستويات، وصندوق كنز يومي.">
+  <!-- Dictionary API on Render: POST /api/dictionary (عادي) + POST /api/gamer-dictionary (جيمر→جيمر). Backend: dictionary-server/index.js -->
+  <link rel="icon" type="image/png" href="ammar1.png">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body class="legend-dock-visible">
+
+<!-- Toast -->
+<div id="toastMessage" class="toast-msg"></div>
+<!-- XP Float Badge -->
+<div id="xpBadge" class="xp-badge">+3 XP</div>
+<!-- Confetti -->
+<div id="confettiContainer" class="confetti-container" style="display:none;"></div>
+
+<!-- ── شريط البطل العلوي (عائم) ── -->
+<header class="legend-top-bar" id="legendTopBar">
+  <button type="button" class="hero-avatar-btn" id="heroAvatarBtn" onclick="toggleProfileModal()" aria-label="ملفك الشخصي">
+    <span class="hero-avatar-circle" id="heroAvatarCircle"><i class="fa-solid fa-user" id="heroAvatarIcon" aria-hidden="true"></i><span id="heroAvatarLetter" class="hero-avatar-letter" style="display:none;"></span></span>
+      <span class="hero-avatar-meta">
+        <span id="heroLevelBadge" class="hero-level-badge">Noob</span>
+        <span id="heroActiveTitleBadge" class="hero-active-title-badge" hidden></span>
+        <span id="heroXpMini" class="hero-xp-mini">0 XP</span>
+      </span>
+  </button>
+  <div class="legend-top-widgets">
+    <div id="streakWrap" class="streak-wrap" onclick="openStatsPanel()" title="السلسلة اليومية"> <style>  </style>
+      <span id="streakIcon" class="streak-icon"><i class="fa-solid fa-fire" aria-hidden="true"></i></span>
+      <span id="streakCount" class="streak-count">0 يوم</span>
+    </div>
+    <div class="goal-ring-wrap" onclick="openStatsPanel()" title="هدفك اليومي">
+      <svg viewBox="0 0 36 36" class="goal-svg">
+        <circle cx="18" cy="18" r="16" class="goal-bg"/>
+        <circle id="goalRing" cx="18" cy="18" r="16" class="goal-fill"
+                style="stroke-dasharray:100.53;stroke-dashoffset:100.53;"/>
+      </svg>
+      <span id="goalText" class="goal-text">0/5</span>
+    </div>
+    <div class="notif-hub" id="notifHub">
+      <button type="button" id="notifBtn" class="notif-bell-btn delayed-tip" data-tip="الإشعارات" onclick="toggleNotificationsPanel(event)" aria-label="الإشعارات" aria-expanded="false" aria-controls="notificationsPanel">
+        <span class="notif-bell-ring"></span>
+        <i class="fa-solid fa-bell"></i>
+        <span id="notifBadge" class="notif-badge" style="display:none;">0</span>
+      </button>
+      <div id="notificationsPanel" class="notif-popover" style="display:none;" role="dialog" aria-label="الإشعارات">
+        <div class="notif-popover-arrow"></div>
+        <div class="notif-panel-header">
+          <span><i class="fa-solid fa-bell"></i> الإشعارات</span>
+          <div class="notif-header-actions">
+            <button type="button" id="notifClearAllBtn" onclick="clearAllNotifications(event)" class="notif-clear-all" style="display:none;" aria-label="حذف جميع الإشعارات">حذف الكل</button>
+            <button type="button" onclick="toggleNotificationsPanel(event)" class="notif-close" aria-label="إغلاق"><i class="fa-solid fa-xmark"></i></button>
+          </div>
+        </div>
+        <ul id="notificationsList" class="notifications-list"></ul>
+      </div>
+    </div>
+    <button type="button" id="dailyQuestsBtn" class="quest-pill-btn delayed-tip" data-tip="مهام اليوم" onclick="toggleDailyQuestsSheet()" aria-label="مهام اليوم" aria-expanded="false" aria-controls="dailyQuestsSheet">
+      <i class="fa-solid fa-scroll"></i>
+      <span id="dailyQuestsBadge" class="quest-pill-badge">0/3</span>
+    </button>
+  </div>
+</header>
+
+<!-- ── Sidebar (مخفي — للتوافق مع الكود القديم) ── -->
+<div id="sidebar" class="sidebar sidebar-legacy-hidden" aria-hidden="true">
+  <div class="sidebar-header" data-tip="فتح الشريط الجانبي" onclick="toggleSidebar()"><h2><i class="fa-solid fa-book-open"></i> <span class="side-label">LootLingua</span></h2></div>
+  <nav>
+    <!-- قاموسك الشخصي -->
+    <a href="#" class="nav-link active" data-feature="personal" data-view="personal" data-tip="قاموسك الشخصي" onclick="return onSidebarFeatureClick(event, 'personal', function () { loadPersonalDictionary(); });">
+      <i class="fas fa-user-shield"></i> <span class="side-label">قاموسك الشخصي</span>
+    </a>
+    <!-- الكلمات الصعبة — تحت قاموسك الشخصي -->
+    <div class="nav-thin-divider nav-divider-strong"></div>
+    <a href="#" class="nav-link" id="navStarred" data-feature="starred" data-view="starred" data-tip="الكلمات الصعبة" onclick="return onSidebarFeatureClick(event, 'starred', function () { loadStarredView(); });">
+      <i class="fas fa-star"></i> <span class="side-label">الكلمات الصعبة</span>
+    </a>
+    <div class="sidebar-divider"><span class="side-label">موسوعة الأساطير</span></div>
+    <a href="#" class="nav-link" data-feature="minecraft" data-view="minecraft" data-tip="Minecraft Dict" onclick="return onSidebarFeatureClick(event, 'minecraft', function () { loadGameDictionary('minecraft'); });">
+      <i class="fas fa-cube"></i> <span class="side-label">Minecraft Dict</span>
+    </a>
+    <a href="#" class="nav-link" data-feature="pubg" data-view="pubg" data-tip="PUBG Terms" onclick="return onSidebarFeatureClick(event, 'pubg', function () { loadGameDictionary('pubg'); });">
+      <i class="fas fa-crosshairs"></i> <span class="side-label">PUBG Terms</span>
+    </a>
+    <!-- إحصائيات + كويز — بعد قواميس الألعاب بنفس فاصل sidebar-divider -->
+    <div class="sidebar-divider"><span class="side-label">الأدوات</span></div>
+    <a href="#" class="nav-link" data-feature="stats" data-tip="إحصائياتي" onclick="return onSidebarFeatureClick(event, 'stats', function () { openStatsPanel(); });">
+      <i class="fas fa-chart-bar"></i> <span class="side-label">إحصائياتي</span>
+    </a>
+    <a href="#" class="nav-link" id="navQuiz" data-feature="quiz" data-view="quiz" data-tip="الاختبار" onclick="return onSidebarFeatureClick(event, 'quiz', function () { loadQuizView(); });">
+      <i class="fas fa-gamepad"></i> <span class="side-label">الاختبار</span>
+    </a>
+  </nav>
+</div>
+
+<div id="overlay" class="overlay sidebar-legacy-hidden" aria-hidden="true"></div>
+
+<!-- ── Main ── -->
+<main class="main-content">
+  <header class="page-header">
+    <div class="header-top">
+      <h1 id="pageTitle"><i class="fa-solid fa-sword" aria-hidden="true"></i> قاموسك الشخصي</h1>
+      <nav id="viewNavBar" class="view-nav-bar" aria-hidden="true">
+        <button type="button" id="viewBackBar" class="view-back-btn delayed-tip" data-tip="رجوع لعوالم الأساطير" onclick="goBackFromSubView()" aria-label="رجوع لعوالم الأساطير">
+          <i class="fa-solid fa-arrow-right" aria-hidden="true"></i>
+          <span id="viewBackLabel">رجوع لعوالم الأساطير</span>
+        </button>
+      </nav>
+    </div>
+  </header>
+
+  <!-- بطاقة الإضافة (تُخفى عند قواميس الألعاب) -->
+  <div class="card-box" id="personalControls">
+    <div id="normalSearchZone" class="search-zone" data-search-type="normal">
+      <div class="search-zone-inner dictionary-search-row">
+        <button onclick="fetchSuggestions()" id="searchBtn" class="btn-ai dictionary-search-btn" data-tip="بحث ذكي">ابحث عن معنى</button>
+        <button type="button" id="wordHunterBtn" class="btn-icon-tip word-hunter-btn dictionary-word-hunter-btn" onclick="openWordHunterModal()" data-tip="صائد الكلمات" aria-label="صائد الكلمات">
+          <i class="fa-solid fa-crosshairs" aria-hidden="true"></i>
+        </button>
+        <input type="text" id="wordInput" class="dict-rtl-input" placeholder="الكلمة بالإنجليزي (مثال: Sword)" autocomplete="off">
+      </div>
+      <button type="button" class="search-lock-overlay" aria-label="البحث مقفل — سجّل دخولك" tabindex="-1">
+        <i class="fa-solid fa-lock" aria-hidden="true"></i>
+      </button>
+    </div>
+    <button type="button" id="addFormToggle" class="add-form-toggle" onclick="toggleAddFormExpanded()" aria-expanded="false" aria-controls="addFormAdvancedFields">
+      <i class="fa-solid fa-chevron-down" aria-hidden="true"></i>
+      <span class="sr-only">إظهار الحقول الإضافية</span>
+    </button>
+    <div id="onboardingExampleChips" class="onboarding-examples" style="display:none;"></div>
+    <div id="suggestionsBox">
+      <p style="font-size:13px; color:var(--accent); font-weight:bold; margin:0; padding:10px 14px 4px;">اختر المعنى الأنسب:</p>
+      <div id="suggestionsList"></div>
+    </div>
+    <div id="addFormAdvancedFields" class="add-form-advanced" aria-hidden="true">
+      <div class="add-form-advanced-inner">
+        <input type="text" id="meaningInput" placeholder="المعنى بالعربي">
+        <textarea id="exampleInput" placeholder="جملة مثال (اختياري)" rows="2"></textarea>
+        <div class="app-dropdown-wrap app-dropdown-block" id="categoryDropdownWrap">
+          <button type="button" id="categoryDropdownBtn" class="app-dropdown-trigger" aria-haspopup="listbox" aria-expanded="false">عام</button>
+          <div id="categoryDropdownMenu" class="app-dropdown-menu" role="listbox" aria-label="نوع الكلمة">
+            <button type="button" data-value="عام" class="active">عام</button>
+            <button type="button" data-value="فعل">فعل</button>
+            <button type="button" data-value="اسم">اسم</button>
+            <button type="button" data-value="صفة">صفة</button>
+            <button type="button" data-value="أداة">أداة</button>
+            <button type="button" data-value="ظرف">ظرف</button>
+            <button type="button" data-value="جمل">جمل شائعة</button>
+          </div>
+          <input type="hidden" id="categoryInput" value="عام">
+        </div>
+        <button class="btn-main" id="addBtn" onclick="addWord()">إضافة للقاموس</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── مربع بحث قواميس الألعاب (مخفي افتراضياً) ── -->
+  <div id="gameSearchBar" class="game-search-bar" style="display:none;">
+    <div class="game-search-inner">
+      <i class="fas fa-search game-search-icon"></i>
+      <input type="text" id="gameSearchInput"
+             placeholder="ابحث في كلمات اللعبة..."
+             oninput="searchGameWords()"
+             dir="ltr">
+    </div>
+    <div id="gamerAiSearchZone" class="search-zone" data-search-type="gamer">
+      <div id="gameGamerAiWrap" class="game-gamer-ai-wrap">
+        <button type="button" class="game-gamer-ask-btn" onclick="openGameGamerAiSearch()">
+          <i class="fa-solid fa-wand-magic-sparkles" aria-hidden="true"></i>
+          <span>ما لقيت مصطلحك؟ اسأل الـ AI عن أي كلمة ألعاب</span>
+        </button>
+        <div id="gameGamerAiPanel" class="game-gamer-ai-panel" style="display:none;" aria-live="polite"></div>
+      </div>
+      <button type="button" class="search-lock-overlay" aria-label="بحث الألعاب مقفل — سجّل دخولك" tabindex="-1">
+        <i class="fa-solid fa-lock" aria-hidden="true"></i>
+      </button>
+    </div>
+  </div>
+
+  <!-- ── مربع بحث الكلمات الصعبة (مخفي افتراضياً) ── -->
+  <div id="starredSearchBar" class="game-search-bar" style="display:none;">
+    <div class="game-search-inner">
+      <i class="fas fa-search game-search-icon"></i>
+      <input type="text" id="starredSearchInput"
+             placeholder="ابحث في الكلمات الصعبة..."
+             oninput="renderStarredWords()"
+             dir="ltr">
+    </div>
+  </div>
+
+  <!-- شريط البحث والترتيب -->
+  <div class="search-bar-row">
+    <div class="dictionary-filter-search">
+      <button type="button" id="voiceSearchBtn" class="voice-search-btn btn-icon-tip" data-tip="بحث صوتي" onclick="startVoiceSearch()" aria-label="بحث صوتي">
+        <i class="fa-solid fa-microphone" aria-hidden="true"></i>
+      </button>
+      <input type="text" id="searchInput" class="dict-rtl-input" placeholder="ابحث في قاموسك..." oninput="render()" autocomplete="off">
+      <div class="search-inline-divider"></div>
+      <div class="app-dropdown-wrap search-filter-dropdown" id="searchFilterWrap">
+        <button type="button" id="searchFilterBtn" class="app-dropdown-trigger delayed-tip" data-tip="إعدادات البحث" aria-haspopup="listbox" aria-expanded="false" aria-label="إعدادات البحث">
+          <i class="fa-solid fa-gear" aria-hidden="true"></i>
+        </button>
+        <div id="searchFilterMenu" class="app-dropdown-menu" role="listbox" aria-label="نطاق البحث">
+          <button type="button" data-value="all" class="active">بحث في الكل</button>
+          <button type="button" data-value="word">الكلمة فقط</button>
+          <button type="button" data-value="meaning">المعنى فقط</button>
+          <button type="button" data-value="example">الجملة فقط</button>
+        </div>
+        <input type="hidden" id="searchFilter" value="all">
+      </div>
+    </div>
+    <div class="sort-dropdown-wrap app-dropdown-wrap">
+      <button type="button" id="dictionarySortBtn" class="btn-icon-tip sort-trigger app-dropdown-trigger-icon" data-tip="فرز القاموس" onclick="toggleDictionarySortMenu()" aria-haspopup="menu" aria-expanded="false">
+        <i class="fa-solid fa-filter" aria-hidden="true"></i>
+      </button>
+      <div id="dictionarySortMenu" class="app-dropdown-menu sort-dropdown-menu" role="menu" aria-label="فرز القاموس">
+        <button type="button" data-sort-mode="auto" onclick="setDictionarySortMode('auto')">تلقائي</button>
+        <button type="button" data-sort-mode="newest" onclick="setDictionarySortMode('newest')">الأحدث</button>
+        <button type="button" data-sort-mode="oldest" onclick="setDictionarySortMode('oldest')">الأقدم</button>
+        <button type="button" data-sort-mode="alpha" onclick="setDictionarySortMode('alpha')">حسب الأحرف</button>
+        <div class="sort-submenu-wrap">
+          <button type="button" class="sort-submenu-toggle" onclick="toggleSortCategorySubmenu(event)">
+            ترتيب حسب النوع
+            <i class="fa-solid fa-chevron-down" aria-hidden="true"></i>
+          </button>
+          <div class="sort-submenu" id="dictionarySortCategoryMenu">
+            <button type="button" data-sort-mode="category" data-sort-category="all" onclick="setDictionarySortMode('category', 'all')">كل الأنواع</button>
+            <button type="button" data-sort-mode="category" data-sort-category="عام" onclick="setDictionarySortMode('category', 'عام')">عام</button>
+            <button type="button" data-sort-mode="category" data-sort-category="اسم" onclick="setDictionarySortMode('category', 'اسم')">اسم</button>
+            <button type="button" data-sort-mode="category" data-sort-category="فعل" onclick="setDictionarySortMode('category', 'فعل')">فعل</button>
+            <button type="button" data-sort-mode="category" data-sort-category="صفة" onclick="setDictionarySortMode('category', 'صفة')">صفة</button>
+            <button type="button" data-sort-mode="category" data-sort-category="أداة" onclick="setDictionarySortMode('category', 'أداة')">أداة</button>
+            <button type="button" data-sort-mode="category" data-sort-category="ظرف" onclick="setDictionarySortMode('category', 'ظرف')">ظرف</button>
+            <button type="button" data-sort-mode="category" data-sort-category="جمل" onclick="setDictionarySortMode('category', 'جمل')">جمل شائعة</button>
+            <button type="button" data-sort-mode="category" data-sort-category="لعبة" onclick="setDictionarySortMode('category', 'لعبة')">لعبة</button>
+          </div>
+        </div>
+      </div>
+    </div>
+    <button id="selectionModeBtn" class="btn-text-tool selection-mode-entry" type="button" onclick="enterSelectionMode()" data-tip="تحديد">تحديد</button>
+  </div>
+
+  <div id="selectionActionBar" class="selection-action-bar" hidden>
+    <button type="button" onclick="confirmBulkDeleteSelection()">حذف</button>
+    <button type="button" id="selectionReorderBtn" onclick="toggleReorderMode()">ترتيب يدوي</button>
+    <button type="button" class="selection-reorder-step" onclick="moveSelectedWordsByStep(-1)" hidden>أعلى</button>
+    <button type="button" class="selection-reorder-step" onclick="moveSelectedWordsByStep(1)" hidden>أسفل</button>
+    <button type="button" onclick="openWorldManageModal()">إدارة العالم</button>
+    <button type="button" onclick="exitSelectionMode()">إلغاء</button>
+  </div>
+
+  <div id="bulkDeleteBar" class="bulk-delete-bar" hidden>
+    <button type="button" id="bulkDeleteConfirmBtn" class="bulk-delete-confirm" onclick="confirmBulkDeleteSelection()">
+      حذف الكلمات المحددة (0)
+    </button>
+    <button type="button" class="bulk-delete-cancel" onclick="exitBulkDeleteMode()">إلغاء</button>
+  </div>
+
+  <ul id="list"></ul>
+
+  <!-- ══ QUIZ FULL-PAGE VIEW (مخفي افتراضياً) ══ -->
+  <div id="quizView" class="quiz-view" style="display:none;">
+    <button type="button" class="quiz-exit-btn btn-icon-tip" data-tip="رجوع للقاموس" onclick="requestQuizExit('personal')"><i class="fas fa-arrow-right"></i></button>
+    <!-- Quiz Modes -->
+    <div id="quizViewSetup" class="quiz-view-setup quiz-modes-view">
+      <h3><i class="fa-solid fa-brain" aria-hidden="true"></i> اختر وضع الاختبار</h3>
+      <p class="quiz-available-count" id="quizAvailableCount">الكلمات المتاحة: 0</p>
+      <div class="quiz-modes-grid" aria-label="أوضاع الاختبار">
+        <button type="button" class="quiz-mode-card quiz-mode-flashcards" onclick="openQuizModeSettings('flashcards')">
+          <span class="quiz-mode-icon"><i class="fa-solid fa-layer-group" aria-hidden="true"></i></span>
+          <strong>بطاقات الذاكرة</strong>
+          <span>اقلب البطاقة، اختبر ذاكرتك، وعلّم الكلمة إذا نسيتها.</span>
+        </button>
+        <button type="button" class="quiz-mode-card quiz-mode-time" onclick="openQuizModeSettings('timeAttack')">
+          <span class="quiz-mode-icon"><i class="fa-solid fa-stopwatch" aria-hidden="true"></i></span>
+          <strong>الهروب من النسيان</strong>
+          <span>اختيار من متعدد مع وقت يضغط عليك وقلوب HP تحميك.</span>
+        </button>
+        <button type="button" class="quiz-mode-card quiz-mode-scramble" onclick="openQuizModeSettings('scramble')">
+          <span class="quiz-mode-icon"><i class="fa-solid fa-shuffle" aria-hidden="true"></i></span>
+          <strong>الصندوق المشفر</strong>
+          <span id="scrambleModeCoverDesc">رتب حروف الكلمة الإنجليزية اعتماداً على معناها العربي.</span>
+        </button>
+      </div>
+    </div>
+
+    <!-- Quiz Settings -->
+    <div id="quizSettingsPanel" class="quiz-view-setup quiz-settings-panel" style="display:none;">
+      <button type="button" class="quiz-settings-back" onclick="showQuizModes()"><i class="fa-solid fa-arrow-right" aria-hidden="true"></i></button>
+      <h3 id="quizSettingsTitle">إعدادات الاختبار</h3>
+      <p id="quizSettingsDesc">اضبط التحدي قبل ما تبدأ.</p>
+      <div id="flashcardPresetOptions" class="flashcard-preset-options" style="display:none;">
+        <button class="setup-btn btn-new"     onclick="startActualQuiz('recent')"><i class="fa-solid fa-sparkles" aria-hidden="true"></i> كلمات جديدة (آخر 10)</button>
+        <button class="setup-btn btn-old"     onclick="startActualQuiz('old')"><i class="fa-solid fa-clock-rotate-left" aria-hidden="true"></i> مراجعة الذكريات (أقدم 10)</button>
+        <button class="setup-btn btn-starred" onclick="startActualQuiz('starred')"><i class="fa-solid fa-star" aria-hidden="true"></i> الكلمات الصعبة</button>
+        <button class="setup-btn btn-all"     onclick="startActualQuiz('all')"><i class="fa-solid fa-globe" aria-hidden="true"></i> كل الكلمات (عشوائي)</button>
+      </div>
+      <div id="quizSharedSettings">
+      <div class="quiz-setting-group">
+        <label>مصدر الكلمات</label>
+        <div class="quiz-segmented quiz-source-selector" role="group" aria-label="مصدر كلمات الاختبار">
+          <button type="button" class="active" data-quiz-source="personal" onclick="setQuizSourceScope('personal', this)">القاموس الشخصي</button>
+          <button type="button" data-quiz-source="starred" onclick="setQuizSourceScope('starred', this)">الكلمات الصعبة</button>
+        </div>
+      </div>
+      <div class="quiz-setting-group">
+        <label>عدد الأسئلة</label>
+        <div class="quiz-segmented" role="group" aria-label="عدد الأسئلة">
+          <button type="button" data-quiz-count="5" onclick="setQuizQuestionCount('5', this)">5</button>
+          <button type="button" class="active" data-quiz-count="10" onclick="setQuizQuestionCount('10', this)">10</button>
+          <button type="button" data-quiz-count="20" onclick="setQuizQuestionCount('20', this)">20</button>
+          <button type="button" data-quiz-count="all" onclick="setQuizQuestionCount('all', this)">كل الكلمات</button>
+        </div>
+      </div>
+      <div id="timeAttackDirectionGroup" class="quiz-setting-group" style="display:none;">
+        <label>اتجاه السؤال</label>
+        <div class="quiz-segmented" role="group" aria-label="اتجاه السؤال">
+          <button type="button" class="active" data-time-direction="ar-to-en" onclick="setTimeAttackDirection('ar-to-en', this)">المعنى ← الكلمة</button>
+          <button type="button" data-time-direction="en-to-ar" onclick="setTimeAttackDirection('en-to-ar', this)">الكلمة ← المعنى</button>
+        </div>
+      </div>
+      <div id="scrambleDirectionGroup" class="quiz-setting-group" style="display:none;">
+        <label>اتجاه السؤال</label>
+        <div class="quiz-segmented" role="group" aria-label="اتجاه سؤال الشيفرة">
+          <button type="button" class="active" data-scramble-direction="ar-to-en" onclick="setScrambleDirection('ar-to-en', this)">المعنى ← الكلمة</button>
+          <button type="button" data-scramble-direction="en-to-ar" onclick="setScrambleDirection('en-to-ar', this)">الكلمة ← المعنى</button>
+        </div>
+      </div>
+      <p class="quiz-settings-summary" id="quizSettingsSummary">جاهز؟</p>
+      <button type="button" class="quiz-start-btn" onclick="startConfiguredQuiz()">
+        ابدأ الاختبار <i class="fa-solid fa-play" aria-hidden="true"></i>
+      </button>
+      </div>
+    </div>
+    <!-- Quiz Flashcard -->
+    <div id="quizViewCard" style="display:none;">
+      <button type="button" class="quiz-play-exit btn-icon-tip" data-tip="خروج" onclick="requestQuizExit()"><i class="fa-solid fa-arrow-right" aria-hidden="true"></i></button>
+      <div class="quiz-card-meta">
+        <span id="quizCardCounter">1 / 10</span>
+      </div>
+      <div class="quiz-card-bar"><div id="quizCardProgress"></div></div>
+      <div class="card-container">
+        <div class="card" id="mainCard" onclick="flipCard()">
+          <div class="card-face card-front">
+            <button class="quiz-sound-btn btn-icon-tip" data-tip="نطق" onclick="playQuizSound(event)">
+              <i class="fas fa-volume-up"></i>
+            </button>
+            <div class="quiz-word" id="cardFrontText">الكلمة</div>
+            <button class="hint-btn" onclick="showHint(event)">اعرض المثال <i class="fa-regular fa-lightbulb" aria-hidden="true"></i></button>
+            <div class="hint-text" id="quizHintText"></div>
+          </div>
+          <div class="card-face card-back">
+            <div class="quiz-meaning" id="cardBackText">المعنى</div>
+            <div class="quiz-example" id="cardBackExample"></div>
+          </div>
+        </div>
+      </div>
+      <div class="quiz-controls">
+        <button class="quiz-btn btn-forget"   onclick="markForgot()">نسيتها <i class="fa-solid fa-trash" aria-hidden="true"></i></button>
+        <button class="quiz-btn btn-remember" onclick="markRemember()">تذكرتها <i class="fa-solid fa-check" aria-hidden="true"></i></button>
+      </div>
+    </div>
+    <!-- Quiz Time Attack -->
+    <div id="quizTimeAttackView" class="quiz-play-view" style="display:none;">
+      <button type="button" class="quiz-play-exit btn-icon-tip" data-tip="خروج" onclick="requestQuizExit()"><i class="fa-solid fa-arrow-right" aria-hidden="true"></i></button>
+      <div class="quiz-card-meta">
+        <span id="timeAttackCounter">1 / 10</span>
+        <span id="timeAttackHp" class="time-attack-hp" aria-live="polite"></span>
+        <span id="timeAttackTimer">15s</span>
+      </div>
+      <div class="quiz-card-bar"><div id="timeAttackProgress"></div></div>
+      <div class="quiz-challenge-card">
+        <span class="quiz-mini-label">اختر الكلمة الإنجليزية</span>
+        <strong id="timeAttackPrompt">المعنى</strong>
+        <div id="timeAttackChoices" class="quiz-choice-grid"></div>
+      </div>
+    </div>
+    <!-- Quiz Scramble -->
+    <div id="quizScrambleView" class="quiz-play-view" style="display:none;">
+      <button type="button" class="quiz-play-exit btn-icon-tip" data-tip="خروج" onclick="requestQuizExit()"><i class="fa-solid fa-arrow-right" aria-hidden="true"></i></button>
+      <div class="quiz-card-meta">
+        <span id="scrambleCounter">1 / 10</span>
+      </div>
+      <div class="quiz-card-bar"><div id="scrambleProgress"></div></div>
+      <div class="quiz-challenge-card">
+        <span class="quiz-mini-label">رتب حروف الكلمة الإنجليزية اعتماداً على معناها العربي.</span>
+        <strong id="scrambleMeaning">المعنى</strong>
+        <div id="scrambleLetters" class="scramble-letters"></div>
+        <input type="text" id="scrambleInput" placeholder="اكتب الكلمة هنا..." dir="ltr" autocomplete="off">
+        <button type="button" class="quiz-start-btn" onclick="submitScrambleAnswer()">تأكيد</button>
+      </div>
+    </div>
+    <div id="quizResumeModal" class="custom-modal quiz-resume-modal">
+      <div class="modal-content">
+        <div class="modal-icon"><i class="fa-solid fa-rotate-right" aria-hidden="true"></i></div>
+        <h2>عندك محاولة غير مكتملة</h2>
+        <p>هل تريد المتابعة من نفس المكان؟</p>
+        <div class="modal-buttons">
+          <button type="button" class="btn-cancel" onclick="forfeitActiveQuizSession()">إلغاء المحاولة</button>
+          <button type="button" class="btn-confirm" onclick="resumeActiveQuizSession()">متابعة</button>
+        </div>
+      </div>
+    </div>
+    <div id="quizExitSafeModal" class="custom-modal quiz-exit-modal">
+      <div class="modal-content">
+        <div class="modal-icon"><i class="fa-solid fa-door-open" aria-hidden="true"></i></div>
+        <h2>الخروج من الاختبار</h2>
+        <p>هل تريد الخروج من الاختبار؟ لن تفقد أي نقاط لأنك لم تبدأ الحل بعد.</p>
+        <div class="modal-buttons">
+          <button type="button" class="btn-cancel" onclick="cancelQuizExitPrompt()">تراجع ومتابعة</button>
+          <button type="button" class="btn-confirm quiz-safe-exit-confirm" onclick="confirmQuizExitWithoutLoss()">خروج بدون خسارة</button>
+        </div>
+      </div>
+    </div>
+    <div id="quizForfeitModal" class="custom-modal quiz-exit-modal quiz-penalty-modal">
+      <div class="modal-content">
+        <div class="modal-icon"><i class="fa-solid fa-triangle-exclamation" aria-hidden="true"></i></div>
+        <h2>تحذير قبل الانسحاب</h2>
+        <p>تحذير! إذا خرجت الآن، فستعتبر محاولتك ملغاة (Attempt Abandoned). لن تخسر XP من حسابك الأساسي، ولكنك ستفقد جميع النقاط التي جمعتها في هذه الجولة، ولن يتم احتساب أي تقدم للكلمات، وسيبقى صندوق الـ XP مغلقاً!</p>
+        <div class="modal-buttons">
+          <button type="button" class="btn-cancel quiz-continue-btn" onclick="cancelQuizExitPrompt()">إكمال التحدي ⚔️</button>
+          <button type="button" class="btn-confirm" onclick="confirmQuizForfeit()">إلغاء المحاولة وخسارة الجولة ❌</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+
+  <!-- ══ WORLDS HUB (مخفي افتراضياً) ══ -->
+  <section id="worldsView" class="worlds-view" style="display:none;" aria-live="polite">
+    <div class="worlds-hero">
+      <span class="worlds-kicker"><i class="fa-solid fa-earth-americas" aria-hidden="true"></i> Legend Worlds</span>
+      <h2>عوالم الأساطير</h2>
+      <p>اختر عالمك.</p>
+    </div>
+    <div class="worlds-grid" id="worldsGrid">
+      <button type="button" class="world-card world-card-minecraft" data-feature="minecraft" onclick="return onWorldCardClick(event, 'minecraft', function () { loadGameDictionary('minecraft'); });">
+        <span class="world-card-icon-wrap">
+          <span class="world-card-icon"><i class="fas fa-cube" aria-hidden="true"></i></span>
+          <span class="world-card-lock-overlay" aria-hidden="true"><i class="fa-solid fa-lock"></i></span>
+        </span>
+        <strong>Minecraft</strong>
+        <span class="world-card-desc">قاموس بلوكات ومغامرات</span>
+      </button>
+      <button type="button" class="world-card world-card-pubg" data-feature="pubg" onclick="return onWorldCardClick(event, 'pubg', function () { loadGameDictionary('pubg'); });">
+        <span class="world-card-icon-wrap">
+          <span class="world-card-icon"><i class="fas fa-crosshairs" aria-hidden="true"></i></span>
+          <span class="world-card-lock-overlay" aria-hidden="true"><i class="fa-solid fa-lock"></i></span>
+        </span>
+        <strong>PUBG</strong>
+        <span class="world-card-desc">مصطلحات البقاء والمعركة</span>
+      </button>
+      <button type="button" class="world-card world-card-starred" data-feature="starred" onclick="return onWorldCardClick(event, 'starred', function () { loadStarredView(); });">
+        <span class="world-card-icon-wrap">
+          <span class="world-card-icon"><i class="fas fa-star" aria-hidden="true"></i></span>
+          <span class="world-card-lock-overlay" aria-hidden="true"><i class="fa-solid fa-lock"></i></span>
+        </span>
+        <strong>الكلمات الصعبة</strong>
+        <span class="world-card-desc">شوف الكلمات اللي حددت عليها بنجمة</span>
+      </button>
+    </div>
+  </section>
+
+  <!-- ══ TREASURE FULL-PAGE VIEW (مخفي افتراضياً) ══ -->
+  <section id="treasureView" class="treasure-view" style="display:none;" aria-live="polite">
+    <div class="treasure-hero">
+      <span class="treasure-kicker"><i class="fa-solid fa-gem" aria-hidden="true"></i> Loot Room</span>
+      <h2>خزنة المكافآت</h2>
+      <p>افتح الصندوق اليومي، اجمع XP، وخلّي الألقاب تبين أنك مش داخل تتفرج بس.</p>
+    </div>
+
+    <div class="treasure-stage" aria-label="الصندوق اليومي">
+      <button id="dailyLootChest" class="treasure-chest-main" type="button" onpointerdown="startLootChestCharge(event)" onpointermove="moveLootChestCharge(event)" onpointerup="releaseLootChestCharge(event)" onpointerleave="cancelLootChestCharge(event)" onpointercancel="cancelLootChestCharge(event)" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();openDailyLootBox();}" aria-describedby="lootStatusText">
+        <span class="chest-glow"></span>
+        <span class="chest-shadow"></span>
+        <span class="chest-lid"><span class="chest-band chest-band-left"></span><span class="chest-band chest-band-right"></span></span>
+        <span class="chest-body"><span class="chest-face"></span><span class="chest-lock"><i class="fa-solid fa-lock" aria-hidden="true"></i></span></span>
+      </button>
+      <div class="treasure-timer">
+        <span id="lootStatusText"><i class="fa-regular fa-clock" aria-hidden="true"></i> الصندوق اليومي</span>
+        <strong id="lootCountdownText">جاهز للفتح</strong>
+      </div>
+      <div id="lootRewardPreview" class="loot-reward-preview">افتحه وخذ مكافأتك اليومية</div>
+    </div>
+
+    <div class="treasure-slots" id="treasureSlots" aria-label="قائمة الصناديق">
+      <article class="treasure-slot treasure-slot-ready">
+        <i class="fa-solid fa-box" aria-hidden="true"></i>
+        <h3>الصندوق اليومي</h3>
+        <p>XP، تجميد سلسلة، أو مفاجأة صغيرة.</p>
+      </article>
+      <article class="treasure-slot">
+        <i class="fa-solid fa-medal" aria-hidden="true"></i>
+        <h3>صندوق الألقاب</h3>
+        <p>يفتح لما تجمع إنجازات كفاية.</p>
+      </article>
+      <article class="treasure-slot treasure-slot-locked">
+        <i class="fa-solid fa-lock" aria-hidden="true"></i>
+        <h3>صندوق نادر</h3>
+        <p>للمراحل القادمة بعد ما نثبت النظام.</p>
+      </article>
+      <article class="treasure-slot treasure-slot-locked">
+        <i class="fa-solid fa-lock" aria-hidden="true"></i>
+        <h3>صندوق أسطوري</h3>
+        <p>مكان محجوز لمكافآت أقوى لاحقاً.</p>
+      </article>
+    </div>
+
+    <div class="treasure-title-strip">
+      <div>
+        <span class="treasure-strip-label">الألقاب</span>
+        <strong id="titleProgressText">الألقاب بتفتح حسب إنجازاتك.</strong>
+      </div>
+      <i class="fa-solid fa-medal" aria-hidden="true"></i>
+    </div>
+    <div id="titlesGrid" class="titles-grid" aria-label="قائمة الألقاب"></div>
+  </section>
+
+
+  <!-- إدارة المحتوى الجاهز: تُملأ بأمان من js/admin.js للأدمن فقط -->
+  <section id="adminView" class="admin-view" hidden aria-live="polite" aria-label="إدارة المحتوى الجاهز"></section>
+
+
+  <!-- تصدير / استيراد -->
+  <div class="backup-zone">
+    <div class="backup-row">
+      <button class="btn-backup" onclick="exportData()"><i class="fa-solid fa-file-export" aria-hidden="true"></i> حفظ نسخة احتياطية</button>
+      <button type="button" class="icon-circle help-btn" aria-label="شرح التصدير" title="شرح التصدير" onclick="showBackupHelp('export', event)"><i class="fa-solid fa-question" aria-hidden="true"></i></button>
+    </div>
+    <div class="backup-row">
+      <button class="btn-backup" onclick="document.getElementById('importFile').click()"><i class="fa-solid fa-file-import" aria-hidden="true"></i> استيراد نسخة احتياطية</button>
+      <button type="button" class="icon-circle help-btn" aria-label="شرح الاستيراد" title="شرح الاستيراد" onclick="showBackupHelp('import', event)"><i class="fa-solid fa-question" aria-hidden="true"></i></button>
+    </div>
+    <input type="file" id="importFile" style="display:none;" onchange="importData(event)">
+  </div>
+
+  <footer class="site-footer" aria-label="روابط الموقع">
+    <a href="/privacy">سياسة الخصوصية</a>
+  </footer>
+</main>
+
+<!-- ── Legend Dock (4 تبويبات) ── -->
+<nav id="legendDock" class="legend-dock treasure-dock" aria-label="تنقل التطبيق">
+  <button class="legend-dock-btn treasure-dock-btn" type="button" data-feature="treasure" data-dock-view="treasure" data-label="الكنز" aria-label="الكنز" onclick="return onDockFeatureClick(event, 'treasure', function () { loadTreasureView(); });">
+    <span class="dock-btn-icon-wrap">
+      <i class="fa-solid fa-gem" aria-hidden="true"></i>
+      <span class="dock-lock-overlay" aria-hidden="true"><i class="fa-solid fa-lock"></i></span>
+    </span>
+  </button>
+  <button class="legend-dock-btn treasure-dock-btn active" type="button" data-dock-view="personal" data-label="قاموسك" aria-label="قاموسك الشخصي" onclick="loadPersonalDictionary()">
+    <i class="fa-solid fa-book-open" aria-hidden="true"></i>
+  </button>
+  <button class="legend-dock-btn treasure-dock-btn" type="button" data-dock-view="worlds" data-label="العوالم" aria-label="العوالم" onclick="loadWorldsView()">
+    <i class="fa-solid fa-earth-americas" aria-hidden="true"></i>
+  </button>
+  <button class="legend-dock-btn treasure-dock-btn" type="button" data-feature="quiz" data-dock-view="quiz" data-label="الاختبار" aria-label="الاختبار" onclick="return onDockFeatureClick(event, 'quiz', function () { loadQuizView(); });">
+    <span class="dock-btn-icon-wrap">
+      <i class="fa-solid fa-gamepad" aria-hidden="true"></i>
+      <span class="dock-lock-overlay" aria-hidden="true"><i class="fa-solid fa-lock"></i></span>
+    </span>
+  </button>
+</nav>
+
+<!-- نافذة الملف الشخصي (زجاجية بملء الشاشة) -->
+<div id="profileModal" class="profile-modal" aria-hidden="true" role="dialog" aria-modal="true" aria-labelledby="profileModalTitle">
+  <div class="profile-modal-backdrop" onclick="closeProfileModal()"></div>
+  <div class="profile-modal-sheet">
+    <div class="profile-modal-header">
+      <button type="button" class="profile-modal-close" onclick="closeProfileModal()" aria-label="إغلاق"><i class="fa-solid fa-xmark"></i></button>
+      <div class="profile-modal-hero">
+        <span class="profile-modal-avatar" id="profileModalAvatar"><i class="fa-solid fa-user"></i></span>
+        <div class="profile-modal-identity">
+          <h2 class="profile-title-line"><span id="profileModalTitle">ملفك الشخصي</span></h2>
+          <span id="profileActiveTitleBadge" class="profile-active-title-badge" hidden></span>
+          <p id="profileModalSubtitle" class="profile-modal-sub">LootLingua Legend</p>
+        </div>
+      </div>
+    </div>
+    <div class="profile-modal-body">
+      <section class="profile-section">
+        <h3><i class="fa-solid fa-chart-line"></i> شريط المستوى</h3>
+        <div id="levelSection" class="level-section profile-level-section">
+          <div class="xp-panel">
+            <div class="xp-top">
+              <span id="xpRankIcon" class="xp-icon"><i class="fa-solid fa-seedling" aria-hidden="true"></i></span>
+              <span id="xpRankLabel" class="xp-rank">Noob</span>
+              <span id="xpValue" class="xp-val">0 XP</span>
+            </div>
+            <div class="xp-track"><div id="xpFill" class="xp-fill"></div></div>
+            <div class="xp-bottom">
+              <span class="xp-hint">التالي:</span>
+          <span id="xpNext" class="xp-next-val">15 XP</span>
+            </div>
+            <div class="xp-guide-inline xp-ranks-setting">
+              <button type="button" class="xp-guide-toggle" id="xpRanksGuideToggle" onclick="toggleXpRanksGuide(event)" aria-expanded="false" aria-controls="xpRanksGuidePanel">
+                <i class="fa-solid fa-chevron-down xp-ranks-guide-chevron" aria-hidden="true"></i>
+                <span>دليل المستويات</span>
+                <small id="xpRanksGuideSummary">Noob</small>
+              </button>
+              <div id="xpRanksGuidePanel" class="xp-ranks-guide-panel" hidden>
+                <ul id="xpRanksGuideList" class="xp-ranks-guide-list" aria-label="مستويات XP من الأقل للأعلى"></ul>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+      <section class="profile-section">
+        <h3><i class="fa-solid fa-chart-bar"></i> إحصائيات سريعة</h3>
+        <div class="profile-stats-mini">
+          <div class="profile-stat-chip"><span id="profileStatWords">0</span><small>كلمة محفوظة</small></div>
+          <div class="profile-stat-chip"><span id="profileStatStreak">0</span><small>أكبر سلسلة</small></div>
+        </div>
+        <button type="button" class="profile-link-btn" onclick="closeProfileModal(true); openStatsPanel();">عرض الإحصائيات الكاملة</button>
+      </section>
+      <section class="profile-section">
+        <h3><i class="fa-solid fa-medal"></i> ألقابك المفتوحة</h3>
+        <div id="profileTitlePicker" class="profile-title-picker" aria-label="الألقاب المفتوحة"></div>
+      </section>
+      <section class="profile-section">
+        <h3><i class="fa-solid fa-palette"></i> الثيمات</h3>
+        <div class="theme-selector profile-theme-selector">
+          <div class="theme-option active" data-theme="lootlingua" data-unlock-level="1" onclick="setTheme('lootlingua')">
+            <div class="theme-preview preview-lootlingua"></div>
+            <span class="theme-display-name">LootLingua</span>
+            <span class="theme-status-label" aria-hidden="true"></span>
+          </div>
+          <div class="theme-option" data-theme="golden" data-unlock-level="2" onclick="setTheme('golden')">
+            <div class="theme-preview preview-golden"></div>
+            <span class="theme-display-name">الكنز الذهبي</span>
+            <span class="theme-status-label" aria-hidden="true"></span>
+          </div>
+          <div class="theme-option" data-theme="scroll" data-unlock-level="3" onclick="setTheme('scroll')">
+            <div class="theme-preview preview-scroll"></div>
+            <span class="theme-display-name">المخطوطة القديمة</span>
+            <span class="theme-status-label" aria-hidden="true"></span>
+          </div>
+          <div class="theme-option" data-theme="ocean" data-unlock-level="4" onclick="setTheme('ocean')">
+            <div class="theme-preview preview-ocean"></div>
+            <span class="theme-display-name">واحة الهدوء</span>
+            <span class="theme-status-label" aria-hidden="true"></span>
+          </div>
+          <div class="theme-option theme-coming-soon" data-theme="glass" data-unlock-level="5" data-coming-soon="1" onclick="setTheme('glass')" aria-disabled="true">
+            <div class="theme-preview preview-glass"></div>
+            <span class="theme-display-name">الثيم الزجاجي</span>
+            <span class="theme-status-label theme-status-label--soon">قريباً</span>
+          </div>
+        </div>
+      </section>
+      <section class="profile-section profile-account-section">
+        <h3><i class="fa-solid fa-user-gear"></i> إعدادات الحساب</h3>
+        <button id="loginBtn" class="auth-btn profile-auth-btn" onclick="login()"><i class="fa-brands fa-google" aria-hidden="true"></i> تسجيل دخول بـ Google</button>
+        <button id="logoutBtn" class="auth-btn profile-auth-btn" onclick="showModal('logoutModal')"><i class="fa-solid fa-right-from-bracket" aria-hidden="true"></i> تسجيل الخروج</button>
+        <button id="adminEntryBtn" type="button" class="auth-btn profile-auth-btn admin-profile-entry" hidden>
+          <i class="fa-solid fa-shield-halved" aria-hidden="true"></i> إدارة المحتوى الجاهز
+        </button>
+      </section>
+      <section class="profile-section profile-settings-section">
+        <h3><i class="fa-solid fa-sliders"></i> إعدادات التطبيق</h3>
+        <div class="performance-setting-row performance-level-setting">
+          <div class="performance-setting-head">
+            <span><i class="fa-solid fa-gauge-high" aria-hidden="true"></i> الأداء</span>
+            <small id="performanceModeState">متوازن</small>
+          </div>
+          <div class="performance-slider-card">
+            <div class="performance-level-labels" aria-hidden="true">
+              <span>أقصى جرافيك</span>
+              <span>متوازن</span>
+              <span>أداء مستقر</span>
+              <span>تربو</span>
+            </div>
+            <input type="range" id="performanceLevelSlider" class="performance-level-slider" min="0" max="3" step="any" value="1" aria-label="مستوى الأداء">
+          </div>
+          <button type="button" class="performance-help-btn" onclick="showPerformanceModeHelp(event)" aria-label="شرح وضع الأداء السريع">
+            <i class="fa-solid fa-question" aria-hidden="true"></i>
+          </button>
+        </div>
+        <button type="button" class="auth-btn profile-auth-btn profile-settings-btn performance-toggle-btn keyboard-shortcuts-btn" onclick="showKeyboardShortcutsModal()">
+          <i class="fa-solid fa-keyboard" aria-hidden="true"></i>
+          <span>اختصارات لوحة المفاتيح</span>
+          <small>دليل سريع</small>
+        </button>
+        <button type="button" id="replayOnboardingBtn" class="auth-btn profile-auth-btn profile-settings-btn feature-coming-soon" onclick="handleOnboardingReplayClick(event)" aria-disabled="true" title="الشرح التفاعلي قريباً">
+          <i class="fa-solid fa-redo" aria-hidden="true"></i> إعادة الشرح التفاعلي <span class="feature-soon-badge">(قريباً)</span>
+        </button>
+      </section>
+    </div>
+  </div>
+</div>
+
+
+<!-- ══ Onboarding Overlay & Guide ══ -->
+<div id="onboardingBackdrop" class="onboarding-backdrop hidden"></div>
+<div id="onboardingBox" class="onboarding-box hidden" aria-live="polite" role="dialog" aria-modal="true">
+  <div class="onboarding-content">
+    <h2 id="onboardingTitle">مرحباً في LootLingua</h2>
+    <p id="onboardingText"></p>
+    <div id="onboardingExtras" class="onboarding-extras"></div>
+    <div class="onboarding-buttons">
+      <button id="onboardingPrimaryBtn" class="btn-main"></button>
+      <button id="onboardingSecondaryBtn" class="btn-secondary"></button>
+    </div>
+  </div>
+</div>
+
+<!-- ══ MODAL: صائد الكلمات الذكي ══ -->
+<div id="wordHunterModal" class="word-hunter-modal" aria-hidden="true" role="dialog" aria-modal="true" aria-labelledby="wordHunterTitle">
+  <div class="word-hunter-backdrop" onclick="closeWordHunterModal()"></div>
+  <div class="word-hunter-sheet">
+    <div class="word-hunter-header">
+      <div>
+        <h2 id="wordHunterTitle"><i class="fa-solid fa-crosshairs" aria-hidden="true"></i> صائد الكلمات</h2>
+        <p>ارفع صورة، ثم اضغط على الكلمة التي تريد معناها فقط.</p>
+      </div>
+      <button type="button" class="word-hunter-close" onclick="closeWordHunterModal()" aria-label="إغلاق"><i class="fa-solid fa-xmark"></i></button>
+    </div>
+    <div id="wordHunterDropzone" class="word-hunter-dropzone" role="button" tabindex="0" aria-label="رفع صورة لصائد الكلمات">
+      <input id="wordHunterFileInput" type="file" accept="image/*" hidden>
+      <i class="fa-solid fa-image" aria-hidden="true"></i>
+      <strong>اسحب الصورة هنا أو اضغط للاختيار</strong>
+      <span>تتم قراءة الصورة محلياً عبر Tesseract.js.</span>
+    </div>
+    <div id="wordHunterStatus" class="word-hunter-status" aria-live="polite"></div>
+    <div id="wordHunterStage" class="word-hunter-stage" hidden>
+      <div id="wordHunterImageWrap" class="word-hunter-image-wrap">
+        <img id="wordHunterImage" alt="الصورة المرفوعة لصائد الكلمات">
+        <div id="wordHunterOverlay" class="word-hunter-overlay"></div>
+        <div id="wordHunterPopover" class="word-hunter-popover" hidden></div>
+      </div>
+    </div>
+  </div>
+</div>
+<div id="onboardingTooltip" class="onboarding-tooltip hidden"></div>
+
+<!-- مهام اليوم — ورقة منبثقة -->
+<div id="dailyQuestsBackdrop" class="daily-quests-backdrop" onclick="closeDailyQuestsSheet()"></div>
+<section id="dailyQuestsSheet" class="daily-quests-sheet" aria-label="مهام اليوم" aria-hidden="true">
+  <div class="daily-quests-sheet-handle"></div>
+  <div class="daily-quests-head">
+    <h3><i class="fa-solid fa-scroll" aria-hidden="true"></i> مهام اليوم</h3>
+    <button type="button" class="daily-quests-close" onclick="closeDailyQuestsSheet()" aria-label="إغلاق"><i class="fa-solid fa-xmark"></i></button>
+  </div>
+  <p id="dailyQuestsResetHint" class="daily-quests-hint">تتجدد كل يوم — اضغط المهمة المكتملة لاستلام XP</p>
+  <ul id="dailyQuestsList" class="daily-quests-list"></ul>
+</section>
+
+<!-- ══ MODAL: حذف ══ -->
+<div id="deleteModal" class="custom-modal">
+  <div class="modal-content">
+    <div class="modal-icon"><i class="fa-solid fa-trash" aria-hidden="true"></i></div>
+    <h2>حذف الكلمة؟</h2>
+    <p>هذا الإجراء لا يمكن التراجع عنه</p>
+    <div class="modal-buttons">
+      <button id="deleteConfirmBtn" class="btn-confirm">نعم، احذف</button>
+      <button id="deleteCancelBtn" onclick="hideModal('deleteModal')" class="btn-cancel">إلغاء</button>
+    </div>
+  </div>
+</div>
+
+<!-- ══ MODAL: ترحيب أول زيارة (مرة واحدة) ══ -->
+<div id="welcomeModal" class="custom-modal welcome-modal" role="dialog" aria-modal="true" aria-labelledby="welcomeModalTitle" onclick="if (event.target === this) dismissWelcomeModal()">
+  <div class="modal-content welcome-modal-content" onclick="event.stopPropagation()">
+    <div class="modal-icon welcome-modal-icon"><i class="fa-solid fa-hand-sparkles" aria-hidden="true"></i></div>
+    <h2 id="welcomeModalTitle">مرحباً في LootLingua</h2>
+    <p class="welcome-modal-lead">قاموسك الشخصي للإنجليزية والعربية — مع عوالم ألعاب، بحث ذكي، وكنز XP ينمو معك.</p>
+    <p class="welcome-modal-sub">استمتع باستكشاف الموقع على راحتك يا بطل. أضف كلماتك، جرّب عوالم الأساطير، وخلّي رحلتك مع اللغة ممتعة.</p>
+    <div class="modal-buttons">
+      <button type="button" class="btn-confirm" onclick="dismissWelcomeModal()">يلا نستكشف! 🚀</button>
+    </div>
+  </div>
+</div>
+
+<!-- ══ MODAL: شرح القفل (ميزة مقفلة) ══ -->
+<div id="unlockExplainModal" class="custom-modal unlock-explain-modal" role="dialog" aria-modal="true" aria-labelledby="unlockExplainTitle" onclick="if (event.target === this) hideModal('unlockExplainModal')">
+  <div class="modal-content unlock-explain-content" onclick="event.stopPropagation()">
+    <div class="modal-icon unlock-explain-icon"><i class="fa-solid fa-lock" aria-hidden="true"></i></div>
+    <h2 id="unlockExplainTitle">ميزة مقفلة</h2>
+    <p id="unlockExplainWhy" class="unlock-explain-text"></p>
+    <p id="unlockExplainHow" class="unlock-explain-text unlock-explain-how"></p>
+    <p id="unlockExplainProgress" class="unlock-explain-progress"></p>
+    <div class="modal-buttons">
+      <button type="button" class="btn-cancel unlock-explain-close" onclick="hideModal('unlockExplainModal')">حسناً</button>
+    </div>
+  </div>
+</div>
+
+<!-- ══ MODAL: إنشاء / تعديل عالم خاص ══ -->
+<div id="customWorldModal" class="custom-modal custom-world-modal" role="dialog" aria-modal="true" aria-labelledby="customWorldModalTitle" onclick="if (event.target === this) closeCustomWorldModal()">
+  <div class="modal-content custom-world-content" onclick="event.stopPropagation()">
+    <div class="modal-icon custom-world-icon"><span id="customWorldModalIcon">+</span></div>
+    <h2 id="customWorldModalTitle">إنشاء عالم جديد</h2>
+    <div class="custom-world-form">
+      <input type="text" id="customWorldNameInput" maxlength="40" placeholder="اسم العالم" autocomplete="off">
+      <textarea id="customWorldDescInput" maxlength="140" placeholder="وصف العالم (اختياري)" rows="3"></textarea>
+      <input type="hidden" id="customWorldEmojiInput" value="📘">
+      <div class="emoji-picker" id="customWorldEmojiPicker" aria-label="اختيار رمز العالم">
+        <button type="button" data-emoji="📘">📘</button>
+        <button type="button" data-emoji="🎮">🎮</button>
+        <button type="button" data-emoji="⚔️">⚔️</button>
+        <button type="button" data-emoji="🧪">🧪</button>
+        <button type="button" data-emoji="📖">📖</button>
+        <button type="button" data-emoji="🎬">🎬</button>
+        <button type="button" data-emoji="🌍">🌍</button>
+        <button type="button" data-emoji="🎵">🎵</button>
+      </div>
+    </div>
+    <div class="modal-buttons">
+      <button type="button" class="btn-cancel" onclick="closeCustomWorldModal()">إلغاء</button>
+      <button type="button" id="customWorldSaveBtn" class="btn-confirm" onclick="saveCustomWorldFromModal()">إنشاء عالم</button>
+    </div>
+  </div>
+</div>
+
+<!-- ══ MODAL: إدارة العالم للكلمات المحددة ══ -->
+<div id="worldManageModal" class="custom-modal world-manage-modal" role="dialog" aria-modal="true" aria-labelledby="worldManageTitle" onclick="if (event.target === this) hideModal('worldManageModal')">
+  <div class="modal-content world-manage-content" onclick="event.stopPropagation()">
+    <div class="modal-icon"><i class="fa-solid fa-layer-group" aria-hidden="true"></i></div>
+    <h2 id="worldManageTitle">إدارة العالم</h2>
+    <p id="worldManageSummary">اختر العملية والوجهة.</p>
+    <div class="world-manage-tabs" role="group" aria-label="نوع العملية">
+      <button type="button" class="active" data-world-action="move" onclick="setWorldManageAction('move')">نقل إلى عالم</button>
+      <button type="button" data-world-action="copy" onclick="setWorldManageAction('copy')">نسخ إلى عالم</button>
+    </div>
+    <div id="worldManageTargets" class="world-manage-targets"></div>
+  </div>
+</div>
+
+<!-- ══ MODAL: حذف عالم خاص ══ -->
+<div id="deleteWorldModal" class="custom-modal delete-world-modal" role="dialog" aria-modal="true" aria-labelledby="deleteWorldTitle" onclick="if (event.target === this) hideModal('deleteWorldModal')">
+  <div class="modal-content delete-world-content" onclick="event.stopPropagation()">
+    <div class="modal-icon"><i class="fa-solid fa-triangle-exclamation" aria-hidden="true"></i></div>
+    <h2 id="deleteWorldTitle">حذف العالم</h2>
+    <p>ماذا تريد أن تفعل بالكلمات الموجودة داخل هذا العالم؟</p>
+    <div class="modal-buttons delete-world-actions">
+      <button type="button" class="btn-confirm" onclick="confirmDeleteCustomWorld('move')">نقل جميع الكلمات إلى القاموس الشخصي</button>
+      <button type="button" class="btn-cancel danger-choice" onclick="confirmDeleteCustomWorld('delete')">حذف الكلمات مع حذف العالم</button>
+    </div>
+  </div>
+</div>
+
+<!-- ══ MODAL: خروج ══ -->
+<div id="logoutModal" class="custom-modal">
+  <div class="modal-content">
+    <div class="modal-icon"><i class="fa-solid fa-triangle-exclamation" aria-hidden="true"></i></div>
+    <h2>متأكد أنك تريد تسجيل الخروج؟</h2>
+    <p>ستبقى الكلمات محفوظة في الحساب</p>
+    <div class="modal-buttons">
+      <button onclick="confirmLogout()" class="btn-confirm">نعم، سجل خروج</button>
+      <button onclick="hideModal('logoutModal')" class="btn-cancel">إلغاء</button>
+    </div>
+  </div>
+</div>
+
+<!-- ══ MODAL: نقل بيانات الضيف ══ -->
+<div id="guestMigrationModal" class="custom-modal guest-migration-modal" role="dialog" aria-modal="true" aria-labelledby="guestMigrationTitle">
+  <div class="modal-content guest-migration-content" onclick="event.stopPropagation()">
+    <div class="modal-icon guest-migration-icon"><i class="fa-solid fa-gem" aria-hidden="true"></i></div>
+    <h2 id="guestMigrationTitle">لوت مخفي!</h2>
+    <p id="guestMigrationMessage">يا بطل! لقينا كلمات مخبأة في جهازك.. بدك تنقلهم لحسابك الأسطوري الجديد عشان ما يضيعوا؟</p>
+    <div id="guestMigrationStats" class="guest-migration-stats" aria-live="polite"></div>
+    <div id="guestMigrationConfirm" class="guest-migration-confirm" style="display:none;">
+      <i class="fa-solid fa-triangle-exclamation" aria-hidden="true"></i>
+      <span>متأكد؟ إذا بدأت من جديد رح نحذف لوت الضيف من هذا الجهاز.</span>
+    </div>
+    <div class="modal-buttons guest-migration-actions">
+      <button type="button" id="guestMigrationAcceptBtn" class="btn-confirm" onclick="confirmGuestMigration()">نعم، انقل اللوت!</button>
+      <button type="button" id="guestMigrationDeclineBtn" class="btn-cancel" onclick="declineGuestMigration()">لا، ابدأ من جديد</button>
+    </div>
+  </div>
+</div>
+
+<!-- ══ MODAL: شرح وضع الأداء ══ -->
+<div id="performanceModeInfoModal" class="custom-modal" onclick="if (event.target === this) hideModal('performanceModeInfoModal')">
+  <div class="modal-content">
+    <div class="modal-icon"><i class="fa-solid fa-bolt" aria-hidden="true"></i></div>
+    <h2>الأداء</h2>
+    <p>اختر مستوى التأثيرات حسب جهازك: "أقصى جرافيك" يشغّل كل المؤثرات، "متوازن" يخفف البلور والحركة، "أداء مستقر" يبقي الانتقالات الأساسية، و"تربو" يوقف المؤثرات بالكامل.</p>
+    <div class="modal-buttons">
+      <button type="button" onclick="hideModal('performanceModeInfoModal')" class="btn-confirm">تمام</button>
+    </div>
+  </div>
+</div>
+
+<!-- ══ MODAL: اختصارات لوحة المفاتيح ══ -->
+<div id="keyboardShortcutsModal" class="custom-modal keyboard-shortcuts-modal" role="dialog" aria-modal="true" aria-labelledby="keyboardShortcutsTitle" onclick="if (event.target === this) hideModal('keyboardShortcutsModal')">
+  <div class="modal-content keyboard-shortcuts-content" onclick="event.stopPropagation()">
+    <div class="modal-icon keyboard-shortcuts-icon"><i class="fa-solid fa-keyboard" aria-hidden="true"></i></div>
+    <h2 id="keyboardShortcutsTitle">اختصارات لوحة المفاتيح</h2>
+    <div class="shortcut-list" aria-label="قائمة اختصارات لوحة المفاتيح">
+      <div class="shortcut-row">
+        <span class="shortcut-keys"><kbd>Alt</kbd><kbd>→</kbd></span>
+        <span>الانتقال لليمين في الشريط السفلي</span>
+      </div>
+      <div class="shortcut-row">
+        <span class="shortcut-keys"><kbd>Alt</kbd><kbd>←</kbd></span>
+        <span>الانتقال لليسار في الشريط السفلي</span>
+      </div>
+      <div class="shortcut-row">
+        <span class="shortcut-keys"><kbd>/</kbd></span>
+        <span>الانتقال مباشرة إلى البحث</span>
+      </div>
+      <div class="shortcut-row">
+        <span class="shortcut-keys"><kbd>Enter</kbd></span>
+        <span>إضافة الكلمة للقاموس عند عدم تحديد أي حقل</span>
+      </div>
+      <div class="shortcut-row">
+        <span class="shortcut-keys"><kbd>Enter</kbd></span>
+        <span>البحث عن معنى الكلمة عند تحديد مربع الكلمة الإنجليزية</span>
+      </div>
+      <div class="shortcut-row">
+        <span class="shortcut-keys"><kbd>Esc</kbd></span>
+        <span>مسح البحث أو إغلاق النافذة المفتوحة</span>
+      </div>
+    </div>
+    <div class="modal-buttons">
+      <button type="button" onclick="hideModal('keyboardShortcutsModal')" class="btn-confirm">تمام</button>
+    </div>
+  </div>
+</div>
+
+<!-- ══ FIREBASE ══ -->
+<script type="module" src="js/cloud.js"></script>
+
+<!-- ══ STATS PANEL ══ -->
+<div id="statsPanel" class="stats-overlay" style="display:none;">
+  <div class="stats-box">
+    <div class="stats-header">
+      <h2><i class="fa-solid fa-chart-line" aria-hidden="true"></i> إحصائياتي</h2>
+      <button onclick="closeStatsPanel()" class="stats-close">✕</button>
+    </div>
+    <div class="stats-grid">
+      <div class="stat-card"><div class="stat-val" id="statTotal">0</div><div class="stat-lbl">كلمة مضافة</div></div>
+      <div class="stat-card"><div class="stat-val" id="statStreak">0 يوم</div><div class="stat-lbl">السلسلة اليومية</div></div>
+      <div class="stat-card"><div class="stat-val" id="statStarred">0</div><div class="stat-lbl">كلمة صعبة</div></div>
+      <div class="stat-card"><div class="stat-val" id="statForgot">0</div><div class="stat-lbl">كلمات متقنة</div></div>
+      <div class="stat-card"><div class="stat-val" id="statDays">0 يوم</div><div class="stat-lbl">أيام نشاط</div></div>
+      <div class="stat-card"><div class="stat-val" id="statBest">0 كلمات</div><div class="stat-lbl">أفضل يوم </div></div>
+    </div>
+    <div class="heatmap-section">
+      <div class="heatmap-title">نشاطك خلال السنة</div>
+      <div class="heatmap-legend">
+        <span>أقل</span>
+        <div class="hm-cell" data-level="0"></div>
+        <div class="hm-cell" data-level="1"></div>
+        <div class="hm-cell" data-level="2"></div>
+        <div class="hm-cell" data-level="3"></div>
+        <div class="hm-cell" data-level="4"></div>
+        <span>أكثر</span>
+      </div>
+      <div id="heatmapGrid" class="heatmap-grid"></div>
+    </div>
+  </div>
+</div>
+
+<!-- ══ FIREBASE PROFILE SYNC ══ -->
+<script type="module" src="js/profile-cloud.js"></script>
+<script type="module" src="js/admin-cloud.js"></script>
+
+<script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
+<script src="js/core.js"></script>
+<script src="js/storage.js"></script>
+<script src="js/content-schema.js"></script>
+<script src="js/script.js"></script>
+<script src="js/xp.js"></script>
+<script src="js/dictionary.js"></script>
+<script src="js/worlds.js"></script>
+<script src="js/admin.js"></script>
+<script src="js/dictionary-render.js"></script>
+<script src="js/srs.js"></script>
+<script src="js/quiz.js"></script>
+<script src="js/srs-transitions.js"></script>
+<script src="js/quiz-runtime.js"></script>
+<script src="js/core-runtime.js"></script>
+</body>
+</html>

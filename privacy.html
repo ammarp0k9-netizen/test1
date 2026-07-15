@@ -1,0 +1,322 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl" data-theme="lootlingua">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="سياسة الخصوصية لتطبيق LootLingua.">
+  <title>سياسة الخصوصية | LootLingua</title>
+  <link rel="canonical" href="https://loot-lingua.vercel.app/privacy">
+  <link rel="icon" type="image/png" href="ammar1.png">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+  <link rel="stylesheet" href="style.css">
+  <style>
+    body {
+      min-height: 100vh;
+      background:
+        radial-gradient(circle at top right, color-mix(in srgb, var(--accent) 18%, transparent), transparent 34rem),
+        linear-gradient(180deg, var(--main-bg) 0%, color-mix(in srgb, var(--card-bg) 78%, var(--main-bg)) 100%);
+    }
+
+    .privacy-page {
+      width: min(920px, calc(100% - 32px));
+      margin: 0 auto;
+      padding: 36px 0 48px;
+    }
+
+    .privacy-topbar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      margin-bottom: 24px;
+    }
+
+    .privacy-brand {
+      display: inline-flex;
+      align-items: center;
+      gap: 10px;
+      color: var(--text-white);
+      text-decoration: none;
+      font-weight: 900;
+      font-size: 18px;
+    }
+
+    .privacy-brand i {
+      color: var(--accent);
+    }
+
+    .privacy-back {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 10px 14px;
+      border-radius: 10px;
+      border: 1px solid var(--border);
+      background: color-mix(in srgb, var(--surface-bg) 82%, transparent);
+      color: var(--text-white);
+      text-decoration: none;
+      font-size: 14px;
+      font-weight: 700;
+      transition: transform 0.16s ease, background 0.2s ease, border-color 0.2s ease;
+    }
+
+    .privacy-back:hover {
+      transform: translateY(-1px);
+      border-color: var(--accent);
+      background: var(--accent-soft);
+    }
+
+    .privacy-hero {
+      padding: 28px;
+      border: 1px solid color-mix(in srgb, var(--accent) 34%, var(--border));
+      border-radius: 8px;
+      background: color-mix(in srgb, var(--card-bg) 86%, transparent);
+      box-shadow: 0 20px 48px rgba(0, 0, 0, 0.26);
+      margin-bottom: 18px;
+    }
+
+    .privacy-kicker {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 12px;
+      color: var(--accent);
+      font-size: 13px;
+      font-weight: 800;
+    }
+
+    .privacy-hero h1 {
+      margin: 0 0 12px;
+      color: var(--text-white);
+      font-size: clamp(30px, 5vw, 46px);
+      line-height: 1.15;
+      letter-spacing: 0;
+    }
+
+    .privacy-hero p {
+      max-width: 720px;
+      margin: 0;
+      color: var(--text-gray);
+      font-size: 16px;
+      line-height: 1.9;
+    }
+
+    .privacy-updated {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      margin-top: 18px;
+      padding: 8px 12px;
+      border-radius: 999px;
+      background: var(--accent-soft);
+      color: var(--accent);
+      font-size: 13px;
+      font-weight: 800;
+    }
+
+    .privacy-content {
+      display: grid;
+      gap: 14px;
+    }
+
+    .privacy-section {
+      padding: 22px;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      background: color-mix(in srgb, var(--card-bg) 82%, transparent);
+    }
+
+    .privacy-section h2 {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin: 0 0 12px;
+      color: var(--text-white);
+      font-size: 22px;
+      letter-spacing: 0;
+    }
+
+    .privacy-section h2 i {
+      color: var(--accent);
+      font-size: 18px;
+    }
+
+    .privacy-section p,
+    .privacy-section li {
+      color: var(--text-gray);
+      font-size: 15px;
+      line-height: 1.9;
+    }
+
+    .privacy-section p {
+      margin: 0;
+    }
+
+    .privacy-section ul {
+      margin: 0;
+      padding: 0 20px 0 0;
+    }
+
+    .privacy-section li {
+      margin-bottom: 8px;
+    }
+
+    .privacy-section li:last-child {
+      margin-bottom: 0;
+    }
+
+    .privacy-note {
+      margin-top: 14px;
+      padding: 12px 14px;
+      border-radius: 8px;
+      border: 1px solid color-mix(in srgb, var(--accent) 38%, var(--border));
+      background: color-mix(in srgb, var(--accent) 10%, var(--surface-bg));
+      color: var(--text-white);
+      line-height: 1.8;
+    }
+
+    .privacy-contact {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      margin-top: 12px;
+      color: var(--accent);
+      font-weight: 800;
+      text-decoration: none;
+      direction: ltr;
+    }
+
+    .privacy-contact:hover {
+      text-decoration: underline;
+    }
+
+    .privacy-footer {
+      margin-top: 22px;
+      color: var(--text-gray);
+      font-size: 13px;
+      text-align: center;
+      line-height: 1.7;
+    }
+
+    @media (max-width: 640px) {
+      .privacy-page {
+        width: min(100% - 22px, 920px);
+        padding-top: 18px;
+      }
+
+      .privacy-topbar {
+        align-items: stretch;
+        flex-direction: column;
+      }
+
+      .privacy-back {
+        justify-content: center;
+      }
+
+      .privacy-hero,
+      .privacy-section {
+        padding: 18px;
+      }
+
+      .privacy-section h2 {
+        font-size: 19px;
+      }
+    }
+  </style>
+</head>
+<body>
+  <main class="privacy-page">
+    <nav class="privacy-topbar" aria-label="روابط الصفحة">
+      <a class="privacy-brand" href="index.html" aria-label="العودة إلى LootLingua">
+        <i class="fa-solid fa-book-open" aria-hidden="true"></i>
+        <span>LootLingua</span>
+      </a>
+      <a class="privacy-back" href="index.html">
+        <i class="fa-solid fa-arrow-right" aria-hidden="true"></i>
+        <span>العودة للتطبيق</span>
+      </a>
+    </nav>
+
+    <header class="privacy-hero">
+      <span class="privacy-kicker">
+        <i class="fa-solid fa-shield-halved" aria-hidden="true"></i>
+        حماية بياناتك
+      </span>
+      <h1>سياسة الخصوصية</h1>
+      <p>
+        توضح هذه السياسة كيف يتعامل مشروع LootLingua مع بيانات المستخدمين عند تسجيل الدخول
+        واستخدام القاموس الشخصي والميزات المرتبطة بالتقدم داخل التطبيق.
+      </p>
+      <span class="privacy-updated">
+        <i class="fa-solid fa-calendar-days" aria-hidden="true"></i>
+        آخر تحديث: 2 يونيو 2026
+      </span>
+    </header>
+
+    <section class="privacy-content" aria-label="تفاصيل سياسة الخصوصية">
+      <article class="privacy-section">
+        <h2><i class="fa-solid fa-database" aria-hidden="true"></i>ما البيانات التي نجمعها؟</h2>
+        <ul>
+          <li>البريد الإلكتروني واسم العرض المرتبطان بحساب Google عند تسجيل الدخول عبر Google Auth.</li>
+          <li>الكلمات والمعاني والأمثلة والتصنيفات التي يضيفها المستخدم إلى قاموسه الشخصي.</li>
+          <li>بيانات التقدم داخل التطبيق، مثل نقاط XP والمستوى والسلسلة اليومية والألقاب.</li>
+          <li>تاريخ آخر نشاط وعدد الكلمات التي يضيفها المستخدم يومياً، وذلك لحساب الإحصائيات والإنجازات.</li>
+        </ul>
+      </article>
+
+      <article class="privacy-section">
+        <h2><i class="fa-solid fa-wand-magic-sparkles" aria-hidden="true"></i>كيف نستخدم البيانات؟</h2>
+        <ul>
+          <li>تشغيل الحساب الشخصي وربط القاموس بالمستخدم الصحيح بعد تسجيل الدخول.</li>
+          <li>حفظ الكلمات والمعاني والأمثلة حتى يستطيع المستخدم الرجوع إليها لاحقاً.</li>
+          <li>عرض التقدم، مثل XP والمستوى والسلسلة اليومية والألقاب والإحصائيات.</li>
+          <li>تحسين تجربة التعلم داخل LootLingua من خلال تنظيم الكلمات وحساب النشاط اليومي.</li>
+        </ul>
+      </article>
+
+      <article class="privacy-section">
+        <h2><i class="fa-solid fa-handshake-simple-slash" aria-hidden="true"></i>مشاركة البيانات</h2>
+        <p>
+          لا نبيع بيانات المستخدمين ولا نشاركها مع أطراف ثالثة لأغراض إعلانية أو تسويقية.
+          تبقى البيانات المستخدمة داخل LootLingua مرتبطة بتشغيل الحساب والقاموس وميزات التقدم فقط.
+        </p>
+      </article>
+
+      <article class="privacy-section">
+        <h2><i class="fa-solid fa-trash-can" aria-hidden="true"></i>كيفية حذف البيانات</h2>
+        <p>
+          يمكن للمستخدم طلب حذف بياناته من LootLingua في أي وقت. يشمل ذلك بيانات الحساب المحفوظة
+          داخل التطبيق، والقاموس الشخصي، وبيانات التقدم مثل XP والمستوى والسلسلة اليومية والألقاب.
+        </p>
+        <div class="privacy-note">
+          لطلب الحذف، أرسل رسالة من البريد الإلكتروني المرتبط بحسابك في LootLingua واكتب في العنوان:
+          طلب حذف بياناتي.
+        </div>
+      </article>
+
+      <article class="privacy-section">
+        <h2><i class="fa-solid fa-lock" aria-hidden="true"></i>حماية البيانات</h2>
+        <p>
+          نستخدم البيانات بالقدر اللازم لتشغيل التطبيق وتقديم ميزاته. ننصح المستخدم بعدم إضافة
+          معلومات حساسة داخل حقول الكلمات أو الأمثلة في القاموس الشخصي.
+        </p>
+      </article>
+
+      <article class="privacy-section">
+        <h2><i class="fa-solid fa-envelope" aria-hidden="true"></i>التواصل معنا</h2>
+        <p>
+          لأي سؤال حول سياسة الخصوصية أو لطلب حذف البيانات، يمكنك التواصل عبر البريد التالي:
+        </p>
+        <a class="privacy-contact" href="mailto:ammarp0k9@gmail.com">
+          <i class="fa-solid fa-at" aria-hidden="true"></i>
+          ammarp0k9@gmail.com
+        </a>
+      </article>
+    </section>
+
+    <footer class="privacy-footer">
+      هذه الصفحة مخصصة لمشروع LootLingua ويمكن تحديثها عند إضافة ميزات جديدة أو تغيير طريقة معالجة البيانات.
+    </footer>
+  </main>
+</body>
+</html>
