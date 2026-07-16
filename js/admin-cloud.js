@@ -2,7 +2,6 @@ import { getApps } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app
 import { getAuth } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js";
 import {
   collection,
-  collectionGroup,
   doc,
   documentId,
   getDoc,
@@ -1140,7 +1139,7 @@ function assertStoredWord(existing, worldId, rankId, gateId, contentWordId) {
   }
 }
 
-async function findWordDuplicates(
+async function findGateWordDuplicate(
   context,
   worldId,
   rankId,
@@ -1148,64 +1147,28 @@ async function findWordDuplicates(
   normalizedWord,
   excludedContentWordId
 ) {
-  const [gateSnapshot, worldSnapshot] = await Promise.all([
-    getDocs(query(
-      wordsCollection(worldId, rankId, gateId),
-      where('normalizedWord', '==', normalizedWord),
-      limit(2)
-    )),
-    getDocs(query(
-      collectionGroup(db, 'words'),
-      where('worldId', '==', worldId),
-      where('normalizedWord', '==', normalizedWord),
-      limit(WORD_PAGE_SIZE_MAX + 1)
-    )),
-  ]);
+  const contentWordId = await deriveContentWordId(normalizedWord, 1);
+  const snapshot = await getDoc(doc(
+    wordsCollection(worldId, rankId, gateId),
+    contentWordId
+  ));
   assertAdminContext(context);
-  const worldMatches = worldSnapshot.docs
-    .map((item) => ({ ...(item.data() || {}), contentWordId: item.id }))
-    .filter((item) => !(
-      item.rankId === rankId &&
-      item.gateId === gateId &&
-      item.contentWordId === excludedContentWordId
-    ));
-  const gateMatches = gateSnapshot.docs
-    .map((item) => ({ ...(item.data() || {}), contentWordId: item.id }))
-    .filter((item) => item.contentWordId !== excludedContentWordId);
-  const byPath = new Map();
-  worldMatches.concat(gateMatches).forEach((item) => {
-    byPath.set([
-      item.worldId,
-      item.rankId,
-      item.gateId,
-      item.contentWordId,
-    ].join('/'), item);
-  });
-  const matches = Array.from(byPath.values());
-  const visibleMatches = matches.slice(0, WORD_PAGE_SIZE_MAX).map((item) => ({
-    worldId: item.worldId,
-    rankId: item.rankId,
-    gateId: item.gateId,
-    contentWordId: item.contentWordId,
-    status: item.status,
-  }));
-  const duplicateInGate = matches.some((item) =>
-    item.rankId === rankId && item.gateId === gateId
-  );
-  const duplicateInRank = matches.some((item) => item.rankId === rankId);
-  const duplicateInWorld = matches.length > 0;
-  const duplicateScopes = [];
-  if (duplicateInGate) duplicateScopes.push('gate');
-  if (duplicateInRank) duplicateScopes.push('rank');
-  if (duplicateInWorld) duplicateScopes.push('world');
+  const duplicateInGate = snapshot.exists() && contentWordId !== excludedContentWordId;
+  const matched = duplicateInGate ? wordRecord(snapshot, worldId, rankId, gateId) : null;
   return Object.freeze({
     normalizedWord,
     duplicateInGate,
-    duplicateInRank,
-    duplicateInWorld,
-    duplicateScopes: Object.freeze(duplicateScopes),
-    matches: Object.freeze(visibleMatches),
-    hasMore: worldSnapshot.docs.length > WORD_PAGE_SIZE_MAX,
+    duplicateInRank: false,
+    duplicateInWorld: false,
+    duplicateScopes: Object.freeze(duplicateInGate ? ['gate'] : []),
+    matches: Object.freeze(matched ? [{
+      worldId,
+      rankId,
+      gateId,
+      contentWordId,
+      status: matched.status,
+    }] : []),
+    hasMore: false,
   });
 }
 
@@ -2065,7 +2028,7 @@ async function inspectWordDuplicates(worldId, rankId, gateId, word, options) {
       translation: 'preview',
       status: 'draft',
     });
-    return await findWordDuplicates(
+    return await findGateWordDuplicate(
       context,
       parentWorldId,
       parentRankId,
@@ -2105,22 +2068,6 @@ async function createWord(worldId, rankId, gateId, payload) {
       contentWordId,
       context.uid
     );
-    const duplicateAnalysis = await findWordDuplicates(
-      context,
-      parentWorldId,
-      parentRankId,
-      parentGateId,
-      word.normalizedWord,
-      ''
-    );
-    if (duplicateAnalysis.duplicateInGate) {
-      throw adminCloudError(
-        'content/duplicate-word-in-gate',
-        'The normalized word already exists in this gate.',
-        duplicateAnalysis
-      );
-    }
-
     const wordReference = doc(
       wordsCollection(parentWorldId, parentRankId, parentGateId),
       contentWordId
@@ -2157,13 +2104,7 @@ async function createWord(worldId, rankId, gateId, payload) {
       parentGateId,
       context.uid
     );
-    return {
-      ...savedWord,
-      duplicateAnalysis: {
-        ...duplicateAnalysis,
-        duplicateScopes: duplicateAnalysis.duplicateScopes.filter((scope) => scope !== 'gate'),
-      },
-    };
+    return savedWord;
   } catch (error) {
     throw mapAdminCloudError(error, 'admin/create-failed');
   }
