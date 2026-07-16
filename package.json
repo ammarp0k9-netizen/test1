@@ -1,0 +1,23 @@
+{
+  "name": "lootlingua-content-system-tests",
+  "private": true,
+  "scripts": {
+    "test:contracts": "node --test tests/admin-access-static.test.mjs tests/content-schema.test.mjs tests/content-schema-gate.test.mjs tests/protected-contracts.test.mjs",
+    "test:admin": "node --test tests/admin-access-static.test.mjs tests/admin-claim-state.test.mjs tests/admin-cloud-api-static.test.mjs tests/admin-cloud-rank-behavior.test.mjs tests/admin-cloud-gate-static.test.mjs tests/admin-cloud-gate-behavior.test.mjs tests/admin-route-static.test.mjs tests/admin-ui-static.test.mjs tests/admin-gate-ui-static.test.mjs",
+    "test:admin:browser": "node tools/admin-rank-browser-smoke.mjs",
+    "test:admin:gate-browser": "node tools/admin-gate-browser-smoke.mjs",
+    "test:rules": "firebase emulators:exec --only firestore --project demo-lootlingua \"node tests/firestore-rules.test.mjs\"",
+    "test:stage-a": "npm run test:contracts && npm run test:rules",
+    "test:stage-b": "npm run test:contracts && npm run test:admin && npm --prefix functions run check && npm --prefix functions test && npm run test:rules",
+    "test:stage-c1": "npm run test:contracts && npm run test:admin && npm run test:admin:browser && npm --prefix functions run check && npm --prefix functions test && npm run test:rules",
+    "test:stage-c2": "npm run test:contracts && npm run test:admin && npm run test:admin:browser && npm run test:admin:gate-browser && npm --prefix functions run check && npm --prefix functions test && npm run test:rules"
+  },
+  "devDependencies": {
+    "@firebase/rules-unit-testing": "5.0.1",
+    "firebase": "12.16.0",
+    "firebase-tools": "15.23.0"
+  },
+  "dependencies": {
+    "firebase-admin": "^14.1.0"
+  }
+}

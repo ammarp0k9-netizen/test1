@@ -1,0 +1,347 @@
+lootlingua النسخة القديمة 1.0.0
+
+HTML: 
+ــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــ
+
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>LootLingua | قاموس الأساطير</title>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+  <div class="menu-btn" onclick="toggleSidebar()"><i class="fas fa-bars"></i></div>
+  <div id="sidebar" class="sidebar">
+    <div class="sidebar-header"><h2>LootLingua 🎮</h2></div>
+    <nav>
+      <a href="#" class="nav-link active"><i class="fas fa-user-shield"></i> قاموسك الشخصي</a>
+      <div class="sidebar-divider">موسوعة الأساطير</div>
+      <a href="#" class="nav-link"><i class="fas fa-cube"></i> Minecraft Dict</a>
+      <a href="#" class="nav-link"><i class="fas fa-crosshairs"></i> PUBG Terms</a>
+      <div class="sidebar-divider">الإعدادات</div>
+      <button id="loginBtn" class="auth-btn" onclick="login()">تسجيل دخول</button>
+      <button id="logoutBtn" class="auth-btn" onclick="confirmLogout()" style="display:none;">تسجيل الخروج</button>
+    </nav>
+  </div>
+
+  <div id="overlay" class="overlay" onclick="toggleSidebar()"></div>
+
+  <main class="main-content" id="main-content">
+    <header class="page-header">
+      <h1>قاموسك الشخصي</h1>
+      <div class="stats-bar">
+        <span id="totalCount">إجمالي الكلمات: 0</span>
+        <span id="starredCount">⭐ الصعبة: 0</span>
+      </div>
+    </header>
+
+    <div class="card-box">
+      <div class="ai-search-container">
+        <div style="display:flex; gap:8px;">
+          <button onclick="fetchSuggestions()" id="searchBtn" class="btn-ai"><i class="fas fa-search"></i></button>
+          <input type="text" id="wordInput" placeholder="الكلمة (مثال: Sword)" dir="ltr">
+        </div>
+      </div>
+      
+      <div id="suggestionsList"></div> <input type="text" id="meaningInput" placeholder="المعنى بالعربي" style="margin-top:10px; width:100%;">
+      <textarea id="exampleInput" placeholder="جملة مثال (اختياري)" rows="2" style="margin-top:10px; width:100%;"></textarea>
+      
+      <select id="categoryInput" style="margin-top:10px; width:100%;">
+        <option value="عام">عام</option>
+        <option value="اسم">اسم</option>
+        <option value="فعل">فعل</option>
+        <option value="صفة">صفة</option>
+        <option value="لعبة">مصطلح ألعاب</option>
+      </select>
+      
+      <button class="btn-main" id="addBtn" onclick="addWord()" style="margin-top:15px;">إضافة للقاموس 💾</button>
+    </div>
+
+    <div class="toolbar">
+      <button id="toolAll" class="btn-tool active-tool" onclick="setFilter('all')">الكل</button>
+      <button id="toolStarred" class="btn-tool" onclick="setFilter('starred')"><i class="fas fa-star"></i></button>
+      <button class="btn-tool" onclick="openQuizSetup()"><i class="fas fa-gamepad"></i> كويز</button>
+    </div>
+    
+    <input type="text" id="searchInput" placeholder="🔎 ابحث في قاموسك..." oninput="render()" style="width:100%; margin-bottom:15px;">
+
+    <ul id="list"></ul>
+  </main>
+
+  <script type="module">
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/12.10.0/firebase-app.js";
+    import { getAuth, signInWithPopup, signOut, GoogleAuthProvider, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/12.10.0/firebase-auth.js";
+    import { getFirestore, collection, addDoc, query, orderBy, deleteDoc, doc, updateDoc, onSnapshot } from "https://www.gstatic.com/firebasejs/12.10.0/firebase-firestore.js";
+    
+    const firebaseConfig = {
+      apiKey: "AIzaSyDQB5N4wxJw69-tb8suI2T2SfEfCpwFA2c",
+      authDomain: "quizapp-ede17.firebaseapp.com",
+      projectId: "quizapp-ede17",
+      storageBucket: "quizapp-ede17.firebasestorage.app",
+      messagingSenderId: "473471031803",
+      appId: "1:473471031803:web:1b803237aeb0444040535e"
+    };
+    
+    const app = initializeApp(firebaseConfig);
+    window.auth = getAuth(app);
+    window.db = getFirestore(app);
+
+    onAuthStateChanged(window.auth, (user) => {
+      document.getElementById('logoutBtn').style.display = user ? 'block' : 'none';
+      document.getElementById('loginBtn').style.display  = user ? 'none'  : 'block';
+      if (user) loadWordsFromCloud(user);
+    });
+
+    window.login = async function() {
+      const provider = new GoogleAuthProvider();
+      try { await signInWithPopup(window.auth, provider); } catch (e) { console.error(e); }
+    };
+    
+    window.confirmLogout = function() { signOut(window.auth); };
+    
+    function loadWordsFromCloud(user) {
+      const q = query(collection(window.db, "users", user.uid, "words"), orderBy("createdAt", "desc"));
+      onSnapshot(q, (snapshot) => {
+        window.words = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
+        render();
+      });
+    }
+
+    window.dbDelete = async function(id) { await deleteDoc(doc(window.db, "users", window.auth.currentUser.uid, "words", id)); }
+    window.dbUpdate = async function(id, data) { await updateDoc(doc(window.db, "users", window.auth.currentUser.uid, "words", id), data); }
+    window.dbAdd    = async function(data) { return await addDoc(collection(window.db, "users", window.auth.currentUser.uid, "words"), { ...data, createdAt: new Date() }); }
+  </script>
+
+  <script src="script.js"></script>
+</body>
+</html>
+
+ـــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــ
+
+
+CSS:
+
+ـــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــ
+
+:root {
+  --main-bg: #0f172a;      /* كحلي غامق جداً */
+  --card-bg: #1e293b;      /* كحلي أفتح للبطاقات */
+  --accent: #3b82f6;       /* أزرق ساطع */
+  --text-white: #f8fafc;
+  --text-gray: #94a3b8;
+  --danger: #ef4444;
+  --success: #10b981;
+}
+
+body {
+  margin: 0;
+  font-family: 'Segoe UI', Tahoma, sans-serif;
+  background-color: var(--main-bg);
+  color: var(--text-white);
+  overflow-x: hidden;
+}
+
+/* القائمة الجانبية (Sidebar) */
+.sidebar {
+  position: fixed;
+  top: 0; right: -280px;
+  width: 260px; height: 100vh;
+  background-color: #0b1120;
+  box-shadow: -5px 0 15px rgba(0,0,0,0.8);
+  transition: 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+  padding: 20px;
+  z-index: 1000;
+}
+.sidebar.open { right: 0; }
+.sidebar-header h2 { color: var(--accent); margin-top: 0; }
+
+.nav-link {
+  display: block; color: var(--text-gray); text-decoration: none;
+  padding: 12px; margin-bottom: 8px; border-radius: 8px; transition: 0.3s;
+}
+.nav-link:hover, .nav-link.active { background: var(--card-bg); color: var(--text-white); }
+.sidebar-divider { color: #475569; font-size: 12px; margin: 20px 0 10px; border-bottom: 1px solid #1e293b; padding-bottom: 5px; }
+
+/* زر الهامبرغر */
+.menu-btn {
+  position: fixed; top: 15px; right: 15px;
+  background: var(--card-bg); padding: 10px 15px;
+  border-radius: 8px; cursor: pointer; z-index: 999;
+  border: 1px solid #334155; font-size: 20px;
+}
+
+/* المحتوى الرئيسي (هون حلينا التداخل) */
+.main-content {
+  padding: 80px 20px 20px; /* مسافة من فوق عشان الزر */
+  max-width: 600px;
+  margin: 0 auto;
+  transition: 0.4s;
+}
+
+/* البطاقات والإدخال */
+.card-box {
+  background: var(--card-bg);
+  padding: 20px;
+  border-radius: 16px;
+  margin-bottom: 20px;
+  border: 1px solid #334155;
+}
+input, select, textarea {
+  background: #0f172a; color: white;
+  border: 1px solid #334155; padding: 12px;
+  border-radius: 10px; font-family: inherit; outline: none;
+}
+input:focus, textarea:focus { border-color: var(--accent); }
+
+/* الأزرار */
+.btn-main { width: 100%; background: var(--accent); color: white; border: none; padding: 14px; border-radius: 10px; font-weight: bold; cursor: pointer; }
+.btn-ai { background: var(--accent); color: white; border: none; border-radius: 10px; width: 50px; cursor: pointer; }
+.auth-btn { width: 100%; padding: 10px; border-radius: 8px; background: transparent; color: white; border: 1px solid var(--accent); cursor: pointer; margin-top: 10px; }
+#logoutBtn { border-color: var(--danger); color: var(--danger); }
+
+/* شريط الإحصائيات والأدوات */
+.stats-bar { display: flex; justify-content: space-between; font-size: 13px; color: var(--text-gray); margin-bottom: 15px; }
+.toolbar { display: flex; gap: 10px; margin-bottom: 15px; }
+.btn-tool { flex: 1; background: var(--card-bg); color: var(--text-gray); border: 1px solid #334155; padding: 10px; border-radius: 10px; cursor: pointer; }
+.btn-tool.active-tool { background: var(--accent); color: white; border-color: var(--accent); }
+
+/* قائمة الكلمات */
+ul { list-style: none; padding: 0; margin: 0; }
+li {
+  background: var(--card-bg); padding: 15px; border-radius: 12px; margin-bottom: 12px;
+  display: flex; justify-content: space-between; align-items: center;
+  border-right: 4px solid var(--accent); border-top: 1px solid #334155;
+}
+.word-text { font-size: 18px; font-weight: bold; color: var(--text-white); }
+.meaning-text { color: var(--text-gray); font-size: 14px; }
+.actions i { font-size: 18px; margin-right: 15px; cursor: pointer; transition: 0.2s; color: var(--text-gray); }
+.actions i:hover { color: var(--accent); transform: scale(1.2); }
+.fa-trash:hover { color: var(--danger); }
+
+/* الظل الخلفي للقائمة */
+.overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); z-index: 998; display: none; }
+.overlay.show { display: block; }
+
+
+ـــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــ
+
+Java:
+ـــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــ
+
+window.words = [];
+let currentFilter = 'all';
+
+// فتح وإغلاق القائمة الجانبية
+function toggleSidebar() {
+  document.getElementById('sidebar').classList.toggle('open');
+  document.getElementById('overlay').classList.toggle('show');
+}
+
+// إضافة كلمة
+async function addWord() {
+  const w = document.getElementById('wordInput').value.trim();
+  const m = document.getElementById('meaningInput').value.trim();
+  const ex = document.getElementById('exampleInput').value.trim();
+  const c = document.getElementById('categoryInput').value;
+
+  if (!w || !m) return alert("اكتب الكلمة ومعناها!");
+
+  const newWord = { text: w, meaning: m, example: ex, category: c, starred: false };
+  
+  if (window.auth && window.auth.currentUser) {
+    await window.dbAdd(newWord);
+  } else {
+    window.words.unshift({ id: Date.now().toString(), ...newWord });
+    render();
+  }
+
+  document.getElementById('wordInput').value = '';
+  document.getElementById('meaningInput').value = '';
+  document.getElementById('exampleInput').value = '';
+}
+
+// حذف كلمة
+async function deleteWord(id) {
+  if (confirm("تحذف الكلمة يا أسطورة؟")) {
+    if (window.auth && window.auth.currentUser) {
+      await window.dbDelete(id);
+    } else {
+      window.words = window.words.filter(w => w.id !== id);
+      render();
+    }
+  }
+}
+
+// تشغيل الصوت (الطريقة القانونية والأسرع)
+function playSound(text) {
+  const utt = new SpeechSynthesisUtterance(text);
+  utt.lang = 'en-US';
+  window.speechSynthesis.speak(utt);
+}
+
+// جلب المعاني بالذكاء الاصطناعي
+async function fetchSuggestions() {
+  const word = document.getElementById('wordInput').value.trim();
+  if (!word) return alert("اكتب كلمة بالإنجليزي أولاً!");
+  
+  const btn = document.getElementById('searchBtn');
+  btn.innerHTML = "<i class='fas fa-spinner fa-spin'></i>";
+  
+  try {
+    const res = await fetch("https://dictionary7-ayes.onrender.com/api/dictionary", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ word })
+    });
+    const data = await res.json();
+    const text = data.choices[0].message.content;
+    const suggestions = JSON.parse(text.substring(text.indexOf('['), text.lastIndexOf(']') + 1));
+    
+    // أخذ أول وأفضل معنى لتبسيط الواجهة
+    document.getElementById('meaningInput').value = suggestions[0].ar;
+    document.getElementById('exampleInput').value = suggestions[0].ex;
+    document.getElementById('categoryInput').value = suggestions[0].pos;
+    
+  } catch (err) {
+    alert("تأكد إن السيرفر شغال!");
+  } finally {
+    btn.innerHTML = "<i class='fas fa-search'></i>";
+  }
+}
+
+// تصفية وعرض الكلمات
+function setFilter(f) {
+  currentFilter = f;
+  document.getElementById('toolAll').classList.toggle('active-tool', f === 'all');
+  document.getElementById('toolStarred').classList.toggle('active-tool', f === 'starred');
+  render();
+}
+
+function render() {
+  const query = document.getElementById('searchInput').value.toLowerCase();
+  
+  let filtered = window.words.filter(w => {
+    const match = w.text.toLowerCase().includes(query) || w.meaning.toLowerCase().includes(query);
+    return match && (currentFilter === 'all' || w.starred);
+  });
+
+  document.getElementById('list').innerHTML = filtered.map(w => `
+    <li>
+      <div>
+        <div class="word-text">${w.text} <span style="font-size:11px; color:#3b82f6;">(${w.category})</span></div>
+        <div class="meaning-text">${w.meaning}</div>
+      </div>
+      <div class="actions">
+        <i class="fas fa-volume-up" onclick="playSound('${w.text}')"></i>
+        <i class="fas fa-trash" onclick="deleteWord('${w.id}')"></i>
+      </div>
+    </li>
+  `).join('');
+  
+  document.getElementById('totalCount').innerText = `إجمالي الكلمات: ${window.words.length}`;
+}
+
+ــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــــ

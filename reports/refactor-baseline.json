@@ -1,0 +1,1892 @@
+{
+  "generatedAt": "2026-07-13T05:53:36.024Z",
+  "files": {
+    "index.html": {
+      "bytes": 103591,
+      "lines": 1862,
+      "sha256": "40ed98190cbc77fe0281751001af42736ba44a17750ac587db0334f0e85f5693"
+    },
+    "script.js": {
+      "bytes": 483234,
+      "lines": 11911,
+      "sha256": "8003e8b2b28ccbdc79fec799f9c1703cb9de41694f87c026991fd795dbc2c37e"
+    },
+    "style.css": {
+      "bytes": 237245,
+      "lines": 8441,
+      "sha256": "a322fc472b264d4d24618bad186601d0862f0eb2278fa5f2275af58d99ea075a"
+    }
+  },
+  "appJavaScriptFiles": [
+    {
+      "name": "index.html#script-0",
+      "type": "text/javascript",
+      "bytes": 851,
+      "lines": 19,
+      "sha256": "e938f2c8d546150621e293ce2a721a975e8cf6036d0641e2b9d2f3274f97006e"
+    },
+    {
+      "name": "index.html#script-2",
+      "type": "classic",
+      "bytes": 162,
+      "lines": 6,
+      "sha256": "4d4dd2886fe62473ac247d771490e10f8bd7aff6ad7923c5c9430503fa5cf1e0"
+    },
+    {
+      "name": "index.html#script-3",
+      "type": "module",
+      "bytes": 34331,
+      "lines": 783,
+      "sha256": "ddcc103fcb625b8a566b689708a755422ae744ae1d246675b591902456ceb731"
+    },
+    {
+      "name": "index.html#script-4",
+      "type": "module",
+      "bytes": 4091,
+      "lines": 84,
+      "sha256": "aab7db2c621ca5b934609d9bc81a206574ec836ed41f5a5dca14e934c65d2d43"
+    },
+    {
+      "name": "script.js",
+      "type": "classic",
+      "bytes": 483234,
+      "lines": 11911,
+      "sha256": "8003e8b2b28ccbdc79fec799f9c1703cb9de41694f87c026991fd795dbc2c37e"
+    }
+  ],
+  "scriptOrder": [
+    {
+      "index": 0,
+      "type": "text/javascript",
+      "src": "",
+      "inlineBytes": 851,
+      "inlineLines": 19
+    },
+    {
+      "index": 1,
+      "type": "classic",
+      "src": "https://www.googletagmanager.com/gtag/js?id=G-C06S6C7JYT",
+      "inlineBytes": 0,
+      "inlineLines": 0
+    },
+    {
+      "index": 2,
+      "type": "classic",
+      "src": "",
+      "inlineBytes": 162,
+      "inlineLines": 6
+    },
+    {
+      "index": 3,
+      "type": "module",
+      "src": "",
+      "inlineBytes": 34331,
+      "inlineLines": 783
+    },
+    {
+      "index": 4,
+      "type": "module",
+      "src": "",
+      "inlineBytes": 4091,
+      "inlineLines": 84
+    },
+    {
+      "index": 5,
+      "type": "classic",
+      "src": "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js",
+      "inlineBytes": 0,
+      "inlineLines": 0
+    },
+    {
+      "index": 6,
+      "type": "classic",
+      "src": "script.js",
+      "inlineBytes": 0,
+      "inlineLines": 0
+    }
+  ],
+  "inlineJavaScript": {
+    "blocks": 4,
+    "bytes": 39435,
+    "lines": 892
+  },
+  "inlineHandlers": {
+    "count": 149,
+    "attributes": {
+      "onclick": 139,
+      "oninput": 3,
+      "onpointerdown": 1,
+      "onpointermove": 1,
+      "onpointerup": 1,
+      "onpointerleave": 1,
+      "onpointercancel": 1,
+      "onkeydown": 1,
+      "onchange": 1
+    },
+    "requiredGlobals": [
+      "addWord",
+      "cancelLootChestCharge",
+      "cancelQuizExitPrompt",
+      "clearAllNotifications",
+      "closeCustomWorldModal",
+      "closeDailyQuestsSheet",
+      "closeProfileModal",
+      "closeStatsPanel",
+      "closeWordHunterModal",
+      "confirmBulkDeleteSelection",
+      "confirmDeleteCustomWorld",
+      "confirmGuestMigration",
+      "confirmLogout",
+      "confirmQuizExitWithoutLoss",
+      "confirmQuizForfeit",
+      "declineGuestMigration",
+      "dismissWelcomeModal",
+      "enterSelectionMode",
+      "exitBulkDeleteMode",
+      "exitSelectionMode",
+      "exportData",
+      "fetchSuggestions",
+      "flipCard",
+      "forfeitActiveQuizSession",
+      "goBackFromSubView",
+      "handleOnboardingReplayClick",
+      "hideModal",
+      "importData",
+      "loadGameDictionary",
+      "loadPersonalDictionary",
+      "loadQuizView",
+      "loadStarredView",
+      "loadTreasureView",
+      "loadWorldsView",
+      "login",
+      "markForgot",
+      "markRemember",
+      "moveLootChestCharge",
+      "moveSelectedWordsByStep",
+      "onDockFeatureClick",
+      "onSidebarFeatureClick",
+      "onWorldCardClick",
+      "openDailyLootBox",
+      "openGameGamerAiSearch",
+      "openQuizModeSettings",
+      "openStatsPanel",
+      "openWordHunterModal",
+      "openWorldManageModal",
+      "playQuizSound",
+      "releaseLootChestCharge",
+      "render",
+      "renderStarredWords",
+      "requestQuizExit",
+      "resumeActiveQuizSession",
+      "saveCustomWorldFromModal",
+      "searchGameWords",
+      "setDictionarySortMode",
+      "setQuizQuestionCount",
+      "setQuizSourceScope",
+      "setScrambleDirection",
+      "setTheme",
+      "setTimeAttackDirection",
+      "setWorldManageAction",
+      "showBackupHelp",
+      "showHint",
+      "showKeyboardShortcutsModal",
+      "showModal",
+      "showPerformanceModeHelp",
+      "showQuizModes",
+      "startActualQuiz",
+      "startConfiguredQuiz",
+      "startLootChestCharge",
+      "startVoiceSearch",
+      "submitScrambleAnswer",
+      "toggleAddFormExpanded",
+      "toggleDailyQuestsSheet",
+      "toggleDictionarySortMenu",
+      "toggleNotificationsPanel",
+      "toggleProfileModal",
+      "toggleReorderMode",
+      "toggleSidebar",
+      "toggleSortCategorySubmenu",
+      "toggleXpRanksGuide"
+    ],
+    "missingStaticGlobals": [],
+    "entries": [
+      {
+        "attribute": "onclick",
+        "code": "toggleProfileModal()"
+      },
+      {
+        "attribute": "onclick",
+        "code": "openStatsPanel()"
+      },
+      {
+        "attribute": "onclick",
+        "code": "openStatsPanel()"
+      },
+      {
+        "attribute": "onclick",
+        "code": "toggleNotificationsPanel(event)"
+      },
+      {
+        "attribute": "onclick",
+        "code": "clearAllNotifications(event)"
+      },
+      {
+        "attribute": "onclick",
+        "code": "toggleNotificationsPanel(event)"
+      },
+      {
+        "attribute": "onclick",
+        "code": "toggleDailyQuestsSheet()"
+      },
+      {
+        "attribute": "onclick",
+        "code": "toggleSidebar()"
+      },
+      {
+        "attribute": "onclick",
+        "code": "return onSidebarFeatureClick(event, 'personal', function () { loadPersonalDictionary(); });"
+      },
+      {
+        "attribute": "onclick",
+        "code": "return onSidebarFeatureClick(event, 'starred', function () { loadStarredView(); });"
+      },
+      {
+        "attribute": "onclick",
+        "code": "return onSidebarFeatureClick(event, 'minecraft', function () { loadGameDictionary('minecraft'); });"
+      },
+      {
+        "attribute": "onclick",
+        "code": "return onSidebarFeatureClick(event, 'pubg', function () { loadGameDictionary('pubg'); });"
+      },
+      {
+        "attribute": "onclick",
+        "code": "return onSidebarFeatureClick(event, 'stats', function () { openStatsPanel(); });"
+      },
+      {
+        "attribute": "onclick",
+        "code": "return onSidebarFeatureClick(event, 'quiz', function () { loadQuizView(); });"
+      },
+      {
+        "attribute": "onclick",
+        "code": "goBackFromSubView()"
+      },
+      {
+        "attribute": "onclick",
+        "code": "fetchSuggestions()"
+      },
+      {
+        "attribute": "onclick",
+        "code": "openWordHunterModal()"
+      },
+      {
+        "attribute": "onclick",
+        "code": "toggleAddFormExpanded()"
+      },
+      {
+        "attribute": "onclick",
+        "code": "addWord()"
+      },
+      {
+        "attribute": "oninput",
+        "code": "searchGameWords()"
+      },
+      {
+        "attribute": "onclick",
+        "code": "openGameGamerAiSearch()"
+      },
+      {
+        "attribute": "oninput",
+        "code": "renderStarredWords()"
+      },
+      {
+        "attribute": "onclick",
+        "code": "startVoiceSearch()"
+      },
+      {
+        "attribute": "oninput",
+        "code": "render()"
+      },
+      {
+        "attribute": "onclick",
+        "code": "toggleDictionarySortMenu()"
+      },
+      {
+        "attribute": "onclick",
+        "code": "setDictionarySortMode('auto')"
+      },
+      {
+        "attribute": "onclick",
+        "code": "setDictionarySortMode('newest')"
+      },
+      {
+        "attribute": "onclick",
+        "code": "setDictionarySortMode('oldest')"
+      },
+      {
+        "attribute": "onclick",
+        "code": "setDictionarySortMode('alpha')"
+      },
+      {
+        "attribute": "onclick",
+        "code": "toggleSortCategorySubmenu(event)"
+      },
+      {
+        "attribute": "onclick",
+        "code": "setDictionarySortMode('category', 'all')"
+      },
+      {
+        "attribute": "onclick",
+        "code": "setDictionarySortMode('category', 'عام')"
+      },
+      {
+        "attribute": "onclick",
+        "code": "setDictionarySortMode('category', 'اسم')"
+      },
+      {
+        "attribute": "onclick",
+        "code": "setDictionarySortMode('category', 'فعل')"
+      },
+      {
+        "attribute": "onclick",
+        "code": "setDictionarySortMode('category', 'صفة')"
+      },
+      {
+        "attribute": "onclick",
+        "code": "setDictionarySortMode('category', 'أداة')"
+      },
+      {
+        "attribute": "onclick",
+        "code": "setDictionarySortMode('category', 'ظرف')"
+      },
+      {
+        "attribute": "onclick",
+        "code": "setDictionarySortMode('category', 'جمل')"
+      },
+      {
+        "attribute": "onclick",
+        "code": "setDictionarySortMode('category', 'لعبة')"
+      },
+      {
+        "attribute": "onclick",
+        "code": "enterSelectionMode()"
+      },
+      {
+        "attribute": "onclick",
+        "code": "confirmBulkDeleteSelection()"
+      },
+      {
+        "attribute": "onclick",
+        "code": "toggleReorderMode()"
+      },
+      {
+        "attribute": "onclick",
+        "code": "moveSelectedWordsByStep(-1)"
+      },
+      {
+        "attribute": "onclick",
+        "code": "moveSelectedWordsByStep(1)"
+      },
+      {
+        "attribute": "onclick",
+        "code": "openWorldManageModal()"
+      },
+      {
+        "attribute": "onclick",
+        "code": "exitSelectionMode()"
+      },
+      {
+        "attribute": "onclick",
+        "code": "confirmBulkDeleteSelection()"
+      },
+      {
+        "attribute": "onclick",
+        "code": "exitBulkDeleteMode()"
+      },
+      {
+        "attribute": "onclick",
+        "code": "requestQuizExit('personal')"
+      },
+      {
+        "attribute": "onclick",
+        "code": "openQuizModeSettings('flashcards')"
+      },
+      {
+        "attribute": "onclick",
+        "code": "openQuizModeSettings('timeAttack')"
+      },
+      {
+        "attribute": "onclick",
+        "code": "openQuizModeSettings('scramble')"
+      },
+      {
+        "attribute": "onclick",
+        "code": "showQuizModes()"
+      },
+      {
+        "attribute": "onclick",
+        "code": "startActualQuiz('recent')"
+      },
+      {
+        "attribute": "onclick",
+        "code": "startActualQuiz('old')"
+      },
+      {
+        "attribute": "onclick",
+        "code": "startActualQuiz('starred')"
+      },
+      {
+        "attribute": "onclick",
+        "code": "startActualQuiz('all')"
+      },
+      {
+        "attribute": "onclick",
+        "code": "setQuizSourceScope('personal', this)"
+      },
+      {
+        "attribute": "onclick",
+        "code": "setQuizSourceScope('starred', this)"
+      },
+      {
+        "attribute": "onclick",
+        "code": "setQuizQuestionCount('5', this)"
+      },
+      {
+        "attribute": "onclick",
+        "code": "setQuizQuestionCount('10', this)"
+      },
+      {
+        "attribute": "onclick",
+        "code": "setQuizQuestionCount('20', this)"
+      },
+      {
+        "attribute": "onclick",
+        "code": "setQuizQuestionCount('all', this)"
+      },
+      {
+        "attribute": "onclick",
+        "code": "setTimeAttackDirection('ar-to-en', this)"
+      },
+      {
+        "attribute": "onclick",
+        "code": "setTimeAttackDirection('en-to-ar', this)"
+      },
+      {
+        "attribute": "onclick",
+        "code": "setScrambleDirection('ar-to-en', this)"
+      },
+      {
+        "attribute": "onclick",
+        "code": "setScrambleDirection('en-to-ar', this)"
+      },
+      {
+        "attribute": "onclick",
+        "code": "startConfiguredQuiz()"
+      },
+      {
+        "attribute": "onclick",
+        "code": "requestQuizExit()"
+      },
+      {
+        "attribute": "onclick",
+        "code": "flipCard()"
+      },
+      {
+        "attribute": "onclick",
+        "code": "playQuizSound(event)"
+      },
+      {
+        "attribute": "onclick",
+        "code": "showHint(event)"
+      },
+      {
+        "attribute": "onclick",
+        "code": "markForgot()"
+      },
+      {
+        "attribute": "onclick",
+        "code": "markRemember()"
+      },
+      {
+        "attribute": "onclick",
+        "code": "requestQuizExit()"
+      },
+      {
+        "attribute": "onclick",
+        "code": "requestQuizExit()"
+      },
+      {
+        "attribute": "onclick",
+        "code": "submitScrambleAnswer()"
+      },
+      {
+        "attribute": "onclick",
+        "code": "forfeitActiveQuizSession()"
+      },
+      {
+        "attribute": "onclick",
+        "code": "resumeActiveQuizSession()"
+      },
+      {
+        "attribute": "onclick",
+        "code": "cancelQuizExitPrompt()"
+      },
+      {
+        "attribute": "onclick",
+        "code": "confirmQuizExitWithoutLoss()"
+      },
+      {
+        "attribute": "onclick",
+        "code": "cancelQuizExitPrompt()"
+      },
+      {
+        "attribute": "onclick",
+        "code": "confirmQuizForfeit()"
+      },
+      {
+        "attribute": "onclick",
+        "code": "return onWorldCardClick(event, 'minecraft', function () { loadGameDictionary('minecraft'); });"
+      },
+      {
+        "attribute": "onclick",
+        "code": "return onWorldCardClick(event, 'pubg', function () { loadGameDictionary('pubg'); });"
+      },
+      {
+        "attribute": "onclick",
+        "code": "return onWorldCardClick(event, 'starred', function () { loadStarredView(); });"
+      },
+      {
+        "attribute": "onpointerdown",
+        "code": "startLootChestCharge(event)"
+      },
+      {
+        "attribute": "onpointermove",
+        "code": "moveLootChestCharge(event)"
+      },
+      {
+        "attribute": "onpointerup",
+        "code": "releaseLootChestCharge(event)"
+      },
+      {
+        "attribute": "onpointerleave",
+        "code": "cancelLootChestCharge(event)"
+      },
+      {
+        "attribute": "onpointercancel",
+        "code": "cancelLootChestCharge(event)"
+      },
+      {
+        "attribute": "onkeydown",
+        "code": "if(event.key==='Enter'||event.key===' '){event.preventDefault();openDailyLootBox();}"
+      },
+      {
+        "attribute": "onclick",
+        "code": "exportData()"
+      },
+      {
+        "attribute": "onclick",
+        "code": "showBackupHelp('export', event)"
+      },
+      {
+        "attribute": "onclick",
+        "code": "document.getElementById('importFile').click()"
+      },
+      {
+        "attribute": "onclick",
+        "code": "showBackupHelp('import', event)"
+      },
+      {
+        "attribute": "onchange",
+        "code": "importData(event)"
+      },
+      {
+        "attribute": "onclick",
+        "code": "return onDockFeatureClick(event, 'treasure', function () { loadTreasureView(); });"
+      },
+      {
+        "attribute": "onclick",
+        "code": "loadPersonalDictionary()"
+      },
+      {
+        "attribute": "onclick",
+        "code": "loadWorldsView()"
+      },
+      {
+        "attribute": "onclick",
+        "code": "return onDockFeatureClick(event, 'quiz', function () { loadQuizView(); });"
+      },
+      {
+        "attribute": "onclick",
+        "code": "closeProfileModal()"
+      },
+      {
+        "attribute": "onclick",
+        "code": "closeProfileModal()"
+      },
+      {
+        "attribute": "onclick",
+        "code": "toggleXpRanksGuide(event)"
+      },
+      {
+        "attribute": "onclick",
+        "code": "closeProfileModal(true); openStatsPanel();"
+      },
+      {
+        "attribute": "onclick",
+        "code": "setTheme('lootlingua')"
+      },
+      {
+        "attribute": "onclick",
+        "code": "setTheme('golden')"
+      },
+      {
+        "attribute": "onclick",
+        "code": "setTheme('scroll')"
+      },
+      {
+        "attribute": "onclick",
+        "code": "setTheme('ocean')"
+      },
+      {
+        "attribute": "onclick",
+        "code": "setTheme('glass')"
+      },
+      {
+        "attribute": "onclick",
+        "code": "login()"
+      },
+      {
+        "attribute": "onclick",
+        "code": "showModal('logoutModal')"
+      },
+      {
+        "attribute": "onclick",
+        "code": "showPerformanceModeHelp(event)"
+      },
+      {
+        "attribute": "onclick",
+        "code": "showKeyboardShortcutsModal()"
+      },
+      {
+        "attribute": "onclick",
+        "code": "handleOnboardingReplayClick(event)"
+      },
+      {
+        "attribute": "onclick",
+        "code": "closeWordHunterModal()"
+      },
+      {
+        "attribute": "onclick",
+        "code": "closeWordHunterModal()"
+      },
+      {
+        "attribute": "onclick",
+        "code": "closeDailyQuestsSheet()"
+      },
+      {
+        "attribute": "onclick",
+        "code": "closeDailyQuestsSheet()"
+      },
+      {
+        "attribute": "onclick",
+        "code": "hideModal('deleteModal')"
+      },
+      {
+        "attribute": "onclick",
+        "code": "if (event.target === this) dismissWelcomeModal()"
+      },
+      {
+        "attribute": "onclick",
+        "code": "event.stopPropagation()"
+      },
+      {
+        "attribute": "onclick",
+        "code": "dismissWelcomeModal()"
+      },
+      {
+        "attribute": "onclick",
+        "code": "if (event.target === this) hideModal('unlockExplainModal')"
+      },
+      {
+        "attribute": "onclick",
+        "code": "event.stopPropagation()"
+      },
+      {
+        "attribute": "onclick",
+        "code": "hideModal('unlockExplainModal')"
+      },
+      {
+        "attribute": "onclick",
+        "code": "if (event.target === this) closeCustomWorldModal()"
+      },
+      {
+        "attribute": "onclick",
+        "code": "event.stopPropagation()"
+      },
+      {
+        "attribute": "onclick",
+        "code": "closeCustomWorldModal()"
+      },
+      {
+        "attribute": "onclick",
+        "code": "saveCustomWorldFromModal()"
+      },
+      {
+        "attribute": "onclick",
+        "code": "if (event.target === this) hideModal('worldManageModal')"
+      },
+      {
+        "attribute": "onclick",
+        "code": "event.stopPropagation()"
+      },
+      {
+        "attribute": "onclick",
+        "code": "setWorldManageAction('move')"
+      },
+      {
+        "attribute": "onclick",
+        "code": "setWorldManageAction('copy')"
+      },
+      {
+        "attribute": "onclick",
+        "code": "if (event.target === this) hideModal('deleteWorldModal')"
+      },
+      {
+        "attribute": "onclick",
+        "code": "event.stopPropagation()"
+      },
+      {
+        "attribute": "onclick",
+        "code": "confirmDeleteCustomWorld('move')"
+      },
+      {
+        "attribute": "onclick",
+        "code": "confirmDeleteCustomWorld('delete')"
+      },
+      {
+        "attribute": "onclick",
+        "code": "confirmLogout()"
+      },
+      {
+        "attribute": "onclick",
+        "code": "hideModal('logoutModal')"
+      },
+      {
+        "attribute": "onclick",
+        "code": "event.stopPropagation()"
+      },
+      {
+        "attribute": "onclick",
+        "code": "confirmGuestMigration()"
+      },
+      {
+        "attribute": "onclick",
+        "code": "declineGuestMigration()"
+      },
+      {
+        "attribute": "onclick",
+        "code": "if (event.target === this) hideModal('performanceModeInfoModal')"
+      },
+      {
+        "attribute": "onclick",
+        "code": "hideModal('performanceModeInfoModal')"
+      },
+      {
+        "attribute": "onclick",
+        "code": "if (event.target === this) hideModal('keyboardShortcutsModal')"
+      },
+      {
+        "attribute": "onclick",
+        "code": "event.stopPropagation()"
+      },
+      {
+        "attribute": "onclick",
+        "code": "hideModal('keyboardShortcutsModal')"
+      },
+      {
+        "attribute": "onclick",
+        "code": "closeStatsPanel()"
+      }
+    ]
+  },
+  "globals": {
+    "functionDeclarationCount": 543,
+    "windowExportCount": 178,
+    "windowExports": [
+      "__acceptedGuestProfileMigration",
+      "__activeVoiceRecognition",
+      "__applyingCloudProfile",
+      "__emptyOnboardingInputWatcher",
+      "__guestMigrationPromise",
+      "__guestMigrationSessionComplete",
+      "__guestMigrationSummary",
+      "__guestMigrationUid",
+      "__initialFeatureLoadPending",
+      "__jsonImportBatchActive",
+      "__lastCustomWorldSaveError",
+      "__lastDictSearchWord",
+      "__lootCountdownTimer",
+      "__lootHoldTimer",
+      "__lootlinguaQuizDebug",
+      "__lootOpening",
+      "__lootPointerStart",
+      "__navLockAnimSeeded",
+      "__navLockPrev",
+      "__notifications",
+      "__pendingQuizResumeSession",
+      "__resolveGuestMigration",
+      "__restoringAddFormDraft",
+      "__suppressCloudWordsSnapshot",
+      "__suppressUnlockNotices",
+      "__toastDetailNotifId",
+      "__toastHideTimer",
+      "__treasureRouteTimer",
+      "__treasureSwipeReady",
+      "__worldsRouteTimer",
+      "_profileLoaded",
+      "_saveProfileToCloudNow",
+      "addAiMeaningToPersonal",
+      "addFromGame",
+      "addWord",
+      "addWordHunterResult",
+      "applyCloudWordsFromSnapshot",
+      "applyCustomWorldsFromCloud",
+      "applyCustomWorldWordsFromSnapshot",
+      "applyGlobalWordMasterySnapshot",
+      "applyWorldManageToTarget",
+      "auth",
+      "beginInitialFeatureLoad",
+      "cancelLootChestCharge",
+      "cancelQuizExitPrompt",
+      "claimXPEventInCloud",
+      "clearActiveQuizSessionFromCloud",
+      "clearAllNotifications",
+      "clearDictionaryState",
+      "closeCustomWorldModal",
+      "closeDailyQuestsSheet",
+      "closeProfileModal",
+      "closeSidebarIfOpen",
+      "closeWordHunterModal",
+      "confirmBulkDeleteSelection",
+      "confirmDeleteCustomWorld",
+      "confirmGuestMigration",
+      "confirmLogout",
+      "confirmQuizExitWithoutLoss",
+      "confirmQuizForfeit",
+      "dataLayer",
+      "db",
+      "declineGuestMigration",
+      "deleteCustomWorldFromCloud",
+      "deleteCustomWorldWordFromCloud",
+      "deleteWord",
+      "deleteWordFromCloud",
+      "dismissWelcomeModal",
+      "editWord",
+      "enterSelectionMode",
+      "exitBulkDeleteMode",
+      "exitSelectionMode",
+      "exportData",
+      "fetchGameGamerSuggestions",
+      "fetchGamerSuggestions",
+      "fetchSuggestions",
+      "fetchWordHunterGamerMeaning",
+      "finishInitialFeatureLoad",
+      "forfeitActiveQuizSession",
+      "getAiGlobalCache",
+      "getLootlinguaProfilePayload",
+      "getWordsStorageKey",
+      "goBackFromSubView",
+      "handleOnboardingReplayClick",
+      "hasMeaningfulGuestLoot",
+      "importData",
+      "isActiveCustomWorld",
+      "isExpanded",
+      "isInitialLoad",
+      "listenCustomWorldWordsFromCloud",
+      "loadActiveQuizSessionFromCloud",
+      "loadCustomWorld",
+      "loadGameDictionary",
+      "loadGuestDictionaryState",
+      "loadPersonalDictionary",
+      "loadProfileFromCloud",
+      "loadQuizView",
+      "loadStarredView",
+      "loadTreasureView",
+      "loadWorldsView",
+      "login",
+      "markInitialFeatureLoadPartDone",
+      "mergeLootlinguaProfileFromCloud",
+      "moveLootChestCharge",
+      "moveSelectedWordsByStep",
+      "onboardingEvent",
+      "onDockFeatureClick",
+      "onload",
+      "onSidebarFeatureClick",
+      "onWorldCardClick",
+      "openCustomWorldModal",
+      "openDailyLootBox",
+      "openDeleteCustomWorldModal",
+      "openGameGamerAiSearch",
+      "openNotificationDetails",
+      "openWordHunterModal",
+      "openWorldManageModal",
+      "playGameSound",
+      "playQuizChoiceSound",
+      "playSound",
+      "prepareGuestMigrationForUser",
+      "purgeStaleGuestLocalData",
+      "readWordsFromStorage",
+      "reconcileEmptyGuestSessionState",
+      "refreshGuestSearchLocks",
+      "releaseLootChestCharge",
+      "replaceWordsForCurrentUser",
+      "requestQuizExit",
+      "resetLootlinguaProfileState",
+      "resumeActiveQuizSession",
+      "retryPendingCustomWorlds",
+      "retryPendingXPEvents",
+      "saveActiveAddFormDraft",
+      "saveActiveQuizSessionToCloud",
+      "saveAiGlobalCache",
+      "saveAndRender",
+      "saveCustomWorldFromModal",
+      "saveCustomWorldToCloud",
+      "saveCustomWorldWordToCloud",
+      "saveGlobalWordMasteryToCloud",
+      "saveProfileToCloud",
+      "saveWordToCloud",
+      "searchGameWords",
+      "setActiveLootlinguaTitle",
+      "setAddFormExpanded",
+      "setDictionarySortMode",
+      "setLootlinguaDisplayName",
+      "setPerformanceLevel",
+      "setQuizSourceScope",
+      "setTheme",
+      "setWorldManageAction",
+      "showKeyboardShortcutsModal",
+      "showMasteryHelp",
+      "showPerformanceModeHelp",
+      "showToast",
+      "showWordMasteryPopover",
+      "SmartLoadingOverlay",
+      "startLootChestCharge",
+      "startOnboarding",
+      "startVoiceSearch",
+      "stopCustomWorldWordsCloudListener",
+      "submitSuggestionFromUI",
+      "submitWordSuggestion",
+      "toggleAddFormExpanded",
+      "toggleDailyQuestsSheet",
+      "toggleDictionarySortMenu",
+      "togglePerformanceMode",
+      "toggleProfileModal",
+      "toggleSidebar",
+      "toggleSortCategorySubmenu",
+      "toggleStar",
+      "toggleXpRanksGuide",
+      "tryStartEmptyOnboarding",
+      "updateCustomWorldWordInCloud",
+      "updateMobileHamburgerState",
+      "updateWordInCloud",
+      "words",
+      "writeWordsToStorage"
+    ],
+    "duplicateFunctionDeclarations": [
+      {
+        "name": "renderProfileTitlePicker",
+        "count": 2
+      }
+    ],
+    "duplicateWindowAssignments": [
+      {
+        "name": "__suppressUnlockNotices",
+        "count": 8
+      },
+      {
+        "name": "words",
+        "count": 27
+      },
+      {
+        "name": "__lastCustomWorldSaveError",
+        "count": 2
+      },
+      {
+        "name": "__applyingCloudProfile",
+        "count": 4
+      },
+      {
+        "name": "__acceptedGuestProfileMigration",
+        "count": 3
+      },
+      {
+        "name": "_profileLoaded",
+        "count": 2
+      },
+      {
+        "name": "__notifications",
+        "count": 3
+      },
+      {
+        "name": "toggleSidebar",
+        "count": 3
+      },
+      {
+        "name": "__toastDetailNotifId",
+        "count": 2
+      },
+      {
+        "name": "__guestMigrationSessionComplete",
+        "count": 3
+      },
+      {
+        "name": "isInitialLoad",
+        "count": 3
+      },
+      {
+        "name": "__initialFeatureLoadPending",
+        "count": 2
+      },
+      {
+        "name": "__activeVoiceRecognition",
+        "count": 3
+      },
+      {
+        "name": "__navLockAnimSeeded",
+        "count": 2
+      },
+      {
+        "name": "__navLockPrev",
+        "count": 2
+      },
+      {
+        "name": "__guestMigrationPromise",
+        "count": 3
+      },
+      {
+        "name": "isExpanded",
+        "count": 2
+      },
+      {
+        "name": "__restoringAddFormDraft",
+        "count": 2
+      },
+      {
+        "name": "deleteWord",
+        "count": 2
+      },
+      {
+        "name": "__suppressCloudWordsSnapshot",
+        "count": 3
+      },
+      {
+        "name": "__jsonImportBatchActive",
+        "count": 2
+      },
+      {
+        "name": "__lootPointerStart",
+        "count": 6
+      },
+      {
+        "name": "__lootHoldTimer",
+        "count": 4
+      },
+      {
+        "name": "__lootOpening",
+        "count": 2
+      },
+      {
+        "name": "__pendingQuizResumeSession",
+        "count": 3
+      },
+      {
+        "name": "closeSidebarIfOpen",
+        "count": 2
+      }
+    ]
+  },
+  "domContract": {
+    "idCount": 207,
+    "duplicateIds": [],
+    "ids": [
+      "addBtn",
+      "addFormAdvancedFields",
+      "addFormToggle",
+      "bulkDeleteBar",
+      "bulkDeleteConfirmBtn",
+      "cardBackExample",
+      "cardBackText",
+      "cardFrontText",
+      "categoryDropdownBtn",
+      "categoryDropdownMenu",
+      "categoryDropdownWrap",
+      "categoryInput",
+      "confettiContainer",
+      "customWorldDescInput",
+      "customWorldEmojiInput",
+      "customWorldEmojiPicker",
+      "customWorldModal",
+      "customWorldModalIcon",
+      "customWorldModalTitle",
+      "customWorldNameInput",
+      "customWorldSaveBtn",
+      "dailyLootChest",
+      "dailyQuestsBackdrop",
+      "dailyQuestsBadge",
+      "dailyQuestsBtn",
+      "dailyQuestsList",
+      "dailyQuestsResetHint",
+      "dailyQuestsSheet",
+      "deleteCancelBtn",
+      "deleteConfirmBtn",
+      "deleteModal",
+      "deleteWorldModal",
+      "deleteWorldTitle",
+      "dictionarySortBtn",
+      "dictionarySortCategoryMenu",
+      "dictionarySortMenu",
+      "exampleInput",
+      "flashcardPresetOptions",
+      "gameGamerAiPanel",
+      "gameGamerAiWrap",
+      "gamerAiSearchZone",
+      "gameSearchBar",
+      "gameSearchInput",
+      "goalRing",
+      "goalText",
+      "guestMigrationAcceptBtn",
+      "guestMigrationConfirm",
+      "guestMigrationDeclineBtn",
+      "guestMigrationMessage",
+      "guestMigrationModal",
+      "guestMigrationStats",
+      "guestMigrationTitle",
+      "heatmapGrid",
+      "heroActiveTitleBadge",
+      "heroAvatarBtn",
+      "heroAvatarCircle",
+      "heroAvatarIcon",
+      "heroAvatarLetter",
+      "heroLevelBadge",
+      "heroXpMini",
+      "importFile",
+      "keyboardShortcutsModal",
+      "keyboardShortcutsTitle",
+      "legendDock",
+      "legendTopBar",
+      "levelSection",
+      "list",
+      "loginBtn",
+      "logoutBtn",
+      "logoutModal",
+      "lootCountdownText",
+      "lootRewardPreview",
+      "lootStatusText",
+      "mainCard",
+      "meaningInput",
+      "navQuiz",
+      "navStarred",
+      "normalSearchZone",
+      "notifBadge",
+      "notifBtn",
+      "notifClearAllBtn",
+      "notifHub",
+      "notificationsList",
+      "notificationsPanel",
+      "onboardingBackdrop",
+      "onboardingBox",
+      "onboardingExampleChips",
+      "onboardingExtras",
+      "onboardingPrimaryBtn",
+      "onboardingSecondaryBtn",
+      "onboardingText",
+      "onboardingTitle",
+      "onboardingTooltip",
+      "overlay",
+      "pageTitle",
+      "performanceLevelSlider",
+      "performanceModeInfoModal",
+      "performanceModeState",
+      "personalControls",
+      "profileActiveTitleBadge",
+      "profileModal",
+      "profileModalAvatar",
+      "profileModalSubtitle",
+      "profileModalTitle",
+      "profileStatStreak",
+      "profileStatWords",
+      "profileTitlePicker",
+      "quizAvailableCount",
+      "quizCardCounter",
+      "quizCardProgress",
+      "quizExitSafeModal",
+      "quizForfeitModal",
+      "quizHintText",
+      "quizResumeModal",
+      "quizScrambleView",
+      "quizSettingsDesc",
+      "quizSettingsPanel",
+      "quizSettingsSummary",
+      "quizSettingsTitle",
+      "quizSharedSettings",
+      "quizTimeAttackView",
+      "quizView",
+      "quizViewCard",
+      "quizViewSetup",
+      "replayOnboardingBtn",
+      "scrambleCounter",
+      "scrambleDirectionGroup",
+      "scrambleInput",
+      "scrambleLetters",
+      "scrambleMeaning",
+      "scrambleModeCoverDesc",
+      "scrambleProgress",
+      "searchBtn",
+      "searchFilter",
+      "searchFilterBtn",
+      "searchFilterMenu",
+      "searchFilterWrap",
+      "searchInput",
+      "selectionActionBar",
+      "selectionModeBtn",
+      "selectionReorderBtn",
+      "sidebar",
+      "starredSearchBar",
+      "starredSearchInput",
+      "statBest",
+      "statDays",
+      "statForgot",
+      "statsPanel",
+      "statStarred",
+      "statStreak",
+      "statTotal",
+      "streakCount",
+      "streakIcon",
+      "streakWrap",
+      "suggestionsBox",
+      "suggestionsList",
+      "timeAttackChoices",
+      "timeAttackCounter",
+      "timeAttackDirectionGroup",
+      "timeAttackHp",
+      "timeAttackProgress",
+      "timeAttackPrompt",
+      "timeAttackTimer",
+      "titleProgressText",
+      "titlesGrid",
+      "toastMessage",
+      "treasureSlots",
+      "treasureView",
+      "unlockExplainHow",
+      "unlockExplainModal",
+      "unlockExplainProgress",
+      "unlockExplainTitle",
+      "unlockExplainWhy",
+      "viewBackBar",
+      "viewBackLabel",
+      "viewNavBar",
+      "voiceSearchBtn",
+      "welcomeModal",
+      "welcomeModalTitle",
+      "wordHunterBtn",
+      "wordHunterDropzone",
+      "wordHunterFileInput",
+      "wordHunterImage",
+      "wordHunterImageWrap",
+      "wordHunterModal",
+      "wordHunterOverlay",
+      "wordHunterPopover",
+      "wordHunterStage",
+      "wordHunterStatus",
+      "wordHunterTitle",
+      "wordInput",
+      "worldManageModal",
+      "worldManageSummary",
+      "worldManageTargets",
+      "worldManageTitle",
+      "worldsGrid",
+      "worldsView",
+      "xpBadge",
+      "xpFill",
+      "xpNext",
+      "xpRankIcon",
+      "xpRankLabel",
+      "xpRanksGuideList",
+      "xpRanksGuidePanel",
+      "xpRanksGuideSummary",
+      "xpRanksGuideToggle",
+      "xpValue"
+    ],
+    "classes": [
+      "active",
+      "add-form-advanced",
+      "add-form-advanced-inner",
+      "add-form-toggle",
+      "app-dropdown-block",
+      "app-dropdown-menu",
+      "app-dropdown-trigger",
+      "app-dropdown-trigger-icon",
+      "app-dropdown-wrap",
+      "auth-btn",
+      "backup-row",
+      "backup-zone",
+      "btn-ai",
+      "btn-all",
+      "btn-backup",
+      "btn-cancel",
+      "btn-confirm",
+      "btn-forget",
+      "btn-icon-tip",
+      "btn-main",
+      "btn-new",
+      "btn-old",
+      "btn-remember",
+      "btn-secondary",
+      "btn-starred",
+      "btn-text-tool",
+      "bulk-delete-bar",
+      "bulk-delete-cancel",
+      "bulk-delete-confirm",
+      "card",
+      "card-back",
+      "card-box",
+      "card-container",
+      "card-face",
+      "card-front",
+      "chest-band",
+      "chest-band-left",
+      "chest-band-right",
+      "chest-body",
+      "chest-face",
+      "chest-glow",
+      "chest-lid",
+      "chest-lock",
+      "chest-shadow",
+      "confetti-container",
+      "custom-modal",
+      "custom-world-content",
+      "custom-world-form",
+      "custom-world-icon",
+      "custom-world-modal",
+      "daily-quests-backdrop",
+      "daily-quests-close",
+      "daily-quests-head",
+      "daily-quests-hint",
+      "daily-quests-list",
+      "daily-quests-sheet",
+      "daily-quests-sheet-handle",
+      "danger-choice",
+      "delayed-tip",
+      "delete-world-actions",
+      "delete-world-content",
+      "delete-world-modal",
+      "dict-rtl-input",
+      "dictionary-filter-search",
+      "dictionary-search-btn",
+      "dictionary-search-row",
+      "dictionary-word-hunter-btn",
+      "dock-btn-icon-wrap",
+      "dock-lock-overlay",
+      "emoji-picker",
+      "fa-arrow-right",
+      "fa-bell",
+      "fa-bolt",
+      "fa-book-open",
+      "fa-box",
+      "fa-brain",
+      "fa-brands",
+      "fa-chart-bar",
+      "fa-chart-line",
+      "fa-check",
+      "fa-chevron-down",
+      "fa-clock",
+      "fa-clock-rotate-left",
+      "fa-crosshairs",
+      "fa-cube",
+      "fa-door-open",
+      "fa-earth-americas",
+      "fa-file-export",
+      "fa-file-import",
+      "fa-filter",
+      "fa-fire",
+      "fa-gamepad",
+      "fa-gauge-high",
+      "fa-gear",
+      "fa-gem",
+      "fa-globe",
+      "fa-google",
+      "fa-hand-sparkles",
+      "fa-image",
+      "fa-keyboard",
+      "fa-layer-group",
+      "fa-lightbulb",
+      "fa-lock",
+      "fa-medal",
+      "fa-microphone",
+      "fa-palette",
+      "fa-play",
+      "fa-question",
+      "fa-redo",
+      "fa-regular",
+      "fa-right-from-bracket",
+      "fa-rotate-right",
+      "fa-scroll",
+      "fa-search",
+      "fa-seedling",
+      "fa-shuffle",
+      "fa-sliders",
+      "fa-solid",
+      "fa-sparkles",
+      "fa-star",
+      "fa-stopwatch",
+      "fa-sword",
+      "fa-trash",
+      "fa-triangle-exclamation",
+      "fa-user",
+      "fa-user-gear",
+      "fa-user-shield",
+      "fa-volume-up",
+      "fa-wand-magic-sparkles",
+      "fa-xmark",
+      "fas",
+      "feature-coming-soon",
+      "feature-soon-badge",
+      "flashcard-preset-options",
+      "game-gamer-ai-panel",
+      "game-gamer-ai-wrap",
+      "game-gamer-ask-btn",
+      "game-search-bar",
+      "game-search-icon",
+      "game-search-inner",
+      "goal-bg",
+      "goal-fill",
+      "goal-ring-wrap",
+      "goal-svg",
+      "goal-text",
+      "guest-migration-actions",
+      "guest-migration-confirm",
+      "guest-migration-content",
+      "guest-migration-icon",
+      "guest-migration-modal",
+      "guest-migration-stats",
+      "header-top",
+      "heatmap-grid",
+      "heatmap-legend",
+      "heatmap-section",
+      "heatmap-title",
+      "help-btn",
+      "hero-active-title-badge",
+      "hero-avatar-btn",
+      "hero-avatar-circle",
+      "hero-avatar-letter",
+      "hero-avatar-meta",
+      "hero-level-badge",
+      "hero-xp-mini",
+      "hidden",
+      "hint-btn",
+      "hint-text",
+      "hm-cell",
+      "icon-circle",
+      "keyboard-shortcuts-btn",
+      "keyboard-shortcuts-content",
+      "keyboard-shortcuts-icon",
+      "keyboard-shortcuts-modal",
+      "legend-dock",
+      "legend-dock-btn",
+      "legend-dock-visible",
+      "legend-top-bar",
+      "legend-top-widgets",
+      "level-section",
+      "loot-reward-preview",
+      "main-content",
+      "modal-buttons",
+      "modal-content",
+      "modal-icon",
+      "nav-divider-strong",
+      "nav-link",
+      "nav-thin-divider",
+      "notif-badge",
+      "notif-bell-btn",
+      "notif-bell-ring",
+      "notif-clear-all",
+      "notif-close",
+      "notif-header-actions",
+      "notif-hub",
+      "notif-panel-header",
+      "notif-popover",
+      "notif-popover-arrow",
+      "notifications-list",
+      "onboarding-backdrop",
+      "onboarding-box",
+      "onboarding-buttons",
+      "onboarding-content",
+      "onboarding-examples",
+      "onboarding-extras",
+      "onboarding-tooltip",
+      "overlay",
+      "page-header",
+      "performance-help-btn",
+      "performance-level-labels",
+      "performance-level-setting",
+      "performance-level-slider",
+      "performance-setting-head",
+      "performance-setting-row",
+      "performance-slider-card",
+      "performance-toggle-btn",
+      "preview-glass",
+      "preview-golden",
+      "preview-lootlingua",
+      "preview-ocean",
+      "preview-scroll",
+      "profile-account-section",
+      "profile-active-title-badge",
+      "profile-auth-btn",
+      "profile-level-section",
+      "profile-link-btn",
+      "profile-modal",
+      "profile-modal-avatar",
+      "profile-modal-backdrop",
+      "profile-modal-body",
+      "profile-modal-close",
+      "profile-modal-header",
+      "profile-modal-hero",
+      "profile-modal-identity",
+      "profile-modal-sheet",
+      "profile-modal-sub",
+      "profile-section",
+      "profile-settings-btn",
+      "profile-settings-section",
+      "profile-stat-chip",
+      "profile-stats-mini",
+      "profile-theme-selector",
+      "profile-title-line",
+      "profile-title-picker",
+      "quest-pill-badge",
+      "quest-pill-btn",
+      "quiz-available-count",
+      "quiz-btn",
+      "quiz-card-bar",
+      "quiz-card-meta",
+      "quiz-challenge-card",
+      "quiz-choice-grid",
+      "quiz-continue-btn",
+      "quiz-controls",
+      "quiz-example",
+      "quiz-exit-btn",
+      "quiz-exit-modal",
+      "quiz-meaning",
+      "quiz-mini-label",
+      "quiz-mode-card",
+      "quiz-mode-flashcards",
+      "quiz-mode-icon",
+      "quiz-mode-scramble",
+      "quiz-mode-time",
+      "quiz-modes-grid",
+      "quiz-modes-view",
+      "quiz-penalty-modal",
+      "quiz-play-exit",
+      "quiz-play-view",
+      "quiz-resume-modal",
+      "quiz-safe-exit-confirm",
+      "quiz-segmented",
+      "quiz-setting-group",
+      "quiz-settings-back",
+      "quiz-settings-panel",
+      "quiz-settings-summary",
+      "quiz-sound-btn",
+      "quiz-source-selector",
+      "quiz-start-btn",
+      "quiz-view",
+      "quiz-view-setup",
+      "quiz-word",
+      "scramble-letters",
+      "search-bar-row",
+      "search-filter-dropdown",
+      "search-inline-divider",
+      "search-lock-overlay",
+      "search-zone",
+      "search-zone-inner",
+      "selection-action-bar",
+      "selection-mode-entry",
+      "selection-reorder-step",
+      "setup-btn",
+      "shortcut-keys",
+      "shortcut-list",
+      "shortcut-row",
+      "side-label",
+      "sidebar",
+      "sidebar-divider",
+      "sidebar-header",
+      "sidebar-legacy-hidden",
+      "site-footer",
+      "sort-dropdown-menu",
+      "sort-dropdown-wrap",
+      "sort-submenu",
+      "sort-submenu-toggle",
+      "sort-submenu-wrap",
+      "sort-trigger",
+      "sr-only",
+      "stat-card",
+      "stat-lbl",
+      "stat-val",
+      "stats-box",
+      "stats-close",
+      "stats-grid",
+      "stats-header",
+      "stats-overlay",
+      "streak-count",
+      "streak-icon",
+      "streak-wrap",
+      "theme-coming-soon",
+      "theme-display-name",
+      "theme-option",
+      "theme-preview",
+      "theme-selector",
+      "theme-status-label",
+      "theme-status-label--soon",
+      "time-attack-hp",
+      "titles-grid",
+      "toast-msg",
+      "treasure-chest-main",
+      "treasure-dock",
+      "treasure-dock-btn",
+      "treasure-hero",
+      "treasure-kicker",
+      "treasure-slot",
+      "treasure-slot-locked",
+      "treasure-slot-ready",
+      "treasure-slots",
+      "treasure-stage",
+      "treasure-strip-label",
+      "treasure-timer",
+      "treasure-title-strip",
+      "treasure-view",
+      "unlock-explain-close",
+      "unlock-explain-content",
+      "unlock-explain-how",
+      "unlock-explain-icon",
+      "unlock-explain-modal",
+      "unlock-explain-progress",
+      "unlock-explain-text",
+      "view-back-btn",
+      "view-nav-bar",
+      "voice-search-btn",
+      "welcome-modal",
+      "welcome-modal-content",
+      "welcome-modal-icon",
+      "welcome-modal-lead",
+      "welcome-modal-sub",
+      "word-hunter-backdrop",
+      "word-hunter-btn",
+      "word-hunter-close",
+      "word-hunter-dropzone",
+      "word-hunter-header",
+      "word-hunter-image-wrap",
+      "word-hunter-modal",
+      "word-hunter-overlay",
+      "word-hunter-popover",
+      "word-hunter-sheet",
+      "word-hunter-stage",
+      "word-hunter-status",
+      "world-card",
+      "world-card-desc",
+      "world-card-icon",
+      "world-card-icon-wrap",
+      "world-card-lock-overlay",
+      "world-card-minecraft",
+      "world-card-pubg",
+      "world-card-starred",
+      "world-manage-content",
+      "world-manage-modal",
+      "world-manage-tabs",
+      "world-manage-targets",
+      "worlds-grid",
+      "worlds-hero",
+      "worlds-kicker",
+      "worlds-view",
+      "xp-badge",
+      "xp-bottom",
+      "xp-fill",
+      "xp-guide-inline",
+      "xp-guide-toggle",
+      "xp-hint",
+      "xp-icon",
+      "xp-next-val",
+      "xp-panel",
+      "xp-rank",
+      "xp-ranks-guide-chevron",
+      "xp-ranks-guide-list",
+      "xp-ranks-guide-panel",
+      "xp-ranks-setting",
+      "xp-top",
+      "xp-track",
+      "xp-val"
+    ]
+  },
+  "storageContract": {
+    "namedKeysAndPrefixes": [
+      "ACTIVE_QUIZ_SESSION_KEY=active_quiz_session",
+      "ACTIVE_TITLE_KEY=lootlinguaActiveTitleId",
+      "CUSTOM_WORLDS_PREFIX=custom_worlds_",
+      "EMPTY_ONBOARDING_STORAGE_KEY=hasCompletedOnboarding",
+      "EXTRA_CHESTS_KEY=lootlinguaExtraChests",
+      "FREEZE_SAVES_KEY=lootlinguaFreezeSaves",
+      "GAME_DICT_ADDS_KEY=lootlinguaGameDictAdds",
+      "GUEST_DATA_DIRTY_KEY=lootlinguaGuestDataDirty",
+      "GUEST_MIGRATION_COMPLETE_KEY=lootlingua_migration_complete",
+      "GUEST_MIGRATION_HANDLED_KEY=lootlinguaGuestMigrationHandled",
+      "GUEST_STORAGE_KEY=words_normal_guest",
+      "LEGACY_DICTIONARY_KEY=lootlinguaDict",
+      "LOGIN_REDIRECT_PENDING_KEY=lootlinguaLoginRedirectPending",
+      "LOOT_STATE_KEY=lootlinguaDailyLootState",
+      "ONBOARDING_STORAGE_KEY=lootlinguaOnboarding",
+      "PENDING_CUSTOM_WORLDS_PREFIX=pending_custom_worlds_",
+      "PENDING_XP_EVENTS_KEY=lootlinguaPendingXpEvents",
+      "PERFORMANCE_MODE_KEY=lootlinguaPerformanceMode",
+      "PERFORMANCE_MODE_NOTICE_KEY=lootlinguaPerformanceModeNoticeSeen",
+      "QUIZ_EXPOSURE_HISTORY_PREFIX=lootlinguaQuizExposureHistory_",
+      "STREAK_FREEZE_KEY=lootlinguaStreakFreezes",
+      "TITLE_STATE_KEY=lootlinguaTitlesState",
+      "WELCOME_STORAGE_KEY=lootlingua_welcome_v1_seen",
+      "WORD_MASTERY_STORAGE_PREFIX=lootlinguaWordMastery_",
+      "WORDS_CUSTOM_PREFIX=words_custom_",
+      "WORDS_GAMER_PREFIX=words_gamer_",
+      "WORDS_NORMAL_PREFIX=words_normal_",
+      "XP_EVENT_LOG_KEY=lootlinguaXpEventLog"
+    ],
+    "calls": [
+      "localStorage.getItem('dailyStreak'",
+      "localStorage.getItem('lastActivityDate'",
+      "localStorage.getItem('lootlinguaActiveTitleId'",
+      "localStorage.getItem('lootlinguaDisplayName'",
+      "localStorage.getItem('theme'",
+      "localStorage.getItem('userXP'",
+      "localStorage.getItem(ACTIVE_TITLE_KEY",
+      "localStorage.getItem(bootKey",
+      "localStorage.getItem(EMPTY_ONBOARDING_STORAGE_KEY",
+      "localStorage.getItem(getCustomWorldsStorageKey(uid",
+      "localStorage.getItem(getCustomWorldWordsStorageKey(worldId, uid",
+      "localStorage.getItem(getDictSortStorageKey(",
+      "localStorage.getItem(getPendingCustomWorldsStorageKey(uid",
+      "localStorage.getItem(getWordsStorageKey('normal', uid",
+      "localStorage.getItem(GUEST_DATA_DIRTY_KEY",
+      "localStorage.getItem(GUEST_MIGRATION_COMPLETE_KEY",
+      "localStorage.getItem(GUEST_MIGRATION_HANDLED_KEY",
+      "localStorage.getItem(GUEST_STORAGE_KEY",
+      "localStorage.getItem(k",
+      "localStorage.getItem(key",
+      "localStorage.getItem(LEGACY_DICTIONARY_KEY",
+      "localStorage.getItem(ONBOARDING_STORAGE_KEY",
+      "localStorage.getItem(PERFORMANCE_MODE_KEY",
+      "localStorage.getItem(PERFORMANCE_MODE_NOTICE_KEY",
+      "localStorage.getItem(unlockKey",
+      "localStorage.getItem(WELCOME_STORAGE_KEY",
+      "localStorage.removeItem('lootlinguaDisplayName'",
+      "localStorage.removeItem('lootlinguaQuizExposureHistory_guest'",
+      "localStorage.removeItem(ACTIVE_QUIZ_SESSION_KEY",
+      "localStorage.removeItem(ACTIVE_TITLE_KEY",
+      "localStorage.removeItem(getCustomWorldsStorageKey('guest'",
+      "localStorage.removeItem(getCustomWorldWordsStorageKey(worldId, uid",
+      "localStorage.removeItem(getWordsStorageKey('gamer', 'guest'",
+      "localStorage.removeItem(getWordsStorageKey('normal', 'guest'",
+      "localStorage.removeItem(GUEST_DATA_DIRTY_KEY",
+      "localStorage.removeItem(GUEST_LS_GAMER",
+      "localStorage.removeItem(GUEST_LS_NORMAL",
+      "localStorage.removeItem(GUEST_MIGRATION_COMPLETE_KEY",
+      "localStorage.removeItem(GUEST_MIGRATION_HANDLED_KEY",
+      "localStorage.removeItem(key",
+      "localStorage.removeItem(LEGACY_DICTIONARY_KEY",
+      "localStorage.removeItem(themeSeenKey('unlocked', theme",
+      "localStorage.removeItem(themeSeenKey('used', theme",
+      "localStorage.setItem(",
+      "localStorage.setItem('lastActivityDate', lastActivity",
+      "localStorage.setItem('lastActivityDate', today",
+      "localStorage.setItem('lootlinguaActiveTitleId', String(d.activeTitleId",
+      "localStorage.setItem('lootlinguaDisplayName', d.displayName",
+      "localStorage.setItem('lootlinguaDisplayName', name",
+      "localStorage.setItem('theme', 'lootlingua'",
+      "localStorage.setItem('theme', theme",
+      "localStorage.setItem(ACTIVE_QUIZ_SESSION_KEY, JSON.stringify(session",
+      "localStorage.setItem(ACTIVE_TITLE_KEY, ACTIVE_TITLE_NONE",
+      "localStorage.setItem(ACTIVE_TITLE_KEY, next",
+      "localStorage.setItem(bootKey, '1'",
+      "localStorage.setItem(EMPTY_ONBOARDING_STORAGE_KEY, 'true'",
+      "localStorage.setItem(getCustomWorldsStorageKey(uid",
+      "localStorage.setItem(getCustomWorldWordsStorageKey(worldId, uid",
+      "localStorage.setItem(getDictSortStorageKey(",
+      "localStorage.setItem(getPendingCustomWorldsStorageKey(uid",
+      "localStorage.setItem(getWordMasteryStorageKey(uid",
+      "localStorage.setItem(getWordsStorageKey(type, uid",
+      "localStorage.setItem(GUEST_DATA_DIRTY_KEY, '1'",
+      "localStorage.setItem(GUEST_MIGRATION_COMPLETE_KEY, JSON.stringify({",
+      "localStorage.setItem(GUEST_MIGRATION_HANDLED_KEY, JSON.stringify({",
+      "localStorage.setItem(k,JSON.stringify(v",
+      "localStorage.setItem(k,String(v",
+      "localStorage.setItem(key, '1'",
+      "localStorage.setItem(ONBOARDING_STORAGE_KEY, status",
+      "localStorage.setItem(PERFORMANCE_MODE_KEY, 'turbo'",
+      "localStorage.setItem(PERFORMANCE_MODE_KEY, 'ultra'",
+      "localStorage.setItem(PERFORMANCE_MODE_KEY, autoLevel",
+      "localStorage.setItem(PERFORMANCE_MODE_KEY, next",
+      "localStorage.setItem(PERFORMANCE_MODE_KEY, PERFORMANCE_LEVELS[index]",
+      "localStorage.setItem(PERFORMANCE_MODE_NOTICE_KEY, '1'",
+      "localStorage.setItem(themeSeenKey('unlocked', theme",
+      "localStorage.setItem(themeSeenKey('used', activeTheme",
+      "localStorage.setItem(unlockKey, '1'",
+      "localStorage.setItem(WELCOME_STORAGE_KEY, '1'",
+      "sessionStorage.getItem(LOGIN_REDIRECT_PENDING_KEY",
+      "sessionStorage.getItem(noticeKey",
+      "sessionStorage.removeItem(`lootlingua:themeRelockNotice:${theme}`",
+      "sessionStorage.removeItem(LOGIN_REDIRECT_PENDING_KEY",
+      "sessionStorage.setItem(LOGIN_REDIRECT_PENDING_KEY, '1'",
+      "sessionStorage.setItem(noticeKey, '1'"
+    ]
+  },
+  "firestoreContract": {
+    "pathCalls": [
+      "collection(db, 'suggestions')",
+      "collection(db, \"users\", user.uid, \"customWorlds\", listenerWorldId, \"words\")",
+      "collection(db, \"users\", user.uid, \"customWorlds\", String(worldId), \"words\")",
+      "collection(db, \"users\", user.uid, \"customWorlds\")",
+      "collection(db, \"users\", user.uid, \"words\")",
+      "doc(db, \"users\", user.uid, \"customWorlds\", String(worldId), \"words\", docId)",
+      "doc(db, \"users\", user.uid, \"customWorlds\", String(worldId), \"words\", String(id))",
+      "doc(db, \"users\", user.uid, \"customWorlds\", String(worldId))",
+      "doc(db, \"users\", user.uid, \"customWorlds\", worldId)",
+      "doc(db, \"users\", user.uid, \"meta\", \"active_quiz_session\")",
+      "doc(db, \"users\", user.uid, \"meta\", \"profile\")",
+      "doc(db, \"users\", user.uid, \"meta\", \"word_mastery\")",
+      "doc(db, \"users\", user.uid, \"meta\", `xp_event_${eventId}`)",
+      "doc(db, \"users\", user.uid, \"words\", docId)",
+      "doc(db, \"users\", user.uid, \"words\", String(id))",
+      "doc(db, AI_CACHE_COLLECTION, docId)",
+      "doc(profileDb, \"users\", user.uid, \"meta\", \"profile\")"
+    ]
+  },
+  "behaviorContract": {
+    "quizModes": [
+      "10",
+      "20",
+      "5",
+      "all",
+      "category",
+      "copy",
+      "flashcards",
+      "forgotten",
+      "move",
+      "old",
+      "personal",
+      "recent",
+      "scramble",
+      "starred",
+      "timeAttack"
+    ],
+    "srsStatusOccurrences": {
+      "New": 9,
+      "Learning": 11,
+      "Reviewing": 14,
+      "Mastered": 22
+    },
+    "xpRewardsSource": "newToLearning: 2, learningToReviewing: 4, reviewingToMastered: 8, remastered: 3,"
+  },
+  "immutableStyleHash": "a322fc472b264d4d24618bad186601d0862f0eb2278fa5f2275af58d99ea075a"
+}

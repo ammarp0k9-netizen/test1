@@ -1,0 +1,848 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(uid) {
+      return signedIn() && request.auth.uid == uid;
+    }
+
+    function isAdmin() {
+      return signedIn() &&
+        'admin' in request.auth.token &&
+        request.auth.token.admin == true;
+    }
+
+    function nonEmptyString(value, maxLength) {
+      return value is string && value.size() > 0 && value.size() <= maxLength;
+    }
+
+    function optionalString(data, field, maxLength) {
+      return !(field in data) || (data[field] is string && data[field].size() <= maxLength);
+    }
+
+    function optionalBool(data, field) {
+      return !(field in data) || data[field] is bool;
+    }
+
+    function optionalNumber(data, field) {
+      return !(field in data) || data[field] is number;
+    }
+
+    function optionalNonNegativeInt(data, field) {
+      return !(field in data) || (data[field] is int && data[field] >= 0);
+    }
+
+    function optionalList(data, field, maxItems) {
+      return !(field in data) || (data[field] is list && data[field].size() <= maxItems);
+    }
+
+    function optionalMap(data, field, maxItems) {
+      return !(field in data) || (data[field] is map && data[field].size() <= maxItems);
+    }
+
+    function validTimeValue(value) {
+      return value == null || value is timestamp || value is number || value is string;
+    }
+
+    function optionalTime(data, field) {
+      return !(field in data) || validTimeValue(data[field]);
+    }
+
+    function validContentStatus(status) {
+      return status == 'draft' || status == 'published' || status == 'archived';
+    }
+
+    function validSrsStatus(status) {
+      return status == '' || status == 'New' || status == 'Learning' ||
+        status == 'Reviewing' || status == 'Mastered';
+    }
+
+    function validUnlockConfig(data) {
+      return !('unlockConfig' in data) || (
+        data.unlockConfig is map &&
+        data.unlockConfig.keys().hasOnly([
+          'mode',
+          'initialStatus',
+          'requiredMasteredRatio',
+          'requiredReviewingRatio',
+          'requiredGateCount'
+        ]) &&
+        data.unlockConfig.keys().hasAll([
+          'mode',
+          'initialStatus',
+          'requiredMasteredRatio',
+          'requiredReviewingRatio',
+          'requiredGateCount'
+        ]) &&
+        data.unlockConfig.mode == 'manual_placeholder' &&
+        (data.unlockConfig.initialStatus == 'locked' ||
+          data.unlockConfig.initialStatus == 'available') &&
+        data.unlockConfig.requiredMasteredRatio == null &&
+        data.unlockConfig.requiredReviewingRatio == null &&
+        data.unlockConfig.requiredGateCount == null
+      );
+    }
+
+    function validEntryAssessmentPassRatio(data) {
+      return !('entryAssessmentPassRatio' in data) ||
+        data.entryAssessmentPassRatio == null ||
+        (data.entryAssessmentPassRatio is number &&
+          data.entryAssessmentPassRatio > 0 &&
+          data.entryAssessmentPassRatio <= 1);
+    }
+
+    function validCreateAudit(data) {
+      return data.createdAt is timestamp &&
+        data.updatedAt is timestamp &&
+        data.createdAt == request.time &&
+        data.updatedAt == request.time &&
+        data.createdBy == request.auth.uid &&
+        data.updatedBy == request.auth.uid;
+    }
+
+    function validUpdateAudit(before, after) {
+      return after.createdAt == before.createdAt &&
+        after.createdBy == before.createdBy &&
+        after.updatedAt is timestamp &&
+        after.updatedAt == request.time &&
+        after.updatedBy == request.auth.uid;
+    }
+
+    function isPublished(data) {
+      return 'status' in data && data.status == 'published';
+    }
+
+    function worldPublished(worldId) {
+      return exists(/databases/$(database)/documents/content_worlds/$(worldId)) &&
+        get(/databases/$(database)/documents/content_worlds/$(worldId)).data.status == 'published';
+    }
+
+    function worldAllowsChildMutation(worldId) {
+      return exists(/databases/$(database)/documents/content_worlds/$(worldId)) &&
+        !('_deleteLock' in
+          get(/databases/$(database)/documents/content_worlds/$(worldId)).data) &&
+        !('_adminWorldOperation' in
+          get(/databases/$(database)/documents/content_worlds/$(worldId)).data);
+    }
+
+    function rankPublished(worldId, rankId) {
+      return exists(/databases/$(database)/documents/content_worlds/$(worldId)/ranks/$(rankId)) &&
+        get(/databases/$(database)/documents/content_worlds/$(worldId)/ranks/$(rankId)).data.status == 'published';
+    }
+
+    function rankAllowsChildMutation(worldId, rankId) {
+      return worldAllowsChildMutation(worldId) &&
+        exists(/databases/$(database)/documents/content_worlds/$(worldId)/ranks/$(rankId)) &&
+        !('_adminRankOperation' in
+          get(/databases/$(database)/documents/content_worlds/$(worldId)/ranks/$(rankId)).data) &&
+        !('_adminCopyOperation' in
+          get(/databases/$(database)/documents/content_worlds/$(worldId)/ranks/$(rankId)).data);
+    }
+
+    function gateAllowsWordMutation(worldId, rankId, gateId) {
+      return rankAllowsChildMutation(worldId, rankId) &&
+        exists(/databases/$(database)/documents/content_worlds/$(worldId)/ranks/$(rankId)/gates/$(gateId)) &&
+        !('_adminGateOperation' in
+          get(/databases/$(database)/documents/content_worlds/$(worldId)/ranks/$(rankId)/gates/$(gateId)).data) &&
+        !('_adminGateCopyOperation' in
+          get(/databases/$(database)/documents/content_worlds/$(worldId)/ranks/$(rankId)/gates/$(gateId)).data);
+    }
+
+    function gatePublished(worldId, rankId, gateId) {
+      return exists(/databases/$(database)/documents/content_worlds/$(worldId)/ranks/$(rankId)/gates/$(gateId)) &&
+        get(/databases/$(database)/documents/content_worlds/$(worldId)/ranks/$(rankId)/gates/$(gateId)).data.status == 'published';
+    }
+
+    function rankCreateUpdatesWorldCount(worldId) {
+      return 'rankCount' in get(/databases/$(database)/documents/content_worlds/$(worldId)).data &&
+        'rankCount' in getAfter(/databases/$(database)/documents/content_worlds/$(worldId)).data &&
+        getAfter(/databases/$(database)/documents/content_worlds/$(worldId)).data.rankCount ==
+          get(/databases/$(database)/documents/content_worlds/$(worldId)).data.rankCount + 1 &&
+        getAfter(/databases/$(database)/documents/content_worlds/$(worldId)).data.gateCount ==
+          get(/databases/$(database)/documents/content_worlds/$(worldId)).data.gateCount &&
+        getAfter(/databases/$(database)/documents/content_worlds/$(worldId)).data.wordCount ==
+          get(/databases/$(database)/documents/content_worlds/$(worldId)).data.wordCount &&
+        getAfter(/databases/$(database)/documents/content_worlds/$(worldId)).data.version ==
+          get(/databases/$(database)/documents/content_worlds/$(worldId)).data.version;
+    }
+
+    function worldCounterOnlyIncrement(before, after) {
+      return after.diff(before).affectedKeys().hasOnly([
+          'rankCount', 'gateCount', 'wordCount', 'updatedAt', 'updatedBy'
+        ]) &&
+        after.version == before.version &&
+        (
+          (after.rankCount == before.rankCount + 1 &&
+            after.gateCount == before.gateCount &&
+            after.wordCount == before.wordCount) ||
+          (after.rankCount == before.rankCount &&
+            after.gateCount == before.gateCount + 1 &&
+            after.wordCount == before.wordCount) ||
+          (after.rankCount == before.rankCount &&
+            after.gateCount == before.gateCount &&
+            after.wordCount == before.wordCount + 1)
+        );
+    }
+
+    function rankCounterOnlyIncrement(before, after) {
+      return after.diff(before).affectedKeys().hasOnly([
+          'gateCount', 'wordCount', 'updatedAt', 'updatedBy'
+        ]) &&
+        after.version == before.version &&
+        (
+          (after.gateCount == before.gateCount + 1 &&
+            after.wordCount == before.wordCount) ||
+          (after.gateCount == before.gateCount &&
+            after.wordCount == before.wordCount + 1)
+        );
+    }
+
+    function gateCreateUpdatesAncestorCounts(worldId, rankId) {
+      return
+        getAfter(/databases/$(database)/documents/content_worlds/$(worldId)/ranks/$(rankId)).data.gateCount ==
+          get(/databases/$(database)/documents/content_worlds/$(worldId)/ranks/$(rankId)).data.gateCount + 1 &&
+        getAfter(/databases/$(database)/documents/content_worlds/$(worldId)/ranks/$(rankId)).data.wordCount ==
+          get(/databases/$(database)/documents/content_worlds/$(worldId)/ranks/$(rankId)).data.wordCount &&
+        getAfter(/databases/$(database)/documents/content_worlds/$(worldId)/ranks/$(rankId)).data.version ==
+          get(/databases/$(database)/documents/content_worlds/$(worldId)/ranks/$(rankId)).data.version &&
+        getAfter(/databases/$(database)/documents/content_worlds/$(worldId)).data.rankCount ==
+          get(/databases/$(database)/documents/content_worlds/$(worldId)).data.rankCount &&
+        getAfter(/databases/$(database)/documents/content_worlds/$(worldId)).data.gateCount ==
+          get(/databases/$(database)/documents/content_worlds/$(worldId)).data.gateCount + 1 &&
+        getAfter(/databases/$(database)/documents/content_worlds/$(worldId)).data.wordCount ==
+          get(/databases/$(database)/documents/content_worlds/$(worldId)).data.wordCount &&
+        getAfter(/databases/$(database)/documents/content_worlds/$(worldId)).data.version ==
+          get(/databases/$(database)/documents/content_worlds/$(worldId)).data.version;
+    }
+
+    function gateCounterOnlyIncrement(before, after) {
+      return after.diff(before).affectedKeys().hasOnly([
+          'wordCount', 'updatedAt', 'updatedBy'
+        ]) &&
+        after.version == before.version &&
+        after.wordCount == before.wordCount + 1;
+    }
+
+    function wordCreateUpdatesAncestorCounts(worldId, rankId, gateId) {
+      let gateBefore = get(/databases/$(database)/documents/content_worlds/$(worldId)/ranks/$(rankId)/gates/$(gateId)).data;
+      let gateAfter = getAfter(/databases/$(database)/documents/content_worlds/$(worldId)/ranks/$(rankId)/gates/$(gateId)).data;
+      let rankBefore = get(/databases/$(database)/documents/content_worlds/$(worldId)/ranks/$(rankId)).data;
+      let rankAfter = getAfter(/databases/$(database)/documents/content_worlds/$(worldId)/ranks/$(rankId)).data;
+      let worldBefore = get(/databases/$(database)/documents/content_worlds/$(worldId)).data;
+      let worldAfter = getAfter(/databases/$(database)/documents/content_worlds/$(worldId)).data;
+      return gateAfter.wordCount == gateBefore.wordCount + 1 &&
+        gateAfter.version == gateBefore.version &&
+        rankAfter.gateCount == rankBefore.gateCount &&
+        rankAfter.wordCount == rankBefore.wordCount + 1 &&
+        rankAfter.version == rankBefore.version &&
+        worldAfter.rankCount == worldBefore.rankCount &&
+        worldAfter.gateCount == worldBefore.gateCount &&
+        worldAfter.wordCount == worldBefore.wordCount + 1 &&
+        worldAfter.version == worldBefore.version;
+    }
+
+    function validWorld(data, worldId) {
+      return data.keys().hasOnly([
+          'worldId', 'slug', 'title', 'subtitle', 'description', 'icon', 'cover',
+          'theme', 'category', 'difficulty', 'languageFrom', 'languageTo',
+          'status', 'version', 'schemaVersion', 'rankCount', 'gateCount',
+          'wordCount', 'order', 'isFeatured', 'createdAt', 'updatedAt',
+          'createdBy', 'updatedBy'
+        ]) &&
+        data.keys().hasAll([
+          'worldId', 'title', 'status', 'schemaVersion', 'order',
+          'createdAt', 'updatedAt', 'createdBy', 'updatedBy'
+        ]) &&
+        data.worldId == worldId &&
+        nonEmptyString(data.title, 160) &&
+        optionalString(data, 'slug', 120) &&
+        (!isPublished(data) || nonEmptyString(data.slug, 120)) &&
+        optionalString(data, 'subtitle', 240) &&
+        optionalString(data, 'description', 4000) &&
+        optionalString(data, 'icon', 500) &&
+        optionalString(data, 'cover', 2048) &&
+        (!('theme' in data) || data.theme is string || data.theme is map) &&
+        optionalString(data, 'category', 100) &&
+        optionalString(data, 'difficulty', 80) &&
+        optionalString(data, 'languageFrom', 40) &&
+        optionalString(data, 'languageTo', 40) &&
+        validContentStatus(data.status) &&
+        optionalNonNegativeInt(data, 'version') &&
+        data.schemaVersion == 1 &&
+        optionalNonNegativeInt(data, 'rankCount') &&
+        optionalNonNegativeInt(data, 'gateCount') &&
+        optionalNonNegativeInt(data, 'wordCount') &&
+        data.order is int && data.order >= 0 &&
+        optionalBool(data, 'isFeatured') &&
+        data.createdBy is string && data.updatedBy is string;
+    }
+
+    function validRank(data, worldId, rankId) {
+      return data.keys().hasOnly([
+          'worldId', 'rankId', 'title', 'subtitle', 'description', 'order',
+          'difficulty', 'status', 'gateCount', 'wordCount', 'unlockConfig',
+          'version', 'schemaVersion', 'createdAt', 'updatedAt', 'createdBy', 'updatedBy'
+        ]) &&
+        data.keys().hasAll([
+          'worldId', 'rankId', 'title', 'order', 'status', 'unlockConfig',
+          'gateCount', 'wordCount', 'version', 'schemaVersion',
+          'createdAt', 'updatedAt', 'createdBy', 'updatedBy'
+        ]) &&
+        data.worldId == worldId &&
+        data.rankId == rankId &&
+        nonEmptyString(data.title, 160) &&
+        optionalString(data, 'subtitle', 240) &&
+        optionalString(data, 'description', 4000) &&
+        data.order is int && data.order >= 0 &&
+        optionalString(data, 'difficulty', 80) &&
+        validContentStatus(data.status) &&
+        optionalNonNegativeInt(data, 'gateCount') &&
+        optionalNonNegativeInt(data, 'wordCount') &&
+        data.version is int && data.version >= 1 &&
+        validUnlockConfig(data) &&
+        data.schemaVersion == 1 &&
+        data.createdBy is string && data.updatedBy is string;
+    }
+
+    function validGate(data, worldId, rankId, gateId) {
+      return data.keys().hasOnly([
+          'worldId', 'rankId', 'gateId', 'title', 'subtitle', 'description',
+          'order', 'difficulty', 'status', 'version', 'wordCount',
+          'entryAssessmentPassRatio', 'unlockConfig',
+          'schemaVersion', 'createdAt', 'updatedAt', 'createdBy', 'updatedBy'
+        ]) &&
+        data.keys().hasAll([
+          'worldId', 'rankId', 'gateId', 'title', 'order', 'status',
+          'version', 'wordCount', 'entryAssessmentPassRatio',
+          'unlockConfig', 'schemaVersion',
+          'createdAt', 'updatedAt', 'createdBy', 'updatedBy'
+        ]) &&
+        data.worldId == worldId &&
+        data.rankId == rankId &&
+        data.gateId == gateId &&
+        nonEmptyString(data.title, 160) &&
+        optionalString(data, 'subtitle', 240) &&
+        optionalString(data, 'description', 4000) &&
+        data.order is int && data.order >= 0 &&
+        optionalString(data, 'difficulty', 80) &&
+        validContentStatus(data.status) &&
+        data.version is int && data.version >= 1 &&
+        data.wordCount is int && data.wordCount >= 0 &&
+        validEntryAssessmentPassRatio(data) &&
+        validUnlockConfig(data) &&
+        data.schemaVersion == 1 &&
+        data.createdBy is string && data.updatedBy is string;
+    }
+
+    function validContentWord(data, worldId, rankId, gateId, contentWordId) {
+      return data.keys().hasOnly([
+          'normalizationVersion', 'worldId', 'rankId', 'gateId',
+          'contentWordId', 'word', 'normalizedWord', 'wordKey',
+          'translation', 'definition', 'definition_ar', 'example',
+          'exampleTranslation', 'category', 'partOfSpeech', 'level',
+          'tags', 'synonyms', 'pronunciation', 'audioUrl', 'imageUrl',
+          'notes', 'order', 'status', 'version', 'schemaVersion', 'createdAt',
+          'updatedAt', 'createdBy', 'updatedBy'
+        ]) &&
+        data.keys().hasAll([
+          'normalizationVersion', 'worldId', 'rankId', 'gateId',
+          'contentWordId', 'word', 'normalizedWord', 'wordKey', 'translation',
+          'order', 'status', 'version', 'schemaVersion',
+          'createdAt', 'updatedAt', 'createdBy', 'updatedBy'
+        ]) &&
+        data.normalizationVersion == 1 &&
+        data.worldId == worldId &&
+        data.rankId == rankId &&
+        data.gateId == gateId &&
+        data.contentWordId == contentWordId &&
+        nonEmptyString(data.word, 240) &&
+        nonEmptyString(data.normalizedWord, 240) &&
+        nonEmptyString(data.wordKey, 240) &&
+        nonEmptyString(data.translation, 1000) &&
+        optionalString(data, 'definition', 4000) &&
+        optionalString(data, 'definition_ar', 4000) &&
+        optionalString(data, 'example', 4000) &&
+        optionalString(data, 'exampleTranslation', 4000) &&
+        optionalString(data, 'category', 120) &&
+        optionalString(data, 'partOfSpeech', 120) &&
+        optionalString(data, 'level', 80) &&
+        optionalList(data, 'tags', 50) &&
+        optionalList(data, 'synonyms', 50) &&
+        optionalString(data, 'pronunciation', 500) &&
+        optionalString(data, 'audioUrl', 2048) &&
+        optionalString(data, 'imageUrl', 2048) &&
+        optionalString(data, 'notes', 4000) &&
+        data.order is int && data.order >= 0 &&
+        validContentStatus(data.status) &&
+        data.version is int && data.version >= 1 &&
+        data.schemaVersion == 1 &&
+        data.createdBy is string && data.updatedBy is string;
+    }
+
+    function validLegacyWord(data, uid) {
+      return data.keys().hasOnly([
+          'text', 'word', 'meaning', 'example', 'category', 'starred',
+          'forgetCount', 'userId', 'xpValue', 'mastery_status',
+          'mastery_streak', 'last_recalled_at', 'first_recalled_at',
+          'last_recall_day', 'last_recall_session_id', 'last_quizzed_at',
+          'quiz_seen_count', 'mastered_once', 'firstMasteredAt',
+          'hasEarnedMasteryXP', 'earnedTransitions', 'remasteryAwardCount',
+          'xpEconomyVersion', 'order', 'createdAt'
+        ]) &&
+        data.keys().hasAll(['meaning', 'category', 'userId']) &&
+        data.userId == uid &&
+        (('text' in data && nonEmptyString(data.text, 500)) ||
+          ('word' in data && nonEmptyString(data.word, 500))) &&
+        data.meaning is string && data.meaning.size() <= 2000 &&
+        data.category is string && data.category.size() <= 120 &&
+        optionalString(data, 'example', 4000) &&
+        optionalBool(data, 'starred') &&
+        optionalNonNegativeInt(data, 'forgetCount') &&
+        (!('forgetCount' in data) || data.forgetCount <= 100000) &&
+        optionalNumber(data, 'xpValue') &&
+        (!('mastery_status' in data) || validSrsStatus(data.mastery_status)) &&
+        (!('mastery_streak' in data) ||
+          (data.mastery_streak is int && data.mastery_streak >= 0 && data.mastery_streak <= 3)) &&
+        optionalTime(data, 'last_recalled_at') &&
+        optionalTime(data, 'first_recalled_at') &&
+        optionalString(data, 'last_recall_day', 20) &&
+        optionalString(data, 'last_recall_session_id', 180) &&
+        optionalTime(data, 'last_quizzed_at') &&
+        optionalNonNegativeInt(data, 'quiz_seen_count') &&
+        optionalBool(data, 'mastered_once') &&
+        optionalTime(data, 'firstMasteredAt') &&
+        optionalBool(data, 'hasEarnedMasteryXP') &&
+        optionalList(data, 'earnedTransitions', 8) &&
+        optionalNonNegativeInt(data, 'remasteryAwardCount') &&
+        optionalNonNegativeInt(data, 'xpEconomyVersion') &&
+        optionalNonNegativeInt(data, 'order') &&
+        optionalTime(data, 'createdAt');
+    }
+
+    function validCustomWorld(data, uid) {
+      return data.keys().hasOnly([
+          'name', 'description', 'emoji', 'userId', 'createdAt', 'updatedAt'
+        ]) &&
+        data.keys().hasAll(['name', 'description', 'emoji', 'userId', 'createdAt', 'updatedAt']) &&
+        data.userId == uid &&
+        nonEmptyString(data.name, 40) &&
+        data.description is string && data.description.size() <= 140 &&
+        nonEmptyString(data.emoji, 16) &&
+        validTimeValue(data.createdAt) && validTimeValue(data.updatedAt);
+    }
+
+    function validProfile(data) {
+      return data.keys().hasOnly([
+          'userXP', 'xpEconomyVersion', 'dailyStreak', 'maxStreak',
+          'lastActivityDate', 'activityMap', 'quizExposureHistory', 'theme',
+          'displayName', 'addedGameWords', 'dailyLootState', 'titlesState',
+          'activeTitleId', 'dailyQuestDate', 'dailyQuestState',
+          'streakFreezes', 'freezeSaves', 'gameDictAdds', 'perfectQuizzes',
+          'extraChests', 'updatedAt'
+        ]) &&
+        data.keys().hasAll(['userXP', 'xpEconomyVersion']) &&
+        data.userXP is number && data.userXP >= 0 &&
+        data.xpEconomyVersion is int && data.xpEconomyVersion >= 0 &&
+        optionalNonNegativeInt(data, 'dailyStreak') &&
+        optionalNonNegativeInt(data, 'maxStreak') &&
+        optionalString(data, 'lastActivityDate', 40) &&
+        optionalMap(data, 'activityMap', 5000) &&
+        optionalList(data, 'quizExposureHistory', 3) &&
+        optionalString(data, 'theme', 80) &&
+        optionalString(data, 'displayName', 120) &&
+        optionalList(data, 'addedGameWords', 5000) &&
+        optionalMap(data, 'dailyLootState', 100) &&
+        optionalMap(data, 'titlesState', 100) &&
+        optionalString(data, 'activeTitleId', 120) &&
+        optionalString(data, 'dailyQuestDate', 40) &&
+        optionalMap(data, 'dailyQuestState', 100) &&
+        optionalNonNegativeInt(data, 'streakFreezes') &&
+        optionalNonNegativeInt(data, 'freezeSaves') &&
+        optionalNonNegativeInt(data, 'gameDictAdds') &&
+        optionalNonNegativeInt(data, 'perfectQuizzes') &&
+        optionalList(data, 'extraChests', 500) &&
+        optionalTime(data, 'updatedAt');
+    }
+
+    function validWordMasteryDocument(data) {
+      return data.keys().hasOnly(['entries', 'updatedAt']) &&
+        data.keys().hasAll(['entries']) &&
+        data.entries is map && data.entries.size() <= 5000 &&
+        optionalTime(data, 'updatedAt');
+    }
+
+    function validQuizSession(data) {
+      return data.keys().hasOnly([
+          'id', 'mode', 'source', 'createdAt', 'words', 'pool',
+          'questionCount', 'direction', 'quizIndex', 'currentStreak',
+          'currentQuizMistakes', 'timeAttackHp', 'quizSessionResults',
+          'hasStartedAnswering'
+        ]) &&
+        data.keys().hasAll(['id', 'mode', 'source', 'words']) &&
+        nonEmptyString(data.id, 500) &&
+        (data.mode == 'timeAttack' || data.mode == 'scramble') &&
+        data.source is string && data.source.size() <= 500 &&
+        data.words is list && data.words.size() > 0 && data.words.size() <= 2000 &&
+        optionalList(data, 'pool', 3000) &&
+        optionalNonNegativeInt(data, 'questionCount') &&
+        optionalMap(data, 'direction', 10) &&
+        optionalNonNegativeInt(data, 'quizIndex') &&
+        optionalNonNegativeInt(data, 'currentStreak') &&
+        optionalNonNegativeInt(data, 'currentQuizMistakes') &&
+        optionalNonNegativeInt(data, 'timeAttackHp') &&
+        optionalList(data, 'quizSessionResults', 5000) &&
+        optionalBool(data, 'hasStartedAnswering') &&
+        optionalTime(data, 'createdAt');
+    }
+
+    function validXpEvent(data, metaId) {
+      return data.keys().hasOnly(['amount', 'reason', 'xpEconomyVersion', 'createdAt']) &&
+        data.keys().hasAll(['amount', 'reason', 'xpEconomyVersion', 'createdAt']) &&
+        data.amount is int && data.amount > 0 && data.amount <= 50 &&
+        data.xpEconomyVersion is int && data.xpEconomyVersion >= 2 &&
+        data.createdAt is timestamp &&
+        ((data.reason == 'word_transition_new_learning' && data.amount == 2 &&
+            metaId.matches('xp_event_word_transition:[^:]{1,180}:new_learning')) ||
+          (data.reason == 'word_transition_learning_reviewing' && data.amount == 4 &&
+            metaId.matches('xp_event_word_transition:[^:]{1,180}:learning_reviewing')) ||
+          (data.reason == 'word_mastered_first' && data.amount == 8 &&
+            metaId.matches('xp_event_word_transition:[^:]{1,180}:reviewing_mastered')) ||
+          (data.reason == 'word_remastered' && data.amount == 3 &&
+            metaId.matches('xp_event_word_transition:[^:]{1,180}:remastered:1')) ||
+          (data.reason == 'daily_chest_unlock' &&
+            metaId.matches('xp_event_daily_chest_unlock:[0-9]{1,20}')));
+    }
+
+    function validContentLearningWord(data, contentWordId) {
+      return data.keys().hasOnly([
+          'canonicalId', 'normalizationVersion', 'normalizedWord',
+          'masteryKey', 'word',
+          'translation', 'meaning', 'example', 'category', 'difficulty',
+          'forgetCount', 'contentRefPath', 'primarySource', 'sourceCount',
+          'schemaVersion', 'createdAt', 'joinedAt', 'updatedAt'
+        ]) &&
+        data.keys().hasAll([
+          'canonicalId', 'normalizationVersion', 'normalizedWord',
+          'masteryKey', 'word',
+          'forgetCount', 'schemaVersion', 'createdAt', 'updatedAt'
+        ]) &&
+        data.canonicalId == contentWordId &&
+        data.normalizationVersion == 1 &&
+        nonEmptyString(data.normalizedWord, 240) &&
+        nonEmptyString(data.masteryKey, 240) &&
+        nonEmptyString(data.word, 240) &&
+        optionalString(data, 'translation', 1000) &&
+        optionalString(data, 'meaning', 1000) &&
+        optionalString(data, 'example', 4000) &&
+        optionalString(data, 'category', 120) &&
+        optionalString(data, 'difficulty', 80) &&
+        data.forgetCount is int && data.forgetCount >= 0 && data.forgetCount <= 100000 &&
+        optionalString(data, 'contentRefPath', 1000) &&
+        optionalMap(data, 'primarySource', 20) &&
+        optionalNonNegativeInt(data, 'sourceCount') &&
+        data.schemaVersion == 1 &&
+        data.createdAt is timestamp && data.updatedAt is timestamp &&
+        optionalTime(data, 'joinedAt');
+    }
+
+    function validAiCacheEntry(entry, expectedType) {
+      return entry is map &&
+        entry.keys().hasOnly(['type', 'meanings', 'createdAt']) &&
+        entry.keys().hasAll(['type', 'meanings', 'createdAt']) &&
+        entry.type == expectedType &&
+        entry.meanings is list &&
+        entry.meanings.size() > 0 && entry.meanings.size() <= 30 &&
+        entry.createdAt is timestamp;
+    }
+
+    function validAiCache(data) {
+      return data.keys().hasOnly([
+          'word', 'caches', 'type', 'meanings', 'meaning', 'createdAt'
+        ]) &&
+        data.keys().hasAll(['word']) &&
+        nonEmptyString(data.word, 500) &&
+        (!('caches' in data) || (
+          data.caches is map &&
+          data.caches.size() > 0 &&
+          data.caches.keys().hasOnly(['normal', 'gamer']) &&
+          (!('normal' in data.caches) || validAiCacheEntry(data.caches.normal, 'normal')) &&
+          (!('gamer' in data.caches) || validAiCacheEntry(data.caches.gamer, 'gamer'))
+        )) &&
+        (!('type' in data) || data.type == 'normal' || data.type == 'gamer') &&
+        optionalList(data, 'meanings', 30) &&
+        (!('meaning' in data) || data.meaning is string ||
+          data.meaning is list || data.meaning is map) &&
+        optionalTime(data, 'createdAt') &&
+        ('caches' in data || 'type' in data);
+    }
+
+    function preservesExistingCacheEntries(before, after) {
+      return (!('caches' in before) || !('normal' in before.caches) ||
+          ('normal' in after.caches && after.caches.normal == before.caches.normal)) &&
+        (!('caches' in before) || !('gamer' in before.caches) ||
+          ('gamer' in after.caches && after.caches.gamer == before.caches.gamer));
+    }
+
+    function newCacheEntriesUseServerTime(before, after) {
+      return (!('normal' in after.caches) ||
+          (('caches' in before && 'normal' in before.caches) ||
+            after.caches.normal.createdAt == request.time)) &&
+        (!('gamer' in after.caches) ||
+          (('caches' in before && 'gamer' in before.caches) ||
+            after.caches.gamer.createdAt == request.time));
+    }
+
+    function newCacheDocumentUsesServerTime(data) {
+      return (!('normal' in data.caches) ||
+          data.caches.normal.createdAt == request.time) &&
+        (!('gamer' in data.caches) ||
+          data.caches.gamer.createdAt == request.time);
+    }
+
+    function validSuggestion(data) {
+      return data.keys().hasOnly([
+          'word', 'ar', 'game', 'timestamp', 'userId', 'userEmail'
+        ]) &&
+        data.keys().hasAll([
+          'word', 'ar', 'game', 'timestamp', 'userId', 'userEmail'
+        ]) &&
+        data.userId == request.auth.uid &&
+        nonEmptyString(data.word, 500) &&
+        nonEmptyString(data.ar, 2000) &&
+        data.game is string && data.game.size() <= 200 &&
+        data.userEmail is string && data.userEmail.size() <= 320 &&
+        ((!('email' in request.auth.token) && data.userEmail == '') ||
+          ('email' in request.auth.token && data.userEmail == request.auth.token.email)) &&
+        data.timestamp is timestamp && data.timestamp == request.time;
+    }
+
+    // Prepared content: public clients can only read fully published ancestry.
+    match /content_worlds/{worldId} {
+      allow read: if isAdmin() || isPublished(resource.data);
+      allow create: if isAdmin() && validWorld(request.resource.data, worldId) &&
+        validCreateAudit(request.resource.data);
+      allow update: if isAdmin() &&
+        !('_deleteLock' in resource.data) &&
+        !('_adminWorldOperation' in resource.data) &&
+        validWorld(request.resource.data, worldId) &&
+        (
+          (request.resource.data.version == resource.data.version + 1 &&
+            request.resource.data.rankCount == resource.data.rankCount &&
+            request.resource.data.gateCount == resource.data.gateCount &&
+            request.resource.data.wordCount == resource.data.wordCount) ||
+          worldCounterOnlyIncrement(resource.data, request.resource.data)
+        ) &&
+        validUpdateAudit(resource.data, request.resource.data);
+      // Recursive prepared-content deletion is backend-only so descendants
+      // cannot be orphaned by a browser deleteDoc call.
+      allow delete: if false;
+
+      match /ranks/{rankId} {
+        allow read: if isAdmin() ||
+          (isPublished(resource.data) && worldPublished(worldId));
+        allow create: if isAdmin() &&
+          worldAllowsChildMutation(worldId) &&
+          validRank(request.resource.data, worldId, rankId) &&
+          request.resource.data.version == 1 &&
+          request.resource.data.gateCount == 0 &&
+          request.resource.data.wordCount == 0 &&
+          rankCreateUpdatesWorldCount(worldId) &&
+          validCreateAudit(request.resource.data);
+        allow update: if isAdmin() &&
+          worldAllowsChildMutation(worldId) &&
+          !('_adminRankOperation' in resource.data) &&
+          !('_adminCopyOperation' in resource.data) &&
+          validRank(request.resource.data, worldId, rankId) &&
+          (
+            (request.resource.data.version == resource.data.version + 1 &&
+              request.resource.data.gateCount == resource.data.gateCount &&
+              request.resource.data.wordCount == resource.data.wordCount) ||
+            rankCounterOnlyIncrement(resource.data, request.resource.data)
+          ) &&
+          validUpdateAudit(resource.data, request.resource.data);
+        allow delete: if false;
+
+        match /gates/{gateId} {
+          allow read: if isAdmin() ||
+            (isPublished(resource.data) && worldPublished(worldId) &&
+              rankPublished(worldId, rankId));
+          allow create: if isAdmin() &&
+            rankAllowsChildMutation(worldId, rankId) &&
+            validGate(request.resource.data, worldId, rankId, gateId) &&
+            request.resource.data.version == 1 &&
+            request.resource.data.wordCount == 0 &&
+            gateCreateUpdatesAncestorCounts(worldId, rankId) &&
+            validCreateAudit(request.resource.data);
+          allow update: if isAdmin() &&
+            rankAllowsChildMutation(worldId, rankId) &&
+            !('_adminGateOperation' in resource.data) &&
+            !('_adminGateCopyOperation' in resource.data) &&
+            validGate(request.resource.data, worldId, rankId, gateId) &&
+            (
+              (request.resource.data.version == resource.data.version + 1 &&
+                request.resource.data.wordCount == resource.data.wordCount) ||
+              gateCounterOnlyIncrement(resource.data, request.resource.data)
+            ) &&
+            validUpdateAudit(resource.data, request.resource.data);
+          allow delete: if false;
+
+          match /words/{contentWordId} {
+            allow read: if isAdmin() ||
+              (isPublished(resource.data) && worldPublished(worldId) &&
+                rankPublished(worldId, rankId) &&
+                gatePublished(worldId, rankId, gateId));
+            allow create: if isAdmin() &&
+              gateAllowsWordMutation(worldId, rankId, gateId) &&
+              request.resource.data.version == 1 &&
+              wordCreateUpdatesAncestorCounts(worldId, rankId, gateId) &&
+              validContentWord(request.resource.data, worldId, rankId, gateId, contentWordId) &&
+              validCreateAudit(request.resource.data);
+            allow update: if isAdmin() &&
+              gateAllowsWordMutation(worldId, rankId, gateId) &&
+              validContentWord(request.resource.data, worldId, rankId, gateId, contentWordId) &&
+              request.resource.data.version == resource.data.version + 1 &&
+              validUpdateAudit(resource.data, request.resource.data);
+            allow delete: if false;
+          }
+        }
+      }
+    }
+
+    // Existing user paths remain explicit. There is intentionally no recursive
+    // owner rule under /users/{uid}; new progress paths stay read-only to clients.
+    match /users/{uid} {
+      allow get: if isOwner(uid);
+      allow list, create, update, delete: if false;
+
+      match /words/{wordId} {
+        allow read: if isOwner(uid);
+        allow create, update: if isOwner(uid) && validLegacyWord(request.resource.data, uid);
+        allow delete: if isOwner(uid);
+      }
+
+      match /customWorlds/{worldId} {
+        allow read: if isOwner(uid);
+        allow create: if isOwner(uid) && validCustomWorld(request.resource.data, uid);
+        // The legacy reader serializes Firestore timestamps to ISO strings before
+        // saving an edit, so createdAt cannot be type-immutable without breaking it.
+        allow update: if isOwner(uid) && validCustomWorld(request.resource.data, uid);
+        allow delete: if isOwner(uid);
+
+        match /words/{wordId} {
+          allow read: if isOwner(uid);
+          allow create, update: if isOwner(uid) && validLegacyWord(request.resource.data, uid);
+          allow delete: if isOwner(uid);
+        }
+      }
+
+      match /meta/profile {
+        allow read: if isOwner(uid);
+        allow create, update: if isOwner(uid) && validProfile(request.resource.data);
+        allow delete: if false;
+      }
+
+      match /meta/word_mastery {
+        allow read: if isOwner(uid);
+        allow create, update: if isOwner(uid) && validWordMasteryDocument(request.resource.data);
+        allow delete: if false;
+      }
+
+      match /meta/active_quiz_session {
+        allow read: if isOwner(uid);
+        allow create, update: if isOwner(uid) && validQuizSession(request.resource.data);
+        allow delete: if isOwner(uid);
+      }
+
+      match /meta/{metaId} {
+        allow read: if isOwner(uid) && metaId.matches('xp_event_.*');
+        allow create: if isOwner(uid) && metaId.matches('xp_event_.*') &&
+          validXpEvent(request.resource.data, metaId);
+        allow update, delete: if false;
+      }
+
+      match /contentProgress/{worldId} {
+        allow read: if isOwner(uid);
+        allow write: if false;
+
+        match /ranks/{rankId} {
+          allow read: if isOwner(uid);
+          allow write: if false;
+
+          match /gates/{gateId} {
+            allow read: if isOwner(uid);
+            allow write: if false;
+          }
+        }
+      }
+
+      match /contentOperations/{operationId} {
+        allow read: if isOwner(uid);
+        allow write: if false;
+      }
+
+      match /contentWords/{contentWordId} {
+        allow read: if isOwner(uid);
+        allow create, delete: if false;
+        allow update: if isOwner(uid) &&
+          exists(/databases/$(database)/documents/users/$(uid)/contentWords/$(contentWordId)) &&
+          request.resource.data.diff(resource.data).affectedKeys()
+            .hasOnly(['forgetCount', 'updatedAt']) &&
+          (request.resource.data.forgetCount == resource.data.forgetCount ||
+            request.resource.data.forgetCount == resource.data.forgetCount + 1 ||
+            (resource.data.forgetCount > 0 &&
+              request.resource.data.forgetCount == resource.data.forgetCount - 1)) &&
+          validContentLearningWord(request.resource.data, contentWordId) &&
+          request.resource.data.updatedAt == request.time;
+
+        match /sources/{sourceId} {
+          allow read: if isOwner(uid);
+          allow write: if false;
+        }
+      }
+    }
+
+    // Shared AI cache: public reads are retained; authenticated users may fill
+    // validated cache entries. Only admins may remove poisoned/obsolete entries.
+    match /ai_global_cache/{cacheId} {
+      allow read: if true;
+      allow create: if signedIn() &&
+        validAiCache(request.resource.data) &&
+        'caches' in request.resource.data &&
+        newCacheDocumentUsesServerTime(request.resource.data);
+      allow update: if isAdmin() || (
+        signedIn() &&
+        validAiCache(request.resource.data) &&
+        'caches' in request.resource.data &&
+        request.resource.data.word == resource.data.word &&
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['caches']) &&
+        preservesExistingCacheEntries(resource.data, request.resource.data) &&
+        newCacheEntriesUseServerTime(resource.data, request.resource.data)
+      );
+      allow delete: if isAdmin();
+    }
+
+    match /suggestions/{suggestionId} {
+      allow create: if signedIn() && validSuggestion(request.resource.data);
+      allow read, delete: if isAdmin();
+      allow update: if false;
+    }
+
+    match /admin_audit_logs/{logId} {
+      allow read: if isAdmin();
+      allow write: if false;
+    }
+
+    // Admin authority comes only from Firebase custom claims.
+    match /admins/{adminId} {
+      allow read, write: if false;
+    }
+
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

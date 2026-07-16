@@ -1,0 +1,11 @@
+node_modules/
+*-debug.log
+firebase-debug.log
+.firebase/
+.tools/
+cursor/
+functions/node_modules/
+*.log
+firestore-debug.log
+serviceAccountKey.json
+set-admin.cjs

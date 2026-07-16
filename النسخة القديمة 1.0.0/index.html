@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>LootLingua | قاموس الأساطير</title>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+  <div class="menu-btn" onclick="toggleSidebar()"><i class="fas fa-bars"></i></div>
+  <div id="sidebar" class="sidebar">
+    <div class="sidebar-header"><h2>LootLingua 🎮</h2></div>
+    <nav>
+      <a href="#" class="nav-link active"><i class="fas fa-user-shield"></i> قاموسك الشخصي</a>
+      <div class="sidebar-divider">موسوعة الأساطير</div>
+      <a href="#" class="nav-link"><i class="fas fa-cube"></i> Minecraft Dict</a>
+      <a href="#" class="nav-link"><i class="fas fa-crosshairs"></i> PUBG Terms</a>
+      <div class="sidebar-divider">الإعدادات</div>
+      <button id="loginBtn" class="auth-btn" onclick="login()">تسجيل دخول</button>
+      <button id="logoutBtn" class="auth-btn" onclick="confirmLogout()" style="display:none;">تسجيل الخروج</button>
+    </nav>
+  </div>
+
+  <div id="overlay" class="overlay" onclick="toggleSidebar()"></div>
+
+  <main class="main-content" id="main-content">
+    <header class="page-header">
+      <h1>قاموسك الشخصي</h1>
+      <div class="stats-bar">
+        <span id="totalCount">إجمالي الكلمات: 0</span>
+        <span id="starredCount">⭐ الصعبة: 0</span>
+      </div>
+    </header>
+
+    <div class="card-box">
+      <div class="ai-search-container">
+        <div style="display:flex; gap:8px;">
+          <button onclick="fetchSuggestions()" id="searchBtn" class="btn-ai"><i class="fas fa-search"></i></button>
+          <input type="text" id="wordInput" placeholder="الكلمة (مثال: Sword)" dir="ltr">
+        </div>
+      </div>
+      
+      <div id="suggestionsList"></div> <input type="text" id="meaningInput" placeholder="المعنى بالعربي" style="margin-top:10px; width:100%;">
+      <textarea id="exampleInput" placeholder="جملة مثال (اختياري)" rows="2" style="margin-top:10px; width:100%;"></textarea>
+      
+      <select id="categoryInput" style="margin-top:10px; width:100%;">
+        <option value="عام">عام</option>
+        <option value="اسم">اسم</option>
+        <option value="فعل">فعل</option>
+        <option value="صفة">صفة</option>
+        <option value="لعبة">مصطلح ألعاب</option>
+      </select>
+      
+      <button class="btn-main" id="addBtn" onclick="addWord()" style="margin-top:15px;">إضافة للقاموس 💾</button>
+    </div>
+
+    <div class="toolbar">
+      <button id="toolAll" class="btn-tool active-tool" onclick="setFilter('all')">الكل</button>
+      <button id="toolStarred" class="btn-tool" onclick="setFilter('starred')"><i class="fas fa-star"></i></button>
+      <button class="btn-tool" onclick="openQuizSetup()"><i class="fas fa-gamepad"></i> كويز</button>
+    </div>
+    
+    <input type="text" id="searchInput" placeholder="🔎 ابحث في قاموسك..." oninput="render()" style="width:100%; margin-bottom:15px;">
+
+    <ul id="list"></ul>
+  </main>
+
+  <script type="module">
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/12.10.0/firebase-app.js";
+    import { getAuth, signInWithPopup, signOut, GoogleAuthProvider, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/12.10.0/firebase-auth.js";
+    import { getFirestore, collection, addDoc, query, orderBy, deleteDoc, doc, updateDoc, onSnapshot } from "https://www.gstatic.com/firebasejs/12.10.0/firebase-firestore.js";
+    
+    const firebaseConfig = {
+      apiKey: "AIzaSyDQB5N4wxJw69-tb8suI2T2SfEfCpwFA2c",
+      authDomain: "quizapp-ede17.firebaseapp.com",
+      projectId: "quizapp-ede17",
+      storageBucket: "quizapp-ede17.firebasestorage.app",
+      messagingSenderId: "473471031803",
+      appId: "1:473471031803:web:1b803237aeb0444040535e"
+    };
+    
+    const app = initializeApp(firebaseConfig);
+    window.auth = getAuth(app);
+    window.db = getFirestore(app);
+
+    onAuthStateChanged(window.auth, (user) => {
+      document.getElementById('logoutBtn').style.display = user ? 'block' : 'none';
+      document.getElementById('loginBtn').style.display  = user ? 'none'  : 'block';
+      if (user) loadWordsFromCloud(user);
+    });
+
+    window.login = async function() {
+      const provider = new GoogleAuthProvider();
+      try { await signInWithPopup(window.auth, provider); } catch (e) { console.error(e); }
+    };
+    
+    window.confirmLogout = function() { signOut(window.auth); };
+    
+    function loadWordsFromCloud(user) {
+      const q = query(collection(window.db, "users", user.uid, "words"), orderBy("createdAt", "desc"));
+      onSnapshot(q, (snapshot) => {
+        window.words = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
+        render();
+      });
+    }
+
+    window.dbDelete = async function(id) { await deleteDoc(doc(window.db, "users", window.auth.currentUser.uid, "words", id)); }
+    window.dbUpdate = async function(id, data) { await updateDoc(doc(window.db, "users", window.auth.currentUser.uid, "words", id), data); }
+    window.dbAdd    = async function(data) { return await addDoc(collection(window.db, "users", window.auth.currentUser.uid, "words"), { ...data, createdAt: new Date() }); }
+  </script>
+
+  <script src="script.js"></script>
+</body>
+</html>
