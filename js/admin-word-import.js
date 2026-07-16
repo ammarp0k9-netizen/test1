@@ -240,14 +240,17 @@
       source: parsed.source || 'official',
       context,
       entries,
-      stats: recalculateStats(entries)
+      stats: recalculateStats(entries),
+      blockingIssue: null,
+      generalWarnings: []
     };
   }
 
   async function inspectDuplicates(preview, options) {
     const settings = options || {};
-    if (!preview || !Array.isArray(preview.entries) || typeof settings.inspect !== 'function') {
-      throw makeError('import/duplicate-inspector-required', 'A duplicate inspector is required.');
+    const inspectGate = settings.inspectGate || settings.inspect;
+    if (!preview || !Array.isArray(preview.entries) || typeof inspectGate !== 'function') {
+      throw makeError('import/gate-duplicate-inspector-required', 'A gate duplicate inspector is required.');
     }
     const entries = preview.entries.map((entry) => ({
       ...entry,
@@ -257,12 +260,16 @@
     const eligible = entries.filter((entry) => entry.state === 'valid');
     const concurrency = Math.max(1, Math.min(4, Number(settings.concurrency) || 3));
     let cursor = 0;
+    let blockingIssue = null;
+    const generalWarnings = Array.isArray(preview.generalWarnings)
+      ? preview.generalWarnings.map((item) => cloneIssue(item, 'warning'))
+      : [];
 
     async function worker() {
-      while (cursor < eligible.length) {
+      while (cursor < eligible.length && !blockingIssue) {
         const entry = eligible[cursor++];
         try {
-          const result = await settings.inspect(
+          const result = await inspectGate(
             preview.context.worldId,
             preview.context.rankId,
             preview.context.gateId,
@@ -284,24 +291,67 @@
             ));
           }
         } catch (error) {
-          entry.state = 'invalid';
-          entry.errors.push(issue(
-            `words[${entry.index}]`,
-            String(error && error.code || 'import/duplicate-check-failed'),
-            'Duplicate inspection failed.'
-          ));
+          blockingIssue = issue(
+            'gate',
+            'import/gate-duplicate-check-failed',
+            'Could not verify duplicates in the current gate.'
+          );
         }
       }
     }
 
     await Promise.all(Array.from({ length: Math.min(concurrency, eligible.length) }, worker));
-    return { ...preview, entries, stats: recalculateStats(entries) };
+    if (!blockingIssue && typeof settings.inspectOutside === 'function' && eligible.length) {
+      try {
+        const outsideMatches = await settings.inspectOutside(
+          preview.context,
+          eligible.map((entry) => ({
+            normalizedWord: entry.normalizedWord,
+            word: entry.payload.word
+          }))
+        );
+        if (outsideMatches && typeof outsideMatches === 'object') {
+          entries.forEach((entry) => {
+            const match = outsideMatches[entry.normalizedWord];
+            if (entry.state !== 'valid' || !match) return;
+            if (match.duplicateInRank || match.duplicateInWorld) {
+              entry.warnings.push(issue(
+                `words[${entry.index}]`,
+                match.duplicateInRank ? 'import/duplicate-in-rank' : 'import/duplicate-in-world',
+                'The word exists elsewhere in this rank or world.',
+                'warning'
+              ));
+            }
+          });
+        }
+      } catch (error) {
+        generalWarnings.push(issue(
+          'outside-gate',
+          'import/outside-duplicate-check-unavailable',
+          'Could not check for this word outside the current gate. You can continue importing.',
+          'warning'
+        ));
+      }
+    }
+    return {
+      ...preview,
+      entries,
+      stats: recalculateStats(entries),
+      blockingIssue,
+      generalWarnings
+    };
   }
 
   async function commit(preview, options) {
     const settings = options || {};
     if (!preview || !Array.isArray(preview.entries) || typeof settings.createWord !== 'function') {
       throw makeError('import/create-word-required', 'createWord is required.');
+    }
+    if (preview.blockingIssue) {
+      throw makeError(
+        'import/gate-duplicate-check-failed',
+        'Cannot import until duplicate checking for the current gate succeeds.'
+      );
     }
     const entries = preview.entries.map((entry) => ({
       ...entry,
