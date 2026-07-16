@@ -53,6 +53,7 @@
     wordNextCursor: null,
     wordHasMore: false,
     selectedWordIds: new Set(),
+    wordImportPending: false,
     modal: null,
     actionKeys: new Set(),
     lastAdminState: null,
@@ -112,12 +113,24 @@
       'listGates', 'getGate', 'createGate', 'updateGate', 'setGateStatus',
       'duplicateGateAsDraft', 'moveGate', 'requestDeleteGate',
       'listWords', 'getWord', 'createWord', 'updateWord', 'setWordStatus',
+      'inspectWordDuplicates',
       'archiveWord', 'duplicateWord', 'moveWord', 'bulkPublishWords',
       'bulkArchiveWords', 'bulkMoveWords', 'requestDeleteWord'
     ];
     if (!api || required.some((method) => typeof api[method] !== 'function')) {
       const error = new Error('admin/cloud-unavailable');
       error.code = 'admin/cloud-unavailable';
+      throw error;
+    }
+    return api;
+  }
+
+  function getWordImportApi() {
+    const api = root.LootLinguaAdminWordImport;
+    const required = ['assertFileSize', 'parseJsonText', 'preparePreview', 'inspectDuplicates', 'commit'];
+    if (!api || required.some((method) => typeof api[method] !== 'function')) {
+      const error = new Error('admin/word-import-unavailable');
+      error.code = 'admin/word-import-unavailable';
       throw error;
     }
     return api;
@@ -1215,11 +1228,15 @@
       }),
       makeButton(ui.wordsLoading ? 'جارٍ التحديث…' : 'تحديث الكلمات', 'refresh-words', {
         className: 'admin-btn admin-btn-secondary', worldId: world.worldId, rankId: rank.rankId,
-        gateId: gate.gateId, disabled: ui.wordsLoading
+        gateId: gate.gateId, disabled: ui.wordsLoading || ui.wordImportPending
+      }),
+      makeButton('استيراد JSON', 'import-words-json', {
+        className: 'admin-btn admin-btn-secondary', worldId: world.worldId, rankId: rank.rankId,
+        gateId: gate.gateId, disabled: ui.wordsLoading || ui.wordImportPending
       }),
       makeButton('إنشاء كلمة', 'create-word', {
         className: 'admin-btn admin-btn-primary', worldId: world.worldId, rankId: rank.rankId,
-        gateId: gate.gateId, disabled: ui.wordsLoading
+        gateId: gate.gateId, disabled: ui.wordsLoading || ui.wordImportPending
       })
     ]);
     appendChildren(header, [heading, headerActions]);
@@ -1699,6 +1716,305 @@
     modalState.saveButton.textContent = pending ? 'جارٍ الحفظ…' : 'حفظ العالم';
   }
 
+  function wordImportResultLabel(entry) {
+    const labels = {
+      valid: entry.warnings.length ? 'صالح مع تحذير' : 'صالح',
+      invalid: 'غير صالح',
+      'duplicate-file': 'مكرر في الملف',
+      'duplicate-gate': 'موجود في البوابة',
+      imported: 'تم الاستيراد',
+      failed: 'فشل الحفظ'
+    };
+    return labels[entry.state] || String(entry.state || 'غير معروف');
+  }
+
+  function wordImportIssueText(entry) {
+    const issues = entry.errors.concat(entry.warnings);
+    return issues.map((item) => {
+      const code = String(item.code || 'import/invalid-word');
+      const message = String(item.message || '');
+      return message ? `${code}: ${message}` : code;
+    }).join('، ');
+  }
+
+  function renderWordImportEntries(container, entries) {
+    const table = makeElement('table', 'admin-import-table');
+    const head = makeElement('thead');
+    const headingRow = makeElement('tr');
+    ['#', 'الكلمة', 'الترجمة', 'المستوى', 'النتيجة'].forEach((label) => {
+      headingRow.append(makeElement('th', '', label));
+    });
+    head.append(headingRow);
+    const body = makeElement('tbody');
+    entries.forEach((entry) => {
+      const row = makeElement('tr', `admin-import-row admin-import-row-${entry.state}`);
+      const resultCell = makeElement('td');
+      resultCell.append(makeElement('strong', 'admin-import-result', wordImportResultLabel(entry)));
+      const issueText = wordImportIssueText(entry);
+      if (issueText) resultCell.append(makeElement('small', 'admin-import-issue', issueText));
+      [
+        String(entry.index + 1),
+        String(entry.word || '—'),
+        String(entry.translation || '—'),
+        String(entry.level || '—')
+      ].forEach((value) => row.append(makeElement('td', '', value)));
+      row.append(resultCell);
+      body.append(row);
+    });
+    appendChildren(table, [head, body]);
+    container.replaceChildren(table);
+  }
+
+  function renderWordImportStats(container, preview, result) {
+    const stats = preview.stats;
+    const values = result ? [
+      ['الإجمالي', result.summary.total],
+      ['تم الاستيراد', result.summary.succeeded],
+      ['فشل', result.summary.failed],
+      ['تخطي مكرر', result.summary.skippedDuplicates],
+      ['غير صالح', result.summary.skippedInvalid]
+    ] : [
+      ['الإجمالي', stats.total],
+      ['صالح', stats.valid],
+      ['غير صالح', stats.invalid],
+      ['مكرر في الملف', stats.duplicateInFile],
+      ['موجود في البوابة', stats.duplicateInGate]
+    ];
+    container.replaceChildren();
+    values.forEach(([label, value]) => {
+      const item = makeElement('div', 'admin-import-stat');
+      appendChildren(item, [
+        makeElement('strong', 'admin-import-stat-value', value),
+        makeElement('span', 'admin-import-stat-label', label)
+      ]);
+      container.append(item);
+    });
+  }
+
+  function openWordImportPreview(world, rank, gate, preview, returnFocus) {
+    closeAdminModal(true);
+    ui.wordImportPending = true;
+    const overlay = makeElement('div', 'admin-modal-overlay');
+    const backdrop = makeElement('div', 'admin-modal-backdrop');
+    backdrop.setAttribute('aria-hidden', 'true');
+    const dialog = makeElement('section', 'admin-modal admin-word-import-dialog');
+    dialog.setAttribute('role', 'dialog');
+    dialog.setAttribute('aria-modal', 'true');
+    dialog.setAttribute('aria-labelledby', 'adminWordImportTitle');
+
+    const header = makeElement('header', 'admin-modal-header');
+    const heading = makeElement('div', 'admin-modal-heading');
+    const title = makeElement('h2', 'admin-modal-title', 'مراجعة الكلمات قبل الاستيراد');
+    title.id = 'adminWordImportTitle';
+    appendChildren(heading, [
+      title,
+      makeElement('p', 'admin-modal-copy', 'سيتم إنشاء كل الكلمات المقبولة كمسودات. الحقول التقنية الواردة في الملف لا يتم الوثوق بها.')
+    ]);
+    const closeButton = makeButton('×', 'close-modal', {
+      className: 'admin-modal-close',
+      title: 'إغلاق معاينة الاستيراد'
+    });
+    closeButton.setAttribute('aria-label', 'إغلاق معاينة الاستيراد');
+    appendChildren(header, [heading, closeButton]);
+    dialog.append(header);
+
+    const context = makeElement('div', 'admin-import-context');
+    [
+      ['العالم', world.title || world.worldId],
+      ['الرتبة', rank.title || rank.rankId],
+      ['البوابة', gate.title || gate.gateId]
+    ].forEach(([label, value]) => {
+      const item = makeElement('span', 'admin-import-context-item');
+      appendChildren(item, [
+        makeElement('strong', '', `${label}: `),
+        document.createTextNode(String(value))
+      ]);
+      context.append(item);
+    });
+    dialog.append(context);
+
+    const stats = makeElement('div', 'admin-import-stats');
+    renderWordImportStats(stats, preview, null);
+    dialog.append(stats);
+    const progress = makeElement('div', 'admin-import-progress', 'المعاينة جاهزة.');
+    progress.setAttribute('role', 'status');
+    progress.setAttribute('aria-live', 'polite');
+    dialog.append(progress);
+    const tableWrap = makeElement('div', 'admin-import-table-wrap');
+    renderWordImportEntries(tableWrap, preview.entries);
+    dialog.append(tableWrap);
+    const errorBox = makeElement('div', 'admin-form-error');
+    errorBox.hidden = true;
+    dialog.append(errorBox);
+
+    const form = makeElement('form', 'admin-import-form');
+    const footer = makeElement('footer', 'admin-modal-footer');
+    const cancelButton = makeButton('إلغاء', 'close-modal', {
+      className: 'admin-btn admin-btn-secondary'
+    });
+    const importButton = makeButton(`استيراد ${preview.stats.valid} كلمة`, null, {
+      className: 'admin-btn admin-btn-primary',
+      type: 'submit',
+      disabled: preview.stats.valid === 0
+    });
+    appendChildren(footer, [cancelButton, importButton]);
+    form.append(footer);
+    dialog.append(form);
+    appendChildren(overlay, [backdrop, dialog]);
+    document.body.append(overlay);
+
+    const modalState = {
+      kind: 'word-import',
+      overlay,
+      form,
+      errorBox,
+      closeButton,
+      cancelButton,
+      importButton,
+      progress,
+      stats,
+      tableWrap,
+      preview,
+      pending: false,
+      completed: false,
+      returnFocus
+    };
+    ui.modal = modalState;
+    form.addEventListener('submit', (event) => commitWordImport(event, modalState));
+    importButton.focus();
+  }
+
+  async function commitWordImport(event, modalState) {
+    event.preventDefault();
+    if (ui.modal !== modalState || modalState.pending || modalState.completed) return;
+    modalState.pending = true;
+    modalState.form.setAttribute('aria-busy', 'true');
+    modalState.importButton.disabled = true;
+    modalState.closeButton.disabled = true;
+    modalState.cancelButton.disabled = true;
+    modalState.importButton.textContent = 'جارٍ الاستيراد…';
+    modalState.errorBox.hidden = true;
+    try {
+      const cloud = getCloudApi();
+      const result = await getWordImportApi().commit(modalState.preview, {
+        createWord: cloud.createWord.bind(cloud),
+        onProgress(progress) {
+          if (ui.modal !== modalState) return;
+          modalState.progress.textContent =
+            `تمت معالجة ${progress.completed} من ${progress.total} · نجح ${progress.succeeded} · فشل ${progress.failed}`;
+        }
+      });
+      if (ui.modal !== modalState) return;
+      modalState.completed = true;
+      modalState.pending = false;
+      ui.wordImportPending = false;
+      modalState.form.setAttribute('aria-busy', 'false');
+      modalState.closeButton.disabled = false;
+      modalState.cancelButton.disabled = false;
+      modalState.cancelButton.textContent = 'إغلاق';
+      modalState.importButton.disabled = true;
+      modalState.importButton.textContent = 'اكتمل الاستيراد';
+      renderWordImportStats(modalState.stats, modalState.preview, result);
+      renderWordImportEntries(modalState.tableWrap, result.entries);
+      modalState.progress.textContent =
+        `اكتمل: نجح ${result.summary.succeeded}، فشل ${result.summary.failed}، وتُخطّي ${result.summary.skippedDuplicates} مكرر.`;
+      if (result.summary.succeeded > 0) {
+        await refreshWords({ append: false });
+        notify(`تم استيراد ${result.summary.succeeded} كلمة كمسودات.`, 'success');
+      } else {
+        renderFormIssues(modalState.errorBox, [
+          { path: 'import', code: 'admin/no-words-imported' }
+        ], 'لم يتم حفظ أي كلمة. راجع النتائج التفصيلية:');
+      }
+    } catch (error) {
+      if (ui.modal !== modalState) return;
+      modalState.pending = false;
+      ui.wordImportPending = false;
+      modalState.form.setAttribute('aria-busy', 'false');
+      modalState.closeButton.disabled = false;
+      modalState.cancelButton.disabled = false;
+      modalState.importButton.disabled = false;
+      modalState.importButton.textContent = `استيراد ${modalState.preview.stats.valid} كلمة`;
+      renderFormIssues(modalState.errorBox, [
+        { path: 'cloud', code: getErrorCode(error, 'admin/word-import-failed') }
+      ], 'تعذر إكمال الاستيراد. بقيت المعاينة والنتائج مفتوحة:');
+    }
+  }
+
+  async function prepareWordImport(file, world, rank, gate, returnFocus) {
+    try {
+      const importer = getWordImportApi();
+      importer.assertFileSize(file.size);
+      if (!String(file.name || '').toLowerCase().endsWith('.json')) {
+        const error = new Error('admin/json-file-required');
+        error.code = 'admin/json-file-required';
+        throw error;
+      }
+      const parsed = importer.parseJsonText(await file.text());
+      let preview = importer.preparePreview(parsed, {
+        schema: root.LootLinguaContentSchema,
+        worldId: world.worldId,
+        rankId: rank.rankId,
+        gateId: gate.gateId,
+        existingWords: ui.words
+      });
+      const cloud = getCloudApi();
+      preview = await importer.inspectDuplicates(preview, {
+        inspect: cloud.inspectWordDuplicates.bind(cloud),
+        concurrency: 3
+      });
+      if (
+        String(ui.activeWorldId) !== String(world.worldId) ||
+        String(ui.activeRankId) !== String(rank.rankId) ||
+        String(ui.activeGateId) !== String(gate.gateId) ||
+        ui.view !== 'words'
+      ) {
+        throw Object.assign(new Error('admin/import-context-changed'), {
+          code: 'admin/import-context-changed'
+        });
+      }
+      openWordImportPreview(world, rank, gate, preview, returnFocus);
+    } catch (error) {
+      ui.wordImportPending = false;
+      ui.wordPageError =
+        `تعذر تجهيز ملف الاستيراد. رمز الخطأ: ${getErrorCode(error, 'admin/word-import-preview-failed')}`;
+      renderWords();
+    }
+  }
+
+  function chooseWordImportFile(world, rank, gate, returnFocus) {
+    if (ui.wordImportPending) return;
+    ui.wordImportPending = true;
+    renderWords();
+    const input = makeElement('input');
+    input.type = 'file';
+    input.accept = '.json,application/json';
+    input.hidden = true;
+    let handled = false;
+    function cancelSelection() {
+      if (handled) return;
+      handled = true;
+      input.remove();
+      ui.wordImportPending = false;
+      if (ui.view === 'words') renderWords();
+    }
+    input.addEventListener('cancel', cancelSelection, { once: true });
+    input.addEventListener('change', () => {
+      if (handled) return;
+      handled = true;
+      const file = input.files && input.files[0];
+      input.remove();
+      if (!file) {
+        ui.wordImportPending = false;
+        renderWords();
+        return;
+      }
+      prepareWordImport(file, world, rank, gate, returnFocus);
+    }, { once: true });
+    document.body.append(input);
+    input.click();
+  }
+
   function modalIsDirty() {
     return Boolean(ui.modal && (
       ui.modal.kind === 'world-editor' || ui.modal.kind === 'rank-editor' ||
@@ -1722,6 +2038,10 @@
     modalState.dirty = false;
     modalState.overlay.remove();
     ui.modal = null;
+    if (modalState.kind === 'word-import') {
+      ui.wordImportPending = false;
+      if (ui.view === 'words') renderWords();
+    }
     if (modalState.returnFocus && typeof modalState.returnFocus.focus === 'function') {
       modalState.returnFocus.focus();
     }
@@ -3787,6 +4107,12 @@
     }
     if (action === 'create-word') {
       if (rank && gate && canLeaveAdminView()) openWordEditor(world, rank, gate, null, 'create', actionButton);
+      return;
+    }
+    if (action === 'import-words-json') {
+      if (rank && gate && canLeaveAdminView()) {
+        chooseWordImportFile(world, rank, gate, actionButton);
+      }
       return;
     }
     const word = findWord(actionButton.dataset.contentWordId);
