@@ -1,4 +1,4 @@
-﻿/* ============================================
+/* ============================================
    SMART LOADING OVERLAY STYLES
    Full-screen blurred overlay with spinner
    ============================================ */
@@ -547,6 +547,119 @@ body.perf-stable .smart-loading-slow-warning {
   flex-wrap: wrap;
   overflow-wrap: anywhere;
   word-break: break-word;
+}
+
+.admin-word-import-dialog {
+  display: flex;
+  flex-direction: column;
+  width: min(1040px, calc(100vw - 32px));
+  max-height: calc(100vh - 32px);
+  overflow: hidden;
+}
+
+.admin-import-context,
+.admin-import-stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  padding: 0 20px 14px;
+}
+
+.admin-import-context-item {
+  font-size: 13px;
+}
+
+.admin-import-stat {
+  min-width: 112px;
+  padding: 8px 10px;
+  border: 1px solid var(--border-color, #d8dde5);
+  border-radius: 6px;
+}
+
+.admin-import-stat-value,
+.admin-import-stat-label,
+.admin-import-issue {
+  display: block;
+}
+
+.admin-import-stat-value {
+  font-size: 18px;
+}
+
+.admin-import-stat-label,
+.admin-import-issue {
+  margin-top: 3px;
+  font-size: 12px;
+}
+
+.admin-import-progress {
+  padding: 0 20px 12px;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.admin-import-table-wrap {
+  flex: 1 1 280px;
+  min-height: 140px;
+  margin: 0 20px;
+  overflow: auto;
+  border: 1px solid var(--border-color, #d8dde5);
+  border-radius: 6px;
+}
+
+.admin-import-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.admin-import-table th,
+.admin-import-table td {
+  padding: 9px 10px;
+  border-bottom: 1px solid var(--border-color, #d8dde5);
+  text-align: start;
+  vertical-align: top;
+}
+
+.admin-import-table th {
+  position: sticky;
+  top: 0;
+  background: var(--card-bg, #fff);
+  z-index: 1;
+}
+
+.admin-import-row-invalid .admin-import-result,
+.admin-import-row-failed .admin-import-result {
+  color: #b42318;
+}
+
+.admin-import-row-duplicate-file .admin-import-result,
+.admin-import-row-duplicate-gate .admin-import-result {
+  color: #9a6700;
+}
+
+.admin-import-row-imported .admin-import-result {
+  color: #137333;
+}
+
+@media (max-width: 640px) {
+  .admin-word-import-dialog {
+    width: calc(100vw - 16px);
+    max-height: calc(100vh - 16px);
+  }
+
+  .admin-import-context,
+  .admin-import-stats {
+    padding-inline: 14px;
+  }
+
+  .admin-import-stat {
+    flex: 1 1 120px;
+  }
+
+  .admin-import-table-wrap {
+    margin-inline: 14px;
+  }
 }
 
 /* ══ Ready-content administration (scoped) ══ */
