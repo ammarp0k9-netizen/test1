@@ -37,6 +37,56 @@ const moveContentWord = functions ? httpsCallable(functions, 'moveContentWord') 
 const bulkUpdateContentWords = functions ? httpsCallable(functions, 'bulkUpdateContentWords') : null;
 const deleteContentWord = functions ? httpsCallable(functions, 'deleteContentWord') : null;
 const CONTENT_STATUSES = Object.freeze(['draft', 'published', 'archived']);
+const ADMIN_WORD_TRANSACTION_DEBUG_FLAG = 'LootLinguaAdminWordTransactionDebug';
+
+function wordTransactionDebugEnabled() {
+  return typeof window !== 'undefined' && window[ADMIN_WORD_TRANSACTION_DEBUG_FLAG] === true;
+}
+
+function summarizeWordTransactionParent(data) {
+  const parent = data && typeof data === 'object' ? data : {};
+  const keys = Object.keys(parent).sort();
+  return {
+    data: parent,
+    keys,
+    counters: {
+      rankCount: parent.rankCount,
+      gateCount: parent.gateCount,
+      wordCount: parent.wordCount,
+      version: parent.version,
+      status: parent.status,
+    },
+    audit: {
+      createdAt: parent.createdAt,
+      updatedAt: parent.updatedAt,
+      createdBy: parent.createdBy,
+      updatedBy: parent.updatedBy,
+    },
+    operationLocks: keys.filter((key) => key.startsWith('_admin') || key.startsWith('_delete')),
+  };
+}
+
+function logCreateWordTransactionDiagnostic(details) {
+  if (!wordTransactionDebugEnabled() || typeof console === 'undefined') {
+    return;
+  }
+  const logger = console;
+  const group = typeof logger.groupCollapsed === 'function'
+    ? logger.groupCollapsed.bind(logger)
+    : logger.log.bind(logger);
+  group('[LootLingua] Admin createWord transaction diagnostic');
+  logger.log('runtime', { projectId: app?.options?.projectId || null });
+  logger.log('paths', details.paths);
+  logger.log('world', summarizeWordTransactionParent(details.parents.world));
+  logger.log('rank', summarizeWordTransactionParent(details.parents.rank));
+  logger.log('gate', summarizeWordTransactionParent(details.parents.gate));
+  logger.log('wordPayload', details.wordPayload);
+  logger.log('parentUpdates', details.parentUpdates);
+  if (typeof logger.groupEnd === 'function') {
+    logger.groupEnd();
+  }
+}
+
 const WORLD_EDITABLE_FIELDS = Object.freeze([
   'slug',
   'title',
@@ -2150,22 +2200,44 @@ async function createWord(worldId, rankId, gateId, payload) {
         createdBy: context.uid,
         updatedBy: context.uid,
       };
-      transaction.set(wordReference, saved);
-      transaction.update(gateReference, {
+      const gateUpdate = {
         wordCount: nextGateWordCount,
         updatedAt: serverTimestamp(),
         updatedBy: context.uid,
-      });
-      transaction.update(rankReference, {
+      };
+      const rankUpdate = {
         wordCount: nextRankWordCount,
         updatedAt: serverTimestamp(),
         updatedBy: context.uid,
-      });
-      transaction.update(worldReference, {
+      };
+      const worldUpdate = {
         wordCount: nextWorldWordCount,
         updatedAt: serverTimestamp(),
         updatedBy: context.uid,
+      };
+      logCreateWordTransactionDiagnostic({
+        paths: {
+          world: worldReference.path,
+          rank: rankReference.path,
+          gate: gateReference.path,
+          word: wordReference.path,
+        },
+        parents: {
+          world: existingWorld,
+          rank: existingRank,
+          gate: existingGate,
+        },
+        wordPayload: saved,
+        parentUpdates: {
+          gate: gateUpdate,
+          rank: rankUpdate,
+          world: worldUpdate,
+        },
       });
+      transaction.set(wordReference, saved);
+      transaction.update(gateReference, gateUpdate);
+      transaction.update(rankReference, rankUpdate);
+      transaction.update(worldReference, worldUpdate);
       return saved;
     });
     assertAdminContext(context);
