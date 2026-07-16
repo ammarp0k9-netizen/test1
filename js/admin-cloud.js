@@ -8,12 +8,14 @@ import {
   getDoc,
   getDocs,
   getFirestore,
+  increment,
   limit,
   orderBy,
   query,
   runTransaction,
   serverTimestamp,
   startAfter,
+  updateDoc,
   where,
 } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
 import {
@@ -37,56 +39,6 @@ const moveContentWord = functions ? httpsCallable(functions, 'moveContentWord') 
 const bulkUpdateContentWords = functions ? httpsCallable(functions, 'bulkUpdateContentWords') : null;
 const deleteContentWord = functions ? httpsCallable(functions, 'deleteContentWord') : null;
 const CONTENT_STATUSES = Object.freeze(['draft', 'published', 'archived']);
-const ADMIN_WORD_TRANSACTION_DEBUG_FLAG = 'LootLinguaAdminWordTransactionDebug';
-
-function wordTransactionDebugEnabled() {
-  return typeof window !== 'undefined' && window[ADMIN_WORD_TRANSACTION_DEBUG_FLAG] === true;
-}
-
-function summarizeWordTransactionParent(data) {
-  const parent = data && typeof data === 'object' ? data : {};
-  const keys = Object.keys(parent).sort();
-  return {
-    data: parent,
-    keys,
-    counters: {
-      rankCount: parent.rankCount,
-      gateCount: parent.gateCount,
-      wordCount: parent.wordCount,
-      version: parent.version,
-      status: parent.status,
-    },
-    audit: {
-      createdAt: parent.createdAt,
-      updatedAt: parent.updatedAt,
-      createdBy: parent.createdBy,
-      updatedBy: parent.updatedBy,
-    },
-    operationLocks: keys.filter((key) => key.startsWith('_admin') || key.startsWith('_delete')),
-  };
-}
-
-function logCreateWordTransactionDiagnostic(details) {
-  if (!wordTransactionDebugEnabled() || typeof console === 'undefined') {
-    return;
-  }
-  const logger = console;
-  const group = typeof logger.groupCollapsed === 'function'
-    ? logger.groupCollapsed.bind(logger)
-    : logger.log.bind(logger);
-  group('[LootLingua] Admin createWord transaction diagnostic');
-  logger.log('runtime', { projectId: app?.options?.projectId || null });
-  logger.log('paths', details.paths);
-  logger.log('world', summarizeWordTransactionParent(details.parents.world));
-  logger.log('rank', summarizeWordTransactionParent(details.parents.rank));
-  logger.log('gate', summarizeWordTransactionParent(details.parents.gate));
-  logger.log('wordPayload', details.wordPayload);
-  logger.log('parentUpdates', details.parentUpdates);
-  if (typeof logger.groupEnd === 'function') {
-    logger.groupEnd();
-  }
-}
-
 const WORLD_EDITABLE_FIELDS = Object.freeze([
   'slug',
   'title',
@@ -866,6 +818,36 @@ function gateRecord(snapshot, worldId, rankId) {
 
 function wordsCollection(worldId, rankId, gateId) {
   return collection(doc(gatesCollection(worldId, rankId), gateId), 'words');
+}
+
+async function incrementWordCountersBestEffort(worldId, rankId, gateId, uid) {
+  try {
+    const results = await Promise.allSettled([
+      updateDoc(doc(contentWorlds, worldId), {
+        wordCount: increment(1),
+        updatedAt: serverTimestamp(),
+        updatedBy: uid,
+      }),
+      updateDoc(doc(ranksCollection(worldId), rankId), {
+        wordCount: increment(1),
+        updatedAt: serverTimestamp(),
+        updatedBy: uid,
+      }),
+      updateDoc(doc(gatesCollection(worldId, rankId), gateId), {
+        wordCount: increment(1),
+        updatedAt: serverTimestamp(),
+        updatedBy: uid,
+      }),
+    ]);
+    if (!results.some((result) => result.status === 'rejected')) {
+      return;
+    }
+  } catch {
+    // Counter drift is acceptable here; the word write already committed.
+  }
+  if (typeof console !== 'undefined') {
+    console.warn('[LootLingua] Word saved, but one or more word counters were not incremented.');
+  }
 }
 
 function wordRecord(snapshot, worldId, rankId, gateId) {
@@ -2139,29 +2121,14 @@ async function createWord(worldId, rankId, gateId, payload) {
       );
     }
 
-    const worldReference = doc(contentWorlds, parentWorldId);
-    const rankReference = doc(ranksCollection(parentWorldId), parentRankId);
-    const gateReference = doc(gatesCollection(parentWorldId, parentRankId), parentGateId);
     const wordReference = doc(
       wordsCollection(parentWorldId, parentRankId, parentGateId),
       contentWordId
     );
     const savedWord = await runTransaction(db, async (transaction) => {
       assertAdminContext(context);
-      const worldSnapshot = await transaction.get(worldReference);
-      const rankSnapshot = await transaction.get(rankReference);
-      const gateSnapshot = await transaction.get(gateReference);
       const existingWordSnapshot = await transaction.get(wordReference);
       assertAdminContext(context);
-      if (!worldSnapshot.exists()) {
-        throw adminCloudError('admin/not-found', 'Parent world not found.');
-      }
-      if (!rankSnapshot.exists()) {
-        throw adminCloudError('admin/not-found', 'Parent rank not found.');
-      }
-      if (!gateSnapshot.exists()) {
-        throw adminCloudError('admin/not-found', 'Parent gate not found.');
-      }
       if (existingWordSnapshot.exists()) {
         const collision = existingWordSnapshot.data() || {};
         throw adminCloudError(
@@ -2173,26 +2140,6 @@ async function createWord(worldId, rankId, gateId, payload) {
             : 'The deterministic word identity is already occupied.'
         );
       }
-      const existingWorld = worldSnapshot.data() || {};
-      const existingRank = rankSnapshot.data() || {};
-      const existingGate = gateSnapshot.data() || {};
-      assertStoredWorld(existingWorld, parentWorldId);
-      assertStoredRank(existingRank, parentWorldId, parentRankId);
-      assertStoredGate(existingGate, parentWorldId, parentRankId, parentGateId);
-      const nextWorldWordCount = existingWorld.wordCount + 1;
-      const nextRankWordCount = existingRank.wordCount + 1;
-      const nextGateWordCount = existingGate.wordCount + 1;
-      const maxCount = getContentSchema().LIMITS.count;
-      if (
-        !Number.isSafeInteger(nextWorldWordCount) ||
-        !Number.isSafeInteger(nextRankWordCount) ||
-        !Number.isSafeInteger(nextGateWordCount) ||
-        nextWorldWordCount > maxCount ||
-        nextRankWordCount > maxCount ||
-        nextGateWordCount > maxCount
-      ) {
-        throw adminCloudError('admin/corrupt-data', 'The parent wordCount cannot be incremented safely.');
-      }
       const saved = {
         ...word,
         createdAt: serverTimestamp(),
@@ -2200,47 +2147,16 @@ async function createWord(worldId, rankId, gateId, payload) {
         createdBy: context.uid,
         updatedBy: context.uid,
       };
-      const gateUpdate = {
-        wordCount: nextGateWordCount,
-        updatedAt: serverTimestamp(),
-        updatedBy: context.uid,
-      };
-      const rankUpdate = {
-        wordCount: nextRankWordCount,
-        updatedAt: serverTimestamp(),
-        updatedBy: context.uid,
-      };
-      const worldUpdate = {
-        wordCount: nextWorldWordCount,
-        updatedAt: serverTimestamp(),
-        updatedBy: context.uid,
-      };
-      logCreateWordTransactionDiagnostic({
-        paths: {
-          world: worldReference.path,
-          rank: rankReference.path,
-          gate: gateReference.path,
-          word: wordReference.path,
-        },
-        parents: {
-          world: existingWorld,
-          rank: existingRank,
-          gate: existingGate,
-        },
-        wordPayload: saved,
-        parentUpdates: {
-          gate: gateUpdate,
-          rank: rankUpdate,
-          world: worldUpdate,
-        },
-      });
       transaction.set(wordReference, saved);
-      transaction.update(gateReference, gateUpdate);
-      transaction.update(rankReference, rankUpdate);
-      transaction.update(worldReference, worldUpdate);
       return saved;
     });
     assertAdminContext(context);
+    void incrementWordCountersBestEffort(
+      parentWorldId,
+      parentRankId,
+      parentGateId,
+      context.uid
+    );
     return {
       ...savedWord,
       duplicateAnalysis: {
@@ -2349,6 +2265,76 @@ async function archiveWord(worldId, rankId, gateId, contentWordId, expectedVersi
     return result;
   } catch (error) {
     throw mapAdminCloudError(error, 'admin/archive-failed');
+  }
+}
+
+async function bulkSetWordStatus(worldId, rankId, gateId, status, items) {
+  try {
+    const context = await requireAdminContext();
+    const parentWorldId = requireWorldId(worldId);
+    const parentRankId = requireRankId(rankId);
+    const parentGateId = requireGateId(gateId);
+    if (!['published', 'archived'].includes(status)) {
+      throw adminCloudError('admin/invalid-argument', 'Bulk word status is invalid.');
+    }
+    const canonicalItems = requireBulkWordItems(items);
+    const savedWords = await runTransaction(db, async (transaction) => {
+      assertAdminContext(context);
+      const currentWords = await Promise.all(canonicalItems.map(async (item) => {
+        const reference = doc(
+          wordsCollection(parentWorldId, parentRankId, parentGateId),
+          item.contentWordId
+        );
+        const snapshot = await transaction.get(reference);
+        return { item, reference, snapshot };
+      }));
+      assertAdminContext(context);
+      const updates = currentWords.map(({ item, reference, snapshot }) => {
+        if (!snapshot.exists()) {
+          throw adminCloudError('admin/not-found', 'Word not found.');
+        }
+        const existing = snapshot.data() || {};
+        assertStoredWord(existing, parentWorldId, parentRankId, parentGateId, item.contentWordId);
+        if (existing.version !== item.expectedVersion) {
+          throw adminCloudError('admin/version-conflict', 'A word was changed by another request.', {
+            contentWordId: item.contentWordId,
+            expectedVersion: item.expectedVersion,
+            actualVersion: existing.version,
+          });
+        }
+        const word = buildWordUpdateCandidate(
+          existing,
+          { status },
+          parentWorldId,
+          parentRankId,
+          parentGateId,
+          item.contentWordId,
+          context.uid,
+          existing.version + 1
+        );
+        return {
+          reference,
+          saved: {
+            ...word,
+            worldId: parentWorldId,
+            rankId: parentRankId,
+            gateId: parentGateId,
+            contentWordId: item.contentWordId,
+            version: existing.version + 1,
+            createdAt: existing.createdAt,
+            createdBy: existing.createdBy,
+            updatedAt: serverTimestamp(),
+            updatedBy: context.uid,
+          },
+        };
+      });
+      updates.forEach(({ reference, saved }) => transaction.set(reference, saved));
+      return updates.map(({ saved }) => saved);
+    });
+    assertAdminContext(context);
+    return savedWords;
+  } catch (error) {
+    throw mapAdminCloudError(error, 'admin/bulk-update-failed');
   }
 }
 
@@ -2551,11 +2537,13 @@ async function bulkWordOperation(worldId, rankId, gateId, action, items, options
 }
 
 async function bulkPublishWords(worldId, rankId, gateId, items, options) {
-  return bulkWordOperation(worldId, rankId, gateId, 'publish', items, options);
+  requireOptions(options, new Set(['operationId']), 'Bulk publish options must be an object.', true);
+  return bulkSetWordStatus(worldId, rankId, gateId, 'published', items);
 }
 
 async function bulkArchiveWords(worldId, rankId, gateId, items, options) {
-  return bulkWordOperation(worldId, rankId, gateId, 'archive', items, options);
+  requireOptions(options, new Set(['operationId']), 'Bulk archive options must be an object.', true);
+  return bulkSetWordStatus(worldId, rankId, gateId, 'archived', items);
 }
 
 async function bulkMoveWords(worldId, rankId, gateId, items, target, options) {
