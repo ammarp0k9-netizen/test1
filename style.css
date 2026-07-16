@@ -598,6 +598,25 @@ body.perf-stable .smart-loading-slow-warning {
   font-weight: 600;
 }
 
+.admin-import-inspection-notice {
+  margin: 0 20px 12px;
+  padding: 10px 12px;
+  border: 1px solid color-mix(in srgb, var(--star) 42%, var(--border));
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--star) 9%, var(--card-bg));
+  color: var(--text-white);
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.admin-import-inspection-copy {
+  margin: 0;
+}
+
+.admin-import-inspection-copy + .admin-import-inspection-copy {
+  margin-top: 7px;
+}
+
 .admin-import-table-wrap {
   flex: 1 1 280px;
   min-height: 140px;
@@ -658,6 +677,10 @@ body.perf-stable .smart-loading-slow-warning {
   }
 
   .admin-import-table-wrap {
+    margin-inline: 14px;
+  }
+
+  .admin-import-inspection-notice {
     margin-inline: 14px;
   }
 }
