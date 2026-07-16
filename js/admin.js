@@ -1791,6 +1791,32 @@
     });
   }
 
+  function renderWordImportInspectionNotice(container, preview) {
+    const warnings = Array.isArray(preview.generalWarnings) ? preview.generalWarnings : [];
+    container.replaceChildren();
+    if (!preview.blockingIssue && warnings.length === 0) {
+      container.hidden = true;
+      return;
+    }
+    if (preview.blockingIssue) {
+      const blocking = makeElement(
+        'p',
+        'admin-import-inspection-copy',
+        'تعذر فحص تكرار الكلمات داخل البوابة الحالية. لا يمكن متابعة الاستيراد قبل اكتمال هذا الفحص.'
+      );
+      container.append(blocking);
+    }
+    if (warnings.length) {
+      const warning = makeElement(
+        'p',
+        'admin-import-inspection-copy',
+        'تعذر فحص وجود الكلمة خارج البوابة الحالية، ويمكن متابعة الاستيراد.'
+      );
+      container.append(warning);
+    }
+    container.hidden = false;
+  }
+
   function openWordImportPreview(world, rank, gate, preview, returnFocus) {
     closeAdminModal(true);
     ui.wordImportPending = true;
@@ -1840,6 +1866,9 @@
     progress.setAttribute('role', 'status');
     progress.setAttribute('aria-live', 'polite');
     dialog.append(progress);
+    const inspectionNotice = makeElement('div', 'admin-import-inspection-notice');
+    renderWordImportInspectionNotice(inspectionNotice, preview);
+    dialog.append(inspectionNotice);
     const tableWrap = makeElement('div', 'admin-import-table-wrap');
     renderWordImportEntries(tableWrap, preview.entries);
     dialog.append(tableWrap);
@@ -1855,7 +1884,7 @@
     const importButton = makeButton(`استيراد ${preview.stats.valid} كلمة`, null, {
       className: 'admin-btn admin-btn-primary',
       type: 'submit',
-      disabled: preview.stats.valid === 0
+      disabled: preview.stats.valid === 0 || Boolean(preview.blockingIssue)
     });
     appendChildren(footer, [cancelButton, importButton]);
     form.append(footer);
@@ -1872,6 +1901,7 @@
       cancelButton,
       importButton,
       progress,
+      inspectionNotice,
       stats,
       tableWrap,
       preview,
@@ -1880,6 +1910,9 @@
       returnFocus
     };
     ui.modal = modalState;
+    if (preview.blockingIssue) {
+      progress.textContent = 'فشل فحص التكرار داخل البوابة. لا يمكن متابعة الاستيراد.';
+    }
     form.addEventListener('submit', (event) => commitWordImport(event, modalState));
     importButton.focus();
   }
@@ -1960,7 +1993,7 @@
       });
       const cloud = getCloudApi();
       preview = await importer.inspectDuplicates(preview, {
-        inspect: cloud.inspectWordDuplicates.bind(cloud),
+        inspectGate: cloud.inspectWordDuplicates.bind(cloud),
         concurrency: 3
       });
       if (
