@@ -3,7 +3,7 @@
   "private": true,
   "scripts": {
     "test:contracts": "node --test tests/admin-access-static.test.mjs tests/content-schema.test.mjs tests/content-schema-gate.test.mjs tests/protected-contracts.test.mjs",
-    "test:admin": "node --test tests/admin-access-static.test.mjs tests/admin-claim-state.test.mjs tests/admin-cloud-api-static.test.mjs tests/admin-cloud-rank-behavior.test.mjs tests/admin-cloud-gate-static.test.mjs tests/admin-cloud-gate-behavior.test.mjs tests/admin-route-static.test.mjs tests/admin-ui-static.test.mjs tests/admin-gate-ui-static.test.mjs tests/admin-word-ui-static.test.mjs",
+    "test:admin": "node --test tests/admin-access-static.test.mjs tests/admin-claim-state.test.mjs tests/admin-cloud-api-static.test.mjs tests/admin-cloud-rank-behavior.test.mjs tests/admin-cloud-gate-static.test.mjs tests/admin-cloud-gate-behavior.test.mjs tests/admin-cloud-word-static.test.mjs tests/admin-route-static.test.mjs tests/admin-ui-static.test.mjs tests/admin-gate-ui-static.test.mjs tests/admin-word-ui-static.test.mjs",
     "test:admin:browser": "node tools/admin-rank-browser-smoke.mjs",
     "test:admin:gate-browser": "node tools/admin-gate-browser-smoke.mjs",
     "test:rules": "firebase emulators:exec --only firestore --project demo-lootlingua \"node tests/firestore-rules.test.mjs\"",
