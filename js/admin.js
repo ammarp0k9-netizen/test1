@@ -1098,10 +1098,12 @@
         className: 'admin-btn admin-btn-secondary', worldId, rankId, gateId, contentWordId, disabled: isBusy
       }),
       makeButton('نسخ إلى بوابة', 'duplicate-word', {
-        className: 'admin-btn admin-btn-secondary', worldId, rankId, gateId, contentWordId, disabled: isBusy
+        className: 'admin-btn admin-btn-secondary', worldId, rankId, gateId, contentWordId,
+        disabled: true, title: 'نسخ الكلمات لم يتم ربطه بعد.'
       }),
       makeButton('نقل', 'move-word', {
-        className: 'admin-btn admin-btn-secondary', worldId, rankId, gateId, contentWordId, disabled: isBusy
+        className: 'admin-btn admin-btn-secondary', worldId, rankId, gateId, contentWordId,
+        disabled: true, title: 'نقل الكلمات لم يتم ربطه بعد.'
       })
     ]);
     if (word.status === 'draft') {
@@ -1109,12 +1111,14 @@
         className: 'admin-btn admin-btn-success', worldId, rankId, gateId, contentWordId,
         status: 'published', disabled: isBusy
       }));
-      actions.append(makeButton('أرشفة', 'archive-word', {
-        className: 'admin-btn admin-btn-warning', worldId, rankId, gateId, contentWordId, disabled: isBusy
+      actions.append(makeButton('أرشفة', 'set-word-status', {
+        className: 'admin-btn admin-btn-warning', worldId, rankId, gateId, contentWordId,
+        status: 'archived', disabled: isBusy
       }));
     } else if (word.status === 'published') {
-      actions.append(makeButton('أرشفة', 'archive-word', {
-        className: 'admin-btn admin-btn-warning', worldId, rankId, gateId, contentWordId, disabled: isBusy
+      actions.append(makeButton('أرشفة', 'set-word-status', {
+        className: 'admin-btn admin-btn-warning', worldId, rankId, gateId, contentWordId,
+        status: 'archived', disabled: isBusy
       }));
     } else if (word.status === 'archived') {
       actions.append(makeButton('إعادة لمسودة', 'set-word-status', {
@@ -1122,7 +1126,8 @@
         status: 'draft', disabled: isBusy
       }));
       actions.append(makeButton('حذف نهائي', 'delete-word', {
-        className: 'admin-btn admin-btn-danger', worldId, rankId, gateId, contentWordId, disabled: isBusy
+        className: 'admin-btn admin-btn-danger', worldId, rankId, gateId, contentWordId,
+        disabled: true, title: 'حذف الكلمات لم يتم ربطه بعد.'
       }));
     }
 
@@ -1154,7 +1159,12 @@
       }),
       makeButton('نشر المحدد', 'bulk-publish-words', { ...common, className: 'admin-btn admin-btn-success' }),
       makeButton('أرشفة المحدد', 'bulk-archive-words', { ...common, className: 'admin-btn admin-btn-warning' }),
-      makeButton('نقل المحدد', 'bulk-move-words', { ...common, className: 'admin-btn admin-btn-primary' })
+      makeButton('نقل المحدد', 'bulk-move-words', {
+        ...common,
+        className: 'admin-btn admin-btn-primary',
+        disabled: true,
+        title: 'نقل الكلمات جماعيًا لم يتم ربطه بعد.'
+      })
     ]);
     appendChildren(toolbar, [summary, actions]);
     return toolbar;
@@ -2928,13 +2938,17 @@
   }
 
   function wordSelectionPayload() {
-    return ui.words
-      .filter((word) => ui.selectedWordIds.has(String(word.contentWordId || '')))
-      .slice(0, MAX_BULK_WORDS)
-      .map((word) => ({
-        contentWordId: String(word.contentWordId),
-        expectedVersion: expectedVersion(word)
-      }));
+    const selected = ui.words
+      .filter((word) => ui.selectedWordIds.has(String(word.contentWordId || '')));
+    if (selected.length > MAX_BULK_WORDS) {
+      const error = new Error('content/invalid-bulk-size');
+      error.code = 'content/invalid-bulk-size';
+      throw error;
+    }
+    return selected.map((word) => ({
+      contentWordId: String(word.contentWordId),
+      expectedVersion: expectedVersion(word)
+    }));
   }
 
   async function changeWordStatus(world, rank, gate, word, nextStatus) {
@@ -2948,9 +2962,12 @@
       setWordActionError('هذا الانتقال غير مسموح.', { code: 'content/invalid-status-transition' });
       return;
     }
-    if (!root.confirm(nextStatus === 'published'
+    const question = nextStatus === 'published'
       ? `نشر الكلمة «${String(word.word || '')}»؟`
-      : `إعادة الكلمة «${String(word.word || '')}» إلى مسودة؟`)) return;
+      : (nextStatus === 'archived'
+        ? `أرشفة الكلمة «${String(word.word || '')}»؟`
+        : `إعادة الكلمة «${String(word.word || '')}» إلى مسودة؟`);
+    if (!root.confirm(question)) return;
     const key = `word:${world.worldId}:${rank.rankId}:${gate.gateId}:${word.contentWordId}:status`;
     if (ui.actionKeys.has(key)) return;
     const adminUid = String(getAdminState().uid || '');
@@ -3733,6 +3750,64 @@
       return;
     }
     const gate = findGate(actionButton.dataset.gateId);
+    if (action === 'open-words') {
+      if (rank && gate) openWordsForGate(world.worldId, rank.rankId, gate.gateId);
+      return;
+    }
+    if (action === 'refresh-words') {
+      if (
+        rank && gate &&
+        String(actionButton.dataset.worldId || '') === String(ui.activeWorldId || '') &&
+        String(actionButton.dataset.rankId || '') === String(ui.activeRankId || '') &&
+        String(actionButton.dataset.gateId || '') === String(ui.activeGateId || '')
+      ) {
+        refreshWords({ append: false });
+      }
+      return;
+    }
+    if (action === 'load-more-words') {
+      if (
+        rank && gate && ui.wordHasMore &&
+        String(actionButton.dataset.worldId || '') === String(ui.activeWorldId || '') &&
+        String(actionButton.dataset.rankId || '') === String(ui.activeRankId || '') &&
+        String(actionButton.dataset.gateId || '') === String(ui.activeGateId || '')
+      ) {
+        refreshWords({ append: true });
+      }
+      return;
+    }
+    if (action === 'toggle-word-selection') {
+      const contentWordId = String(actionButton.dataset.contentWordId || '');
+      if (rank && gate && findWord(contentWordId)) {
+        if (actionButton.checked) ui.selectedWordIds.add(contentWordId);
+        else ui.selectedWordIds.delete(contentWordId);
+        renderWords();
+      }
+      return;
+    }
+    if (action === 'create-word') {
+      if (rank && gate && canLeaveAdminView()) openWordEditor(world, rank, gate, null, 'create', actionButton);
+      return;
+    }
+    const word = findWord(actionButton.dataset.contentWordId);
+    if (action === 'edit-word') {
+      if (rank && gate && word && canLeaveAdminView()) {
+        loadFreshWordForEditor(world, rank, gate, word.contentWordId, actionButton);
+      }
+      return;
+    }
+    if (action === 'set-word-status') {
+      if (rank && gate && word) changeWordStatus(world, rank, gate, word, actionButton.dataset.status);
+      return;
+    }
+    if (action === 'bulk-publish-words') {
+      if (rank && gate) runBulkWordStatus(world, rank, gate, 'publish');
+      return;
+    }
+    if (action === 'bulk-archive-words') {
+      if (rank && gate) runBulkWordStatus(world, rank, gate, 'archive');
+      return;
+    }
     if (action === 'edit-gate') {
       if (rank && gate && canLeaveAdminView()) loadFreshGateForEditor(world, rank, gate.gateId, actionButton);
       return;
