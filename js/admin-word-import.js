@@ -145,11 +145,19 @@
       );
     }
     const schema = requireSchema(settings.schema);
+    const destination = settings.destination === 'staging' ? 'staging' : 'gate';
     const context = {
-      worldId: String(settings.worldId || ''),
-      rankId: String(settings.rankId || ''),
-      gateId: String(settings.gateId || '')
+      worldId: destination === 'gate' ? String(settings.worldId || '') : '',
+      rankId: destination === 'gate' ? String(settings.rankId || '') : '',
+      gateId: destination === 'gate' ? String(settings.gateId || '') : ''
     };
+    const validationContext = destination === 'staging'
+      ? {
+          worldId: 'staging-preview-world',
+          rankId: 'staging-preview-rank',
+          gateId: 'staging-preview-gate'
+        }
+      : context;
     const existing = new Set((settings.existingWords || []).map((word) =>
       String(word && word.normalizedWord || '')
     ).filter(Boolean));
@@ -185,17 +193,17 @@
 
       const candidate = {
         ...payload,
-        worldId: context.worldId,
-        rankId: context.rankId,
-        gateId: context.gateId,
+        worldId: validationContext.worldId,
+        rankId: validationContext.rankId,
+        gateId: validationContext.gateId,
         contentWordId: `import-preview-${index + 1}`,
         status: 'draft',
         version: 1
       };
       const validation = schema.validateWord(candidate, {
-        worldId: context.worldId,
-        rankId: context.rankId,
-        gateId: context.gateId,
+        worldId: validationContext.worldId,
+        rankId: validationContext.rankId,
+        gateId: validationContext.gateId,
         contentWordId: candidate.contentWordId,
         path
       });
@@ -238,6 +246,7 @@
       format: FORMAT,
       version: VERSION,
       source: parsed.source || 'official',
+      destination,
       context,
       entries,
       stats: recalculateStats(entries),
@@ -412,6 +421,76 @@
     };
   }
 
+  async function commitToStaging(preview, options) {
+    const settings = options || {};
+    if (
+      !preview ||
+      !Array.isArray(preview.entries) ||
+      typeof settings.importWords !== 'function'
+    ) {
+      throw makeError('import/staging-import-required', 'A staging import function is required.');
+    }
+    const entries = preview.entries.map((entry) => ({
+      ...entry,
+      errors: entry.errors.slice(),
+      warnings: entry.warnings.slice()
+    }));
+    const eligible = entries.filter((entry) => entry.state === 'valid');
+    const response = await settings.importWords(
+      eligible.map((entry) => ({
+        index: entry.index,
+        sourceOrder: entry.index,
+        payload: entry.payload
+      })),
+      {
+        importBatchId: settings.importBatchId,
+        sourceFileName: settings.sourceFileName
+      }
+    );
+    const results = new Map((response.results || []).map((item) => [item.index, item]));
+    let staged = 0;
+    let duplicates = 0;
+    let failed = 0;
+    eligible.forEach((entry) => {
+      const result = results.get(entry.index);
+      if (result && result.state === 'staged') {
+        entry.state = 'staged';
+        staged += 1;
+      } else if (result && result.state === 'duplicate-staging') {
+        entry.state = 'duplicate-staging';
+        duplicates += 1;
+        entry.errors.push(issue(
+          `words[${entry.index}]`,
+          'import/duplicate-in-staging',
+          `الكلمة محفوظة مسبقًا في ${result.sourceFileName || result.importBatchId || 'دفعة استيراد أخرى'}.`
+        ));
+      } else {
+        entry.state = 'failed';
+        failed += 1;
+        entry.errors.push(issue(
+          `words[${entry.index}]`,
+          'admin/staging-import-failed',
+          'The word could not be saved to staging.'
+        ));
+      }
+    });
+    return {
+      ...preview,
+      entries,
+      importBatchId: response.importBatchId,
+      summary: {
+        total: entries.length,
+        attempted: eligible.length,
+        succeeded: staged,
+        failed,
+        skippedDuplicates: duplicates + entries.filter((entry) =>
+          entry.state === 'duplicate-file'
+        ).length,
+        skippedInvalid: entries.filter((entry) => entry.state === 'invalid').length
+      }
+    };
+  }
+
   const API = Object.freeze({
     FORMAT,
     VERSION,
@@ -423,7 +502,8 @@
     parseJsonText,
     preparePreview,
     inspectDuplicates,
-    commit
+    commit,
+    commitToStaging
   });
 
   Object.defineProperty(root, 'LootLinguaAdminWordImport', {
