@@ -1255,6 +1255,19 @@ body.admin-mode .admin-world-row {
   min-width: 0;
 }
 
+.admin-word-pagination {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 9px;
+  margin-top: 14px;
+}
+
+.admin-word-pagination .admin-count-note {
+  margin-inline-end: auto;
+}
+
 .admin-gate-row {
   border-inline-start: 3px solid color-mix(in srgb, var(--star) 72%, var(--accent));
 }
