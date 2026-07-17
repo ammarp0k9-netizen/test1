@@ -4,11 +4,13 @@ import {
   collection,
   doc,
   documentId,
+  endBefore,
   getDoc,
   getDocs,
   getFirestore,
   increment,
   limit,
+  limitToLast,
   orderBy,
   query,
   runTransaction,
@@ -397,6 +399,14 @@ function requireWordPageSize(value) {
     );
   }
   return pageSize;
+}
+
+function requireWordListDirection(value) {
+  if (value === undefined) return 'forward';
+  if (value !== 'forward' && value !== 'backward') {
+    throw adminCloudError('admin/invalid-argument', 'direction must be forward or backward.');
+  }
+  return value;
 }
 
 function encodeBase64UrlAscii(value) {
@@ -1917,11 +1927,12 @@ async function listWords(worldId, rankId, gateId, options) {
     const parentGateId = requireGateId(gateId);
     const settings = requireOptions(
       options,
-      new Set(['pageSize', 'pageToken', 'cursor']),
+      new Set(['pageSize', 'pageToken', 'cursor', 'direction']),
       'Word list options must be an object.',
       true
     );
     const pageSize = requireWordPageSize(settings.pageSize);
+    const direction = requireWordListDirection(settings.direction);
     if (
       settings.pageToken !== undefined &&
       settings.cursor !== undefined &&
@@ -1941,16 +1952,28 @@ async function listWords(worldId, rankId, gateId, options) {
         parentRankId,
         parentGateId
       );
-      constraints.push(startAfter(cursor.order, cursor.contentWordId));
+      if (direction === 'backward') {
+        constraints.push(endBefore(cursor.order, cursor.contentWordId));
+      } else {
+        constraints.push(startAfter(cursor.order, cursor.contentWordId));
+      }
     }
-    constraints.push(limit(pageSize + 1));
+    constraints.push(direction === 'backward' ? limitToLast(pageSize + 1) : limit(pageSize + 1));
     const snapshot = await getDocs(query(
       wordsCollection(parentWorldId, parentRankId, parentGateId),
       ...constraints
     ));
     assertAdminContext(context);
-    const hasMore = snapshot.docs.length > pageSize;
-    const items = snapshot.docs.slice(0, pageSize).map((item) =>
+    const hasPrevious = direction === 'backward'
+      ? snapshot.docs.length > pageSize
+      : Boolean(pageToken);
+    const hasNext = direction === 'backward'
+      ? true
+      : snapshot.docs.length > pageSize;
+    const pageDocs = direction === 'backward' && hasPrevious
+      ? snapshot.docs.slice(1)
+      : snapshot.docs.slice(0, pageSize);
+    const items = pageDocs.map((item) =>
       wordRecord(item, parentWorldId, parentRankId, parentGateId)
     );
     items.forEach((item) => assertStoredWord(
@@ -1960,7 +1983,15 @@ async function listWords(worldId, rankId, gateId, options) {
       parentGateId,
       item.contentWordId
     ));
-    const nextPageToken = hasMore && items.length
+    const firstCursor = items.length
+      ? encodeWordPageToken(
+        parentWorldId,
+        parentRankId,
+        parentGateId,
+        items[0]
+      )
+      : null;
+    const endCursor = items.length
       ? encodeWordPageToken(
         parentWorldId,
         parentRankId,
@@ -1968,12 +1999,29 @@ async function listWords(worldId, rankId, gateId, options) {
         items[items.length - 1]
       )
       : null;
+    const beforeCursor = direction === 'backward'
+      ? (hasPrevious
+        ? encodeWordPageToken(
+          parentWorldId,
+          parentRankId,
+          parentGateId,
+          wordRecord(snapshot.docs[0], parentWorldId, parentRankId, parentGateId)
+        )
+        : null)
+      : (pageToken || null);
     return {
       items,
       pageSize,
-      hasMore,
-      nextPageToken,
-      nextCursor: nextPageToken,
+      direction,
+      hasMore: hasNext,
+      hasNext,
+      hasPrevious,
+      beforeCursor,
+      firstCursor,
+      startCursor: firstCursor,
+      endCursor,
+      nextPageToken: hasNext ? endCursor : null,
+      nextCursor: hasNext ? endCursor : null,
     };
   } catch (error) {
     throw mapAdminCloudError(error, 'admin/list-failed');
