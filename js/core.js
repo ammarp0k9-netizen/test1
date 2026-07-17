@@ -1264,6 +1264,10 @@ function setViewBackBar(visible, label) {
 }
 
 window.goBackFromSubView = function() {
+  if (typeof currentView !== 'undefined' && currentView === 'admin' &&
+      typeof window.returnFromAdminView === 'function') {
+    return window.returnFromAdminView();
+  }
   if (viewBackTarget === 'worlds') loadWorldsView();
   else loadPersonalDictionary();
 };
