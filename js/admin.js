@@ -58,7 +58,9 @@
     actionKeys: new Set(),
     lastAdminState: null,
     entryBound: false,
-    accessCheckPending: false
+    accessCheckPending: false,
+    returnView: 'personal',
+    returnCustomWorldId: ''
   };
 
   function makeElement(tagName, className, textValue) {
@@ -88,6 +90,26 @@
     if (settings.disabled) button.disabled = true;
     if (settings.title) button.title = settings.title;
     return button;
+  }
+
+  function shortenTechnicalValue(value, maxLength) {
+    const text = String(value || '');
+    const limit = Math.max(16, Number(maxLength) || 30);
+    if (text.length <= limit) return text;
+    const tailLength = 8;
+    return `${text.slice(0, limit - tailLength - 1)}…${text.slice(-tailLength)}`;
+  }
+
+  function makeTechnicalCode(value, fallback, className) {
+    const fullValue = String(value || fallback || '');
+    const code = makeElement(
+      'code',
+      className || 'admin-world-id',
+      shortenTechnicalValue(fullValue, 32)
+    );
+    code.title = fullValue;
+    code.setAttribute('aria-label', fullValue);
+    return code;
   }
 
   function getAdminRoot() {
@@ -395,7 +417,7 @@
     appendChildren(identity, [
       titleLine,
       makeElement('p', 'admin-world-subtitle', world.subtitle || 'لا يوجد وصف مختصر.'),
-      makeElement('code', 'admin-world-id', id || 'معرّف مفقود'),
+      makeTechnicalCode(id, 'معرّف مفقود', 'admin-world-id'),
       makeElement('span', 'admin-world-meta', `الترتيب: ${cachedCount(world.order)} · آخر تعديل: ${formatDate(world.updatedAt || world.createdAt)}`)
     ]);
 
@@ -703,7 +725,7 @@
     appendChildren(identity, [
       titleLine,
       makeElement('p', 'admin-world-subtitle', rank.subtitle || 'لا يوجد وصف مختصر.'),
-      makeElement('code', 'admin-world-id', rankId || 'معرّف مفقود'),
+      makeTechnicalCode(rankId, 'معرّف مفقود', 'admin-world-id'),
       makeElement('span', 'admin-world-meta', `الترتيب: ${cachedCount(rank.order)} · الإصدار: ${String(rank.version || 'غير صالح')} · آخر تعديل: ${formatDate(rank.updatedAt || rank.createdAt)}`)
     ]);
 
@@ -864,7 +886,7 @@
     appendChildren(identity, [
       titleLine,
       makeElement('p', 'admin-world-subtitle', gate.subtitle || 'لا يوجد وصف مختصر.'),
-      makeElement('code', 'admin-world-id', gateId || 'معرّف مفقود'),
+      makeTechnicalCode(gateId, 'معرّف مفقود', 'admin-world-id'),
       makeElement('span', 'admin-world-meta', `الترتيب: ${cachedCount(gate.order)} · الإصدار: ${String(gate.version || 'غير صالح')} · آخر تعديل: ${formatDate(gate.updatedAt || gate.createdAt)}`)
     ]);
 
@@ -1085,7 +1107,11 @@
     appendChildren(identity, [
       titleLine,
       makeElement('p', 'admin-world-subtitle admin-word-translation', word.translation || 'لا توجد ترجمة.'),
-      makeElement('code', 'admin-world-id', word.normalizedWord || contentWordId || 'معرّف مفقود'),
+      makeTechnicalCode(
+        word.normalizedWord || contentWordId,
+        'معرّف مفقود',
+        'admin-world-id admin-word-technical-value'
+      ),
       makeElement('span', 'admin-world-meta', `الترتيب: ${cachedCount(word.order)} · الإصدار: ${String(word.version || 'غير صالح')} · النوع: ${String(word.partOfSpeech || 'غير محدد')} · آخر تعديل: ${formatDate(word.updatedAt || word.createdAt)}`)
     ]);
     const duplicateScopes = collectWordDuplicateScopes(word);
@@ -1099,10 +1125,20 @@
     }
 
     const details = makeElement('div', 'admin-world-counts admin-word-details');
+    const identifierNote = makeElement('small', 'admin-count-note admin-word-id-note');
+    appendChildren(identifierNote, [
+      document.createTextNode('المعرّف: '),
+      makeTechnicalCode(
+        contentWordId,
+        'مفقود',
+        'admin-technical-value admin-word-content-id'
+      ),
+      document.createTextNode(' · مفتاح الإتقان مشتق مركزيًا')
+    ]);
     appendChildren(details, [
       makeElement('span', 'admin-count-chip', String(word.category || 'بلا تصنيف')),
       makeElement('span', 'admin-count-chip', String(word.level || 'بلا مستوى')),
-      makeElement('small', 'admin-count-note', `المعرّف: ${contentWordId || 'مفقود'} · مفتاح الإتقان مشتق مركزيًا`)
+      identifierNote
     ]);
 
     const actions = makeElement('div', 'admin-world-actions admin-word-actions');
@@ -1154,10 +1190,10 @@
     toolbar.setAttribute('aria-label', 'عمليات الكلمات الجماعية');
     const summary = makeElement('div', 'admin-word-selection-summary');
     appendChildren(summary, [
-      makeElement('strong', '', `${selectedCount} محددة`),
+      makeElement('strong', '', `${selectedCount} كلمات محددة`),
       makeElement('small', '', `الحد الأقصى للعملية الواحدة ${MAX_BULK_WORDS} كلمة مع إصدار كل كلمة.`)
     ]);
-    const actions = makeElement('div', 'admin-header-actions');
+    const actions = makeElement('div', 'admin-header-actions admin-word-bulk-actions');
     const common = {
       worldId: world.worldId,
       rankId: rank.rankId,
@@ -1165,7 +1201,7 @@
       disabled: ui.wordsLoading || selectedCount === 0 || selectedCount > MAX_BULK_WORDS
     };
     appendChildren(actions, [
-      makeButton(selectedCount && selectedCount === ui.words.length ? 'إلغاء تحديد الصفحة' : 'تحديد الصفحة المحملة', 'select-page-words', {
+      makeButton(selectedCount && selectedCount === ui.words.length ? 'إلغاء تحديد الكل' : 'تحديد الكل في الصفحة', 'select-page-words', {
         className: 'admin-btn admin-btn-secondary',
         worldId: world.worldId, rankId: rank.rankId, gateId: gate.gateId,
         disabled: ui.wordsLoading || ui.words.length === 0
@@ -1210,6 +1246,11 @@
       }
       return;
     }
+
+    const loadedWordIds = new Set(ui.words.map((word) => String(word.contentWordId || '')));
+    Array.from(ui.selectedWordIds).forEach((contentWordId) => {
+      if (!loadedWordIds.has(contentWordId)) ui.selectedWordIds.delete(contentWordId);
+    });
 
     container.replaceChildren();
     container.append(makeWordBreadcrumb(world, rank, gate));
@@ -1717,24 +1758,30 @@
   }
 
   function wordImportResultLabel(entry) {
+    const visualState = wordImportVisualState(entry);
     const labels = {
-      valid: entry.warnings.length ? 'صالح مع تحذير' : 'صالح',
-      invalid: 'غير صالح',
-      'duplicate-file': 'مكرر في الملف',
-      'duplicate-gate': 'موجود في البوابة',
-      imported: 'تم الاستيراد',
-      failed: 'فشل الحفظ'
+      valid: 'صالح',
+      warning: 'تحذير',
+      duplicate: 'مكرر',
+      invalid: 'غير صالح'
     };
-    return labels[entry.state] || String(entry.state || 'غير معروف');
+    if (entry.state === 'imported') return 'تم الاستيراد';
+    if (entry.state === 'failed') return 'فشل الحفظ';
+    return labels[visualState] || 'غير صالح';
+  }
+
+  function wordImportVisualState(entry) {
+    if (entry.state === 'duplicate-file' || entry.state === 'duplicate-gate') return 'duplicate';
+    if (entry.state === 'invalid' || entry.state === 'failed') return 'invalid';
+    if (entry.state === 'valid' && entry.warnings.length) return 'warning';
+    return 'valid';
   }
 
   function wordImportIssueText(entry) {
     const issues = entry.errors.concat(entry.warnings);
-    return issues.map((item) => {
-      const code = String(item.code || 'import/invalid-word');
-      const message = String(item.message || '');
-      return message ? `${code}: ${message}` : code;
-    }).join('، ');
+    return Array.from(new Set(issues.map((item) =>
+      String(item && item.message || '').trim()
+    ).filter(Boolean))).join('، ');
   }
 
   function renderWordImportEntries(container, entries) {
@@ -1747,9 +1794,15 @@
     head.append(headingRow);
     const body = makeElement('tbody');
     entries.forEach((entry) => {
-      const row = makeElement('tr', `admin-import-row admin-import-row-${entry.state}`);
+      const visualState = wordImportVisualState(entry);
+      const row = makeElement('tr', `admin-import-row admin-import-row-${visualState}`);
+      row.dataset.importState = String(entry.state || '');
       const resultCell = makeElement('td');
-      resultCell.append(makeElement('strong', 'admin-import-result', wordImportResultLabel(entry)));
+      resultCell.append(makeElement(
+        'strong',
+        `admin-import-result admin-import-result-${visualState}`,
+        wordImportResultLabel(entry)
+      ));
       const issueText = wordImportIssueText(entry);
       if (issueText) resultCell.append(makeElement('small', 'admin-import-issue', issueText));
       [
@@ -1878,6 +1931,9 @@
 
     const form = makeElement('form', 'admin-import-form');
     const footer = makeElement('footer', 'admin-modal-footer');
+    const backButton = makeButton('رجوع', 'choose-word-import-file', {
+      className: 'admin-btn admin-btn-secondary'
+    });
     const cancelButton = makeButton('إلغاء', 'close-modal', {
       className: 'admin-btn admin-btn-secondary'
     });
@@ -1886,11 +1942,14 @@
       type: 'submit',
       disabled: preview.stats.valid === 0 || Boolean(preview.blockingIssue)
     });
-    appendChildren(footer, [cancelButton, importButton]);
+    appendChildren(footer, [backButton, cancelButton, importButton]);
     form.append(footer);
     dialog.append(form);
     appendChildren(overlay, [backdrop, dialog]);
-    document.body.append(overlay);
+    getAdminRoot().append(overlay);
+    if (typeof lockBackgroundScroll === 'function') {
+      lockBackgroundScroll('adminWordImport');
+    }
 
     const modalState = {
       kind: 'word-import',
@@ -1898,6 +1957,7 @@
       form,
       errorBox,
       closeButton,
+      backButton,
       cancelButton,
       importButton,
       progress,
@@ -1905,6 +1965,9 @@
       stats,
       tableWrap,
       preview,
+      world,
+      rank,
+      gate,
       pending: false,
       completed: false,
       returnFocus
@@ -1924,6 +1987,7 @@
     modalState.form.setAttribute('aria-busy', 'true');
     modalState.importButton.disabled = true;
     modalState.closeButton.disabled = true;
+    modalState.backButton.disabled = true;
     modalState.cancelButton.disabled = true;
     modalState.importButton.textContent = 'جارٍ الاستيراد…';
     modalState.errorBox.hidden = true;
@@ -1943,6 +2007,7 @@
       ui.wordImportPending = false;
       modalState.form.setAttribute('aria-busy', 'false');
       modalState.closeButton.disabled = false;
+      modalState.backButton.disabled = false;
       modalState.cancelButton.disabled = false;
       modalState.cancelButton.textContent = 'إغلاق';
       modalState.importButton.disabled = true;
@@ -1965,6 +2030,7 @@
       ui.wordImportPending = false;
       modalState.form.setAttribute('aria-busy', 'false');
       modalState.closeButton.disabled = false;
+      modalState.backButton.disabled = false;
       modalState.cancelButton.disabled = false;
       modalState.importButton.disabled = false;
       modalState.importButton.textContent = `استيراد ${modalState.preview.stats.valid} كلمة`;
@@ -2072,6 +2138,9 @@
     modalState.overlay.remove();
     ui.modal = null;
     if (modalState.kind === 'word-import') {
+      if (typeof unlockBackgroundScroll === 'function') {
+        unlockBackgroundScroll('adminWordImport');
+      }
       ui.wordImportPending = false;
       if (ui.view === 'words') renderWords();
     }
@@ -4054,6 +4123,14 @@
       closeAdminModal(false);
       return;
     }
+    if (action === 'choose-word-import-file') {
+      const modalState = ui.modal;
+      if (!modalState || modalState.kind !== 'word-import' || modalState.pending) return;
+      const { world, rank, gate, returnFocus } = modalState;
+      closeAdminModal(true);
+      chooseWordImportFile(world, rank, gate, returnFocus);
+      return;
+    }
     if (action === 'refresh-worlds') {
       refreshWorlds({ clear: false });
       return;
@@ -4138,6 +4215,19 @@
       }
       return;
     }
+    if (action === 'select-page-words') {
+      if (!rank || !gate || ui.wordsLoading || ui.words.length === 0) return;
+      const pageIds = ui.words.map((item) => String(item.contentWordId || '')).filter(Boolean);
+      const pageIsSelected = pageIds.every((contentWordId) =>
+        ui.selectedWordIds.has(contentWordId)
+      );
+      pageIds.forEach((contentWordId) => {
+        if (pageIsSelected) ui.selectedWordIds.delete(contentWordId);
+        else ui.selectedWordIds.add(contentWordId);
+      });
+      renderWords();
+      return;
+    }
     if (action === 'create-word') {
       if (rank && gate && canLeaveAdminView()) openWordEditor(world, rank, gate, null, 'create', actionButton);
       return;
@@ -4215,14 +4305,32 @@
   }
 
   function switchToAdminShell() {
+    const originView = typeof currentView !== 'undefined' ? String(currentView || '') : '';
+    if (originView && originView !== 'admin') {
+      ui.returnView = originView;
+      ui.returnCustomWorldId = originView === 'customWorld' &&
+        typeof activeCustomWorldId !== 'undefined'
+        ? String(activeCustomWorldId || '')
+        : '';
+    }
     if (typeof beginViewSwitch === 'function') beginViewSwitch();
     if (typeof saveCurrentViewScroll === 'function') saveCurrentViewScroll();
     if (typeof closeSidebarIfOpen === 'function') closeSidebarIfOpen();
     if (typeof root.stopCustomWorldWordsCloudListener === 'function') root.stopCustomWorldWordsCloudListener();
+    if (typeof setTreasureMode === 'function') setTreasureMode(false);
+    document.body.classList.remove(
+      'treasure-mode',
+      'game-bg-active',
+      'treasure-route-next',
+      'treasure-route-back',
+      'worlds-route-next',
+      'worlds-route-back'
+    );
+    document.body.removeAttribute('data-game');
     if (typeof hideAllViewElements === 'function') hideAllViewElements();
     if (typeof currentView !== 'undefined') currentView = 'admin';
-    if (typeof viewBackTarget !== 'undefined') viewBackTarget = 'personal';
-    if (typeof setViewBackBar === 'function') setViewBackBar(true, 'العودة إلى قاموسك');
+    if (typeof viewBackTarget !== 'undefined') viewBackTarget = 'admin-origin';
+    if (typeof setViewBackBar === 'function') setViewBackBar(true, 'العودة إلى الصفحة السابقة');
     document.body.classList.add('admin-mode');
     const container = getAdminRoot();
     if (container) {
@@ -4236,6 +4344,32 @@
       pageTitle.replaceChildren(icon, document.createTextNode(' إدارة المحتوى الجاهز'));
     }
     if (typeof setAppViewRoute === 'function') setAppViewRoute('admin');
+  }
+
+  function returnFromAdminView() {
+    if (!canLeaveAdminView()) return false;
+    const returnView = String(ui.returnView || 'personal');
+    const customWorldId = String(ui.returnCustomWorldId || '');
+    document.body.classList.remove('admin-mode');
+    if (returnView === 'customWorld' && customWorldId && typeof root.loadCustomWorld === 'function') {
+      root.loadCustomWorld(customWorldId);
+      return true;
+    }
+    if ((returnView === 'minecraft' || returnView === 'pubg') &&
+        typeof root.loadGameDictionary === 'function') {
+      root.loadGameDictionary(returnView);
+      return true;
+    }
+    const loaders = {
+      treasure: root.loadTreasureView,
+      worlds: root.loadWorldsView,
+      starred: root.loadStarredView,
+      quiz: root.loadQuizView,
+      personal: root.loadPersonalDictionary
+    };
+    const loader = loaders[returnView] || root.loadPersonalDictionary;
+    if (typeof loader === 'function') loader();
+    return true;
   }
 
   async function loadAdminView() {
@@ -4388,6 +4522,7 @@
 
   root.loadAdminView = loadAdminView;
   root.openAdminDashboard = loadAdminView;
+  root.returnFromAdminView = returnFromAdminView;
   root.canLeaveAdminView = canLeaveAdminView;
 
   root.addEventListener('lootlingua:admin-state', handleAdminState);
