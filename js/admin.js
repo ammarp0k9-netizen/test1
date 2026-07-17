@@ -60,8 +60,26 @@
     wordPagerSignature: '',
     wordLoadingNext: false,
     wordLoadingPrevious: false,
+    wordSort: 'newest',
+    wordFilterField: '',
+    wordFilterValue: '',
+    wordSearch: '',
+    wordSearchTimer: null,
     selectedWordIds: new Set(),
     selectedWordMeta: new Map(),
+    stagingWords: [],
+    stagingLoading: false,
+    stagingPageError: '',
+    stagingPager: null,
+    stagingPageIndex: 0,
+    stagingHasNext: false,
+    stagingHasPrevious: false,
+    stagingSort: 'newest',
+    stagingFilterField: '',
+    stagingFilterValue: '',
+    stagingCount: null,
+    selectedStagingIds: new Set(),
+    selectedStagingMeta: new Map(),
     wordImportPending: false,
     modal: null,
     actionKeys: new Set(),
@@ -143,6 +161,8 @@
       'duplicateRankAsDraft', 'requestDeleteRank',
       'listGates', 'getGate', 'createGate', 'updateGate', 'setGateStatus',
       'duplicateGateAsDraft', 'moveGate', 'requestDeleteGate',
+      'importStagingWords', 'listStagingWords', 'countStagingWords',
+      'getStagingWord', 'deleteStagingWords', 'distributeStagingWords',
       'listWords', 'getWord', 'createWord', 'updateWord', 'setWordStatus',
       'inspectWordDuplicates',
       'archiveWord', 'duplicateWord', 'moveWord', 'bulkPublishWords',
@@ -169,7 +189,10 @@
 
   function getWordImportApi() {
     const api = root.LootLinguaAdminWordImport;
-    const required = ['assertFileSize', 'parseJsonText', 'preparePreview', 'inspectDuplicates', 'commit'];
+    const required = [
+      'assertFileSize', 'parseJsonText', 'preparePreview',
+      'inspectDuplicates', 'commit', 'commitToStaging'
+    ];
     if (!api || required.some((method) => typeof api[method] !== 'function')) {
       const error = new Error('admin/word-import-unavailable');
       error.code = 'admin/word-import-unavailable';
@@ -277,6 +300,24 @@
     return normalized;
   }
 
+  function normalizeStagingWordRecord(record) {
+    if (!record || typeof record !== 'object') return null;
+    const normalized = {};
+    [
+      'stagingWordId', 'importBatchId', 'sourceFileName', 'sourceOrder',
+      'schemaVersion', 'normalizationVersion', 'word', 'normalizedWord',
+      'wordKey', 'translation', 'definition', 'definition_ar', 'example',
+      'exampleTranslation', 'category', 'partOfSpeech', 'level', 'tags',
+      'synonyms', 'pronunciation', 'audioUrl', 'imageUrl', 'notes', 'order',
+      'stagingStatus', 'distributionTarget', 'distributionOperationId',
+      'distributedContentWordId', 'distributedAt', 'importedAt',
+      'createdAt', 'updatedAt', 'createdBy', 'updatedBy'
+    ].forEach((field) => {
+      if (Object.prototype.hasOwnProperty.call(record, field)) normalized[field] = record[field];
+    });
+    return normalized.stagingWordId ? normalized : null;
+  }
+
   function entryAssessmentDefaultRatio() {
     const schema = root.LootLinguaContentSchema;
     const ratio = Number(schema && schema.ENTRY_ASSESSMENT_DEFAULTS && schema.ENTRY_ASSESSMENT_DEFAULTS.passRatio);
@@ -350,14 +391,17 @@
   }
 
   function createAdminWordQuery(worldId, rankId, gateId) {
+    const filters = ui.wordFilterField && ui.wordFilterValue
+      ? { [ui.wordFilterField]: ui.wordFilterValue }
+      : {};
     return {
       sourceType: 'admin-content-words',
       worldId: String(worldId || ''),
       rankId: String(rankId || ''),
       gateId: String(gateId || ''),
-      search: '',
-      filter: '',
-      sort: 'order:asc,contentWordId:asc',
+      search: String(ui.wordSearch || ''),
+      filters,
+      sort: String(ui.wordSort || 'newest'),
       pageSize: WORD_PAGE_SIZE
     };
   }
@@ -377,7 +421,10 @@
         {
           pageSize: request.pageSize,
           cursor: request.cursor,
-          direction: request.direction
+          direction: request.direction,
+          sort: request.query.sort,
+          filters: request.query.filters,
+          search: request.query.search
         }
       )
     });
@@ -402,6 +449,132 @@
     ui.wordLoadingNext = Boolean(snapshot.loading.next);
     ui.wordLoadingPrevious = Boolean(snapshot.loading.previous);
     return snapshot;
+  }
+
+  function clearStagingSelection() {
+    ui.selectedStagingIds.clear();
+    ui.selectedStagingMeta.clear();
+  }
+
+  function setStagingSelected(word, selected) {
+    const stagingWordId = String(word && word.stagingWordId || '');
+    if (!stagingWordId) return;
+    if (!selected) {
+      ui.selectedStagingIds.delete(stagingWordId);
+      ui.selectedStagingMeta.delete(stagingWordId);
+      return;
+    }
+    ui.selectedStagingIds.add(stagingWordId);
+    ui.selectedStagingMeta.set(stagingWordId, {
+      stagingWordId,
+      word: String(word.word || ''),
+      sourceFileName: String(word.sourceFileName || '')
+    });
+  }
+
+  function createStagingQuery() {
+    return {
+      sourceType: 'admin-content-word-import-staging',
+      sort: String(ui.stagingSort || 'newest'),
+      filters: ui.stagingFilterField && ui.stagingFilterValue
+        ? { [ui.stagingFilterField]: ui.stagingFilterValue }
+        : {},
+      pageSize: WORD_PAGE_SIZE
+    };
+  }
+
+  function createStagingPager() {
+    const data = getWordListDataApi();
+    return data.createPagedWordSource({
+      query: createStagingQuery(),
+      pageSize: WORD_PAGE_SIZE,
+      maxCachedPages: ADMIN_WORD_PAGE_CACHE_LIMIT,
+      getItemId: (word) => String(word && word.stagingWordId || ''),
+      fetchPage: (request) => getCloudApi().listStagingWords({
+        pageSize: request.pageSize,
+        cursor: request.cursor,
+        direction: request.direction,
+        sort: request.query.sort,
+        filters: request.query.filters
+      })
+    });
+  }
+
+  function applyStagingPagerSnapshot(pager) {
+    const snapshot = pager.getSnapshot();
+    const page = snapshot.currentPage;
+    ui.stagingWords = page
+      ? page.items.map(normalizeStagingWordRecord).filter(Boolean)
+      : [];
+    ui.stagingWords.forEach((word) => {
+      if (ui.selectedStagingIds.has(word.stagingWordId)) {
+        setStagingSelected(word, true);
+      }
+    });
+    ui.stagingPageIndex = page ? page.pageIndex : 0;
+    ui.stagingHasNext = Boolean(page && page.hasNext);
+    ui.stagingHasPrevious = Boolean(page && page.hasPrevious);
+    return snapshot;
+  }
+
+  async function refreshStagingWords(options) {
+    const settings = options || {};
+    if (ui.view !== 'staging') return;
+    const initial = Boolean(settings.initial) || !ui.stagingPager;
+    const direction = settings.direction === 'previous'
+      ? 'previous'
+      : (settings.direction === 'next' ? 'next' : 'refresh');
+    const pager = initial ? createStagingPager() : ui.stagingPager;
+    if (initial) {
+      ui.stagingPager = pager;
+      ui.stagingWords = [];
+      ui.stagingPageIndex = 0;
+    }
+    ui.stagingLoading = true;
+    ui.stagingPageError = '';
+    renderStagingWords();
+    try {
+      if (initial) await pager.loadInitialPage();
+      else if (direction === 'previous') await pager.loadPreviousPage();
+      else if (direction === 'next') await pager.loadNextPage();
+      else await pager.refreshCurrentPage();
+      if (pager !== ui.stagingPager || ui.view !== 'staging') return;
+      applyStagingPagerSnapshot(pager);
+      try {
+        ui.stagingCount = await getCloudApi().countStagingWords();
+      } catch {
+        ui.stagingCount = null;
+      }
+    } catch (error) {
+      if (pager !== ui.stagingPager || ui.view !== 'staging') return;
+      ui.stagingPageError =
+        `تعذر تحميل الكلمات غير الموزعة. رمز الخطأ: ${getErrorCode(error, 'admin/staging-list-failed')}`;
+    } finally {
+      if (pager === ui.stagingPager && ui.view === 'staging') {
+        ui.stagingLoading = false;
+        applyStagingPagerSnapshot(pager);
+        renderStagingWords();
+      }
+    }
+  }
+
+  async function openStagingWords() {
+    if (!canLeaveAdminView()) return false;
+    ui.view = 'staging';
+    ui.stagingWords = [];
+    ui.stagingPager = null;
+    ui.stagingPageIndex = 0;
+    ui.stagingPageError = '';
+    clearStagingSelection();
+    await refreshStagingWords({ initial: true });
+    return true;
+  }
+
+  function reloadStagingQuery() {
+    ui.stagingPager = null;
+    ui.stagingPageIndex = 0;
+    clearStagingSelection();
+    refreshStagingWords({ initial: true });
   }
 
   function scrollAdminWordsToPageStart() {
@@ -608,6 +781,16 @@
       makeButton(ui.loading ? 'جارٍ التحديث…' : 'تحديث', 'refresh-worlds', {
         className: 'admin-btn admin-btn-secondary', disabled: ui.loading
       }),
+      makeButton(
+        Number.isSafeInteger(ui.stagingCount)
+          ? `كلمات غير موزعة (${ui.stagingCount})`
+          : 'كلمات غير موزعة',
+        'open-staging',
+        {
+          className: 'admin-btn admin-btn-secondary',
+          disabled: ui.loading
+        }
+      ),
       makeButton('إنشاء عالم', 'create-world', {
         className: 'admin-btn admin-btn-primary', disabled: ui.loading
       })
@@ -1346,6 +1529,150 @@
     return toolbar;
   }
 
+  function makeQuerySelect(label, value, options) {
+    const wrapper = makeElement('label', 'admin-word-query-field');
+    wrapper.append(makeElement('span', 'admin-field-label', label));
+    const select = makeElement('select', 'admin-input admin-select admin-word-query-select');
+    options.forEach((option) => {
+      const node = makeElement('option', '', option.label);
+      node.value = option.value;
+      node.selected = String(option.value) === String(value || '');
+      if (option.disabled) node.disabled = true;
+      select.append(node);
+    });
+    wrapper.append(select);
+    return { wrapper, select };
+  }
+
+  function uniqueCurrentWordValues(field, defaults) {
+    const values = new Set(defaults || []);
+    ui.words.forEach((word) => {
+      const value = String(word && word[field] || '').trim();
+      if (value) values.add(value);
+    });
+    return Array.from(values).sort((left, right) =>
+      left.localeCompare(right, undefined, { sensitivity: 'base', numeric: true })
+    );
+  }
+
+  function wordFilterValueOptions(field) {
+    let values = [];
+    if (field === 'status') values = ['draft', 'published', 'archived'];
+    else if (field === 'level') values = uniqueCurrentWordValues('level', ['A1', 'A2', 'B1', 'B2', 'C1', 'C2']);
+    else if (field === 'partOfSpeech') {
+      values = uniqueCurrentWordValues('partOfSpeech', ['noun', 'verb', 'adjective', 'adverb']);
+    } else if (field === 'category') {
+      values = uniqueCurrentWordValues('category', []);
+    }
+    return [
+      { value: '', label: 'اختر قيمة' },
+      ...values.map((value) => ({
+        value,
+        label: field === 'status' ? (STATUS_LABELS[value] || value) : value
+      }))
+    ];
+  }
+
+  function reloadAdminWordQuery() {
+    ui.wordLoadRevision += 1;
+    ui.wordPager = null;
+    ui.wordPageIndex = 0;
+    ui.wordHasMore = false;
+    ui.wordHasPrevious = false;
+    clearWordSelection();
+    refreshWords({ initial: true });
+  }
+
+  function renderWordQueryControls() {
+    const controls = makeElement('section', 'admin-word-query-controls');
+    controls.setAttribute('aria-label', 'فرز وتصفية كلمات البوابة');
+
+    const searchLabel = makeElement('label', 'admin-word-query-field admin-word-search-field');
+    searchLabel.append(makeElement('span', 'admin-field-label', 'بحث بادئة الكلمة'));
+    const search = makeElement('input', 'admin-input admin-word-query-search');
+    search.type = 'search';
+    search.value = ui.wordSearch;
+    search.placeholder = 'يبدأ بـ…';
+    search.autocomplete = 'off';
+    searchLabel.append(search);
+
+    const sort = makeQuerySelect('الترتيب', ui.wordSort, [
+      { value: 'newest', label: 'الأحدث إضافة' },
+      { value: 'oldest', label: 'الأقدم إضافة' },
+      { value: 'order', label: 'ترتيب البوابة' },
+      { value: 'word-asc', label: 'الكلمة A-Z' },
+      { value: 'word-desc', label: 'الكلمة Z-A' },
+      { value: 'updated', label: 'الأحدث تعديلًا' }
+    ]);
+    const filterField = makeQuerySelect('التصفية', ui.wordFilterField, [
+      { value: '', label: 'بلا فلتر' },
+      { value: 'status', label: 'الحالة' },
+      { value: 'level', label: 'المستوى' },
+      { value: 'partOfSpeech', label: 'نوع الكلمة' },
+      { value: 'category', label: 'التصنيف' }
+    ]);
+    const filterValue = makeQuerySelect(
+      'القيمة',
+      ui.wordFilterValue,
+      wordFilterValueOptions(ui.wordFilterField)
+    );
+    filterValue.select.disabled = !ui.wordFilterField;
+    sort.select.disabled = Boolean(ui.wordSearch || ui.wordFilterValue);
+
+    const reset = makeButton('إعادة الضبط', 'reset-word-query', {
+      className: 'admin-btn admin-btn-secondary',
+      disabled: !ui.wordSearch && !ui.wordFilterField && ui.wordSort === 'newest'
+    });
+    const note = makeElement(
+      'small',
+      'admin-count-note admin-word-query-note',
+      ui.wordSearch
+        ? 'البحث يطابق بداية normalizedWord على كامل البوابة، وليس جزءًا من منتصف الكلمة.'
+        : 'يسمح النظام بفلتر Firestore واحد في كل مرة لتجنب تضخم الفهارس.'
+    );
+    appendChildren(controls, [
+      searchLabel,
+      sort.wrapper,
+      filterField.wrapper,
+      filterValue.wrapper,
+      reset,
+      note
+    ]);
+
+    search.addEventListener('input', () => {
+      if (ui.wordSearchTimer) root.clearTimeout(ui.wordSearchTimer);
+      const value = search.value.trim();
+      ui.wordSearchTimer = root.setTimeout(() => {
+        ui.wordSearchTimer = null;
+        if (value === ui.wordSearch) return;
+        ui.wordSearch = value;
+        ui.wordFilterField = '';
+        ui.wordFilterValue = '';
+        ui.wordSort = value ? 'word-asc' : 'newest';
+        reloadAdminWordQuery();
+      }, 350);
+    });
+    sort.select.addEventListener('change', () => {
+      if (sort.select.value === ui.wordSort) return;
+      ui.wordSort = sort.select.value;
+      reloadAdminWordQuery();
+    });
+    filterField.select.addEventListener('change', () => {
+      ui.wordFilterField = filterField.select.value;
+      ui.wordFilterValue = '';
+      ui.wordSearch = '';
+      ui.wordSort = 'newest';
+      renderWords();
+    });
+    filterValue.select.addEventListener('change', () => {
+      ui.wordFilterValue = filterValue.select.value;
+      ui.wordSearch = '';
+      ui.wordSort = 'newest';
+      reloadAdminWordQuery();
+    });
+    return controls;
+  }
+
   function renderWords() {
     const container = getAdminRoot();
     if (!container) return;
@@ -1413,6 +1740,7 @@
     ]);
     appendChildren(header, [heading, headerActions]);
     container.append(header);
+    container.append(renderWordQueryControls());
     container.append(renderWordBulkToolbar(world, rank, gate));
 
     if (ui.wordPageError) {
@@ -1491,8 +1819,235 @@
     container.append(section);
   }
 
+  function stagingFilterOptions(field) {
+    let values = [];
+    if (field === 'level') {
+      values = ['A1', 'A2', 'B1', 'B2', 'C1', 'C2'];
+    } else {
+      values = ui.stagingWords.map((word) => String(word && word[field] || '').trim()).filter(Boolean);
+    }
+    values = Array.from(new Set(values)).sort((left, right) =>
+      left.localeCompare(right, undefined, { sensitivity: 'base', numeric: true })
+    );
+    return [
+      { value: '', label: 'اختر قيمة' },
+      ...values.map((value) => ({ value, label: value }))
+    ];
+  }
+
+  function renderStagingQueryControls() {
+    const controls = makeElement('section', 'admin-word-query-controls');
+    const sort = makeQuerySelect('الترتيب', ui.stagingSort, [
+      { value: 'newest', label: 'أحدث استيراد' },
+      { value: 'oldest', label: 'أقدم استيراد' },
+      { value: 'file-order', label: 'ترتيب الملف' },
+      { value: 'word-asc', label: 'الكلمة A-Z' },
+      { value: 'word-desc', label: 'الكلمة Z-A' }
+    ]);
+    const filterField = makeQuerySelect('التصفية', ui.stagingFilterField, [
+      { value: '', label: 'بلا فلتر' },
+      { value: 'level', label: 'المستوى' },
+      { value: 'partOfSpeech', label: 'نوع الكلمة' },
+      { value: 'sourceFileName', label: 'اسم الملف' },
+      { value: 'importBatchId', label: 'دفعة الاستيراد' }
+    ]);
+    const filterValue = makeQuerySelect(
+      'القيمة',
+      ui.stagingFilterValue,
+      stagingFilterOptions(ui.stagingFilterField)
+    );
+    filterValue.select.disabled = !ui.stagingFilterField;
+    sort.select.disabled = Boolean(ui.stagingFilterValue);
+    const reset = makeButton('إعادة الضبط', 'reset-staging-query', {
+      className: 'admin-btn admin-btn-secondary',
+      disabled: !ui.stagingFilterField && ui.stagingSort === 'newest'
+    });
+    appendChildren(controls, [
+      sort.wrapper,
+      filterField.wrapper,
+      filterValue.wrapper,
+      reset,
+      makeElement('small', 'admin-count-note admin-word-query-note', 'تعمل التصفية على كامل مجموعة staging. يسمح بفلتر واحد في كل مرة.')
+    ]);
+    sort.select.addEventListener('change', () => {
+      ui.stagingSort = sort.select.value;
+      reloadStagingQuery();
+    });
+    filterField.select.addEventListener('change', () => {
+      ui.stagingFilterField = filterField.select.value;
+      ui.stagingFilterValue = '';
+      ui.stagingSort = 'newest';
+      renderStagingWords();
+    });
+    filterValue.select.addEventListener('change', () => {
+      ui.stagingFilterValue = filterValue.select.value;
+      ui.stagingSort = 'newest';
+      reloadStagingQuery();
+    });
+    return controls;
+  }
+
+  function renderStagingRow(word) {
+    const stagingWordId = String(word.stagingWordId || '');
+    const row = makeElement('article', 'admin-world-row admin-word-row admin-staging-word-row');
+    row.dataset.stagingWordId = stagingWordId;
+    const selection = makeElement('label', 'admin-word-selection');
+    const checkbox = makeElement('input', 'admin-checkbox admin-staging-word-checkbox');
+    checkbox.type = 'checkbox';
+    checkbox.checked = ui.selectedStagingIds.has(stagingWordId);
+    checkbox.disabled = ui.stagingLoading;
+    checkbox.dataset.adminAction = 'toggle-staging-selection';
+    checkbox.dataset.stagingWordId = stagingWordId;
+    checkbox.setAttribute('aria-label', `تحديد الكلمة ${String(word.word || '')}`);
+    selection.append(checkbox);
+
+    const identity = makeElement('div', 'admin-world-identity admin-word-identity');
+    appendChildren(identity, [
+      makeElement('h3', 'admin-world-title admin-word-title', word.word || 'كلمة بلا نص'),
+      makeElement('p', 'admin-world-subtitle admin-word-translation', word.translation || 'لا توجد ترجمة.'),
+      makeTechnicalCode(word.normalizedWord, stagingWordId, 'admin-world-id admin-word-technical-value'),
+      makeElement(
+        'span',
+        'admin-world-meta',
+        `${String(word.sourceFileName || 'ملف غير معروف')} · #${cachedCount(word.sourceOrder) + 1} · ${formatDate(word.importedAt || word.createdAt)}`
+      )
+    ]);
+    const details = makeElement('div', 'admin-world-counts admin-word-details');
+    appendChildren(details, [
+      makeElement('span', 'admin-count-chip', String(word.level || 'بلا مستوى')),
+      makeElement('span', 'admin-count-chip', String(word.partOfSpeech || 'نوع غير محدد')),
+      makeElement('span', 'admin-count-chip', String(word.category || 'بلا تصنيف'))
+    ]);
+    const actions = makeElement('div', 'admin-world-actions admin-word-actions');
+    actions.append(makeButton('التفاصيل', 'show-staging-details', {
+      className: 'admin-btn admin-btn-secondary'
+    }));
+    actions.lastElementChild.dataset.stagingWordId = stagingWordId;
+    appendChildren(row, [selection, identity, details, actions]);
+    return row;
+  }
+
+  function renderStagingWords() {
+    const container = getAdminRoot();
+    if (!container) return;
+    const state = getAdminState();
+    if (!state.resolved || !state.isAdmin) {
+      renderAccessMessage(container, state);
+      return;
+    }
+    container.replaceChildren();
+    const header = makeElement('header', 'admin-dashboard-header');
+    const heading = makeElement('div', 'admin-dashboard-heading');
+    appendChildren(heading, [
+      makeElement('span', 'admin-kicker', 'منطقة انتظار إدارية'),
+      makeElement('h2', 'admin-dashboard-title', 'كلمات غير موزعة'),
+      makeElement('p', 'admin-dashboard-copy', 'احفظ الكلمات مؤقتًا ثم وزّعها بين البوابات لاحقًا.')
+    ]);
+    const actions = makeElement('div', 'admin-header-actions');
+    appendChildren(actions, [
+      makeButton('العودة للعوالم', 'show-dashboard', {
+        className: 'admin-btn admin-btn-secondary',
+        disabled: ui.stagingLoading
+      }),
+      makeButton('استيراد JSON', 'import-staging-json', {
+        className: 'admin-btn admin-btn-primary',
+        disabled: ui.stagingLoading || ui.wordImportPending
+      }),
+      makeButton('تحديث', 'refresh-staging', {
+        className: 'admin-btn admin-btn-secondary',
+        disabled: ui.stagingLoading
+      })
+    ]);
+    appendChildren(header, [heading, actions]);
+    container.append(header);
+    container.append(renderStagingQueryControls());
+
+    const selectedOnPage = ui.stagingWords.filter((word) =>
+      ui.selectedStagingIds.has(String(word.stagingWordId || ''))
+    ).length;
+    const toolbar = makeElement('section', 'admin-word-bulk-toolbar');
+    const summary = makeElement('div', 'admin-word-selection-summary');
+    appendChildren(summary, [
+      makeElement('strong', '', `${ui.selectedStagingIds.size} كلمات محددة`),
+      makeElement('small', '', `${selectedOnPage} في الصفحة الحالية، ${ui.selectedStagingIds.size} إجمالًا.`)
+    ]);
+    const bulkActions = makeElement('div', 'admin-header-actions admin-word-bulk-actions');
+    appendChildren(bulkActions, [
+      makeButton(
+        selectedOnPage === ui.stagingWords.length && ui.stagingWords.length
+          ? 'إلغاء تحديد الصفحة'
+          : 'تحديد الصفحة',
+        'select-staging-page',
+        {
+          className: 'admin-btn admin-btn-secondary',
+          disabled: ui.stagingLoading || ui.stagingWords.length === 0
+        }
+      ),
+      makeButton('توزيع المحدد', 'distribute-staging', {
+        className: 'admin-btn admin-btn-success',
+        disabled: ui.stagingLoading ||
+          ui.selectedStagingIds.size === 0 ||
+          ui.selectedStagingIds.size > MAX_BULK_WORDS
+      }),
+      makeButton('حذف المحدد', 'delete-staging', {
+        className: 'admin-btn admin-btn-danger',
+        disabled: ui.stagingLoading ||
+          ui.selectedStagingIds.size === 0 ||
+          ui.selectedStagingIds.size > MAX_BULK_WORDS
+      })
+    ]);
+    appendChildren(toolbar, [summary, bulkActions]);
+    container.append(toolbar);
+
+    if (ui.stagingPageError) {
+      const error = makeElement('div', 'admin-page-error', ui.stagingPageError);
+      error.setAttribute('role', 'alert');
+      container.append(error);
+    }
+    const section = makeElement('section', 'admin-worlds-section admin-words-section');
+    const sectionHeading = makeElement('div', 'admin-section-heading');
+    appendChildren(sectionHeading, [
+      makeElement('h3', 'admin-section-title', 'الكلمات المحفوظة مؤقتًا'),
+      makeElement(
+        'span',
+        'admin-list-count',
+        `الصفحة ${ui.stagingPageIndex + 1} · ${ui.stagingWords.length}${Number.isSafeInteger(ui.stagingCount) ? ` / ${ui.stagingCount}` : ''}`
+      )
+    ]);
+    section.append(sectionHeading);
+    const list = makeElement('div', 'admin-worlds-list admin-words-list');
+    if (ui.stagingLoading && ui.stagingWords.length === 0) {
+      list.append(makeElement('div', 'admin-loading-card', 'جارٍ تحميل الكلمات غير الموزعة…'));
+    } else if (ui.stagingWords.length === 0) {
+      list.append(makeElement('div', 'admin-empty-state', 'لا توجد كلمات غير موزعة ضمن هذا الاستعلام.'));
+    } else {
+      ui.stagingWords.forEach((word) => list.append(renderStagingRow(word)));
+    }
+    section.append(list);
+    const pagination = makeElement('div', 'admin-word-pagination');
+    appendChildren(pagination, [
+      makeElement(
+        'small',
+        'admin-count-note',
+        `المحمّل في الذاكرة ${ui.stagingPager ? ui.stagingPager.getSnapshot().cache.itemCount : 0} كلمة.`
+      ),
+      makeButton('السابق', 'previous-staging', {
+        className: 'admin-btn admin-btn-secondary',
+        disabled: ui.stagingLoading || !ui.stagingHasPrevious
+      }),
+      makeElement('span', 'admin-count-chip', `صفحة ${ui.stagingPageIndex + 1}`),
+      makeButton('التالي', 'next-staging', {
+        className: 'admin-btn admin-btn-secondary',
+        disabled: ui.stagingLoading || !ui.stagingHasNext
+      })
+    ]);
+    section.append(pagination);
+    container.append(section);
+  }
+
   function renderCurrentView() {
-    if (ui.view === 'words') renderWords();
+    if (ui.view === 'staging') renderStagingWords();
+    else if (ui.view === 'words') renderWords();
     else if (ui.view === 'gates') renderGates();
     else if (ui.view === 'ranks') renderRanks();
     else renderDashboard();
@@ -1544,6 +2099,9 @@
     ui.gates = [];
     ui.words = [];
     ui.wordPager = null;
+    ui.stagingWords = [];
+    ui.stagingPager = null;
+    clearStagingSelection();
     clearWordSelection();
     ui.rankPageError = '';
     ui.gatePageError = '';
@@ -1596,6 +2154,9 @@
     ui.gates = [];
     ui.words = [];
     ui.wordPager = null;
+    ui.stagingWords = [];
+    ui.stagingPager = null;
+    clearStagingSelection();
     clearWordSelection();
     ui.gatePageError = '';
     await refreshGates({ clear: true });
@@ -1754,6 +2315,10 @@
     ui.wordPageIndex = 0;
     ui.wordPager = null;
     ui.wordPagerSignature = '';
+    ui.wordSearch = '';
+    ui.wordFilterField = '';
+    ui.wordFilterValue = '';
+    ui.wordSort = 'newest';
     clearWordSelection();
     await refreshWords({ initial: true });
     return true;
@@ -1774,6 +2339,9 @@
     ui.gates = [];
     ui.words = [];
     ui.wordPager = null;
+    ui.stagingWords = [];
+    ui.stagingPager = null;
+    clearStagingSelection();
     clearWordSelection();
     renderDashboard();
     return true;
@@ -1795,6 +2363,11 @@
         throw error;
       }
       ui.worlds = records.map(normalizeWorldRecord).filter(Boolean);
+      try {
+        ui.stagingCount = await getCloudApi().countStagingWords();
+      } catch {
+        ui.stagingCount = null;
+      }
     } catch (error) {
       if (revision !== ui.loadRevision) return;
       ui.pageError = `تعذر تحميل العوالم. رمز الخطأ: ${getErrorCode(error, 'admin/list-failed')}`;
@@ -1997,12 +2570,17 @@
       invalid: 'غير صالح'
     };
     if (entry.state === 'imported') return 'تم الاستيراد';
+    if (entry.state === 'staged') return 'تم الحفظ المؤقت';
     if (entry.state === 'failed') return 'فشل الحفظ';
     return labels[visualState] || 'غير صالح';
   }
 
   function wordImportVisualState(entry) {
-    if (entry.state === 'duplicate-file' || entry.state === 'duplicate-gate') return 'duplicate';
+    if (
+      entry.state === 'duplicate-file' ||
+      entry.state === 'duplicate-gate' ||
+      entry.state === 'duplicate-staging'
+    ) return 'duplicate';
     if (entry.state === 'invalid' || entry.state === 'failed') return 'invalid';
     if (entry.state === 'valid' && entry.warnings.length) return 'warning';
     return 'valid';
@@ -2101,7 +2679,16 @@
     container.hidden = false;
   }
 
-  function openWordImportPreview(world, rank, gate, preview, returnFocus) {
+  function openWordImportPreview(
+    world,
+    rank,
+    gate,
+    preview,
+    returnFocus,
+    destination,
+    sourceFileName
+  ) {
+    const importDestination = destination === 'gate' ? 'gate' : 'staging';
     closeAdminModal(true);
     ui.wordImportPending = true;
     const overlay = makeElement('div', 'admin-modal-overlay');
@@ -2118,7 +2705,13 @@
     title.id = 'adminWordImportTitle';
     appendChildren(heading, [
       title,
-      makeElement('p', 'admin-modal-copy', 'سيتم إنشاء كل الكلمات المقبولة كمسودات. الحقول التقنية الواردة في الملف لا يتم الوثوق بها.')
+      makeElement(
+        'p',
+        'admin-modal-copy',
+        importDestination === 'gate'
+          ? 'سيتم إنشاء كل الكلمات المقبولة كمسودات في البوابة الحالية. الحقول التقنية الواردة في الملف لا يتم الوثوق بها.'
+          : 'ستُحفظ الكلمات المقبولة مؤقتًا دون عالم أو رتبة أو بوابة، ثم يمكن توزيعها لاحقًا.'
+      )
     ]);
     const closeButton = makeButton('×', 'close-modal', {
       className: 'admin-modal-close',
@@ -2129,11 +2722,17 @@
     dialog.append(header);
 
     const context = makeElement('div', 'admin-import-context');
-    [
-      ['العالم', world.title || world.worldId],
-      ['الرتبة', rank.title || rank.rankId],
-      ['البوابة', gate.title || gate.gateId]
-    ].forEach(([label, value]) => {
+    const contextValues = importDestination === 'gate'
+      ? [
+          ['العالم', world.title || world.worldId],
+          ['الرتبة', rank.title || rank.rankId],
+          ['البوابة', gate.title || gate.gateId]
+        ]
+      : [
+          ['الوجهة', 'كلمات غير موزعة'],
+          ['الملف', sourceFileName]
+        ];
+    contextValues.forEach(([label, value]) => {
       const item = makeElement('span', 'admin-import-context-item');
       appendChildren(item, [
         makeElement('strong', '', `${label}: `),
@@ -2199,12 +2798,14 @@
       world,
       rank,
       gate,
+      destination: importDestination,
+      sourceFileName,
       pending: false,
       completed: false,
       returnFocus
     };
     ui.modal = modalState;
-    if (preview.blockingIssue) {
+    if (importDestination === 'gate' && preview.blockingIssue) {
       progress.textContent = 'فشل فحص التكرار داخل البوابة. لا يمكن متابعة الاستيراد.';
     }
     form.addEventListener('submit', (event) => commitWordImport(event, modalState));
@@ -2224,14 +2825,20 @@
     modalState.errorBox.hidden = true;
     try {
       const cloud = getCloudApi();
-      const result = await getWordImportApi().commit(modalState.preview, {
-        createWord: cloud.createWord.bind(cloud),
-        onProgress(progress) {
-          if (ui.modal !== modalState) return;
-          modalState.progress.textContent =
-            `تمت معالجة ${progress.completed} من ${progress.total} · نجح ${progress.succeeded} · فشل ${progress.failed}`;
-        }
-      });
+      const importer = getWordImportApi();
+      const result = modalState.destination === 'staging'
+        ? await importer.commitToStaging(modalState.preview, {
+            importWords: cloud.importStagingWords.bind(cloud),
+            sourceFileName: modalState.sourceFileName
+          })
+        : await importer.commit(modalState.preview, {
+            createWord: cloud.createWord.bind(cloud),
+            onProgress(progress) {
+              if (ui.modal !== modalState) return;
+              modalState.progress.textContent =
+                `تمت معالجة ${progress.completed} من ${progress.total} · نجح ${progress.succeeded} · فشل ${progress.failed}`;
+            }
+          });
       if (ui.modal !== modalState) return;
       modalState.completed = true;
       modalState.pending = false;
@@ -2248,8 +2855,15 @@
       modalState.progress.textContent =
         `اكتمل: نجح ${result.summary.succeeded}، فشل ${result.summary.failed}، وتُخطّي ${result.summary.skippedDuplicates} مكرر.`;
       if (result.summary.succeeded > 0) {
-        await refreshWords({ append: false });
-        notify(`تم استيراد ${result.summary.succeeded} كلمة كمسودات.`, 'success');
+        modalState.refreshAfterClose = true;
+        if (modalState.destination === 'staging') {
+          ui.stagingCount = Number.isSafeInteger(ui.stagingCount)
+            ? ui.stagingCount + result.summary.succeeded
+            : null;
+          notify(`تم حفظ ${result.summary.succeeded} كلمة ضمن الكلمات غير الموزعة.`, 'success');
+        } else {
+          notify(`تم استيراد ${result.summary.succeeded} كلمة كمسودات.`, 'success');
+        }
       } else {
         renderFormIssues(modalState.errorBox, [
           { path: 'import', code: 'admin/no-words-imported' }
@@ -2271,7 +2885,95 @@
     }
   }
 
-  async function prepareWordImport(file, world, rank, gate, returnFocus) {
+  function openWordImportDestinationDialog(world, rank, gate, returnFocus) {
+    closeAdminModal(true);
+    const overlay = makeElement('div', 'admin-modal-overlay');
+    const backdrop = makeElement('div', 'admin-modal-backdrop');
+    backdrop.setAttribute('aria-hidden', 'true');
+    const dialog = makeElement('section', 'admin-modal admin-delete-dialog');
+    dialog.setAttribute('role', 'dialog');
+    dialog.setAttribute('aria-modal', 'true');
+    dialog.setAttribute('aria-labelledby', 'adminImportDestinationTitle');
+    const header = makeElement('header', 'admin-modal-header');
+    const heading = makeElement('div', 'admin-modal-heading');
+    const title = makeElement('h2', 'admin-modal-title', 'وجهة استيراد JSON');
+    title.id = 'adminImportDestinationTitle';
+    appendChildren(heading, [
+      title,
+      makeElement('p', 'admin-modal-copy', 'اختر مكان حفظ الكلمات المقبولة بعد المعاينة.')
+    ]);
+    const closeButton = makeButton('×', 'close-modal', {
+      className: 'admin-modal-close',
+      title: 'إغلاق'
+    });
+    appendChildren(header, [heading, closeButton]);
+    dialog.append(header);
+    const form = makeElement('form', 'admin-world-form');
+    const destination = makeSelectField({
+      name: 'destination',
+      label: 'الوجهة',
+      value: 'staging',
+      options: [
+        { value: 'staging', label: 'كلمات غير موزعة' },
+        { value: 'gate', label: 'البوابة الحالية' }
+      ],
+      help: 'احفظ الكلمات مؤقتًا ثم وزّعها بين البوابات لاحقًا.',
+      wide: true
+    });
+    if (!world || !rank || !gate) {
+      const gateOption = destination.input.querySelector('option[value="gate"]');
+      if (gateOption) gateOption.disabled = true;
+    }
+    form.append(destination.wrapper);
+    if (world && rank && gate) {
+      form.append(makeElement(
+        'p',
+        'admin-import-inspection-notice',
+        `البوابة الحالية: ${world.title || world.worldId} ← ${rank.title || rank.rankId} ← ${gate.title || gate.gateId}`
+      ));
+    }
+    const footer = makeElement('footer', 'admin-modal-footer');
+    appendChildren(footer, [
+      makeButton('إلغاء', 'close-modal', { className: 'admin-btn admin-btn-secondary' }),
+      makeButton('اختيار ملف JSON', null, {
+        className: 'admin-btn admin-btn-primary',
+        type: 'submit'
+      })
+    ]);
+    form.append(footer);
+    dialog.append(form);
+    appendChildren(overlay, [backdrop, dialog]);
+    getAdminRoot().append(overlay);
+    const modalState = {
+      kind: 'word-import-destination',
+      overlay,
+      form,
+      closeButton,
+      world,
+      rank,
+      gate,
+      returnFocus,
+      pending: false
+    };
+    ui.modal = modalState;
+    form.addEventListener('submit', (event) => {
+      event.preventDefault();
+      const selected = String(new FormData(form).get('destination') || 'staging');
+      closeAdminModal(true);
+      chooseWordImportFile(world, rank, gate, returnFocus, selected);
+    });
+    destination.input.focus();
+  }
+
+  async function prepareWordImport(
+    file,
+    world,
+    rank,
+    gate,
+    returnFocus,
+    destination
+  ) {
+    const importDestination = destination === 'gate' ? 'gate' : 'staging';
     try {
       const importer = getWordImportApi();
       importer.assertFileSize(file.size);
@@ -2283,36 +2985,57 @@
       const parsed = importer.parseJsonText(await file.text());
       let preview = importer.preparePreview(parsed, {
         schema: root.LootLinguaContentSchema,
-        worldId: world.worldId,
-        rankId: rank.rankId,
-        gateId: gate.gateId,
-        existingWords: ui.words
+        destination: importDestination,
+        worldId: world && world.worldId,
+        rankId: rank && rank.rankId,
+        gateId: gate && gate.gateId,
+        existingWords: importDestination === 'gate' ? ui.words : []
       });
-      const cloud = getCloudApi();
-      preview = await importer.inspectDuplicates(preview, {
-        inspectGate: cloud.inspectWordDuplicates.bind(cloud),
-        concurrency: 3
-      });
-      if (
-        String(ui.activeWorldId) !== String(world.worldId) ||
-        String(ui.activeRankId) !== String(rank.rankId) ||
-        String(ui.activeGateId) !== String(gate.gateId) ||
-        ui.view !== 'words'
-      ) {
+      if (importDestination === 'gate') {
+        const cloud = getCloudApi();
+        preview = await importer.inspectDuplicates(preview, {
+          inspectGate: cloud.inspectWordDuplicates.bind(cloud),
+          concurrency: 3
+        });
+        if (
+          String(ui.activeWorldId) !== String(world.worldId) ||
+          String(ui.activeRankId) !== String(rank.rankId) ||
+          String(ui.activeGateId) !== String(gate.gateId) ||
+          ui.view !== 'words'
+        ) {
+          throw Object.assign(new Error('admin/import-context-changed'), {
+            code: 'admin/import-context-changed'
+          });
+        }
+      } else if (ui.view !== 'words' && ui.view !== 'staging') {
         throw Object.assign(new Error('admin/import-context-changed'), {
           code: 'admin/import-context-changed'
         });
       }
-      openWordImportPreview(world, rank, gate, preview, returnFocus);
+      openWordImportPreview(
+        world,
+        rank,
+        gate,
+        preview,
+        returnFocus,
+        importDestination,
+        String(file.name || 'import.json')
+      );
     } catch (error) {
       ui.wordImportPending = false;
-      ui.wordPageError =
+      const message =
         `تعذر تجهيز ملف الاستيراد. رمز الخطأ: ${getErrorCode(error, 'admin/word-import-preview-failed')}`;
-      renderWords();
+      if (ui.view === 'staging') {
+        ui.stagingPageError = message;
+        renderStagingWords();
+      } else {
+        ui.wordPageError = message;
+        renderWords();
+      }
     }
   }
 
-  function chooseWordImportFile(world, rank, gate, returnFocus) {
+  function chooseWordImportFile(world, rank, gate, returnFocus, destination) {
     if (ui.wordImportPending) return;
     ui.wordImportPending = true;
     renderWords();
@@ -2327,6 +3050,7 @@
       input.remove();
       ui.wordImportPending = false;
       if (ui.view === 'words') renderWords();
+      else if (ui.view === 'staging') renderStagingWords();
     }
     input.addEventListener('cancel', cancelSelection, { once: true });
     input.addEventListener('change', () => {
@@ -2336,10 +3060,11 @@
       input.remove();
       if (!file) {
         ui.wordImportPending = false;
-        renderWords();
+        if (ui.view === 'staging') renderStagingWords();
+        else renderWords();
         return;
       }
-      prepareWordImport(file, world, rank, gate, returnFocus);
+      prepareWordImport(file, world, rank, gate, returnFocus, destination);
     }, { once: true });
     document.body.append(input);
     input.click();
@@ -2373,7 +3098,19 @@
         unlockBackgroundScroll('adminWordImport');
       }
       ui.wordImportPending = false;
-      if (ui.view === 'words') renderWords();
+      if (modalState.refreshAfterClose && ui.view === 'words' && modalState.destination === 'gate') {
+        refreshWords({ initial: true });
+      } else if (
+        modalState.refreshAfterClose &&
+        ui.view === 'staging' &&
+        modalState.destination === 'staging'
+      ) {
+        refreshStagingWords({ initial: true });
+      } else if (ui.view === 'words') {
+        renderWords();
+      } else if (ui.view === 'staging') {
+        renderStagingWords();
+      }
     }
     if (modalState.returnFocus && typeof modalState.returnFocus.focus === 'function') {
       modalState.returnFocus.focus();
@@ -4354,6 +5091,267 @@
     }
   }
 
+  function openStagingDetails(stagingWordId, returnFocus) {
+    const word = ui.stagingWords.find((item) =>
+      String(item.stagingWordId || '') === String(stagingWordId || '')
+    );
+    if (!word) return;
+    closeAdminModal(true);
+    const overlay = makeElement('div', 'admin-modal-overlay');
+    const backdrop = makeElement('div', 'admin-modal-backdrop');
+    const dialog = makeElement('section', 'admin-modal admin-delete-dialog');
+    dialog.setAttribute('role', 'dialog');
+    dialog.setAttribute('aria-modal', 'true');
+    const header = makeElement('header', 'admin-modal-header');
+    const heading = makeElement('div', 'admin-modal-heading');
+    appendChildren(heading, [
+      makeElement('h2', 'admin-modal-title', String(word.word || 'تفاصيل الكلمة')),
+      makeElement('p', 'admin-modal-copy', String(word.translation || 'لا توجد ترجمة.'))
+    ]);
+    const closeButton = makeButton('×', 'close-modal', {
+      className: 'admin-modal-close',
+      title: 'إغلاق'
+    });
+    appendChildren(header, [heading, closeButton]);
+    dialog.append(header);
+    const body = makeElement('div', 'admin-world-form admin-staging-details');
+    [
+      ['التعريف', word.definition || word.definition_ar],
+      ['المثال', word.example],
+      ['ترجمة المثال', word.exampleTranslation],
+      ['ملاحظات', word.notes],
+      ['الملف', word.sourceFileName],
+      ['دفعة الاستيراد', word.importBatchId],
+      ['المعرّف المؤقت', word.stagingWordId]
+    ].forEach(([label, value]) => {
+      if (!String(value || '').trim()) return;
+      const item = makeElement('div', 'admin-staging-detail');
+      appendChildren(item, [
+        makeElement('strong', 'admin-field-label', label),
+        makeElement('p', 'admin-modal-copy', String(value))
+      ]);
+      body.append(item);
+    });
+    dialog.append(body);
+    appendChildren(overlay, [backdrop, dialog]);
+    getAdminRoot().append(overlay);
+    ui.modal = {
+      kind: 'staging-details',
+      overlay,
+      closeButton,
+      pending: false,
+      returnFocus
+    };
+    closeButton.focus();
+  }
+
+  async function deleteSelectedStagingWords() {
+    if (ui.stagingLoading || ui.selectedStagingIds.size === 0) return;
+    const ids = Array.from(ui.selectedStagingIds);
+    if (!root.confirm(`سيتم حذف ${ids.length} كلمة غير موزعة نهائيًا. هل تريد المتابعة؟`)) return;
+    ui.stagingLoading = true;
+    renderStagingWords();
+    try {
+      const result = await getCloudApi().deleteStagingWords(ids);
+      clearStagingSelection();
+      notify(`تم حذف ${result.deleted} كلمة غير موزعة.`, 'success');
+      await refreshStagingWords({ initial: true });
+    } catch (error) {
+      ui.stagingPageError =
+        `تعذر حذف الكلمات المحددة. رمز الخطأ: ${getErrorCode(error, 'admin/staging-delete-failed')}`;
+    } finally {
+      ui.stagingLoading = false;
+      if (ui.view === 'staging') renderStagingWords();
+    }
+  }
+
+  function replaceSelectOptions(select, records, idField, labelField, placeholder) {
+    select.replaceChildren();
+    const empty = makeElement('option', '', placeholder);
+    empty.value = '';
+    select.append(empty);
+    records.forEach((record) => {
+      const option = makeElement('option', '', String(record[labelField] || record[idField] || ''));
+      option.value = String(record[idField] || '');
+      select.append(option);
+    });
+  }
+
+  function openStagingDistributionDialog(returnFocus) {
+    if (ui.selectedStagingIds.size === 0) return;
+    closeAdminModal(true);
+    const overlay = makeElement('div', 'admin-modal-overlay');
+    const backdrop = makeElement('div', 'admin-modal-backdrop');
+    const dialog = makeElement('section', 'admin-modal admin-move-gate-dialog');
+    dialog.setAttribute('role', 'dialog');
+    dialog.setAttribute('aria-modal', 'true');
+    const header = makeElement('header', 'admin-modal-header');
+    const heading = makeElement('div', 'admin-modal-heading');
+    appendChildren(heading, [
+      makeElement('h2', 'admin-modal-title', 'توزيع الكلمات المحددة'),
+      makeElement('p', 'admin-modal-copy', `سيتم توزيع ${ui.selectedStagingIds.size} كلمة كمسودات إلى بوابة موجودة.`)
+    ]);
+    const closeButton = makeButton('×', 'close-modal', {
+      className: 'admin-modal-close',
+      title: 'إغلاق'
+    });
+    appendChildren(header, [heading, closeButton]);
+    dialog.append(header);
+    const form = makeElement('form', 'admin-world-form');
+    const worldField = makeSelectField({
+      name: 'worldId',
+      label: 'العالم',
+      value: '',
+      options: [{ value: '', label: 'اختر العالم' }, ...ui.worlds.map((world) => ({
+        value: world.worldId,
+        label: world.title || world.worldId
+      }))],
+      required: true,
+      wide: true
+    });
+    const rankField = makeSelectField({
+      name: 'rankId',
+      label: 'الرتبة',
+      value: '',
+      options: [{ value: '', label: 'اختر الرتبة' }],
+      required: true,
+      wide: true
+    });
+    const gateField = makeSelectField({
+      name: 'gateId',
+      label: 'البوابة',
+      value: '',
+      options: [{ value: '', label: 'اختر البوابة' }],
+      required: true,
+      wide: true
+    });
+    rankField.input.disabled = true;
+    gateField.input.disabled = true;
+    const progress = makeElement('div', 'admin-import-progress', 'اختر وجهة التوزيع.');
+    progress.setAttribute('role', 'status');
+    const errorBox = makeElement('div', 'admin-form-error');
+    errorBox.hidden = true;
+    appendChildren(form, [
+      worldField.wrapper,
+      rankField.wrapper,
+      gateField.wrapper,
+      progress,
+      errorBox
+    ]);
+    const footer = makeElement('footer', 'admin-modal-footer');
+    const cancel = makeButton('إلغاء', 'close-modal', {
+      className: 'admin-btn admin-btn-secondary'
+    });
+    const submit = makeButton('بدء التوزيع', null, {
+      className: 'admin-btn admin-btn-success',
+      type: 'submit'
+    });
+    appendChildren(footer, [cancel, submit]);
+    form.append(footer);
+    dialog.append(form);
+    appendChildren(overlay, [backdrop, dialog]);
+    getAdminRoot().append(overlay);
+    const modalState = {
+      kind: 'staging-distribution',
+      overlay,
+      form,
+      closeButton,
+      submit,
+      cancel,
+      progress,
+      errorBox,
+      worldField,
+      rankField,
+      gateField,
+      pending: false,
+      returnFocus
+    };
+    ui.modal = modalState;
+    worldField.input.addEventListener('change', async () => {
+      const worldId = worldField.input.value;
+      rankField.input.disabled = true;
+      gateField.input.disabled = true;
+      replaceSelectOptions(rankField.input, [], 'rankId', 'title', 'جارٍ تحميل الرتب…');
+      replaceSelectOptions(gateField.input, [], 'gateId', 'title', 'اختر البوابة');
+      if (!worldId) return;
+      try {
+        const ranks = await getCloudApi().listRanks(worldId);
+        if (ui.modal !== modalState || worldField.input.value !== worldId) return;
+        replaceSelectOptions(rankField.input, ranks, 'rankId', 'title', 'اختر الرتبة');
+        rankField.input.disabled = false;
+      } catch (error) {
+        renderFormIssues(errorBox, [
+          { path: 'worldId', code: getErrorCode(error, 'admin/rank-list-failed') }
+        ], 'تعذر تحميل الرتب:');
+      }
+    });
+    rankField.input.addEventListener('change', async () => {
+      const worldId = worldField.input.value;
+      const rankId = rankField.input.value;
+      gateField.input.disabled = true;
+      replaceSelectOptions(gateField.input, [], 'gateId', 'title', 'جارٍ تحميل البوابات…');
+      if (!worldId || !rankId) return;
+      try {
+        const gates = await getCloudApi().listGates(worldId, rankId);
+        if (ui.modal !== modalState || rankField.input.value !== rankId) return;
+        replaceSelectOptions(gateField.input, gates, 'gateId', 'title', 'اختر البوابة');
+        gateField.input.disabled = false;
+      } catch (error) {
+        renderFormIssues(errorBox, [
+          { path: 'rankId', code: getErrorCode(error, 'admin/gate-list-failed') }
+        ], 'تعذر تحميل البوابات:');
+      }
+    });
+    form.addEventListener('submit', async (event) => {
+      event.preventDefault();
+      if (ui.modal !== modalState || modalState.pending) return;
+      const target = {
+        worldId: worldField.input.value,
+        rankId: rankField.input.value,
+        gateId: gateField.input.value
+      };
+      if (!target.worldId || !target.rankId || !target.gateId) return;
+      modalState.pending = true;
+      closeButton.disabled = true;
+      cancel.disabled = true;
+      submit.disabled = true;
+      submit.textContent = 'جارٍ التوزيع…';
+      try {
+        const result = await getCloudApi().distributeStagingWords(
+          Array.from(ui.selectedStagingIds),
+          target,
+          {
+            onProgress(value) {
+              if (ui.modal !== modalState) return;
+              progress.textContent =
+                `عولج ${value.completed}/${value.total} · وُزّع ${value.distributed} · مكرر ${value.duplicates} · فشل ${value.failed}`;
+            }
+          }
+        );
+        if (ui.modal !== modalState) return;
+        clearStagingSelection();
+        modalState.pending = false;
+        closeAdminModal(true);
+        notify(
+          `وُزّع ${result.summary.distributed}، مكرر ${result.summary.duplicates}، فشل ${result.summary.failed}، وبقي ${result.summary.remaining}.`,
+          result.summary.failed ? 'warning' : 'success'
+        );
+        await refreshStagingWords({ initial: true });
+      } catch (error) {
+        if (ui.modal !== modalState) return;
+        modalState.pending = false;
+        closeButton.disabled = false;
+        cancel.disabled = false;
+        submit.disabled = false;
+        submit.textContent = 'إعادة المحاولة';
+        renderFormIssues(errorBox, [
+          { path: 'distribution', code: getErrorCode(error, 'admin/staging-distribution-failed') }
+        ], 'تعذر إكمال التوزيع:');
+      }
+    });
+    worldField.input.focus();
+  }
+
   function handleAdminClick(event) {
     const actionButton = event.target.closest('[data-admin-action]');
     if (!actionButton || actionButton.disabled) return;
@@ -4365,9 +5363,9 @@
     if (action === 'choose-word-import-file') {
       const modalState = ui.modal;
       if (!modalState || modalState.kind !== 'word-import' || modalState.pending) return;
-      const { world, rank, gate, returnFocus } = modalState;
+      const { world, rank, gate, returnFocus, destination } = modalState;
       closeAdminModal(true);
-      chooseWordImportFile(world, rank, gate, returnFocus);
+      chooseWordImportFile(world, rank, gate, returnFocus, destination);
       return;
     }
     if (action === 'refresh-worlds') {
@@ -4376,6 +5374,70 @@
     }
     if (action === 'show-dashboard') {
       showAdminDashboard();
+      return;
+    }
+    if (action === 'reset-word-query') {
+      ui.wordSearch = '';
+      ui.wordFilterField = '';
+      ui.wordFilterValue = '';
+      ui.wordSort = 'newest';
+      reloadAdminWordQuery();
+      return;
+    }
+    if (action === 'open-staging') {
+      openStagingWords();
+      return;
+    }
+    if (action === 'refresh-staging') {
+      refreshStagingWords({ initial: true });
+      return;
+    }
+    if (action === 'previous-staging') {
+      if (ui.stagingHasPrevious) refreshStagingWords({ direction: 'previous' });
+      return;
+    }
+    if (action === 'next-staging') {
+      if (ui.stagingHasNext) refreshStagingWords({ direction: 'next' });
+      return;
+    }
+    if (action === 'reset-staging-query') {
+      ui.stagingSort = 'newest';
+      ui.stagingFilterField = '';
+      ui.stagingFilterValue = '';
+      reloadStagingQuery();
+      return;
+    }
+    if (action === 'import-staging-json') {
+      openWordImportDestinationDialog(null, null, null, actionButton);
+      return;
+    }
+    if (action === 'toggle-staging-selection') {
+      const stagingWordId = String(actionButton.dataset.stagingWordId || '');
+      const word = ui.stagingWords.find((item) => item.stagingWordId === stagingWordId);
+      if (word) {
+        setStagingSelected(word, actionButton.checked);
+        renderStagingWords();
+      }
+      return;
+    }
+    if (action === 'select-staging-page') {
+      const allSelected = ui.stagingWords.length > 0 && ui.stagingWords.every((word) =>
+        ui.selectedStagingIds.has(String(word.stagingWordId || ''))
+      );
+      ui.stagingWords.forEach((word) => setStagingSelected(word, !allSelected));
+      renderStagingWords();
+      return;
+    }
+    if (action === 'delete-staging') {
+      deleteSelectedStagingWords();
+      return;
+    }
+    if (action === 'distribute-staging') {
+      openStagingDistributionDialog(actionButton);
+      return;
+    }
+    if (action === 'show-staging-details') {
+      openStagingDetails(actionButton.dataset.stagingWordId, actionButton);
       return;
     }
     if (action === 'open-ranks') {
@@ -4504,7 +5566,7 @@
     }
     if (action === 'import-words-json') {
       if (rank && gate && canLeaveAdminView()) {
-        chooseWordImportFile(world, rank, gate, actionButton);
+        openWordImportDestinationDialog(world, rank, gate, actionButton);
       }
       return;
     }
