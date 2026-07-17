@@ -1,4 +1,4 @@
-﻿let currentFilter    = 'all';
+let currentFilter    = 'all';
 let editId           = null;
 let isReorderMode    = false;
 let selectedIndices  = [];
@@ -1171,15 +1171,22 @@ const APP_OVERLAY_ROUTES = {
 const APP_ROUTE_TO_VIEW = Object.fromEntries(Object.entries(APP_VIEW_ROUTES).map(([k, v]) => [v, k]));
 const APP_ROUTE_TO_MODAL = Object.fromEntries(Object.entries(APP_MODAL_ROUTES).map(([k, v]) => [v, k]));
 const APP_ROUTE_TO_OVERLAY = Object.fromEntries(Object.entries(APP_OVERLAY_ROUTES).map(([k, v]) => [v, k]));
-const APP_PROJECT_BASE_PATH = '/LootLingua';
+const APP_PROJECT_BASE_PATH = (() => {
+  if (!location.hostname.endsWith('.github.io')) {
+    return '';
+  }
+
+  const segments = location.pathname
+    .split('/')
+    .filter(Boolean);
+
+  return segments.length ? `/${segments[0]}` : '';
+})();
 let appRouteSyncing = false;
 let appRoutingReady = false;
 
 function getAppBasePath() {
-  const pathname = location.pathname || '/';
-  const isGithubPages = location.hostname.endsWith('github.io');
-  const isProjectPath = pathname === APP_PROJECT_BASE_PATH || pathname.startsWith(APP_PROJECT_BASE_PATH + '/');
-  return isGithubPages || isProjectPath ? APP_PROJECT_BASE_PATH : '';
+  return APP_PROJECT_BASE_PATH;
 }
 
 function getAppRoutePath(kind, key) {
