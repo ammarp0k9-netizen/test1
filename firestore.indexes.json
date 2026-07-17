@@ -1,0 +1,146 @@
+{
+  "indexes": [
+    {
+      "collectionGroup": "content_worlds",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "status", "order": "ASCENDING" },
+        { "fieldPath": "order", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "ranks",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "status", "order": "ASCENDING" },
+        { "fieldPath": "order", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "gates",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "status", "order": "ASCENDING" },
+        { "fieldPath": "order", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "words",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "status", "order": "ASCENDING" },
+        { "fieldPath": "order", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "words",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "status", "order": "ASCENDING" },
+        { "fieldPath": "createdAt", "order": "DESCENDING" },
+        { "fieldPath": "__name__", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "words",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "level", "order": "ASCENDING" },
+        { "fieldPath": "createdAt", "order": "DESCENDING" },
+        { "fieldPath": "__name__", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "words",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "partOfSpeech", "order": "ASCENDING" },
+        { "fieldPath": "createdAt", "order": "DESCENDING" },
+        { "fieldPath": "__name__", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "words",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "category", "order": "ASCENDING" },
+        { "fieldPath": "createdAt", "order": "DESCENDING" },
+        { "fieldPath": "__name__", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "content_word_import_staging",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "importedAt", "order": "DESCENDING" },
+        { "fieldPath": "importBatchId", "order": "DESCENDING" },
+        { "fieldPath": "sourceOrder", "order": "ASCENDING" },
+        { "fieldPath": "__name__", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "content_word_import_staging",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "importedAt", "order": "ASCENDING" },
+        { "fieldPath": "importBatchId", "order": "ASCENDING" },
+        { "fieldPath": "sourceOrder", "order": "ASCENDING" },
+        { "fieldPath": "__name__", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "content_word_import_staging",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "sourceFileName", "order": "ASCENDING" },
+        { "fieldPath": "importBatchId", "order": "ASCENDING" },
+        { "fieldPath": "sourceOrder", "order": "ASCENDING" },
+        { "fieldPath": "__name__", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "content_word_import_staging",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "level", "order": "ASCENDING" },
+        { "fieldPath": "importedAt", "order": "DESCENDING" },
+        { "fieldPath": "importBatchId", "order": "DESCENDING" },
+        { "fieldPath": "sourceOrder", "order": "ASCENDING" },
+        { "fieldPath": "__name__", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "content_word_import_staging",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "partOfSpeech", "order": "ASCENDING" },
+        { "fieldPath": "importedAt", "order": "DESCENDING" },
+        { "fieldPath": "importBatchId", "order": "DESCENDING" },
+        { "fieldPath": "sourceOrder", "order": "ASCENDING" },
+        { "fieldPath": "__name__", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "content_word_import_staging",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "sourceFileName", "order": "ASCENDING" },
+        { "fieldPath": "importedAt", "order": "DESCENDING" },
+        { "fieldPath": "importBatchId", "order": "DESCENDING" },
+        { "fieldPath": "sourceOrder", "order": "ASCENDING" },
+        { "fieldPath": "__name__", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "content_word_import_staging",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "importBatchId", "order": "ASCENDING" },
+        { "fieldPath": "importedAt", "order": "DESCENDING" },
+        { "fieldPath": "sourceOrder", "order": "ASCENDING" },
+        { "fieldPath": "__name__", "order": "ASCENDING" }
+      ]
+    }
+  ],
+  "fieldOverrides": []
+}
