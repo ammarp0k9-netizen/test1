@@ -5766,6 +5766,8 @@
     if (!entry) return;
     const visible = Boolean(state && state.resolved && state.isAdmin);
     entry.hidden = !visible;
+    entry.disabled = !visible;
+    entry.style.display = visible ? 'flex' : 'none';
     entry.setAttribute('aria-hidden', visible ? 'false' : 'true');
     entry.tabIndex = visible ? 0 : -1;
     if (!ui.entryBound) {
