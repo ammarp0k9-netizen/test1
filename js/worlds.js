@@ -1258,6 +1258,7 @@ const publishedContentState = {
   gate: null,
   wordPager: null,
   wordSnapshot: null,
+  wordPageRequest: null,
   generation: 0,
   loading: false,
   error: null,
@@ -1322,10 +1323,23 @@ function publishedViewRoot() {
 function renderPublishedLoading(message) {
   const root = publishedViewRoot();
   if (!root) return;
-  const state = publishedElement('div', 'published-state');
+  const loading = publishedElement('div', 'published-loading');
+  const state = publishedElement('div', 'published-state published-state-loading');
+  state.setAttribute('role', 'status');
+  state.setAttribute('aria-live', 'polite');
   state.append(publishedIcon('fa-solid fa-circle-notch fa-spin'));
   state.append(publishedElement('strong', '', message || 'جارٍ تحميل المحتوى الجاهز...'));
-  root.replaceChildren(state);
+  const skeletons = publishedElement('div', 'published-skeleton-list');
+  for (let index = 0; index < 3; index += 1) {
+    const skeleton = publishedElement('div', 'published-skeleton-card');
+    skeleton.append(
+      publishedElement('span', 'published-skeleton-visual'),
+      publishedElement('span', 'published-skeleton-lines')
+    );
+    skeletons.append(skeleton);
+  }
+  loading.append(state, skeletons);
+  root.replaceChildren(loading);
 }
 
 function logPublishedContentError(context, error) {
@@ -1349,6 +1363,7 @@ function renderPublishedError(level, error, retry) {
   if (!root) return;
   const notFound = error?.code === 'published/not-found';
   const state = publishedElement('div', 'published-state published-state-error');
+  state.setAttribute('role', 'alert');
   state.append(publishedIcon(notFound
     ? 'fa-solid fa-map-location-dot'
     : 'fa-solid fa-triangle-exclamation'));
@@ -1374,6 +1389,7 @@ function renderPublishedError(level, error, retry) {
 
 function renderPublishedEmpty(message, iconClass) {
   const state = publishedElement('div', 'published-state published-state-empty');
+  state.setAttribute('role', 'status');
   state.append(publishedIcon(iconClass || 'fa-regular fa-folder-open'));
   state.append(publishedElement('strong', '', message));
   return state;
@@ -1387,23 +1403,56 @@ function appendMetaChip(container, text, iconClass) {
   container.append(chip);
 }
 
-function appendPublishedVisual(card, item, fallbackIcon) {
+function getPublishedVisualFallback(item, kind) {
+  const identity = [
+    item?.title,
+    item?.name,
+    item?.category,
+    item?.theme,
+    item?.description,
+  ].filter(Boolean).join(' ').toLowerCase();
+  const themed = [
+    { match: /game|gaming|minecraft|pubg|لعب|ألعاب/, theme: 'games', icon: 'fa-solid fa-gamepad' },
+    { match: /film|movie|cinema|فيلم|سينما/, theme: 'cinema', icon: 'fa-solid fa-film' },
+    { match: /treasure|loot|chest|كنز|صندوق/, theme: 'loot', icon: 'fa-solid fa-box-open' },
+    { match: /battle|combat|war|sword|fantasy|قتال|حرب|سيف/, theme: 'adventure', icon: 'fa-solid fa-shield-halved' },
+    { match: /space|science|planet|فضاء|علوم|كوكب/, theme: 'science', icon: 'fa-solid fa-rocket' },
+    { match: /star|legend|hero|نجم|أسطور|بطل/, theme: 'legend', icon: 'fa-solid fa-star' },
+    { match: /book|language|dictionary|word|كتاب|لغة|قاموس|كلمات/, theme: 'knowledge', icon: 'fa-solid fa-book-open' },
+  ].find((entry) => entry.match.test(identity));
+  if (themed) return themed;
+  const defaults = {
+    world: { theme: 'world', icon: 'fa-solid fa-earth-americas' },
+    rank: { theme: 'rank', icon: 'fa-solid fa-ranking-star' },
+    gate: { theme: 'gate', icon: 'fa-solid fa-dungeon' },
+  };
+  return defaults[kind] || { theme: 'knowledge', icon: 'fa-solid fa-book-open' };
+}
+
+function appendPublishedVisual(card, item, kind) {
   const visual = publishedElement('span', 'published-card-visual');
-  const cover = String(item.cover || item.imageUrl || '').trim();
+  const cover = String(item.cover || item.coverUrl || item.imageUrl || item.image || '').trim();
   const icon = String(item.icon || '').trim();
+  const fallback = getPublishedVisualFallback(item, kind);
+  visual.classList.add(`published-visual-${fallback.theme}`);
+  const showFallback = () => {
+    visual.replaceChildren(publishedIcon(fallback.icon));
+    visual.classList.add('published-card-visual-fallback');
+  };
   if (cover) {
     const image = document.createElement('img');
     image.src = cover;
     image.alt = '';
     image.loading = 'lazy';
     image.decoding = 'async';
+    image.addEventListener('error', showFallback, { once: true });
     visual.append(image);
   } else if (/^(fa-|fas |far |fab )/.test(icon)) {
     visual.append(publishedIcon(icon));
-  } else if (icon) {
+  } else if (icon && /\p{Extended_Pictographic}/u.test(icon)) {
     visual.append(publishedElement('span', 'published-card-emoji', icon));
   } else {
-    visual.append(publishedIcon(fallbackIcon));
+    showFallback();
   }
   card.append(visual);
 }
@@ -1412,12 +1461,7 @@ function makePublishedHierarchyCard(kind, item, onClick) {
   const card = publishedElement('button', `published-card published-card-${kind}`);
   card.type = 'button';
   card.addEventListener('click', onClick);
-  const fallbackIcons = {
-    world: 'fa-solid fa-earth-americas',
-    rank: 'fa-solid fa-ranking-star',
-    gate: 'fa-solid fa-dungeon',
-  };
-  appendPublishedVisual(card, item, fallbackIcons[kind]);
+  appendPublishedVisual(card, item, kind);
 
   const body = publishedElement('span', 'published-card-body');
   body.append(publishedElement('strong', 'published-card-title', item.title || item.name || 'بدون اسم'));
@@ -1441,8 +1485,21 @@ function makePublishedHierarchyCard(kind, item, onClick) {
   if (item.comingSoon === true || item.isComingSoon === true) {
     appendMetaChip(meta, 'قريبًا', 'fa-regular fa-clock');
   }
-  body.append(meta);
-  card.append(body, publishedIcon('fa-solid fa-chevron-left published-card-chevron'));
+  const footer = publishedElement('span', 'published-card-footer');
+  footer.append(meta);
+  const actionLabels = {
+    world: 'استكشف العالم',
+    rank: 'عرض البوابات',
+    gate: 'معاينة الكلمات',
+  };
+  const action = publishedElement('span', 'published-card-action');
+  action.append(
+    document.createTextNode(actionLabels[kind] || 'فتح'),
+    publishedIcon('fa-solid fa-arrow-left')
+  );
+  footer.append(action);
+  body.append(footer);
+  card.append(body);
   return card;
 }
 
@@ -1460,9 +1517,16 @@ function appendPublishedHeader(root, options) {
     const breadcrumbs = publishedElement('nav', 'published-breadcrumb');
     breadcrumbs.setAttribute('aria-label', 'مسار المحتوى');
     options.breadcrumbs.forEach((item, index) => {
-      if (index > 0) breadcrumbs.append(publishedElement('span', '', '←'));
+      if (index > 0) {
+        breadcrumbs.append(publishedElement('span', 'published-breadcrumb-separator', '›'));
+      }
       if (item.onClick) {
-        breadcrumbs.append(publishedButton(item.label, 'published-breadcrumb-link', item.onClick));
+        breadcrumbs.append(publishedButton(
+          item.label,
+          'published-breadcrumb-link',
+          item.onClick,
+          item.iconClass
+        ));
       } else {
         breadcrumbs.append(publishedElement('span', 'published-breadcrumb-current', item.label));
       }
@@ -1486,6 +1550,20 @@ function renderPublishedWorlds(items) {
       'fa-solid fa-earth-americas'
     ));
   } else {
+    const intro = publishedElement('header', 'published-hub-intro');
+    const introIcon = publishedElement('span', 'published-hub-icon');
+    introIcon.append(publishedIcon('fa-solid fa-compass'));
+    const introCopy = publishedElement('span', 'published-hub-copy');
+    introCopy.append(
+      publishedElement('strong', '', 'اختر عالمك التالي'),
+      publishedElement('span', '', 'محتوى مرتب على رتب وبوابات، جاهز للتصفح كلمة بكلمة.')
+    );
+    intro.append(
+      introIcon,
+      introCopy,
+      publishedElement('span', 'published-hub-count', `${items.length} عوالم`)
+    );
+    content.append(intro);
     const grid = publishedElement('div', 'published-card-grid');
     items.forEach((world) => {
       grid.append(makePublishedHierarchyCard(
@@ -1510,7 +1588,11 @@ function renderPublishedRanks(world, ranks) {
     backLabel: 'العودة للعوالم',
     back: () => window.openPublishedWorldsRoot(),
     breadcrumbs: [
-      { label: 'العوالم الجاهزة', onClick: () => window.openPublishedWorldsRoot() },
+      {
+        label: 'العوالم الجاهزة',
+        onClick: () => window.openPublishedWorldsRoot(),
+        iconClass: 'fa-solid fa-earth-americas',
+      },
       { label: world.title || 'العالم' },
     ],
   });
@@ -1541,6 +1623,11 @@ function renderPublishedGates(world, rank, gates) {
     backLabel: 'العودة للرتب',
     back: () => window.openPublishedWorld(world.worldId),
     breadcrumbs: [
+      {
+        label: 'العوالم الجاهزة',
+        onClick: () => window.openPublishedWorldsRoot(),
+        iconClass: 'fa-solid fa-earth-americas',
+      },
       { label: world.title || 'العالم', onClick: () => window.openPublishedWorld(world.worldId) },
       { label: rank.title || 'الرتبة' },
     ],
@@ -1561,52 +1648,182 @@ function renderPublishedGates(world, rank, gates) {
   root.replaceChildren(section);
 }
 
+function publishedDetailText(value) {
+  if (Array.isArray(value)) return value.filter(Boolean).join('، ');
+  if (value && typeof value === 'object') {
+    return Object.values(value).filter(Boolean).join('، ');
+  }
+  return String(value || '').trim();
+}
+
 function makePublishedWordCard(word) {
   const card = publishedElement('article', 'published-word-card');
-  const top = publishedElement('div', 'published-word-top');
+  const content = publishedElement('div', 'published-word-content');
   const identity = publishedElement('div', 'published-word-identity');
-  identity.append(publishedElement('strong', 'published-word-text', word.word || ''));
-  identity.append(publishedElement('span', 'published-word-translation', word.translation || ''));
-  top.append(identity);
+  const wordText = publishedElement('strong', 'published-word-text', word.word || '');
+  wordText.setAttribute('dir', 'ltr');
+  wordText.setAttribute('lang', 'en');
+  const translation = publishedElement(
+    'span',
+    'published-word-translation',
+    word.translation || word.meaning || ''
+  );
+  translation.setAttribute('dir', 'rtl');
+  identity.append(wordText, translation);
+  content.append(identity);
+
   const meta = publishedElement('div', 'published-word-meta');
-  appendMetaChip(meta, word.partOfSpeech, 'fa-solid fa-font');
   appendMetaChip(meta, word.level, 'fa-solid fa-signal');
+  appendMetaChip(meta, word.partOfSpeech, 'fa-solid fa-font');
   appendMetaChip(meta, word.category, 'fa-solid fa-tag');
-  top.append(meta);
-  card.append(top);
+  if (meta.childElementCount) content.append(meta);
 
   if (word.example) {
-    card.append(publishedElement('p', 'published-word-example', word.example));
+    const example = publishedElement('p', 'published-word-example');
+    example.setAttribute('dir', 'ltr');
+    example.setAttribute('lang', 'en');
+    example.append(
+      publishedIcon('fa-solid fa-quote-left'),
+      document.createTextNode(String(word.example))
+    );
+    content.append(example);
   }
+
   const detailValues = [
     ['التعريف', word.definition],
-    ['التعريف بالعربية', word.definition_ar],
+    ['التعريف بالعربية', word.definition_ar || word.definitionAr],
+    ['المثال', word.example],
     ['ترجمة المثال', word.exampleTranslation],
-    ['ملاحظات', word.notes],
-  ].filter((item) => item[1]);
+    ['الوسوم', word.tags],
+    ['المرادفات', word.synonyms],
+  ].map(([label, value]) => [label, publishedDetailText(value)])
+    .filter((item) => item[1]);
+
+  const actions = publishedElement('div', 'published-word-actions');
+  const spokenWord = String(word.word || '').trim();
+  const soundAvailable = Boolean(
+    spokenWord &&
+    'speechSynthesis' in window &&
+    typeof window.playGameSound === 'function'
+  );
+  const sound = publishedElement('button', 'published-word-icon-btn published-word-sound');
+  sound.type = 'button';
+  sound.setAttribute('aria-label', soundAvailable ? `لفظ ${spokenWord}` : 'اللفظ غير متاح');
+  sound.title = soundAvailable ? 'استمع إلى اللفظ' : 'اللفظ غير متاح على هذا الجهاز';
+  sound.disabled = !soundAvailable;
+  sound.append(publishedIcon('fa-solid fa-volume-high'));
+  if (soundAvailable) {
+    sound.addEventListener('click', (event) => {
+      sound.classList.add('is-speaking');
+      window.playGameSound(spokenWord, event);
+      clearTimeout(sound.__publishedSpeakingTimer);
+      sound.__publishedSpeakingTimer = setTimeout(() => {
+        sound.classList.remove('is-speaking');
+      }, 1100);
+    });
+  }
+  actions.append(sound);
+
+  let details = null;
   if (detailValues.length) {
-    const details = publishedElement('div', 'published-word-details');
+    details = publishedElement('div', 'published-word-details');
     details.hidden = true;
     detailValues.forEach(([label, value]) => {
       const row = publishedElement('p', '');
       row.append(publishedElement('strong', '', `${label}: `));
-      row.append(document.createTextNode(String(value)));
+      row.append(document.createTextNode(value));
       details.append(row);
     });
-    const toggle = publishedButton(
-      'التفاصيل',
-      'published-word-toggle',
-      () => {
-        details.hidden = !details.hidden;
-        toggle.setAttribute('aria-expanded', String(!details.hidden));
-        toggle.lastChild.textContent = details.hidden ? 'التفاصيل' : 'إخفاء التفاصيل';
-      },
-      'fa-solid fa-circle-info'
+    const toggle = publishedElement(
+      'button',
+      'published-word-icon-btn published-word-toggle'
     );
+    toggle.type = 'button';
+    toggle.title = 'عرض التفاصيل';
+    toggle.setAttribute('aria-label', 'عرض تفاصيل الكلمة');
     toggle.setAttribute('aria-expanded', 'false');
-    card.append(toggle, details);
+    toggle.append(publishedIcon('fa-solid fa-circle-info'));
+    toggle.addEventListener('click', () => {
+      details.hidden = !details.hidden;
+      const expanded = !details.hidden;
+      toggle.setAttribute('aria-expanded', String(expanded));
+      toggle.setAttribute('aria-label', expanded ? 'إخفاء تفاصيل الكلمة' : 'عرض تفاصيل الكلمة');
+      toggle.title = expanded ? 'إخفاء التفاصيل' : 'عرض التفاصيل';
+      card.classList.toggle('published-word-expanded', expanded);
+    });
+    actions.append(toggle);
   }
+
+  card.append(content, actions);
+  if (details) card.append(details);
   return card;
+}
+
+function getPublishedWordPageMeta(gate, snapshot) {
+  const page = snapshot?.currentPage;
+  const pageNumber = Math.max(1, Number(snapshot?.currentPageIndex ?? 0) + 1);
+  const pageSize = Math.max(1, Number(snapshot?.pageSize) || 25);
+  const countValue = gate?.wordCount;
+  const rawCount = Number(countValue);
+  const knownCount = countValue !== undefined &&
+    countValue !== null &&
+    String(countValue).trim() !== '' &&
+    Number.isFinite(rawCount) &&
+    rawCount >= 0
+    ? rawCount
+    : null;
+  const observedCount = ((pageNumber - 1) * pageSize) + (page?.items?.length || 0);
+  const totalPages = knownCount !== null
+    ? Math.max(1, pageNumber + (page?.hasNext ? 1 : 0), Math.ceil(knownCount / pageSize))
+    : (page?.hasNext ? null : pageNumber);
+  const countLabel = knownCount !== null
+    ? `${knownCount} كلمة منشورة تقريبًا`
+    : (page?.hasNext
+      ? `أكثر من ${pageNumber * pageSize} كلمة`
+      : `${observedCount} كلمة منشورة`);
+  return {
+    pageNumber,
+    totalPages,
+    indicator: totalPages ? `${pageNumber} / ${totalPages}` : `${pageNumber} / …`,
+    countLabel,
+  };
+}
+
+function makePublishedPagination(snapshot, meta) {
+  const page = snapshot?.currentPage;
+  if (!page) return null;
+  const controls = publishedElement('nav', 'published-pagination');
+  controls.setAttribute('aria-label', 'التنقل بين صفحات كلمات البوابة');
+  const previous = publishedButton(
+    'السابق',
+    'published-page-btn published-page-previous',
+    (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      loadPublishedWordPage('previous');
+    },
+    'fa-solid fa-chevron-right'
+  );
+  const next = publishedButton(
+    'التالي',
+    'published-page-btn published-page-next',
+    (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      loadPublishedWordPage('next');
+    },
+    'fa-solid fa-chevron-left'
+  );
+  previous.disabled = !page.hasPrevious;
+  next.disabled = !page.hasNext;
+
+  const status = publishedElement('span', 'published-page-status');
+  status.append(
+    publishedElement('strong', '', meta.indicator),
+    publishedElement('small', '', 'صفحة')
+  );
+  controls.append(previous, status, next);
+  return controls;
 }
 
 function renderPublishedGateWords(world, rank, gate, snapshot) {
@@ -1619,6 +1836,11 @@ function renderPublishedGateWords(world, rank, gate, snapshot) {
     backLabel: 'العودة للبوابات',
     back: () => window.openPublishedRank(world.worldId, rank.rankId),
     breadcrumbs: [
+      {
+        label: 'العوالم الجاهزة',
+        onClick: () => window.openPublishedWorldsRoot(),
+        iconClass: 'fa-solid fa-earth-americas',
+      },
       { label: world.title || 'العالم', onClick: () => window.openPublishedWorld(world.worldId) },
       {
         label: rank.title || 'الرتبة',
@@ -1628,13 +1850,16 @@ function renderPublishedGateWords(world, rank, gate, snapshot) {
     ],
   });
 
+  const pageMeta = getPublishedWordPageMeta(gate, snapshot);
+  const toolbar = publishedElement('div', 'published-word-toolbar');
   const summary = publishedElement('div', 'published-word-summary');
-  const pageNumber = Number(snapshot?.currentPageIndex ?? 0) + 1;
-  summary.append(publishedElement('span', '', `الصفحة ${pageNumber}`));
-  if (Number.isFinite(Number(gate.wordCount))) {
-    summary.append(publishedElement('span', '', `${Number(gate.wordCount)} كلمة منشورة تقريبًا`));
-  }
-  section.append(summary);
+  summary.setAttribute('aria-live', 'polite');
+  summary.append(
+    publishedElement('strong', '', 'كلمات البوابة'),
+    publishedElement('span', '', pageMeta.countLabel)
+  );
+  toolbar.append(summary);
+  section.append(toolbar);
 
   const page = snapshot?.currentPage;
   if (!page || !page.items.length) {
@@ -1645,25 +1870,8 @@ function renderPublishedGateWords(world, rank, gate, snapshot) {
     section.append(list);
   }
 
-  if (page) {
-    const controls = publishedElement('div', 'published-pagination');
-    const previous = publishedButton(
-      'السابق',
-      'published-page-btn',
-      () => loadPublishedWordPage('previous'),
-      'fa-solid fa-chevron-right'
-    );
-    const next = publishedButton(
-      'التالي',
-      'published-page-btn',
-      () => loadPublishedWordPage('next'),
-      'fa-solid fa-chevron-left'
-    );
-    previous.disabled = !page.hasPrevious || snapshot.loading.previous;
-    next.disabled = !page.hasNext || snapshot.loading.next;
-    controls.append(previous, publishedElement('span', '', `صفحة ${pageNumber}`), next);
-    section.append(controls);
-  }
+  const pagination = makePublishedPagination(snapshot, pageMeta);
+  if (pagination) section.append(pagination);
   root.replaceChildren(section);
 }
 
@@ -1700,13 +1908,24 @@ function createPublishedWordPager(worldId, rankId, gateId) {
 
 async function loadPublishedWordPage(direction) {
   const pager = publishedContentState.wordPager;
-  if (!pager || publishedContentState.loading) return;
+  if (!pager) return null;
+  const pageDirection = direction === 'previous' ? 'previous' : 'next';
+  const currentSnapshot = pager.getSnapshot();
+  const currentPage = currentSnapshot.currentPage;
+  if (!currentPage) return currentSnapshot;
+  if (pageDirection === 'previous' && !currentPage.hasPrevious) return currentSnapshot;
+  if (pageDirection === 'next' && !currentPage.hasNext) return currentSnapshot;
+  if (publishedContentState.wordPageRequest) {
+    return publishedContentState.wordPageRequest;
+  }
+
   const generation = publishedContentState.generation;
-  publishedContentState.loading = true;
-  try {
-    const method = direction === 'previous' ? 'loadPreviousPage' : 'loadNextPage';
-    const result = await pager[method]();
-    if (generation !== publishedContentState.generation) return;
+  const previousPageIndex = currentSnapshot.currentPageIndex;
+  const method = pageDirection === 'previous' ? 'loadPreviousPage' : 'loadNextPage';
+  const task = (async () => {
+    await pager[method]();
+    const result = pager.getSnapshot();
+    if (generation !== publishedContentState.generation) return result;
     publishedContentState.wordSnapshot = result;
     renderPublishedGateWords(
       publishedContentState.world,
@@ -1714,12 +1933,30 @@ async function loadPublishedWordPage(direction) {
       publishedContentState.gate,
       result
     );
+    if (result.currentPageIndex !== previousPageIndex) {
+      requestAnimationFrame(() => {
+        const list = document.querySelector('.published-word-list') ||
+          document.querySelector('.published-word-summary');
+        if (!list) return;
+        const reduceMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+        list.scrollIntoView({ block: 'start', behavior: reduceMotion ? 'auto' : 'smooth' });
+      });
+    }
+    return result;
+  })();
+  publishedContentState.wordPageRequest = task;
+
+  try {
+    return await task;
   } catch (error) {
-    if (generation !== publishedContentState.generation) return;
+    if (generation !== publishedContentState.generation) return null;
     logPublishedContentError('words-page', error);
-    renderPublishedError('words', error, () => loadPublishedWordPage(direction));
+    renderPublishedError('words', error, () => loadPublishedWordPage(pageDirection));
+    return null;
   } finally {
-    if (generation === publishedContentState.generation) publishedContentState.loading = false;
+    if (publishedContentState.wordPageRequest === task) {
+      publishedContentState.wordPageRequest = null;
+    }
   }
 }
 
@@ -1764,6 +2001,7 @@ async function loadPublishedWorlds(options) {
   publishedContentState.wordPager?.invalidate();
   publishedContentState.wordPager = null;
   publishedContentState.wordSnapshot = null;
+  publishedContentState.wordPageRequest = null;
   publishedContentState.loading = true;
   renderPublishedLoading('جارٍ تحميل العوالم الجاهزة...');
   try {
@@ -1793,6 +2031,7 @@ window.showCustomWorldsTab = function() {
   publishedContentState.wordPager?.invalidate();
   publishedContentState.wordPager = null;
   publishedContentState.wordSnapshot = null;
+  publishedContentState.wordPageRequest = null;
   setPublishedTabState('custom');
   setPublishedTabsVisible(true);
   renderCustomWorldCards();
@@ -1816,6 +2055,7 @@ async function loadPublishedRouteData(route, options) {
   publishedContentState.wordPager?.invalidate();
   publishedContentState.wordPager = null;
   publishedContentState.wordSnapshot = null;
+  publishedContentState.wordPageRequest = null;
   publishedContentState.loading = true;
   const level = key === 'world' ? 'ranks' : key === 'rank' ? 'gates' : 'words';
   renderPublishedLoading(
