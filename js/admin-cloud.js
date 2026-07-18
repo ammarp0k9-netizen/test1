@@ -325,6 +325,16 @@ function mapAdminCloudError(error, fallbackCode) {
     conflict.sourceCode = sourceCode;
     return conflict;
   }
+  if (sourceCode === 'failed-precondition' || sourceCode === 'functions/failed-precondition') {
+    const message = String(error?.message || '');
+    const failedPrecondition = adminCloudError(
+      /\bindex\b/i.test(message) ? 'admin/index-required' : 'admin/failed-precondition',
+      message || 'The request requires a Firestore precondition that is not ready.',
+      error?.details
+    );
+    failedPrecondition.sourceCode = sourceCode;
+    return failedPrecondition;
+  }
   const mappedCodes = {
     'unauthenticated': 'admin/auth-required',
     'functions/unauthenticated': 'admin/auth-required',
@@ -336,8 +346,6 @@ function mapAdminCloudError(error, fallbackCode) {
     'functions/already-exists': 'admin/already-exists',
     'aborted': 'admin/conflict',
     'functions/aborted': 'admin/conflict',
-    'failed-precondition': 'admin/conflict',
-    'functions/failed-precondition': 'admin/conflict',
     'invalid-argument': 'admin/invalid-argument',
     'functions/invalid-argument': 'admin/invalid-argument',
     'deadline-exceeded': 'admin/timeout',
@@ -401,6 +409,21 @@ function getContentSchema() {
     throw adminCloudError('admin/schema-unavailable', 'The content schema is not available.');
   }
   return schema;
+}
+
+function getWordListDataApi() {
+  const api = window.LootLinguaWordListData;
+  if (
+    !api ||
+    typeof api.normalizeQuery !== 'function' ||
+    typeof api.createQuerySignature !== 'function'
+  ) {
+    throw adminCloudError(
+      'admin/query-normalizer-unavailable',
+      'The shared word-list query normalizer is unavailable.'
+    );
+  }
+  return api;
 }
 
 function requireWorldId(value) {
@@ -472,7 +495,7 @@ function requireSourceFileName(value) {
 }
 
 function requireWordPageSize(value) {
-  const pageSize = value === undefined ? WORD_PAGE_SIZE_DEFAULT : value;
+  const pageSize = Number(value === undefined ? WORD_PAGE_SIZE_DEFAULT : value);
   if (!Number.isSafeInteger(pageSize) || pageSize < 1 || pageSize > WORD_PAGE_SIZE_MAX) {
     throw adminCloudError(
       'admin/invalid-argument',
@@ -491,7 +514,10 @@ function requireWordListDirection(value) {
 }
 
 function requireListSort(value, definitions, fallback) {
-  const sort = value === undefined || value === '' ? fallback : String(value);
+  const sort = getWordListDataApi().normalizeQuery({
+    sourceType: 'list-sort',
+    sort: value,
+  }).sort || fallback;
   if (!Object.prototype.hasOwnProperty.call(definitions, sort)) {
     throw adminCloudError('admin/invalid-argument', 'The requested list sort is invalid.');
   }
@@ -499,9 +525,11 @@ function requireListSort(value, definitions, fallback) {
 }
 
 function requireListFilters(value, allowedFields) {
-  const source = value === undefined
-    ? {}
-    : requireOptions(value, allowedFields, 'List filters must be an object.', true);
+  const source = getWordListDataApi().normalizeQuery({
+    sourceType: 'list-filters',
+    filters: value,
+  }).filters;
+  requireOptions(source, allowedFields, 'List filters must be an object.', true);
   const output = {};
   Object.keys(source).forEach((field) => {
     const filterValue = source[field];
@@ -576,24 +604,6 @@ function decodeBase64UrlAscii(value) {
   return output;
 }
 
-function stableQueryValue(value) {
-  if (value === null || typeof value !== 'object') return JSON.stringify(value);
-  if (Array.isArray(value)) return `[${value.map(stableQueryValue).join(',')}]`;
-  return `{${Object.keys(value).sort().map((key) =>
-    `${JSON.stringify(key)}:${stableQueryValue(value[key])}`
-  ).join(',')}}`;
-}
-
-function queryShapeHash(value) {
-  const text = stableQueryValue(value);
-  let hash = 2166136261;
-  for (let index = 0; index < text.length; index += 1) {
-    hash ^= text.charCodeAt(index);
-    hash = Math.imul(hash, 16777619);
-  }
-  return (hash >>> 0).toString(16).padStart(8, '0');
-}
-
 function serializeCursorValue(value) {
   if (
     value &&
@@ -635,17 +645,17 @@ function deserializeCursorValue(value) {
   throw adminCloudError('admin/invalid-argument', 'The page cursor contains invalid data.');
 }
 
-function encodePageToken(prefix, scope, queryHash, sortFields, record, recordId) {
+function encodePageToken(prefix, scope, querySignature, sortFields, record, recordId) {
   return prefix + encodeBase64UrlAscii(JSON.stringify({
     v: 2,
     s: scope,
-    q: queryHash,
+    q: querySignature,
     k: sortFields.map((item) => serializeCursorValue(record[item.field])),
     i: recordId,
   }));
 }
 
-function decodePageToken(token, prefix, scope, queryHash, sortFields, requireId) {
+function decodePageToken(token, prefix, scope, querySignature, sortFields, requireId) {
   if (typeof token !== 'string' || !token.startsWith(prefix)) {
     throw adminCloudError('admin/invalid-argument', 'The page cursor is invalid.');
   }
@@ -663,7 +673,7 @@ function decodePageToken(token, prefix, scope, queryHash, sortFields, requireId)
     keys.join(',') !== 'i,k,q,s,v' ||
     cursor.v !== 2 ||
     cursor.s !== scope ||
-    cursor.q !== queryHash ||
+    cursor.q !== querySignature ||
     !Array.isArray(cursor.k) ||
     cursor.k.length !== sortFields.length
   ) {
@@ -675,11 +685,11 @@ function decodePageToken(token, prefix, scope, queryHash, sortFields, requireId)
   ]);
 }
 
-function encodeWordPageToken(worldId, rankId, gateId, queryHash, sortFields, word) {
+function encodeWordPageToken(worldId, rankId, gateId, querySignature, sortFields, word) {
   return encodePageToken(
     WORD_CURSOR_PREFIX,
     `${worldId}/${rankId}/${gateId}`,
-    queryHash,
+    querySignature,
     sortFields,
     word,
     word.contentWordId
@@ -691,14 +701,14 @@ function decodeWordPageToken(
   worldId,
   rankId,
   gateId,
-  queryHash,
+  querySignature,
   sortFields
 ) {
   return decodePageToken(
     token,
     WORD_CURSOR_PREFIX,
     `${worldId}/${rankId}/${gateId}`,
-    queryHash,
+    querySignature,
     sortFields,
     requireContentWordId
   );
@@ -2280,17 +2290,24 @@ async function importStagingWords(entries, options) {
 async function listStagingWords(options) {
   try {
     const context = await requireAdminContext();
+    const listData = getWordListDataApi();
     const settings = requireOptions(
       options,
       new Set(['pageSize', 'pageToken', 'cursor', 'direction', 'sort', 'filters']),
       'Staging list options must be an object.',
       true
     );
-    const pageSize = requireWordPageSize(settings.pageSize);
+    const normalizedQuery = listData.normalizeQuery({
+      sourceType: 'admin-content-word-import-staging',
+      sort: settings.sort,
+      filters: settings.filters,
+      pageSize: settings.pageSize === undefined ? WORD_PAGE_SIZE_DEFAULT : settings.pageSize,
+    });
+    const pageSize = requireWordPageSize(normalizedQuery.pageSize);
     const direction = requireWordListDirection(settings.direction);
-    const sort = requireListSort(settings.sort, STAGING_SORTS, 'newest');
+    const sort = requireListSort(normalizedQuery.sort, STAGING_SORTS, 'newest');
     const filters = requireListFilters(
-      settings.filters,
+      normalizedQuery.filters,
       new Set(['level', 'partOfSpeech', 'sourceFileName', 'importBatchId'])
     );
     if (Object.keys(filters).length && sort !== 'newest') {
@@ -2308,7 +2325,12 @@ async function listStagingWords(options) {
     }
     const pageToken = settings.pageToken ?? settings.cursor ?? '';
     const sortFields = STAGING_SORTS[sort];
-    const queryHash = queryShapeHash({ sort, filters });
+    const querySignature = listData.createQuerySignature({
+      ...normalizedQuery,
+      sort,
+      filters,
+      pageSize,
+    });
     const constraints = [];
     Object.entries(filters).forEach(([field, value]) => {
       constraints.push(where(field, '==', value));
@@ -2321,7 +2343,7 @@ async function listStagingWords(options) {
         pageToken,
         STAGING_CURSOR_PREFIX,
         'content_word_import_staging',
-        queryHash,
+        querySignature,
         sortFields,
         requireStagingWordId
       );
@@ -2343,7 +2365,7 @@ async function listStagingWords(options) {
     const encode = (item) => encodePageToken(
       STAGING_CURSOR_PREFIX,
       'content_word_import_staging',
-      queryHash,
+      querySignature,
       sortFields,
       item,
       item.stagingWordId
@@ -2359,7 +2381,7 @@ async function listStagingWords(options) {
       direction,
       sort,
       filters,
-      queryHash,
+      querySignature,
       hasMore: hasNext,
       hasNext,
       hasPrevious,
@@ -2625,6 +2647,7 @@ async function distributeStagingWords(stagingWordIds, target, options) {
 async function listWords(worldId, rankId, gateId, options) {
   try {
     const context = await requireAdminContext();
+    const listData = getWordListDataApi();
     const parentWorldId = requireWorldId(worldId);
     const parentRankId = requireRankId(rankId);
     const parentGateId = requireGateId(gateId);
@@ -2634,20 +2657,30 @@ async function listWords(worldId, rankId, gateId, options) {
       'Word list options must be an object.',
       true
     );
-    const pageSize = requireWordPageSize(settings.pageSize);
+    const normalizedQuery = listData.normalizeQuery({
+      sourceType: 'admin-content-words',
+      worldId: parentWorldId,
+      rankId: parentRankId,
+      gateId: parentGateId,
+      sort: settings.sort,
+      filters: settings.filters,
+      search: settings.search,
+      pageSize: settings.pageSize === undefined ? WORD_PAGE_SIZE_DEFAULT : settings.pageSize,
+    });
+    const pageSize = requireWordPageSize(normalizedQuery.pageSize);
     const direction = requireWordListDirection(settings.direction);
     const filters = requireListFilters(
-      settings.filters,
+      normalizedQuery.filters,
       new Set(['status', 'level', 'partOfSpeech', 'category'])
     );
-    const search = requirePrefixSearch(settings.search);
+    const search = requirePrefixSearch(normalizedQuery.search);
     if (search && Object.keys(filters).length) {
       throw adminCloudError(
         'admin/unsupported-filter-combination',
         'Prefix search cannot be combined with another filter.'
       );
     }
-    const sort = requireListSort(settings.sort, WORD_SORTS, 'newest');
+    const sort = requireListSort(normalizedQuery.sort, WORD_SORTS, 'newest');
     if (search && sort !== 'word-asc') {
       throw adminCloudError(
         'admin/unsupported-sort-combination',
@@ -2661,8 +2694,13 @@ async function listWords(worldId, rankId, gateId, options) {
       );
     }
     const sortFields = WORD_SORTS[sort];
-    const queryShape = Object.freeze({ sort, filters, search });
-    const queryHash = queryShapeHash(queryShape);
+    const querySignature = listData.createQuerySignature({
+      ...normalizedQuery,
+      sort,
+      filters,
+      search,
+      pageSize,
+    });
     if (
       settings.pageToken !== undefined &&
       settings.cursor !== undefined &&
@@ -2688,7 +2726,7 @@ async function listWords(worldId, rankId, gateId, options) {
         parentWorldId,
         parentRankId,
         parentGateId,
-        queryHash,
+        querySignature,
         sortFields
       );
       if (direction === 'backward') {
@@ -2727,7 +2765,7 @@ async function listWords(worldId, rankId, gateId, options) {
         parentWorldId,
         parentRankId,
         parentGateId,
-        queryHash,
+        querySignature,
         sortFields,
         items[0]
       )
@@ -2737,7 +2775,7 @@ async function listWords(worldId, rankId, gateId, options) {
         parentWorldId,
         parentRankId,
         parentGateId,
-        queryHash,
+        querySignature,
         sortFields,
         items[items.length - 1]
       )
@@ -2748,7 +2786,7 @@ async function listWords(worldId, rankId, gateId, options) {
           parentWorldId,
           parentRankId,
           parentGateId,
-          queryHash,
+          querySignature,
           sortFields,
           wordRecord(snapshot.docs[0], parentWorldId, parentRankId, parentGateId)
         )
@@ -2761,7 +2799,7 @@ async function listWords(worldId, rankId, gateId, options) {
       sort,
       filters,
       search,
-      queryHash,
+      querySignature,
       hasMore: hasNext,
       hasNext,
       hasPrevious,
