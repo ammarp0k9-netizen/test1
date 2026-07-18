@@ -239,7 +239,8 @@ function normalizeWordPageOptions(options) {
 
 function wordCursor(item) {
   return item ? {
-    order: Number.isFinite(Number(item.order)) ? Number(item.order) : 0,
+    // Firestore keyset cursors must retain the stored field type exactly.
+    order: item.order,
     id: String(item.contentWordId || ''),
   } : null;
 }
@@ -255,8 +256,16 @@ async function listPublishedGateWords(worldId, rankId, gateId, options) {
     orderBy(documentId(), 'asc'),
   ];
   if (settings.cursor) {
-    const cursorOrder = Number(settings.cursor.order);
+    const cursorOrder = settings.cursor.order;
     const cursorId = requireId(settings.cursor.id, 'Word');
+    if (
+      !(
+        (typeof cursorOrder === 'number' && Number.isFinite(cursorOrder)) ||
+        (typeof cursorOrder === 'string' && cursorOrder.length > 0)
+      )
+    ) {
+      throw publishedError('published/unavailable', 'Published word cursor is invalid.');
+    }
     if (settings.direction === 'backward') {
       constraints.push(endBefore(cursorOrder, cursorId));
     } else {
