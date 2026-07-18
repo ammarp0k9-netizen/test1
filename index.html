@@ -485,31 +485,40 @@
       <h2>عوالم الأساطير</h2>
       <p>اختر عالمك.</p>
     </div>
-    <div class="worlds-grid" id="worldsGrid">
-      <button type="button" class="world-card world-card-minecraft" data-feature="minecraft" onclick="return onWorldCardClick(event, 'minecraft', function () { loadGameDictionary('minecraft'); });">
-        <span class="world-card-icon-wrap">
-          <span class="world-card-icon"><i class="fas fa-cube" aria-hidden="true"></i></span>
-          <span class="world-card-lock-overlay" aria-hidden="true"><i class="fa-solid fa-lock"></i></span>
-        </span>
-        <strong>Minecraft</strong>
-        <span class="world-card-desc">قاموس بلوكات ومغامرات</span>
-      </button>
-      <button type="button" class="world-card world-card-pubg" data-feature="pubg" onclick="return onWorldCardClick(event, 'pubg', function () { loadGameDictionary('pubg'); });">
-        <span class="world-card-icon-wrap">
-          <span class="world-card-icon"><i class="fas fa-crosshairs" aria-hidden="true"></i></span>
-          <span class="world-card-lock-overlay" aria-hidden="true"><i class="fa-solid fa-lock"></i></span>
-        </span>
-        <strong>PUBG</strong>
-        <span class="world-card-desc">مصطلحات البقاء والمعركة</span>
-      </button>
-      <button type="button" class="world-card world-card-starred" data-feature="starred" onclick="return onWorldCardClick(event, 'starred', function () { loadStarredView(); });">
-        <span class="world-card-icon-wrap">
-          <span class="world-card-icon"><i class="fas fa-star" aria-hidden="true"></i></span>
-          <span class="world-card-lock-overlay" aria-hidden="true"><i class="fa-solid fa-lock"></i></span>
-        </span>
-        <strong>الكلمات الصعبة</strong>
-        <span class="world-card-desc">شوف الكلمات اللي حددت عليها بنجمة</span>
-      </button>
+    <div class="worlds-tabs" role="tablist" aria-label="مصدر العوالم">
+      <button id="publishedWorldsTab" class="worlds-tab active" type="button" role="tab" aria-selected="true" aria-controls="publishedWorldsPanel" onclick="showPublishedWorldsTab()">العوالم الجاهزة</button>
+      <button id="customWorldsTab" class="worlds-tab" type="button" role="tab" aria-selected="false" aria-controls="customWorldsPanel" onclick="showCustomWorldsTab()">عوالمي الخاصة</button>
+    </div>
+    <div id="publishedWorldsPanel" class="worlds-tab-panel" role="tabpanel" aria-labelledby="publishedWorldsTab">
+      <div id="publishedContentView" class="published-content-view" aria-live="polite"></div>
+    </div>
+    <div id="customWorldsPanel" class="worlds-tab-panel" role="tabpanel" aria-labelledby="customWorldsTab" hidden>
+      <div class="worlds-grid" id="worldsGrid">
+        <button type="button" class="world-card world-card-minecraft" data-feature="minecraft" onclick="return onWorldCardClick(event, 'minecraft', function () { loadGameDictionary('minecraft'); });">
+          <span class="world-card-icon-wrap">
+            <span class="world-card-icon"><i class="fas fa-cube" aria-hidden="true"></i></span>
+            <span class="world-card-lock-overlay" aria-hidden="true"><i class="fa-solid fa-lock"></i></span>
+          </span>
+          <strong>Minecraft</strong>
+          <span class="world-card-desc">قاموس بلوكات ومغامرات</span>
+        </button>
+        <button type="button" class="world-card world-card-pubg" data-feature="pubg" onclick="return onWorldCardClick(event, 'pubg', function () { loadGameDictionary('pubg'); });">
+          <span class="world-card-icon-wrap">
+            <span class="world-card-icon"><i class="fas fa-crosshairs" aria-hidden="true"></i></span>
+            <span class="world-card-lock-overlay" aria-hidden="true"><i class="fa-solid fa-lock"></i></span>
+          </span>
+          <strong>PUBG</strong>
+          <span class="world-card-desc">مصطلحات البقاء والمعركة</span>
+        </button>
+        <button type="button" class="world-card world-card-starred" data-feature="starred" onclick="return onWorldCardClick(event, 'starred', function () { loadStarredView(); });">
+          <span class="world-card-icon-wrap">
+            <span class="world-card-icon"><i class="fas fa-star" aria-hidden="true"></i></span>
+            <span class="world-card-lock-overlay" aria-hidden="true"><i class="fa-solid fa-lock"></i></span>
+          </span>
+          <strong>الكلمات الصعبة</strong>
+          <span class="world-card-desc">شوف الكلمات اللي حددت عليها بنجمة</span>
+        </button>
+      </div>
     </div>
   </section>
 
@@ -1005,6 +1014,7 @@
 
 <!-- ══ FIREBASE PROFILE SYNC ══ -->
 <script type="module" src="js/profile-cloud.js"></script>
+<script type="module" src="js/published-content.js"></script>
 <script type="module" src="js/admin-cloud.js"></script>
 
 <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
