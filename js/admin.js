@@ -394,7 +394,7 @@
     const filters = ui.wordFilterField && ui.wordFilterValue
       ? { [ui.wordFilterField]: ui.wordFilterValue }
       : {};
-    return {
+    return getWordListDataApi().normalizeQuery({
       sourceType: 'admin-content-words',
       worldId: String(worldId || ''),
       rankId: String(rankId || ''),
@@ -402,8 +402,8 @@
       search: String(ui.wordSearch || ''),
       filters,
       sort: String(ui.wordSort || 'newest'),
-      pageSize: WORD_PAGE_SIZE
-    };
+      pageSize: Number(WORD_PAGE_SIZE)
+    });
   }
 
   function createAdminWordPager(worldId, rankId, gateId) {
@@ -473,21 +473,22 @@
   }
 
   function createStagingQuery() {
-    return {
+    return getWordListDataApi().normalizeQuery({
       sourceType: 'admin-content-word-import-staging',
       sort: String(ui.stagingSort || 'newest'),
       filters: ui.stagingFilterField && ui.stagingFilterValue
         ? { [ui.stagingFilterField]: ui.stagingFilterValue }
         : {},
-      pageSize: WORD_PAGE_SIZE
-    };
+      pageSize: Number(WORD_PAGE_SIZE)
+    });
   }
 
   function createStagingPager() {
     const data = getWordListDataApi();
+    const query = createStagingQuery();
     return data.createPagedWordSource({
-      query: createStagingQuery(),
-      pageSize: WORD_PAGE_SIZE,
+      query,
+      pageSize: Number(WORD_PAGE_SIZE),
       maxCachedPages: ADMIN_WORD_PAGE_CACHE_LIMIT,
       getItemId: (word) => String(word && word.stagingWordId || ''),
       fetchPage: (request) => getCloudApi().listStagingWords({
@@ -571,6 +572,7 @@
   }
 
   function reloadStagingQuery() {
+    if (ui.stagingPager) ui.stagingPager.invalidate(createStagingQuery());
     ui.stagingPager = null;
     ui.stagingPageIndex = 0;
     clearStagingSelection();
@@ -1575,6 +1577,13 @@
 
   function reloadAdminWordQuery() {
     ui.wordLoadRevision += 1;
+    if (ui.wordPager) {
+      ui.wordPager.invalidate(createAdminWordQuery(
+        ui.activeWorldId,
+        ui.activeRankId,
+        ui.activeGateId
+      ));
+    }
     ui.wordPager = null;
     ui.wordPageIndex = 0;
     ui.wordHasMore = false;
