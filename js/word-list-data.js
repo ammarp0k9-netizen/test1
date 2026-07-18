@@ -3,6 +3,18 @@
 
   const DEFAULT_PAGE_SIZE = 25;
   const DEFAULT_CACHE_PAGES = 3;
+  const SORT_ALIASES = Object.freeze({
+    latest: 'newest',
+    'created-desc': 'newest',
+    'created-asc': 'oldest',
+    'gate-order': 'order',
+    'order-asc': 'order',
+    'order:asc': 'order',
+    alphabetical: 'word-asc',
+    'word-ascending': 'word-asc',
+    'word-descending': 'word-desc',
+    'updated-desc': 'updated'
+  });
 
   function makeError(code, message) {
     const error = new Error(message || code);
@@ -10,9 +22,75 @@
     return error;
   }
 
-  function cloneQuery(value) {
+  function emptyFilterValue(value) {
+    if (value === undefined || value === null) return true;
+    const normalized = String(value).trim();
+    return !normalized || normalized.toLowerCase() === 'all';
+  }
+
+  function normalizeFilters(value) {
+    if (emptyFilterValue(value)) return {};
     if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
-    return { ...value };
+    const filters = {};
+    Object.keys(value).sort().forEach((field) => {
+      const normalizedField = String(field || '').trim();
+      const filterValue = value[field];
+      if (!normalizedField || normalizedField.toLowerCase() === 'all' || emptyFilterValue(filterValue)) {
+        return;
+      }
+      filters[normalizedField] = typeof filterValue === 'string'
+        ? filterValue.trim()
+        : filterValue;
+    });
+    return filters;
+  }
+
+  function normalizeSort(value) {
+    if (emptyFilterValue(value)) return 'newest';
+    const normalized = String(value).trim().toLowerCase();
+    return SORT_ALIASES[normalized] || normalized;
+  }
+
+  function normalizePageSize(value) {
+    const pageSize = Number(value);
+    return Number.isSafeInteger(pageSize) && pageSize > 0 ? pageSize : DEFAULT_PAGE_SIZE;
+  }
+
+  function normalizeSearch(value) {
+    if (emptyFilterValue(value)) return '';
+    const text = String(value).trim();
+    const schema = root.LootLinguaContentSchema;
+    return schema && typeof schema.normalizeWord === 'function'
+      ? schema.normalizeWord(text)
+      : text;
+  }
+
+  function normalizeQuery(value) {
+    const source = value && typeof value === 'object' && !Array.isArray(value) ? value : {};
+    const sourceType = String(source.sourceType || '').trim();
+    const normalized = {
+      sourceType,
+      sort: normalizeSort(source.sort),
+      filters: normalizeFilters(source.filters ?? source.filter),
+      pageSize: normalizePageSize(source.pageSize)
+    };
+    if (sourceType === 'admin-content-words') {
+      normalized.worldId = String(source.worldId || '').trim();
+      normalized.rankId = String(source.rankId || '').trim();
+      normalized.gateId = String(source.gateId || '').trim();
+      normalized.search = normalizeSearch(source.search);
+    } else if (sourceType !== 'admin-content-word-import-staging') {
+      Object.keys(source).sort().forEach((key) => {
+        if (key in normalized || key === 'filter') return;
+        const item = source[key];
+        normalized[key] = item === undefined || item === null ? '' : item;
+      });
+    }
+    return normalized;
+  }
+
+  function cloneQuery(value) {
+    return normalizeQuery(value);
   }
 
   function stableSerialize(value) {
@@ -24,7 +102,7 @@
   }
 
   function createQuerySignature(query) {
-    return `word-list:v1:${stableSerialize(cloneQuery(query))}`;
+    return `word-list:v2:${encodeURIComponent(stableSerialize(normalizeQuery(query)))}`;
   }
 
   function pageItemsCount(cache) {
@@ -40,11 +118,10 @@
     if (typeof settings.fetchPage !== 'function') {
       throw makeError('word-list/fetch-page-required', 'fetchPage is required.');
     }
-    const pageSize = Number.isSafeInteger(settings.pageSize) && settings.pageSize > 0
-      ? settings.pageSize
-      : DEFAULT_PAGE_SIZE;
-    const maxCachedPages = Number.isSafeInteger(settings.maxCachedPages) && settings.maxCachedPages > 0
-      ? settings.maxCachedPages
+    const pageSize = normalizePageSize(settings.pageSize);
+    const requestedCachePages = Number(settings.maxCachedPages);
+    const maxCachedPages = Number.isSafeInteger(requestedCachePages) && requestedCachePages > 0
+      ? requestedCachePages
       : DEFAULT_CACHE_PAGES;
     const getItemId = typeof settings.getItemId === 'function'
       ? settings.getItemId
@@ -174,6 +251,11 @@
           }
           writePage(normalizePage(result, pageIndex));
           return getSnapshot();
+        }, (error) => {
+          if (requestGeneration !== generation || requestNavigationId !== navigationId) {
+            return getSnapshot();
+          }
+          throw error;
         })
         .finally(() => {
           if (pending.get(requestKey) === task) pending.delete(requestKey);
@@ -236,6 +318,7 @@
   }
 
   const API = Object.freeze({
+    normalizeQuery,
     createQuerySignature,
     createPagedWordSource,
     DEFAULT_PAGE_SIZE,
