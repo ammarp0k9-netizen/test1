@@ -1250,7 +1250,480 @@ function hideAllViewElements() {
 
 
 // ── Worlds Hub ──
-window.loadWorldsView = function() {
+const publishedContentState = {
+  tab: 'published',
+  route: { key: 'worlds', params: {} },
+  world: null,
+  rank: null,
+  gate: null,
+  wordPager: null,
+  wordSnapshot: null,
+  generation: 0,
+  loading: false,
+  error: null,
+};
+
+function getPublishedContentApi() {
+  const api = window.LootLinguaPublishedContent;
+  if (!api) {
+    const error = new Error('Published content API is unavailable.');
+    error.code = 'published/unavailable';
+    throw error;
+  }
+  return api;
+}
+
+function publishedElement(tag, className, text) {
+  const element = document.createElement(tag);
+  if (className) element.className = className;
+  if (text !== undefined && text !== null) element.textContent = String(text);
+  return element;
+}
+
+function publishedIcon(className) {
+  const icon = publishedElement('i', className || 'fa-solid fa-book-open');
+  icon.setAttribute('aria-hidden', 'true');
+  return icon;
+}
+
+function publishedButton(label, className, onClick, iconClass) {
+  const button = publishedElement('button', className);
+  button.type = 'button';
+  if (iconClass) button.append(publishedIcon(iconClass));
+  button.append(document.createTextNode(label));
+  button.addEventListener('click', onClick);
+  return button;
+}
+
+function setPublishedTabState(tab) {
+  const published = tab !== 'custom';
+  publishedContentState.tab = published ? 'published' : 'custom';
+  const publishedTab = document.getElementById('publishedWorldsTab');
+  const customTab = document.getElementById('customWorldsTab');
+  const publishedPanel = document.getElementById('publishedWorldsPanel');
+  const customPanel = document.getElementById('customWorldsPanel');
+  publishedTab?.classList.toggle('active', published);
+  customTab?.classList.toggle('active', !published);
+  publishedTab?.setAttribute('aria-selected', String(published));
+  customTab?.setAttribute('aria-selected', String(!published));
+  if (publishedPanel) publishedPanel.hidden = !published;
+  if (customPanel) customPanel.hidden = published;
+}
+
+function setPublishedTabsVisible(visible) {
+  const tabs = document.querySelector('#worldsView .worlds-tabs');
+  if (tabs) tabs.hidden = !visible;
+}
+
+function publishedViewRoot() {
+  return document.getElementById('publishedContentView');
+}
+
+function renderPublishedLoading(message) {
+  const root = publishedViewRoot();
+  if (!root) return;
+  const state = publishedElement('div', 'published-state');
+  state.append(publishedIcon('fa-solid fa-circle-notch fa-spin'));
+  state.append(publishedElement('strong', '', message || 'جارٍ تحميل المحتوى الجاهز...'));
+  root.replaceChildren(state);
+}
+
+function logPublishedContentError(context, error) {
+  const localHost = ['localhost', '127.0.0.1', '::1'].includes(location.hostname);
+  if (localHost) console.error(`[published-content:${context}]`, error);
+}
+
+function publishedErrorMessage(level, error) {
+  if (error?.code === 'published/not-found') return 'هذا المحتوى غير موجود أو لم يعد منشورًا.';
+  const messages = {
+    worlds: 'تعذر تحميل العوالم الجاهزة.',
+    ranks: 'تعذر تحميل الرتب.',
+    gates: 'تعذر تحميل البوابات.',
+    words: 'تعذر تحميل كلمات البوابة.',
+  };
+  return messages[level] || 'تعذر تحميل المحتوى الجاهز.';
+}
+
+function renderPublishedError(level, error, retry) {
+  const root = publishedViewRoot();
+  if (!root) return;
+  const notFound = error?.code === 'published/not-found';
+  const state = publishedElement('div', 'published-state published-state-error');
+  state.append(publishedIcon(notFound
+    ? 'fa-solid fa-map-location-dot'
+    : 'fa-solid fa-triangle-exclamation'));
+  state.append(publishedElement('strong', '', notFound ? 'المحتوى غير موجود' : 'تعذر التحميل'));
+  state.append(publishedElement('p', '', publishedErrorMessage(level, error)));
+  if (!notFound && typeof retry === 'function') {
+    state.append(publishedButton(
+      'إعادة المحاولة',
+      'published-action-btn',
+      retry,
+      'fa-solid fa-rotate-right'
+    ));
+  } else {
+    state.append(publishedButton(
+      'العودة للعوالم الجاهزة',
+      'published-action-btn',
+      () => window.openPublishedWorldsRoot(),
+      'fa-solid fa-arrow-right'
+    ));
+  }
+  root.replaceChildren(state);
+}
+
+function renderPublishedEmpty(message, iconClass) {
+  const state = publishedElement('div', 'published-state published-state-empty');
+  state.append(publishedIcon(iconClass || 'fa-regular fa-folder-open'));
+  state.append(publishedElement('strong', '', message));
+  return state;
+}
+
+function appendMetaChip(container, text, iconClass) {
+  if (text === undefined || text === null || text === '') return;
+  const chip = publishedElement('span', 'published-meta-chip');
+  if (iconClass) chip.append(publishedIcon(iconClass));
+  chip.append(document.createTextNode(String(text)));
+  container.append(chip);
+}
+
+function appendPublishedVisual(card, item, fallbackIcon) {
+  const visual = publishedElement('span', 'published-card-visual');
+  const cover = String(item.cover || item.imageUrl || '').trim();
+  const icon = String(item.icon || '').trim();
+  if (cover) {
+    const image = document.createElement('img');
+    image.src = cover;
+    image.alt = '';
+    image.loading = 'lazy';
+    image.decoding = 'async';
+    visual.append(image);
+  } else if (/^(fa-|fas |far |fab )/.test(icon)) {
+    visual.append(publishedIcon(icon));
+  } else if (icon) {
+    visual.append(publishedElement('span', 'published-card-emoji', icon));
+  } else {
+    visual.append(publishedIcon(fallbackIcon));
+  }
+  card.append(visual);
+}
+
+function makePublishedHierarchyCard(kind, item, onClick) {
+  const card = publishedElement('button', `published-card published-card-${kind}`);
+  card.type = 'button';
+  card.addEventListener('click', onClick);
+  const fallbackIcons = {
+    world: 'fa-solid fa-earth-americas',
+    rank: 'fa-solid fa-ranking-star',
+    gate: 'fa-solid fa-dungeon',
+  };
+  appendPublishedVisual(card, item, fallbackIcons[kind]);
+
+  const body = publishedElement('span', 'published-card-body');
+  body.append(publishedElement('strong', 'published-card-title', item.title || item.name || 'بدون اسم'));
+  const description = item.description || item.subtitle;
+  if (description) body.append(publishedElement('span', 'published-card-description', description));
+  const meta = publishedElement('span', 'published-card-meta');
+  if (item.difficulty) appendMetaChip(meta, item.difficulty, 'fa-solid fa-signal');
+  if (item.category) appendMetaChip(meta, item.category, 'fa-solid fa-tag');
+  if (kind === 'world' && Number.isFinite(Number(item.rankCount))) {
+    appendMetaChip(meta, `${Number(item.rankCount)} رتبة`, 'fa-solid fa-ranking-star');
+  }
+  if (kind === 'rank' && Number.isFinite(Number(item.gateCount))) {
+    appendMetaChip(meta, `${Number(item.gateCount)} بوابة`, 'fa-solid fa-dungeon');
+  }
+  if (kind === 'gate' && Number.isFinite(Number(item.wordCount))) {
+    appendMetaChip(meta, `${Number(item.wordCount)} كلمة`, 'fa-solid fa-language');
+  }
+  if (kind !== 'world' && Number.isFinite(Number(item.order))) {
+    appendMetaChip(meta, `الترتيب ${Number(item.order) + 1}`, 'fa-solid fa-arrow-down-1-9');
+  }
+  if (item.comingSoon === true || item.isComingSoon === true) {
+    appendMetaChip(meta, 'قريبًا', 'fa-regular fa-clock');
+  }
+  body.append(meta);
+  card.append(body, publishedIcon('fa-solid fa-chevron-left published-card-chevron'));
+  return card;
+}
+
+function appendPublishedHeader(root, options) {
+  const header = publishedElement('header', 'published-view-header');
+  if (options.back) {
+    header.append(publishedButton(
+      options.backLabel || 'رجوع',
+      'published-back-btn',
+      options.back,
+      'fa-solid fa-arrow-right'
+    ));
+  }
+  if (options.breadcrumbs?.length) {
+    const breadcrumbs = publishedElement('nav', 'published-breadcrumb');
+    breadcrumbs.setAttribute('aria-label', 'مسار المحتوى');
+    options.breadcrumbs.forEach((item, index) => {
+      if (index > 0) breadcrumbs.append(publishedElement('span', '', '←'));
+      if (item.onClick) {
+        breadcrumbs.append(publishedButton(item.label, 'published-breadcrumb-link', item.onClick));
+      } else {
+        breadcrumbs.append(publishedElement('span', 'published-breadcrumb-current', item.label));
+      }
+    });
+    header.append(breadcrumbs);
+  }
+  const heading = publishedElement('div', 'published-heading');
+  heading.append(publishedElement('h3', '', options.title));
+  if (options.description) heading.append(publishedElement('p', '', options.description));
+  header.append(heading);
+  root.append(header);
+}
+
+function renderPublishedWorlds(items) {
+  const root = publishedViewRoot();
+  if (!root) return;
+  const content = document.createDocumentFragment();
+  if (!items.length) {
+    content.append(renderPublishedEmpty(
+      'لا توجد عوالم منشورة حاليًا.',
+      'fa-solid fa-earth-americas'
+    ));
+  } else {
+    const grid = publishedElement('div', 'published-card-grid');
+    items.forEach((world) => {
+      grid.append(makePublishedHierarchyCard(
+        'world',
+        world,
+        () => window.openPublishedWorld(world.worldId)
+      ));
+    });
+    content.append(grid);
+  }
+  root.replaceChildren(content);
+}
+
+function renderPublishedRanks(world, ranks) {
+  const root = publishedViewRoot();
+  if (!root) return;
+  const content = document.createDocumentFragment();
+  const section = publishedElement('section', 'published-route-view');
+  appendPublishedHeader(section, {
+    title: world.title || 'العالم',
+    description: world.description || world.subtitle || '',
+    backLabel: 'العودة للعوالم',
+    back: () => window.openPublishedWorldsRoot(),
+    breadcrumbs: [
+      { label: 'العوالم الجاهزة', onClick: () => window.openPublishedWorldsRoot() },
+      { label: world.title || 'العالم' },
+    ],
+  });
+  if (!ranks.length) {
+    section.append(renderPublishedEmpty('لا توجد رتب منشورة في هذا العالم.', 'fa-solid fa-ranking-star'));
+  } else {
+    const grid = publishedElement('div', 'published-card-grid');
+    ranks.forEach((rank) => {
+      grid.append(makePublishedHierarchyCard(
+        'rank',
+        rank,
+        () => window.openPublishedRank(world.worldId, rank.rankId)
+      ));
+    });
+    section.append(grid);
+  }
+  content.append(section);
+  root.replaceChildren(content);
+}
+
+function renderPublishedGates(world, rank, gates) {
+  const root = publishedViewRoot();
+  if (!root) return;
+  const section = publishedElement('section', 'published-route-view');
+  appendPublishedHeader(section, {
+    title: rank.title || 'الرتبة',
+    description: rank.description || rank.subtitle || '',
+    backLabel: 'العودة للرتب',
+    back: () => window.openPublishedWorld(world.worldId),
+    breadcrumbs: [
+      { label: world.title || 'العالم', onClick: () => window.openPublishedWorld(world.worldId) },
+      { label: rank.title || 'الرتبة' },
+    ],
+  });
+  if (!gates.length) {
+    section.append(renderPublishedEmpty('لا توجد بوابات منشورة في هذه الرتبة.', 'fa-solid fa-dungeon'));
+  } else {
+    const grid = publishedElement('div', 'published-card-grid');
+    gates.forEach((gate) => {
+      grid.append(makePublishedHierarchyCard(
+        'gate',
+        gate,
+        () => window.openPublishedGate(world.worldId, rank.rankId, gate.gateId)
+      ));
+    });
+    section.append(grid);
+  }
+  root.replaceChildren(section);
+}
+
+function makePublishedWordCard(word) {
+  const card = publishedElement('article', 'published-word-card');
+  const top = publishedElement('div', 'published-word-top');
+  const identity = publishedElement('div', 'published-word-identity');
+  identity.append(publishedElement('strong', 'published-word-text', word.word || ''));
+  identity.append(publishedElement('span', 'published-word-translation', word.translation || ''));
+  top.append(identity);
+  const meta = publishedElement('div', 'published-word-meta');
+  appendMetaChip(meta, word.partOfSpeech, 'fa-solid fa-font');
+  appendMetaChip(meta, word.level, 'fa-solid fa-signal');
+  appendMetaChip(meta, word.category, 'fa-solid fa-tag');
+  top.append(meta);
+  card.append(top);
+
+  if (word.example) {
+    card.append(publishedElement('p', 'published-word-example', word.example));
+  }
+  const detailValues = [
+    ['التعريف', word.definition],
+    ['التعريف بالعربية', word.definition_ar],
+    ['ترجمة المثال', word.exampleTranslation],
+    ['ملاحظات', word.notes],
+  ].filter((item) => item[1]);
+  if (detailValues.length) {
+    const details = publishedElement('div', 'published-word-details');
+    details.hidden = true;
+    detailValues.forEach(([label, value]) => {
+      const row = publishedElement('p', '');
+      row.append(publishedElement('strong', '', `${label}: `));
+      row.append(document.createTextNode(String(value)));
+      details.append(row);
+    });
+    const toggle = publishedButton(
+      'التفاصيل',
+      'published-word-toggle',
+      () => {
+        details.hidden = !details.hidden;
+        toggle.setAttribute('aria-expanded', String(!details.hidden));
+        toggle.lastChild.textContent = details.hidden ? 'التفاصيل' : 'إخفاء التفاصيل';
+      },
+      'fa-solid fa-circle-info'
+    );
+    toggle.setAttribute('aria-expanded', 'false');
+    card.append(toggle, details);
+  }
+  return card;
+}
+
+function renderPublishedGateWords(world, rank, gate, snapshot) {
+  const root = publishedViewRoot();
+  if (!root) return;
+  const section = publishedElement('section', 'published-route-view');
+  appendPublishedHeader(section, {
+    title: gate.title || 'البوابة',
+    description: gate.description || gate.subtitle || '',
+    backLabel: 'العودة للبوابات',
+    back: () => window.openPublishedRank(world.worldId, rank.rankId),
+    breadcrumbs: [
+      { label: world.title || 'العالم', onClick: () => window.openPublishedWorld(world.worldId) },
+      {
+        label: rank.title || 'الرتبة',
+        onClick: () => window.openPublishedRank(world.worldId, rank.rankId)
+      },
+      { label: gate.title || 'البوابة' },
+    ],
+  });
+
+  const summary = publishedElement('div', 'published-word-summary');
+  const pageNumber = Number(snapshot?.currentPageIndex ?? 0) + 1;
+  summary.append(publishedElement('span', '', `الصفحة ${pageNumber}`));
+  if (Number.isFinite(Number(gate.wordCount))) {
+    summary.append(publishedElement('span', '', `${Number(gate.wordCount)} كلمة منشورة تقريبًا`));
+  }
+  section.append(summary);
+
+  const page = snapshot?.currentPage;
+  if (!page || !page.items.length) {
+    section.append(renderPublishedEmpty('لا توجد كلمات منشورة في هذه البوابة.', 'fa-solid fa-language'));
+  } else {
+    const list = publishedElement('div', 'published-word-list');
+    page.items.forEach((word) => list.append(makePublishedWordCard(word)));
+    section.append(list);
+  }
+
+  if (page) {
+    const controls = publishedElement('div', 'published-pagination');
+    const previous = publishedButton(
+      'السابق',
+      'published-page-btn',
+      () => loadPublishedWordPage('previous'),
+      'fa-solid fa-chevron-right'
+    );
+    const next = publishedButton(
+      'التالي',
+      'published-page-btn',
+      () => loadPublishedWordPage('next'),
+      'fa-solid fa-chevron-left'
+    );
+    previous.disabled = !page.hasPrevious || snapshot.loading.previous;
+    next.disabled = !page.hasNext || snapshot.loading.next;
+    controls.append(previous, publishedElement('span', '', `صفحة ${pageNumber}`), next);
+    section.append(controls);
+  }
+  root.replaceChildren(section);
+}
+
+function createPublishedWordPager(worldId, rankId, gateId) {
+  const listData = window.LootLinguaWordListData;
+  if (!listData || typeof listData.createPagedWordSource !== 'function') {
+    const error = new Error('Published word pagination is unavailable.');
+    error.code = 'published/unavailable';
+    throw error;
+  }
+  const api = getPublishedContentApi();
+  const queryState = {
+    sourceType: 'published-gate-words',
+    worldId,
+    rankId,
+    gateId,
+    sort: 'order',
+    filters: { status: 'published' },
+    pageSize: api.PAGE_SIZE,
+  };
+  return listData.createPagedWordSource({
+    query: queryState,
+    pageSize: api.PAGE_SIZE,
+    maxCachedPages: 3,
+    getItemId: (item) => String(item?.contentWordId || ''),
+    fetchPage: ({ pageSize, direction, cursor }) =>
+      api.listPublishedGateWords(worldId, rankId, gateId, {
+        pageSize,
+        direction,
+        cursor,
+      }),
+  });
+}
+
+async function loadPublishedWordPage(direction) {
+  const pager = publishedContentState.wordPager;
+  if (!pager || publishedContentState.loading) return;
+  const generation = publishedContentState.generation;
+  publishedContentState.loading = true;
+  try {
+    const method = direction === 'previous' ? 'loadPreviousPage' : 'loadNextPage';
+    const result = await pager[method]();
+    if (generation !== publishedContentState.generation) return;
+    publishedContentState.wordSnapshot = result;
+    renderPublishedGateWords(
+      publishedContentState.world,
+      publishedContentState.rank,
+      publishedContentState.gate,
+      result
+    );
+  } catch (error) {
+    if (generation !== publishedContentState.generation) return;
+    logPublishedContentError('words-page', error);
+    renderPublishedError('words', error, () => loadPublishedWordPage(direction));
+  } finally {
+    if (generation === publishedContentState.generation) publishedContentState.loading = false;
+  }
+}
+
+function prepareWorldsShell() {
   window.saveActiveAddFormDraft?.();
   cleanupQuizSessionIfActive();
   if (currentView === 'personal') animateWorldsRoute('next');
@@ -1281,9 +1754,159 @@ window.loadWorldsView = function() {
 
   document.querySelector('.page-header h1').innerHTML =
     '<i class="fa-solid fa-earth-americas" aria-hidden="true"></i> عوالم الأساطير';
-  restoreViewScroll('worlds');
   refreshFeatureUnlockUI();
+}
+
+async function loadPublishedWorlds(options) {
+  const settings = options || {};
+  const generation = ++publishedContentState.generation;
+  publishedContentState.route = { key: 'worlds', params: {} };
+  publishedContentState.wordPager?.invalidate();
+  publishedContentState.wordPager = null;
+  publishedContentState.wordSnapshot = null;
+  publishedContentState.loading = true;
+  renderPublishedLoading('جارٍ تحميل العوالم الجاهزة...');
+  try {
+    const items = await getPublishedContentApi().listPublishedWorlds({ force: settings.force });
+    if (generation !== publishedContentState.generation) return;
+    renderPublishedWorlds(items);
+  } catch (error) {
+    if (generation !== publishedContentState.generation) return;
+    logPublishedContentError('worlds', error);
+    renderPublishedError('worlds', error, () => loadPublishedWorlds({ force: true }));
+  } finally {
+    if (generation === publishedContentState.generation) publishedContentState.loading = false;
+  }
+}
+
+window.showPublishedWorldsTab = function() {
+  setPublishedTabState('published');
+  setPublishedTabsVisible(true);
+  if (publishedContentState.route.key !== 'worlds') {
+    setAppViewRoute('worlds');
+  }
+  loadPublishedWorlds();
+};
+
+window.showCustomWorldsTab = function() {
+  ++publishedContentState.generation;
+  publishedContentState.wordPager?.invalidate();
+  publishedContentState.wordPager = null;
+  publishedContentState.wordSnapshot = null;
+  setPublishedTabState('custom');
+  setPublishedTabsVisible(true);
+  renderCustomWorldCards();
   setAppViewRoute('worlds');
+};
+
+window.loadWorldsView = function() {
+  prepareWorldsShell();
+  setPublishedTabState('published');
+  setPublishedTabsVisible(true);
+  loadPublishedWorlds();
+  restoreViewScroll('worlds');
+  setAppViewRoute('worlds');
+};
+
+async function loadPublishedRouteData(route, options) {
+  const key = route?.key || 'not-found';
+  const params = route?.params || {};
+  const generation = ++publishedContentState.generation;
+  publishedContentState.route = { key, params: { ...params } };
+  publishedContentState.wordPager?.invalidate();
+  publishedContentState.wordPager = null;
+  publishedContentState.wordSnapshot = null;
+  publishedContentState.loading = true;
+  const level = key === 'world' ? 'ranks' : key === 'rank' ? 'gates' : 'words';
+  renderPublishedLoading(
+    key === 'world'
+      ? 'جارٍ تحميل الرتب...'
+      : key === 'rank'
+        ? 'جارٍ تحميل البوابات...'
+        : 'جارٍ تحميل كلمات البوابة...'
+  );
+  try {
+    const api = getPublishedContentApi();
+    if (key === 'not-found') {
+      const notFound = new Error('Published route was not found.');
+      notFound.code = 'published/not-found';
+      throw notFound;
+    }
+    const world = await api.getPublishedWorld(params.worldId);
+    if (generation !== publishedContentState.generation) return;
+    publishedContentState.world = world;
+    if (key === 'world') {
+      const ranks = await api.listPublishedRanks(params.worldId, options);
+      if (generation !== publishedContentState.generation) return;
+      renderPublishedRanks(world, ranks);
+      return;
+    }
+    const rank = await api.getPublishedRank(params.worldId, params.rankId);
+    if (generation !== publishedContentState.generation) return;
+    publishedContentState.rank = rank;
+    if (key === 'rank') {
+      const gates = await api.listPublishedGates(params.worldId, params.rankId, options);
+      if (generation !== publishedContentState.generation) return;
+      renderPublishedGates(world, rank, gates);
+      return;
+    }
+    const gate = await api.getPublishedGate(params.worldId, params.rankId, params.gateId);
+    if (generation !== publishedContentState.generation) return;
+    publishedContentState.gate = gate;
+    const pager = createPublishedWordPager(params.worldId, params.rankId, params.gateId);
+    publishedContentState.wordPager = pager;
+    const snapshot = await pager.loadInitialPage();
+    if (generation !== publishedContentState.generation) return;
+    publishedContentState.wordSnapshot = snapshot;
+    renderPublishedGateWords(world, rank, gate, snapshot);
+  } catch (error) {
+    if (generation !== publishedContentState.generation) return;
+    logPublishedContentError(key, error);
+    renderPublishedError(level, error, () => loadPublishedRouteData(route, { force: true }));
+  } finally {
+    if (generation === publishedContentState.generation) publishedContentState.loading = false;
+  }
+}
+
+window.loadPublishedContentRoute = function(route) {
+  prepareWorldsShell();
+  setPublishedTabState('published');
+  setPublishedTabsVisible(false);
+  window.scrollTo({ top: 0, behavior: 'auto' });
+  loadPublishedRouteData(route);
+};
+
+window.openPublishedWorldsRoot = function() {
+  setAppViewRoute('worlds');
+  window.loadWorldsView();
+};
+
+window.openPublishedWorld = function(worldId) {
+  const route = { key: 'world', params: { worldId: String(worldId || '') } };
+  setPublishedContentRoute(route.key, route.params);
+  window.loadPublishedContentRoute(route);
+};
+
+window.openPublishedRank = function(worldId, rankId) {
+  const route = {
+    key: 'rank',
+    params: { worldId: String(worldId || ''), rankId: String(rankId || '') },
+  };
+  setPublishedContentRoute(route.key, route.params);
+  window.loadPublishedContentRoute(route);
+};
+
+window.openPublishedGate = function(worldId, rankId, gateId) {
+  const route = {
+    key: 'gate',
+    params: {
+      worldId: String(worldId || ''),
+      rankId: String(rankId || ''),
+      gateId: String(gateId || ''),
+    },
+  };
+  setPublishedContentRoute(route.key, route.params);
+  window.loadPublishedContentRoute(route);
 };
 
 function normalizeCustomWorldPayload({ name, description, emoji, id } = {}) {
