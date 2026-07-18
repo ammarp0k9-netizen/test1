@@ -1190,6 +1190,14 @@ function getAppBasePath() {
 }
 
 function getAppRoutePath(kind, key) {
+  if (kind === 'published') {
+    const params = key && typeof key === 'object' ? key : {};
+    const parts = ['worlds'];
+    if (params.worldId) parts.push(encodeURIComponent(params.worldId));
+    if (params.rankId) parts.push('ranks', encodeURIComponent(params.rankId));
+    if (params.gateId) parts.push('gates', encodeURIComponent(params.gateId));
+    return getAppBasePath() + '/' + parts.join('/');
+  }
   const slug = kind === 'modal'
     ? APP_MODAL_ROUTES[key]
     : kind === 'overlay'
@@ -1208,6 +1216,31 @@ function parseAppRoute() {
   }
   const slug = pathname.replace(/^\/+|\/+$/g, '');
   if (!slug) return { kind: 'view', key: 'personal' };
+  const parts = slug.split('/').filter(Boolean);
+  if (parts[0] === APP_VIEW_ROUTES.worlds && parts.length > 1) {
+    if (parts.length === 2) {
+      return {
+        kind: 'published',
+        key: 'world',
+        params: { worldId: parts[1] }
+      };
+    }
+    if (parts.length === 4 && parts[2] === 'ranks') {
+      return {
+        kind: 'published',
+        key: 'rank',
+        params: { worldId: parts[1], rankId: parts[3] }
+      };
+    }
+    if (parts.length === 6 && parts[2] === 'ranks' && parts[4] === 'gates') {
+      return {
+        kind: 'published',
+        key: 'gate',
+        params: { worldId: parts[1], rankId: parts[3], gateId: parts[5] }
+      };
+    }
+    return { kind: 'published', key: 'not-found', params: {} };
+  }
   if (APP_ROUTE_TO_VIEW[slug]) return { kind: 'view', key: APP_ROUTE_TO_VIEW[slug] };
   if (APP_ROUTE_TO_MODAL[slug]) return { kind: 'modal', key: APP_ROUTE_TO_MODAL[slug] };
   if (APP_ROUTE_TO_OVERLAY[slug]) return { kind: 'overlay', key: APP_ROUTE_TO_OVERLAY[slug] };
@@ -1216,8 +1249,15 @@ function parseAppRoute() {
 
 function setAppRoute(kind, key, options = {}) {
   if (!appRoutingReady || appRouteSyncing) return;
-  const path = getAppRoutePath(kind, key);
-  const state = { lootlingua: true, kind, key, source: options.source || (options.replace ? 'replace' : 'push') };
+  const routeKey = kind === 'published' ? (options.params || {}) : key;
+  const path = getAppRoutePath(kind, routeKey);
+  const state = {
+    lootlingua: true,
+    kind,
+    key,
+    ...(kind === 'published' ? { params: routeKey } : {}),
+    source: options.source || (options.replace ? 'replace' : 'push')
+  };
   try {
     if (location.pathname === path) {
       history.replaceState({ ...state, source: history.state?.source || state.source }, '', path);
@@ -1231,6 +1271,10 @@ function setAppRoute(kind, key, options = {}) {
 
 function setAppViewRoute(viewKey, options = {}) {
   setAppRoute('view', viewKey, options);
+}
+
+function setPublishedContentRoute(key, params, options = {}) {
+  setAppRoute('published', key, { ...options, params });
 }
 
 function closeRouteOverlays() {
@@ -1328,6 +1372,12 @@ function applyAppRoute(route = parseAppRoute()) {
   closeRouteOverlays();
   if (route.kind === 'view') {
     openRouteView(route.key);
+  } else if (route.kind === 'published') {
+    if (typeof window.loadPublishedContentRoute === 'function') {
+      window.loadPublishedContentRoute(route);
+    } else {
+      openRouteView('worlds');
+    }
   } else {
     openRouteView(currentView || 'personal');
     openRouteOverlay(route.kind, route.key);
@@ -1341,7 +1391,10 @@ function handleInitialRouting() {
   const route = parseAppRoute();
   appRoutingReady = true;
   try {
-    const path = getAppRoutePath(route.kind, route.key);
+    const path = getAppRoutePath(
+      route.kind,
+      route.kind === 'published' ? route.params : route.key
+    );
     const state = { lootlingua: true, ...route, source: 'initial' };
     if (location.pathname === path) {
       history.replaceState(state, '', location.href);
