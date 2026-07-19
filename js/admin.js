@@ -1301,7 +1301,7 @@
     assessmentNote.setAttribute('role', 'note');
     appendChildren(assessmentNote, [
       makeElement('strong', 'admin-assessment-note-title', 'عتبة اختبار الدخول فقط'),
-      makeElement('span', 'admin-assessment-note-copy', 'تحدد هذه العتبة نتيجة تقييم الدخول إلى البوابة، ولا تمنح XP أو إتقانًا. منطق فتح المحتوى بعد التعلّم لم يُحسم بعد.')
+      makeElement('span', 'admin-assessment-note-copy', 'تحدد هذه العتبة نتيجة تقييم الدخول إلى البوابة، ولا تمنح XP أو إتقانًا. تفتح البوابة التالية بعد إكمال تعلم الحالية.')
     ]);
     container.append(assessmentNote);
 
@@ -3350,6 +3350,25 @@
     return JSON.stringify(collectRankForm(form));
   }
 
+  function rankCandidateHasPrevious(form, modalState) {
+    const values = collectRankForm(form);
+    const candidateOrder = Number(values.order);
+    const candidateId = String(modalState.rank?.rankId || 'pending-rank');
+    return ui.ranks.some((rank) => {
+      const rankId = String(rank.rankId || '');
+      if (modalState.rank && rankId === String(modalState.rank.rankId)) return false;
+      const rankOrder = Number(rank.order);
+      if (rankOrder !== candidateOrder) return rankOrder < candidateOrder;
+      return rankId.localeCompare(candidateId, 'en') < 0;
+    });
+  }
+
+  function syncFirstRankLockWarning(form, modalState, warning) {
+    const values = collectRankForm(form);
+    const locked = values.unlockConfig.initialStatus === 'locked';
+    warning.hidden = !locked || rankCandidateHasPrevious(form, modalState);
+  }
+
   function validateRankPayload(form, modalState) {
     const values = collectRankForm(form);
     const source = modalState.rank || {};
@@ -3451,9 +3470,16 @@
         { value: 'locked', label: 'مقفلة' },
         { value: 'available', label: 'متاحة' }
       ],
-      help: 'هذا إعداد أولي فقط؛ منطق الفتح اللاحق لم يُحسم.'
+      help: 'هذا إعداد بداية الرحلة؛ تفتح الرتب اللاحقة بعد إكمال الرتبة السابقة.'
     }).wrapper);
     form.append(grid);
+    const lockWarning = makeElement(
+      'div',
+      'admin-rank-lock-warning',
+      'تنبيه: هذه أول رتبة حسب الترتيب وهي مقفلة، لذلك لن توجد نقطة بداية متاحة للرحلة.'
+    );
+    lockWarning.hidden = true;
+    form.append(lockWarning);
     const errorBox = makeElement('div', 'admin-form-error');
     errorBox.hidden = true;
     form.append(errorBox);
@@ -3481,10 +3507,12 @@
       initialSignature: '',
       returnFocus
     };
+    syncFirstRankLockWarning(form, modalState, lockWarning);
     modalState.initialSignature = rankFormSignature(form);
     ui.modal = modalState;
     const syncDirty = () => {
       modalState.dirty = rankFormSignature(form) !== modalState.initialSignature;
+      syncFirstRankLockWarning(form, modalState, lockWarning);
     };
     form.addEventListener('input', syncDirty);
     form.addEventListener('change', syncDirty);
@@ -3568,12 +3596,16 @@
   function gateEditorSeed(gate) {
     const source = gate || {};
     const storedRatio = source.entryAssessmentPassRatio;
+    const unlockConfig = source.unlockConfig && typeof source.unlockConfig === 'object'
+      ? source.unlockConfig
+      : {};
     return {
       title: String(source.title || ''),
       subtitle: String(source.subtitle || ''),
       description: String(source.description || ''),
       order: cachedCount(source.order),
       difficulty: String(source.difficulty || ''),
+      initialStatus: unlockConfig.initialStatus === 'available' ? 'available' : 'locked',
       entryAssessmentPassPercent: storedRatio === null || storedRatio === undefined
         ? ''
         : String(Number(storedRatio) * 100)
@@ -3589,25 +3621,19 @@
       description: String(data.get('description') || '').trim(),
       order: Number(data.get('order')),
       difficulty: String(data.get('difficulty') || '').trim(),
-      entryAssessmentPassRatio: rawThreshold === '' ? null : Number(rawThreshold) / 100
+      entryAssessmentPassRatio: rawThreshold === '' ? null : Number(rawThreshold) / 100,
+      unlockConfig: {
+        mode: 'manual_placeholder',
+        initialStatus: form.dataset.initialStatus === 'available' ? 'available' : 'locked',
+        requiredMasteredRatio: null,
+        requiredReviewingRatio: null,
+        requiredGateCount: null
+      }
     };
   }
 
   function gateFormSignature(form) {
     return JSON.stringify(collectGateForm(form));
-  }
-
-  function gateUnlockPlaceholder(source) {
-    if (source && source.unlockConfig && typeof source.unlockConfig === 'object') {
-      return { ...source.unlockConfig };
-    }
-    return {
-      mode: 'manual_placeholder',
-      initialStatus: 'locked',
-      requiredMasteredRatio: null,
-      requiredReviewingRatio: null,
-      requiredGateCount: null
-    };
   }
 
   function validateGatePayload(form, modalState) {
@@ -3621,8 +3647,7 @@
       ...values,
       status: modalState.mode === 'edit' ? source.status : 'draft',
       version: modalState.mode === 'edit' ? Number(source.version) : 1,
-      wordCount: modalState.mode === 'edit' ? cachedCount(source.wordCount) : 0,
-      unlockConfig: gateUnlockPlaceholder(source)
+      wordCount: modalState.mode === 'edit' ? cachedCount(source.wordCount) : 0
     };
     const schema = root.LootLinguaContentSchema;
     if (!schema || typeof schema.validateGate !== 'function') {
@@ -3696,6 +3721,7 @@
     }
 
     const form = makeElement('form', 'admin-world-form admin-gate-form');
+    form.dataset.initialStatus = seed.initialStatus;
     const grid = makeElement('div', 'admin-form-grid');
     [
       { name: 'title', label: 'عنوان البوابة', value: seed.title, required: true, maxLength: 120, placeholder: 'مثال: بوابة المفردات الأساسية' },
@@ -3712,7 +3738,7 @@
         max: 100,
         step: 0.01,
         placeholder: formatAssessmentPercent(defaultRatio),
-        help: `اختياري؛ اتركه فارغًا لاستخدام الافتراضي المركزي ${formatAssessmentPercent(defaultRatio)}. هذه العتبة لاختبار الدخول فقط؛ منطق الفتح بعد التعلّم لم يُحسم.`
+        help: `اختياري؛ اتركه فارغًا لاستخدام الافتراضي المركزي ${formatAssessmentPercent(defaultRatio)}. هذه العتبة لاختبار الدخول فقط؛ فتح البوابات يعتمد على إكمال تعلم البوابة السابقة.`
       }
     ].forEach((definition) => grid.append(makeField(definition).wrapper));
     form.append(grid);
