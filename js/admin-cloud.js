@@ -161,6 +161,7 @@ const WORD_INPUT_FIELDS = new Set([
 const WORD_PAGE_SIZE_DEFAULT = 50;
 const WORD_PAGE_SIZE_MAX = 100;
 const BULK_WORD_LIMIT = 100;
+const MAX_GATE_DRAFT_PUBLISH_BATCHES = 100;
 const WORD_CURSOR_PREFIX = 'llw1_';
 const STAGING_CURSOR_PREFIX = 'lls1_';
 const STAGING_IMPORT_LIMIT = 100;
@@ -1996,11 +1997,118 @@ async function updateGate(worldId, rankId, gateId, payload, expectedVersion) {
 async function setGateStatus(worldId, rankId, gateId, status, expectedVersion) {
   try {
     const context = await requireAdminContext();
+    let publishedDraftWordCount = 0;
+    if (status === 'published') {
+      const parentWorldId = requireWorldId(worldId);
+      const parentRankId = requireRankId(rankId);
+      const id = requireGateId(gateId);
+      const version = requireExpectedVersion(expectedVersion);
+      const snapshot = await getDoc(doc(gatesCollection(parentWorldId, parentRankId), id));
+      assertAdminContext(context);
+      if (!snapshot.exists()) {
+        throw adminCloudError('admin/not-found', 'Gate not found.');
+      }
+      const existing = snapshot.data() || {};
+      assertStoredGate(existing, parentWorldId, parentRankId, id);
+      if (existing.version !== version) {
+        throw adminCloudError('admin/version-conflict', 'The gate was changed by another request.', {
+          expectedVersion: version,
+          actualVersion: existing.version,
+        });
+      }
+      if (existing.status !== 'draft') {
+        throw adminCloudError(
+          'content/invalid-status-transition',
+          'Only a draft gate can be published.'
+        );
+      }
+      publishedDraftWordCount = await publishDraftWordsForGate(
+        context,
+        parentWorldId,
+        parentRankId,
+        id
+      );
+    }
     const result = await updateGate(worldId, rankId, gateId, { status }, expectedVersion);
     assertAdminContext(context);
-    return result;
+    return status === 'published'
+      ? { ...result, publishedDraftWordCount }
+      : result;
   } catch (error) {
     throw mapAdminCloudError(error, 'admin/status-update-failed');
+  }
+}
+
+async function publishDraftWordsForGate(context, worldId, rankId, gateId) {
+  let publishedDraftWordCount = 0;
+  for (let batchIndex = 0; batchIndex < MAX_GATE_DRAFT_PUBLISH_BATCHES; batchIndex += 1) {
+    const snapshot = await getDocs(query(
+      wordsCollection(worldId, rankId, gateId),
+      where('status', '==', 'draft'),
+      limit(BULK_WORD_LIMIT)
+    ));
+    assertAdminContext(context);
+    if (!snapshot.docs.length) return publishedDraftWordCount;
+
+    const draftWords = snapshot.docs.map((item) =>
+      wordRecord(item, worldId, rankId, gateId)
+    );
+    draftWords.forEach((word) => assertStoredWord(
+      word,
+      worldId,
+      rankId,
+      gateId,
+      word.contentWordId
+    ));
+    await bulkSetWordStatus(
+      worldId,
+      rankId,
+      gateId,
+      'published',
+      draftWords.map((word) => ({
+        contentWordId: word.contentWordId,
+        expectedVersion: word.version,
+      }))
+    );
+    assertAdminContext(context);
+    publishedDraftWordCount += draftWords.length;
+  }
+  throw adminCloudError(
+    'admin/publish-incomplete',
+    'Gate draft publication exceeded the safe batch limit.',
+    { publishedDraftWordCount }
+  );
+}
+
+async function publishGateDraftWords(worldId, rankId, gateId) {
+  try {
+    const context = await requireAdminContext();
+    const parentWorldId = requireWorldId(worldId);
+    const parentRankId = requireRankId(rankId);
+    const id = requireGateId(gateId);
+    const snapshot = await getDoc(doc(gatesCollection(parentWorldId, parentRankId), id));
+    assertAdminContext(context);
+    if (!snapshot.exists()) {
+      throw adminCloudError('admin/not-found', 'Gate not found.');
+    }
+    const gate = snapshot.data() || {};
+    assertStoredGate(gate, parentWorldId, parentRankId, id);
+    if (gate.status !== 'published') {
+      throw adminCloudError(
+        'content/invalid-status-transition',
+        'Draft-word repair is only available for a published gate.'
+      );
+    }
+    const publishedDraftWordCount = await publishDraftWordsForGate(
+      context,
+      parentWorldId,
+      parentRankId,
+      id
+    );
+    assertAdminContext(context);
+    return { publishedDraftWordCount };
+  } catch (error) {
+    throw mapAdminCloudError(error, 'admin/bulk-update-failed');
   }
 }
 
@@ -3405,6 +3513,7 @@ window.LootLinguaAdminCloud = Object.freeze({
   createGate,
   updateGate,
   setGateStatus,
+  publishGateDraftWords,
   duplicateGateAsDraft,
   moveGate,
   requestDeleteGate,
