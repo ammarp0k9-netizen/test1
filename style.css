@@ -8211,8 +8211,7 @@ body.low-end-device *::after {
 body.perf-balanced *,
 body.perf-balanced *::before,
 body.perf-balanced *::after {
-  animation-duration: 0.5s !important;
-  transition-duration: 0.1s !important;
+  transition-duration: 0.16s !important;
 }
 body.perf-stable *,
 body.perf-stable *::before,
@@ -8763,7 +8762,7 @@ body.low-end-device .game-card img {
   --world-icon-radius: 14px;
 }
 .worlds-hero {
-  margin-bottom: 18px;
+  margin-bottom: 12px;
   text-align: center;
 }
 .worlds-kicker {
@@ -8786,39 +8785,73 @@ body.low-end-device .game-card img {
   font-size: 14px;
 }
 .worlds-tabs {
-  display: inline-flex;
+  position: relative;
+  display: flex;
   align-items: center;
-  gap: 4px;
-  margin: 0 0 16px;
-  padding: 4px;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  background: color-mix(in srgb, var(--card-bg) 88%, transparent);
+  width: fit-content;
+  gap: 3px;
+  margin: 0 auto 22px;
+  padding: 3px;
+  border: 1px solid color-mix(in srgb, var(--border) 78%, transparent);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--card-bg) 68%, transparent);
+  box-shadow: 0 7px 18px rgba(0, 0, 0, .11);
+  isolation: isolate;
+}
+.worlds-tabs::before {
+  content: "";
+  position: absolute;
+  z-index: 0;
+  inset-block: 3px;
+  inset-inline-start: 3px;
+  width: calc((100% - 9px) / 2);
+  border-radius: inherit;
+  background: color-mix(in srgb, var(--accent) 82%, transparent);
+  box-shadow: 0 3px 9px color-mix(in srgb, var(--accent) 19%, transparent);
+  transform: translateX(0);
+  transition: transform .26s cubic-bezier(.2, .78, .24, 1);
+}
+.worlds-tabs[data-active-tab="custom"]::before {
+  transform: translateX(calc(-100% - 3px));
+}
+html[dir="ltr"] .worlds-tabs[data-active-tab="custom"]::before {
+  transform: translateX(calc(100% + 3px));
 }
 .worlds-tabs[hidden],
 .worlds-tab-panel[hidden] {
   display: none !important;
 }
 .worlds-tab {
-  min-height: 34px;
-  padding: 7px 12px;
+  position: relative;
+  z-index: 1;
+  min-height: 30px;
+  padding: 5px 10px;
   border: 0;
-  border-radius: 6px;
+  border-radius: 999px;
   background: transparent;
   color: var(--text-gray);
   font: inherit;
-  font-size: 12px;
+  font-size: 11px;
   font-weight: 800;
   cursor: pointer;
+  transition: color .18s ease, transform .16s ease;
 }
-.worlds-tab:hover,
+.worlds-tab:not(.active):hover,
 .worlds-tab:focus-visible {
   color: var(--text-white);
   background: var(--hover-bg);
 }
 .worlds-tab.active {
-  background: var(--accent);
+  background: transparent;
   color: var(--text-on-accent);
+  box-shadow: none;
+}
+.worlds-tab-panel-enter {
+  animation: worldsTabPanelEnter .26s ease both;
+}
+@keyframes worldsTabPanelEnter {
+  from { opacity: .68; transform: translateY(5px); }
+  to { opacity: 1; transform: translateY(0); }
 }
 
 .published-content-view {
@@ -9587,12 +9620,11 @@ body.low-end-device .game-card img {
 
 @media (max-width: 520px) {
   .worlds-tabs {
-    display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    width: 100%;
+    display: flex;
+    width: fit-content;
   }
   .worlds-tab {
-    width: 100%;
+    width: auto;
   }
 
   .published-hub-intro {
@@ -9653,6 +9685,12 @@ body.low-end-device .game-card img {
   .published-word-actions {
     padding-inline-start: 9px;
   }
+}
+
+@keyframes worldsTouchPop {
+  0% { transform: scale(.985); }
+  58% { transform: scale(1.012); }
+  100% { transform: scale(1); }
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -9778,6 +9816,63 @@ body.low-end-device .game-card img {
   background: transparent;
   color: inherit;
 }
+
+@media (hover: none), (pointer: coarse) {
+  .published-card:hover,
+  .world-card:hover,
+  .world-card.locked:hover {
+    transform: none;
+    border-color: var(--border);
+    box-shadow: inset 0 1px 0 color-mix(in srgb, var(--text-white) 5%, transparent);
+  }
+
+  .published-card:hover .published-card-action i {
+    transform: none;
+  }
+
+  .published-word-card:hover:not(.published-word-expanded) {
+    transform: none;
+    border-color: var(--border);
+    border-inline-start-color: color-mix(in srgb, var(--accent) 70%, var(--star));
+    box-shadow:
+      inset 0 1px 0 color-mix(in srgb, var(--text-white) 5%, transparent),
+      0 7px 18px rgba(0, 0, 0, .1);
+  }
+
+  .worlds-tab:not(.active):hover {
+    background: transparent;
+    color: var(--text-gray);
+  }
+
+  .published-card.is-touch-pressed,
+  .published-word-card.is-touch-pressed,
+  .world-card.is-touch-pressed,
+  .worlds-tab.is-touch-pressed {
+    transform: translateY(1px) scale(.982) !important;
+    border-color: color-mix(in srgb, var(--accent) 44%, var(--border));
+    transition-duration: .08s;
+  }
+
+  .published-card.is-touch-pop,
+  .published-word-card.is-touch-pop,
+  .world-card.is-touch-pop,
+  .worlds-tab.is-touch-pop {
+    animation: worldsTouchPop .24s cubic-bezier(.2, .8, .25, 1);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .published-card,
+  .published-word-card,
+  .world-card,
+  .worlds-tab,
+  .worlds-tabs::before,
+  .worlds-tab-panel-enter {
+    transition: none;
+    animation: none;
+  }
+}
+
 .custom-world-title-emoji {
   display: inline-grid;
   place-items: center;
