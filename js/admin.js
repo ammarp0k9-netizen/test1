@@ -160,7 +160,7 @@
       'listRanks', 'getRank', 'createRank', 'updateRank', 'setRankStatus',
       'duplicateRankAsDraft', 'requestDeleteRank',
       'listGates', 'getGate', 'createGate', 'updateGate', 'setGateStatus',
-      'duplicateGateAsDraft', 'moveGate', 'requestDeleteGate',
+      'publishGateDraftWords', 'duplicateGateAsDraft', 'moveGate', 'requestDeleteGate',
       'importStagingWords', 'listStagingWords', 'countStagingWords',
       'getStagingWord', 'deleteStagingWords', 'distributeStagingWords',
       'listWords', 'getWord', 'createWord', 'updateWord', 'setWordStatus',
@@ -1226,6 +1226,9 @@
         className: 'admin-btn admin-btn-warning', worldId, rankId, gateId, status: 'archived', disabled: isBusy
       }));
     } else if (gate.status === 'published') {
+      actions.append(makeButton('نشر الكلمات المتبقية', 'publish-gate-draft-words', {
+        className: 'admin-btn admin-btn-success', worldId, rankId, gateId, disabled: isBusy
+      }));
       actions.append(makeButton('أرشفة', 'set-gate-status', {
         className: 'admin-btn admin-btn-warning', worldId, rankId, gateId, status: 'archived', disabled: isBusy
       }));
@@ -4282,7 +4285,7 @@
       return;
     }
     const question = nextStatus === 'published'
-      ? `نشر البوابة «${String(gate.title || '')}»؟`
+      ? `نشر البوابة «${String(gate.title || '')}» وكل كلماتها المسودة؟ الكلمات المؤرشفة ستبقى مؤرشفة.`
       : (nextStatus === 'archived'
         ? `أرشفة البوابة «${String(gate.title || '')}»؟`
         : `إعادة البوابة «${String(gate.title || '')}» إلى مسودة؟`);
@@ -4292,7 +4295,7 @@
     const adminUid = String(getAdminState().uid || '');
     setActionPending(key, true);
     try {
-      await getCloudApi().setGateStatus(
+      const result = await getCloudApi().setGateStatus(
         String(world.worldId),
         String(rank.rankId),
         String(gate.gateId),
@@ -4300,10 +4303,48 @@
         expectedVersion(gate)
       );
       if (!adminContextMatches(adminUid)) return;
-      notify(`تم تحديث حالة البوابة إلى: ${statusLabel(nextStatus)}.`, 'success');
+      const publishedCount = Number(result?.publishedDraftWordCount) || 0;
+      notify(
+        nextStatus === 'published' && publishedCount > 0
+          ? `تم نشر البوابة و${publishedCount} كلمة مسودة.`
+          : `تم تحديث حالة البوابة إلى: ${statusLabel(nextStatus)}.`,
+        'success'
+      );
       await refreshGates({ clear: false });
     } catch (error) {
       if (adminContextMatches(adminUid)) setGateActionError('تعذر تحديث حالة البوابة.', error);
+    } finally {
+      ui.actionKeys.delete(key);
+      if (ui.view === 'gates') renderGates();
+    }
+  }
+
+  async function publishRemainingGateDraftWords(world, rank, gate) {
+    if (!world || !rank || !gate || gate.status !== 'published') return;
+    const question = `نشر كل كلمات المسودة المتبقية في البوابة «${String(gate.title || '')}»؟ الكلمات المؤرشفة ستبقى مؤرشفة.`;
+    if (!root.confirm(question)) return;
+    const key = `gate:${world.worldId}:${rank.rankId}:${gate.gateId}:publish-drafts`;
+    if (ui.actionKeys.has(key)) return;
+    const adminUid = String(getAdminState().uid || '');
+    setActionPending(key, true);
+    try {
+      const result = await getCloudApi().publishGateDraftWords(
+        String(world.worldId),
+        String(rank.rankId),
+        String(gate.gateId)
+      );
+      if (!adminContextMatches(adminUid)) return;
+      const publishedCount = Number(result?.publishedDraftWordCount) || 0;
+      notify(
+        publishedCount > 0
+          ? `تم نشر ${publishedCount} كلمة مسودة متبقية.`
+          : 'لا توجد كلمات مسودة متبقية في هذه البوابة.',
+        publishedCount > 0 ? 'success' : 'info'
+      );
+    } catch (error) {
+      if (adminContextMatches(adminUid)) {
+        setGateActionError('تعذر نشر كلمات البوابة المتبقية.', error);
+      }
     } finally {
       ui.actionKeys.delete(key);
       if (ui.view === 'gates') renderGates();
@@ -5604,6 +5645,10 @@
     }
     if (action === 'set-gate-status') {
       if (rank && gate) changeGateStatus(world, rank, gate, actionButton.dataset.status);
+      return;
+    }
+    if (action === 'publish-gate-draft-words') {
+      if (rank && gate) publishRemainingGateDraftWords(world, rank, gate);
       return;
     }
     if (action === 'duplicate-gate') {
