@@ -5,7 +5,14 @@
   var NORMALIZATION_VERSION = 1;
 
   var CONTENT_STATUSES = Object.freeze(['draft', 'published', 'archived']);
-  var PROGRESS_STATUSES = Object.freeze(['locked', 'available', 'active', 'completed']);
+  var PROGRESS_STATUSES = Object.freeze([
+    'locked',
+    'available',
+    'learning',
+    'ready',
+    'cleared',
+    'mastered'
+  ]);
   var UNLOCK_MODES = Object.freeze(['manual_placeholder']);
 
   var DEFAULT_UNLOCK_CONFIG = deepFreeze({
