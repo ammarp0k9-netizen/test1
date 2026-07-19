@@ -511,8 +511,7 @@ function evaluateTitleUnlocks(celebrate = false) {
       !unlocked.has(localStorage.getItem(ACTIVE_TITLE_KEY))) {
     localStorage.removeItem(ACTIVE_TITLE_KEY);
   }
-  saveTitleState(state);
-  if (newly.length) requestProfileCloudSave();
+  if (newly.length) saveTitleState(state);
   if (newly.length && celebrate && !isJsonImportBatchActive()) {
     const first = newly[0];
     launchConfetti();
@@ -556,26 +555,38 @@ function renderLootSummary() {
   const slots = document.getElementById('treasureSlots');
   const lockedXP = Number(state.lockedXP) || 0;
   if (chest) chest.classList.toggle('is-locked', lockedXP > 0 || !ready);
-  if (status) status.innerHTML = lockedXP > 0
+  const statusHtml = lockedXP > 0
     ? `<i class="fa-solid fa-lock" aria-hidden="true"></i> ${lockedXP} XP مقفولة`
     : (ready
       ? '<i class="fa-solid fa-box-open" aria-hidden="true"></i> الصندوق اليومي جاهز'
       : '<i class="fa-regular fa-clock" aria-hidden="true"></i> الصندوق يرجع بعد');
+  if (status && status.innerHTML !== statusHtml) status.innerHTML = statusHtml;
   if (count) {
-    count.innerHTML = lockedXP > 0
+    const countHtml = lockedXP > 0
       ? `الإتقان: ${(state.lockMasteredWordIds || []).length}/${CHEST_MASTERED_WORDS_REQUIRED} <button type="button" class="mastery-help-btn" onclick="showMasteryHelp(event)" aria-label="ما معنى إتقان الكلمة؟"><i class="fa-solid fa-question" aria-hidden="true"></i></button> | الاختبارات: ${(state.lockHighAccuracyQuizIds || []).length}/2`
       : (ready ? 'افتحه الآن' : formatLootTime(remaining));
+    if (count.innerHTML !== countHtml) count.innerHTML = countHtml;
   }
   if (preview) {
-    preview.textContent = lockedXP > 0
+    const previewText = lockedXP > 0
       ? CHEST_XP_UNLOCK_TEXT
       : ready
       ? 'فيه XP عشوائي، ومعه فرصة نادرة لـ Streak Freeze. ثبّت ضغطتك وافتحه.'
       : `سلسلة صناديقك: ${state.streak || 0} يوم | Freeze عندك: ${getStreakFreezeCount()} | مجموع الفتحات: ${state.totalOpens || 0}`;
+    if (preview.textContent !== previewText) preview.textContent = previewText;
   }
   if (slots) {
     const rewards = state.rewards || [];
-    slots.innerHTML = `
+    const slotRenderKey = JSON.stringify([
+      ready,
+      state.streak || 0,
+      getStreakFreezeCount(),
+      getTitleState().unlocked?.length || 0,
+      rewards[0] || null,
+    ]);
+    if (slots.dataset.renderKey !== slotRenderKey) {
+      slots.dataset.renderKey = slotRenderKey;
+      slots.innerHTML = `
       <article class="treasure-slot ${ready ? 'treasure-slot-ready' : 'treasure-slot-locked'}">
         <i class="fa-solid ${ready ? 'fa-box-open' : 'fa-lock'}" aria-hidden="true"></i>
         <h3>الصندوق اليومي</h3>
@@ -596,20 +607,28 @@ function renderLootSummary() {
         <h3>آخر لوت</h3>
         <p>${rewards[0] ? describeLootReward(rewards[0]) : 'لسه ما فتحت ولا صندوق.'}</p>
       </article>`;
+    }
   }
+  return { ready, lockedXP };
 }
 
 function renderTreasureRoom() {
   evaluateTitleUnlocks(false);
-  renderLootSummary();
-  renderTitlesGrid();
+  const summary = renderLootSummary();
   clearInterval(window.__lootCountdownTimer);
+  window.__lootCountdownTimer = null;
+  if (!summary || summary.ready || summary.lockedXP > 0) return;
   window.__lootCountdownTimer = setInterval(() => {
     if (currentView !== 'treasure') {
       clearInterval(window.__lootCountdownTimer);
+      window.__lootCountdownTimer = null;
       return;
     }
-    renderLootSummary();
+    const nextSummary = renderLootSummary();
+    if (nextSummary.ready || nextSummary.lockedXP > 0) {
+      clearInterval(window.__lootCountdownTimer);
+      window.__lootCountdownTimer = null;
+    }
   }, 1000);
 }
 
@@ -1264,6 +1283,68 @@ const publishedContentState = {
   error: null,
 };
 
+const WORLDS_TOUCH_TARGET_SELECTOR = [
+  '.published-card',
+  '.published-word-card',
+  '.world-card',
+  '.worlds-tab',
+].join(', ');
+
+function isCoarseWorldsPointer(event) {
+  return event?.pointerType === 'touch' ||
+    (event?.pointerType === 'pen' && window.matchMedia?.('(pointer: coarse)').matches);
+}
+
+function initWorldsTouchFeedback() {
+  if (window.__worldsTouchFeedbackReady) return;
+  const root = document.getElementById('worldsView');
+  if (!root) return;
+  window.__worldsTouchFeedbackReady = true;
+  const activeTargets = new Map();
+
+  root.addEventListener('pointerdown', (event) => {
+    if (!isCoarseWorldsPointer(event)) return;
+    const target = event.target.closest?.(WORLDS_TOUCH_TARGET_SELECTOR);
+    if (!target || target.matches(':disabled')) return;
+    target.classList.remove('is-touch-pop');
+    target.classList.add('is-touch-pressed');
+    activeTargets.set(event.pointerId, target);
+    target.setPointerCapture?.(event.pointerId);
+  }, { passive: true });
+
+  const finishTouch = (event, shouldPop) => {
+    const target = activeTargets.get(event.pointerId);
+    if (!target) return;
+    activeTargets.delete(event.pointerId);
+    target.classList.remove('is-touch-pressed');
+    if (!shouldPop || !target.isConnected) return;
+    void target.offsetWidth;
+    target.classList.add('is-touch-pop');
+    clearTimeout(target.__worldsTouchPopTimer);
+    target.__worldsTouchPopTimer = setTimeout(() => {
+      target.classList.remove('is-touch-pop');
+    }, 260);
+  };
+
+  root.addEventListener('pointerup', (event) => finishTouch(event, true), { passive: true });
+  root.addEventListener('pointercancel', (event) => finishTouch(event, false), { passive: true });
+  root.addEventListener('lostpointercapture', (event) => finishTouch(event, false), { passive: true });
+}
+
+initWorldsTouchFeedback();
+
+function publishedRouteDepth(key) {
+  return { worlds: 0, world: 1, rank: 2, gate: 3 }[key] ?? 0;
+}
+
+function animatePublishedRouteChange(nextKey) {
+  const currentKey = publishedContentState.route?.key || 'worlds';
+  if (currentKey === nextKey) return;
+  animateWorldsRoute(
+    publishedRouteDepth(nextKey) < publishedRouteDepth(currentKey) ? 'back' : 'next'
+  );
+}
+
 function getPublishedContentApi() {
   const api = window.LootLinguaPublishedContent;
   if (!api) {
@@ -1298,17 +1379,31 @@ function publishedButton(label, className, onClick, iconClass) {
 
 function setPublishedTabState(tab) {
   const published = tab !== 'custom';
-  publishedContentState.tab = published ? 'published' : 'custom';
+  const nextTab = published ? 'published' : 'custom';
+  const changed = publishedContentState.tab !== nextTab;
+  publishedContentState.tab = nextTab;
   const publishedTab = document.getElementById('publishedWorldsTab');
   const customTab = document.getElementById('customWorldsTab');
   const publishedPanel = document.getElementById('publishedWorldsPanel');
   const customPanel = document.getElementById('customWorldsPanel');
+  const tabs = document.querySelector('#worldsView .worlds-tabs');
+  if (tabs) tabs.dataset.activeTab = nextTab;
   publishedTab?.classList.toggle('active', published);
   customTab?.classList.toggle('active', !published);
   publishedTab?.setAttribute('aria-selected', String(published));
   customTab?.setAttribute('aria-selected', String(!published));
   if (publishedPanel) publishedPanel.hidden = !published;
   if (customPanel) customPanel.hidden = published;
+  const activePanel = published ? publishedPanel : customPanel;
+  if (changed && activePanel) {
+    activePanel.classList.remove('worlds-tab-panel-enter');
+    void activePanel.offsetWidth;
+    activePanel.classList.add('worlds-tab-panel-enter');
+    clearTimeout(activePanel.__worldsTabEnterTimer);
+    activePanel.__worldsTabEnterTimer = setTimeout(() => {
+      activePanel.classList.remove('worlds-tab-panel-enter');
+    }, 280);
+  }
 }
 
 function setPublishedTabsVisible(visible) {
@@ -1773,14 +1868,21 @@ function getPublishedWordPageMeta(gate, snapshot) {
     ? rawCount
     : null;
   const observedCount = ((pageNumber - 1) * pageSize) + (page?.items?.length || 0);
-  const totalPages = knownCount !== null
-    ? Math.max(1, pageNumber + (page?.hasNext ? 1 : 0), Math.ceil(knownCount / pageSize))
-    : (page?.hasNext ? null : pageNumber);
-  const countLabel = knownCount !== null
-    ? `${knownCount} كلمة منشورة تقريبًا`
+  const reachedPublishedEnd = Boolean(page) && !page.hasNext;
+  const countMatchesPublishedPages = knownCount !== null &&
+    !(reachedPublishedEnd && knownCount > observedCount);
+  const totalPages = page?.hasNext
+    ? (knownCount !== null
+      ? Math.max(pageNumber + 1, Math.ceil(knownCount / pageSize))
+      : null)
+    : pageNumber;
+  const countLabel = countMatchesPublishedPages
+    ? `${knownCount} كلمة منشورة`
+    : (knownCount !== null && reachedPublishedEnd
+      ? `${knownCount} كلمة في البوابة · ${observedCount} منشورة حاليًا`
     : (page?.hasNext
       ? `أكثر من ${pageNumber * pageSize} كلمة`
-      : `${observedCount} كلمة منشورة`);
+      : `${observedCount} كلمة منشورة`));
   return {
     pageNumber,
     totalPages,
@@ -1922,9 +2024,11 @@ async function loadPublishedWordPage(direction) {
   const generation = publishedContentState.generation;
   const previousPageIndex = currentSnapshot.currentPageIndex;
   const method = pageDirection === 'previous' ? 'loadPreviousPage' : 'loadNextPage';
-  const task = (async () => {
-    await pager[method]();
-    const result = pager.getSnapshot();
+  const task = pager[method]();
+  publishedContentState.wordPageRequest = task;
+
+  try {
+    const result = await task;
     if (generation !== publishedContentState.generation) return result;
     publishedContentState.wordSnapshot = result;
     renderPublishedGateWords(
@@ -1943,11 +2047,6 @@ async function loadPublishedWordPage(direction) {
       });
     }
     return result;
-  })();
-  publishedContentState.wordPageRequest = task;
-
-  try {
-    return await task;
   } catch (error) {
     if (generation !== publishedContentState.generation) return null;
     logPublishedContentError('words-page', error);
@@ -2109,6 +2208,7 @@ async function loadPublishedRouteData(route, options) {
 }
 
 window.loadPublishedContentRoute = function(route) {
+  animatePublishedRouteChange(route?.key || 'not-found');
   prepareWorldsShell();
   setPublishedTabState('published');
   setPublishedTabsVisible(false);
@@ -2117,6 +2217,7 @@ window.loadPublishedContentRoute = function(route) {
 };
 
 window.openPublishedWorldsRoot = function() {
+  animatePublishedRouteChange('worlds');
   setAppViewRoute('worlds');
   window.loadWorldsView();
 };
