@@ -1,22 +1,30 @@
 <!DOCTYPE html>
 <html lang="ar" dir="rtl">
 <head>
+  <meta charset="UTF-8">
   <script>
-    (function (location) {
+    (function (location, document) {
+      var segments = location.pathname.split('/').filter(Boolean);
+      var projectBase = location.hostname.endsWith('.github.io') && segments.length
+        ? '/' + segments[0]
+        : '';
+      var assetBase = document.createElement('base');
+      assetBase.href = location.protocol === 'file:' ? './' : projectBase + '/';
+      document.head.appendChild(assetBase);
+
       var params = new URLSearchParams(location.search);
 
       if (!params.has('p')) return;
 
       var path = params.get('p') || '/';
       var query = params.get('q') || '';
-      var base = location.pathname.replace(/\/$/, '');
 
       if (!path.startsWith('/')) {
         path = '/' + path;
       }
 
       var target =
-        base +
+        projectBase +
         (path === '/' ? '' : path) +
         (query ? '?' + query : '') +
         location.hash;
@@ -26,10 +34,8 @@
         '',
         target || '/'
       );
-    })(window.location);
+    })(window.location, document);
   </script>
-  <meta charset="UTF-8">
-  <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <!-- Google Analytics -->
   <script async src="https://www.googletagmanager.com/gtag/js?id=G-C06S6C7JYT"></script>
@@ -55,7 +61,7 @@
   <!-- Dictionary API on Render: POST /api/dictionary (عادي) + POST /api/gamer-dictionary (جيمر→جيمر). Backend: dictionary-server/index.js -->
   <link rel="icon" type="image/png" href="ammar1.png">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
-  <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="style.css?v=20260719-3">
 </head>
 <body class="legend-dock-visible">
 
@@ -485,7 +491,7 @@
       <h2>عوالم الأساطير</h2>
       <p>اختر عالمك.</p>
     </div>
-    <div class="worlds-tabs" role="tablist" aria-label="مصدر العوالم">
+    <div class="worlds-tabs" role="tablist" aria-label="مصدر العوالم" data-active-tab="published">
       <button id="publishedWorldsTab" class="worlds-tab active" type="button" role="tab" aria-selected="true" aria-controls="publishedWorldsPanel" onclick="showPublishedWorldsTab()">العوالم الجاهزة</button>
       <button id="customWorldsTab" class="worlds-tab" type="button" role="tab" aria-selected="false" aria-controls="customWorldsPanel" onclick="showCustomWorldsTab()">عوالمي الخاصة</button>
     </div>
@@ -1014,20 +1020,20 @@
 
 <!-- ══ FIREBASE PROFILE SYNC ══ -->
 <script type="module" src="js/profile-cloud.js"></script>
-<script type="module" src="js/published-content.js"></script>
-<script type="module" src="js/admin-cloud.js"></script>
+<script type="module" src="js/published-content.js?v=20260719-3"></script>
+<script type="module" src="js/admin-cloud.js?v=20260719-4"></script>
 
 <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
-<script src="js/core.js"></script>
+<script src="js/core.js?v=20260719-3"></script>
 <script src="js/storage.js"></script>
 <script src="js/content-schema.js"></script>
 <script src="js/admin-word-import.js"></script>
-<script src="js/word-list-data.js"></script>
+<script src="js/word-list-data.js?v=20260719-3"></script>
 <script src="js/script.js"></script>
 <script src="js/xp.js"></script>
 <script src="js/dictionary.js"></script>
-<script src="js/worlds.js"></script>
-<script src="js/admin.js"></script>
+<script src="js/worlds.js?v=20260719-3"></script>
+<script src="js/admin.js?v=20260719-4"></script>
 <script src="js/dictionary-render.js"></script>
 <script src="js/srs.js"></script>
 <script src="js/quiz.js"></script>
