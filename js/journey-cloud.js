@@ -62,6 +62,21 @@ function journeyCloudError(code, message, cause) {
   return error;
 }
 
+function journeyOperationError(error, operation, details) {
+  const source = error && typeof error === 'object'
+    ? error
+    : new Error(String(error || 'Journey operation failed.'));
+  const wrapped = journeyCloudError(
+    String(source.code || 'journey/operation-failed'),
+    String(source.message || 'Journey operation failed.'),
+    source
+  );
+  wrapped.operation = String(source.operation || operation || 'journey');
+  if (source.stack) wrapped.stack = source.stack;
+  Object.assign(wrapped, details || {});
+  return wrapped;
+}
+
 function requireServices() {
   if (!auth || !db) {
     throw journeyCloudError('journey/unavailable', 'Journey storage is unavailable.');
@@ -297,72 +312,81 @@ async function startJourney(worldId) {
     seed.activeGateId
   );
 
-  await runTransaction(db, async (transaction) => {
-    const [pointerSnapshot, targetSnapshot, worldSnapshot, rankSnapshot, gateSnapshot, progressSnapshot] =
-      await Promise.all([
-        transaction.get(pointerRef),
-        transaction.get(targetRef),
-        transaction.get(contentWorldRef(id)),
-        transaction.get(contentRankRef(id, seed.activeRankId)),
-        transaction.get(contentGateRef(id, seed.activeRankId, seed.activeGateId)),
-        transaction.get(progressRef),
-      ]);
-    assertPublished(worldSnapshot, 'journey/world-unavailable');
-    const rankData = assertPublished(rankSnapshot, 'journey/rank-unavailable');
-    assertPublished(gateSnapshot, 'journey/gate-unavailable');
-    if (!targetSnapshot.exists()) {
-      assertInitiallyAvailable(rankData, 'journey/rank-locked');
-    }
+  try {
+    await runTransaction(db, async (transaction) => {
+      const [pointerSnapshot, targetSnapshot, worldSnapshot, rankSnapshot, gateSnapshot, progressSnapshot] =
+        await Promise.all([
+          transaction.get(pointerRef),
+          transaction.get(targetRef),
+          transaction.get(contentWorldRef(id)),
+          transaction.get(contentRankRef(id, seed.activeRankId)),
+          transaction.get(contentGateRef(id, seed.activeRankId, seed.activeGateId)),
+          transaction.get(progressRef),
+        ]);
+      assertPublished(worldSnapshot, 'journey/world-unavailable');
+      const rankData = assertPublished(rankSnapshot, 'journey/rank-unavailable');
+      assertPublished(gateSnapshot, 'journey/gate-unavailable');
+      if (!targetSnapshot.exists()) {
+        assertInitiallyAvailable(rankData, 'journey/rank-locked');
+      }
 
-    const previousWorldId = pointerSnapshot.exists()
-      ? String(pointerSnapshot.data()?.worldId || '')
-      : '';
-    let previousSnapshot = null;
-    let previousRef = null;
-    if (previousWorldId && previousWorldId !== id) {
-      previousRef = journeyRef(user.uid, previousWorldId);
-      previousSnapshot = await transaction.get(previousRef);
-    }
+      const previousWorldId = pointerSnapshot.exists()
+        ? String(pointerSnapshot.data()?.worldId || '')
+        : '';
+      let previousSnapshot = null;
+      let previousRef = null;
+      if (previousWorldId && previousWorldId !== id) {
+        previousRef = journeyRef(user.uid, previousWorldId);
+        previousSnapshot = await transaction.get(previousRef);
+      }
 
-    if (previousRef && previousSnapshot?.exists()) {
-      transaction.update(previousRef, {
-        status: 'paused',
-        updatedAt: serverTimestamp(),
-      });
-    }
+      if (previousRef && previousSnapshot?.exists()) {
+        transaction.update(previousRef, {
+          status: 'paused',
+          updatedAt: serverTimestamp(),
+        });
+      }
 
-    if (targetSnapshot.exists()) {
-      transaction.update(targetRef, {
-        status: 'active',
-        updatedAt: serverTimestamp(),
-      });
-    } else {
-      transaction.set(targetRef, {
-        ...seed,
-        startedAt: serverTimestamp(),
-        updatedAt: serverTimestamp(),
-      });
-    }
+      if (targetSnapshot.exists()) {
+        transaction.update(targetRef, {
+          status: 'active',
+          updatedAt: serverTimestamp(),
+        });
+      } else {
+        transaction.set(targetRef, {
+          ...seed,
+          startedAt: serverTimestamp(),
+          updatedAt: serverTimestamp(),
+        });
+      }
 
-    if (!progressSnapshot.exists()) {
-      transaction.set(progressRef, {
+      if (!progressSnapshot.exists()) {
+        transaction.set(progressRef, {
+          worldId: id,
+          rankId: seed.activeRankId,
+          gateId: seed.activeGateId,
+          status: 'available',
+          journeyVersion: core().JOURNEY_VERSION,
+          lastActivityAt: serverTimestamp(),
+          readyEvidenceCount: 0,
+          clearAttempts: 0,
+        });
+      }
+
+      transaction.set(pointerRef, {
         worldId: id,
-        rankId: seed.activeRankId,
-        gateId: seed.activeGateId,
-        status: 'available',
         journeyVersion: core().JOURNEY_VERSION,
-        lastActivityAt: serverTimestamp(),
-        readyEvidenceCount: 0,
-        clearAttempts: 0,
+        updatedAt: serverTimestamp(),
       });
-    }
-
-    transaction.set(pointerRef, {
-      worldId: id,
-      journeyVersion: core().JOURNEY_VERSION,
-      updatedAt: serverTimestamp(),
     });
-  });
+  } catch (error) {
+    throw journeyOperationError(error, 'start-journey-transaction', {
+      uid: user.uid,
+      worldId: id,
+      rankId: seed.activeRankId,
+      gateId: seed.activeGateId,
+    });
+  }
 
   resetCache(user.uid);
   const journey = await getJourney(id, { force: true });
@@ -482,49 +506,57 @@ async function linkPublishedWord(uid, word, personalIndex, operationId) {
   const sourceRef = doc(canonicalRef, 'sources', core().contentSourceId(source));
   const indexedWord = personalIndex.get(identity.wordKey);
 
-  return runTransaction(db, async (transaction) => {
-    const [canonicalSnapshot, sourceSnapshot] = await Promise.all([
-      transaction.get(canonicalRef),
-      transaction.get(sourceRef),
-    ]);
-    if (sourceSnapshot.exists()) {
-      return { linked: false, existingWord: true, contentWordId: source.contentWordId };
-    }
+  try {
+    return await runTransaction(db, async (transaction) => {
+      const [canonicalSnapshot, sourceSnapshot] = await Promise.all([
+        transaction.get(canonicalRef),
+        transaction.get(sourceRef),
+      ]);
+      if (sourceSnapshot.exists()) {
+        return { linked: false, existingWord: true, contentWordId: source.contentWordId };
+      }
 
-    const canonicalData = canonicalSnapshot.exists() ? canonicalSnapshot.data() : null;
-    const legacyWordId = String(
-      canonicalData?.legacyWordId ||
-      indexedWord?.id ||
-      deterministicLegacyWordId(identity.wordKey)
-    );
-    const legacyRef = doc(db, 'users', uid, 'words', legacyWordId);
-    const legacySnapshot = await transaction.get(legacyRef);
-
-    if (!canonicalSnapshot.exists()) {
-      transaction.set(
-        canonicalRef,
-        canonicalWordPayload(word, identity, legacyWordId, source)
+      const canonicalData = canonicalSnapshot.exists() ? canonicalSnapshot.data() : null;
+      const legacyWordId = String(
+        canonicalData?.legacyWordId ||
+        indexedWord?.id ||
+        deterministicLegacyWordId(identity.wordKey)
       );
-    }
-    if (!legacySnapshot.exists() && !indexedWord) {
-      transaction.set(legacyRef, legacyWordPayload(uid, word));
-    }
-    transaction.set(sourceRef, {
+      const legacyRef = doc(db, 'users', uid, 'words', legacyWordId);
+      const legacySnapshot = await transaction.get(legacyRef);
+
+      if (!canonicalSnapshot.exists()) {
+        transaction.set(
+          canonicalRef,
+          canonicalWordPayload(word, identity, legacyWordId, source)
+        );
+      }
+      if (!legacySnapshot.exists() && !indexedWord) {
+        transaction.set(legacyRef, legacyWordPayload(uid, word));
+      }
+      transaction.set(sourceRef, {
+        ...source,
+        addedFrom: 'published-gate',
+        operationId,
+        linkedAt: serverTimestamp(),
+      });
+      personalIndex.set(identity.wordKey, {
+        id: legacyWordId,
+        data: legacySnapshot.exists() ? legacySnapshot.data() : legacyWordPayload(uid, word),
+      });
+      return {
+        linked: true,
+        existingWord: Boolean(indexedWord || legacySnapshot.exists()),
+        contentWordId: source.contentWordId,
+      };
+    });
+  } catch (error) {
+    throw journeyOperationError(error, 'link-published-word-source-transaction', {
+      uid,
       ...source,
-      addedFrom: 'published-gate',
-      operationId,
-      linkedAt: serverTimestamp(),
+      wordKey: identity.wordKey,
     });
-    personalIndex.set(identity.wordKey, {
-      id: legacyWordId,
-      data: legacySnapshot.exists() ? legacySnapshot.data() : legacyWordPayload(uid, word),
-    });
-    return {
-      linked: true,
-      existingWord: Boolean(indexedWord || legacySnapshot.exists()),
-      contentWordId: source.contentWordId,
-    };
-  });
+  }
 }
 
 async function listAllGateWords(worldId, rankId, gateId, options) {
@@ -532,7 +564,16 @@ async function listAllGateWords(worldId, rankId, gateId, options) {
   if (!options?.force && cache.gateWords.has(key)) {
     return cache.gateWords.get(key).slice();
   }
-  const words = await contentApi().listAllPublishedGateWords(worldId, rankId, gateId);
+  let words;
+  try {
+    words = await contentApi().listAllPublishedGateWords(worldId, rankId, gateId);
+  } catch (error) {
+    throw journeyOperationError(error, 'read-all-published-gate-words', {
+      worldId: String(worldId),
+      rankId: String(rankId),
+      gateId: String(gateId),
+    });
+  }
   cache.gateWords.set(key, words.slice());
   return words;
 }
@@ -640,7 +681,16 @@ async function updateGateProgress(worldId, rankId, gateId, values, options) {
       operationId: String(values?.operationId || current?.operationId || '').slice(0, 180),
     });
   }
-  await setDoc(gateProgressRef(user.uid, worldId, rankId, gateId), payload);
+  try {
+    await setDoc(gateProgressRef(user.uid, worldId, rankId, gateId), payload);
+  } catch (error) {
+    throw journeyOperationError(error, 'update-gate-progress', {
+      uid: user.uid,
+      worldId: String(worldId),
+      rankId: String(rankId),
+      gateId: String(gateId),
+    });
+  }
   cache.gateProgress.delete(gateCacheKey(worldId, rankId, gateId));
   cache.rankGateProgress.delete(rankCacheKey(worldId, rankId));
   const fresh = await getGateProgress(worldId, rankId, gateId, { force: true });
@@ -656,6 +706,20 @@ async function runGateWordOperation(worldId, rankId, gateId, options) {
   const allWords = await listAllGateWords(worldId, rankId, gateId, {
     force: Boolean(options?.force),
   });
+  if (!allWords.length) {
+    throw journeyOperationError(
+      journeyCloudError(
+        'journey/no-published-words',
+        'This gate has no published words to load.'
+      ),
+      'read-all-published-gate-words',
+      {
+        worldId: String(worldId),
+        rankId: String(rankId),
+        gateId: String(gateId),
+      }
+    );
+  }
   if (allWords.length > MAX_LOADED_WORD_IDS) {
     throw journeyCloudError(
       'journey/gate-too-large',
@@ -671,6 +735,7 @@ async function runGateWordOperation(worldId, rankId, gateId, options) {
   const operationId = createOperationId(gateId);
   const personalIndex = await readPersonalWordIndex(user.uid);
   const failures = [];
+  let firstFailure = null;
   let completed = 0;
   let linkedSources = 0;
   let existingWords = 0;
@@ -682,9 +747,21 @@ async function runGateWordOperation(worldId, rankId, gateId, options) {
       if (result.linked) linkedSources += 1;
       if (result.existingWord) existingWords += 1;
     } catch (error) {
+      const failure = journeyOperationError(
+        error,
+        'link-published-word-source-transaction',
+        {
+          contentWordId: String(word?.contentWordId || ''),
+          wordKey: String(word?.wordKey || ''),
+        }
+      );
+      if (!firstFailure) firstFailure = failure;
       failures.push({
-        contentWordId: String(word?.contentWordId || ''),
-        code: String(error?.code || 'journey/word-load-failed'),
+        contentWordId: failure.contentWordId,
+        wordKey: failure.wordKey,
+        code: failure.code,
+        message: failure.message,
+        operation: failure.operation,
       });
     }
     options?.onProgress?.({
@@ -693,6 +770,8 @@ async function runGateWordOperation(worldId, rankId, gateId, options) {
       total: targetWords.length,
     });
   }
+
+  if (failures.length && completed === 0) throw firstFailure;
 
   if (!failures.length) {
     const nextTarget = await resolveNextContentTarget(worldId, rankId, gateId);
@@ -725,6 +804,9 @@ async function runGateWordOperation(worldId, rankId, gateId, options) {
     linkedSources,
     existingWords,
     failures,
+    errorCode: firstFailure?.code || '',
+    errorMessage: firstFailure?.message || '',
+    errorOperation: firstFailure?.operation || '',
     partial: failures.length > 0,
     status: failures.length ? (context.progress?.status || 'available') : 'learning',
     advancement: null,
@@ -915,9 +997,14 @@ async function preparePlacementGate(worldId, rankId, gateId) {
     force: true,
   });
   if (loadResult.partial) {
-    throw journeyCloudError(
-      'placement/gate-load-incomplete',
-      `Placement loaded ${loadResult.completed} of ${loadResult.total} words.`
+    throw journeyOperationError(
+      journeyCloudError(
+        loadResult.errorCode || 'placement/gate-load-incomplete',
+        loadResult.errorMessage ||
+          `Placement loaded ${loadResult.completed} of ${loadResult.total} words.`
+      ),
+      loadResult.errorOperation || 'link-published-word-source-transaction',
+      { failures: loadResult.failures }
     );
   }
 
