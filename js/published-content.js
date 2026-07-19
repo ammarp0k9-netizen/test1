@@ -318,6 +318,41 @@ async function listPublishedGateWords(worldId, rankId, gateId, options) {
   }
 }
 
+async function listAllPublishedGateWords(worldId, rankId, gateId) {
+  const items = [];
+  const seen = new Set();
+  let cursor = null;
+  let pageCount = 0;
+
+  while (pageCount < 100) {
+    const page = await listPublishedGateWords(worldId, rankId, gateId, {
+      pageSize: PAGE_SIZE,
+      direction: 'forward',
+      cursor,
+    });
+    page.items.forEach((item) => {
+      const id = String(item.contentWordId || '');
+      if (!id || seen.has(id)) return;
+      seen.add(id);
+      items.push(item);
+    });
+    pageCount += 1;
+    if (!page.hasNext) return items;
+    if (!page.endCursor) {
+      throw publishedError(
+        'published/unavailable',
+        'Published word pagination ended without a cursor.'
+      );
+    }
+    cursor = page.endCursor;
+  }
+
+  throw publishedError(
+    'published/unavailable',
+    'Published gate word pagination exceeded its safe page limit.'
+  );
+}
+
 function invalidate(scope) {
   const target = String(scope || 'all');
   if (target === 'all' || target === 'worlds') {
@@ -343,6 +378,7 @@ const API = Object.freeze({
   listPublishedGates,
   getPublishedGate,
   listPublishedGateWords,
+  listAllPublishedGateWords,
   invalidate,
 });
 
