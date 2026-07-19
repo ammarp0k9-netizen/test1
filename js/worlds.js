@@ -1283,6 +1283,7 @@ const publishedContentState = {
   gateProgressById: new Map(),
   newGateWords: [],
   journeyAction: null,
+  journeyError: null,
   placementBundle: null,
   placementPending: false,
   placementFeedback: null,
@@ -1401,7 +1402,7 @@ function setPublishedPlacementMode(active) {
   if (active) setTreasureEntryVisible(false);
 }
 
-function clearPublishedJourneyViewState() {
+function clearPublishedJourneyViewState(options) {
   publishedContentState.journey = null;
   publishedContentState.activeJourney = null;
   publishedContentState.gateProgress = null;
@@ -1411,6 +1412,7 @@ function clearPublishedJourneyViewState() {
   publishedContentState.placementBundle = null;
   publishedContentState.placementPending = false;
   publishedContentState.placementFeedback = null;
+  if (options?.clearError) publishedContentState.journeyError = null;
   setPublishedPlacementMode(false);
 }
 
@@ -1545,8 +1547,49 @@ function publishedJourneyErrorText(error) {
     'placement/choice-required': 'اختر اختبار تحديد المستوى أو ابدأ من البداية.',
     'placement/content-changed': 'تغيّرت كلمات البوابة. ألغِ الاختبار وابدأ من البداية.',
     'placement/gate-load-incomplete': 'لم يكتمل تحميل كلمات البوابة. أعد المحاولة.',
+    'journey/no-published-words': 'لا توجد كلمات منشورة في هذه البوابة لتحميلها.',
+    'permission-denied': 'تعذر حفظ كلمات الرحلة في حسابك. أعد المحاولة.',
+    'firestore/permission-denied': 'تعذر حفظ كلمات الرحلة في حسابك. أعد المحاولة.',
   };
   return messages[error?.code] || 'تعذر إكمال العملية الآن. أعد المحاولة.';
+}
+
+function setPublishedJourneyError(error, operation, retry, worldId) {
+  const journeyError = {
+    code: String(error?.code || 'journey/operation-failed'),
+    message: String(error?.message || 'Journey operation failed.'),
+    stack: String(error?.stack || ''),
+    operation: String(error?.operation || operation || 'journey'),
+    worldId: String(
+      worldId ||
+      publishedContentState.world?.worldId ||
+      publishedContentState.journey?.worldId ||
+      ''
+    ),
+    text: publishedJourneyErrorText(error),
+    retry: typeof retry === 'function' ? retry : null,
+  };
+  publishedContentState.journeyError = journeyError;
+  return journeyError;
+}
+
+function clearPublishedJourneyError() {
+  publishedContentState.journeyError = null;
+}
+
+function currentPublishedJourneyError(worldId) {
+  const error = publishedContentState.journeyError;
+  if (!error) return null;
+  if (!error.worldId || String(error.worldId) === String(worldId || '')) return error;
+  return null;
+}
+
+async function retryPublishedJourneyError() {
+  const error = publishedContentState.journeyError;
+  if (!error?.retry) return;
+  const retry = error.retry;
+  clearPublishedJourneyError();
+  await retry();
 }
 
 async function startOrResumePublishedJourney(world) {
@@ -1586,6 +1629,7 @@ async function startOrResumePublishedJourney(world) {
     publishedContentState.journey = resumed;
     publishedContentState.activeJourney = resumed;
     publishedContentState.journeyAction = null;
+    clearPublishedJourneyError();
     window.openPublishedGate(
       resumed.worldId,
       resumed.activeRankId,
@@ -1593,13 +1637,18 @@ async function startOrResumePublishedJourney(world) {
     );
     return resumed;
   } catch (error) {
+    const journeyError = setPublishedJourneyError(
+      error,
+      'start-journey',
+      () => startOrResumePublishedJourney(world),
+      world.worldId
+    );
     publishedContentState.journeyAction = {
       type: 'start',
       pending: false,
-      error: publishedJourneyErrorText(error),
     };
     rerenderPublishedRoute();
-    showToast(publishedJourneyErrorText(error), 'danger', 4800);
+    showToast(journeyError.text, 'danger', 4800);
     return null;
   }
 }
@@ -1625,6 +1674,7 @@ async function beginPublishedJourneyFromStart(world) {
     publishedContentState.journey = journey;
     publishedContentState.activeJourney = journey;
     publishedContentState.journeyAction = null;
+    clearPublishedJourneyError();
     showToast('بدأت رحلتك من البوابة الأولى.', 'success', 3600);
     window.openPublishedGate(
       journey.worldId,
@@ -1633,13 +1683,18 @@ async function beginPublishedJourneyFromStart(world) {
     );
     return journey;
   } catch (error) {
+    const journeyError = setPublishedJourneyError(
+      error,
+      'begin-journey-from-start',
+      () => beginPublishedJourneyFromStart(world),
+      world.worldId
+    );
     publishedContentState.journeyAction = {
       type: 'beginning',
       pending: false,
-      error: publishedJourneyErrorText(error),
     };
     rerenderPublishedRoute();
-    showToast(publishedJourneyErrorText(error), 'danger', 4800);
+    showToast(journeyError.text, 'danger', 4800);
     return null;
   }
 }
@@ -1665,16 +1720,22 @@ async function beginPublishedPlacement(world) {
     publishedContentState.journey = bundle.journey;
     publishedContentState.activeJourney = bundle.journey;
     publishedContentState.journeyAction = null;
+    clearPublishedJourneyError();
     renderPublishedPlacementAssessment(bundle);
     return bundle;
   } catch (error) {
+    const journeyError = setPublishedJourneyError(
+      error,
+      'start-placement',
+      () => beginPublishedPlacement(world),
+      world.worldId
+    );
     publishedContentState.journeyAction = {
       type: 'placement-start',
       pending: false,
-      error: publishedJourneyErrorText(error),
     };
     rerenderPublishedRoute();
-    showToast(publishedJourneyErrorText(error), 'danger', 4800);
+    showToast(journeyError.text, 'danger', 4800);
     return null;
   }
 }
@@ -1738,16 +1799,30 @@ async function runPublishedGateLoad(syncOnly) {
     publishedContentState.newGateWords = result.partial
       ? publishedContentState.newGateWords
       : [];
-    publishedContentState.journeyAction = result.partial
-      ? {
+    if (result.partial) {
+      const partialError = new Error(
+        result.errorMessage ||
+          `Gate loaded ${result.completed} of ${result.total} words.`
+      );
+      partialError.code = result.errorCode || 'journey/gate-load-incomplete';
+      partialError.operation = result.errorOperation || 'link-published-word';
+      const journeyError = setPublishedJourneyError(
+        partialError,
+        partialError.operation,
+        () => runPublishedGateLoad(syncOnly),
+        world.worldId
+      );
+      publishedContentState.journeyAction = {
         type: syncOnly ? 'sync' : 'load',
         pending: false,
         completed: result.completed,
         total: result.total,
         partial: true,
-        error: `تم تحميل ${result.completed} من ${result.total}. أعد المحاولة لإكمال الباقي.`,
-      }
-      : null;
+      };
+    } else {
+      publishedContentState.journeyAction = null;
+      clearPublishedJourneyError();
+    }
     rerenderPublishedRoute();
     if (!result.advancement?.advanced) showToast(
       result.partial
@@ -1757,13 +1832,18 @@ async function runPublishedGateLoad(syncOnly) {
       4800
     );
   } catch (error) {
+    const journeyError = setPublishedJourneyError(
+      error,
+      syncOnly ? 'sync-gate-words' : 'load-gate-words',
+      () => runPublishedGateLoad(syncOnly),
+      world.worldId
+    );
     publishedContentState.journeyAction = {
       type: syncOnly ? 'sync' : 'load',
       pending: false,
-      error: publishedJourneyErrorText(error),
     };
     rerenderPublishedRoute();
-    showToast(publishedJourneyErrorText(error), 'danger', 4800);
+    showToast(journeyError.text, 'danger', 4800);
   }
 }
 
@@ -1784,10 +1864,17 @@ function syncPublishedPlacementRoute(bundle) {
 async function showPublishedPlacementResume(worldId) {
   try {
     const bundle = await getJourneyCloudApi().resumePlacement(worldId);
+    clearPublishedJourneyError();
     renderPublishedPlacementResumePrompt(bundle);
     return bundle;
   } catch (error) {
-    renderPublishedError('words', error, () => showPublishedPlacementResume(worldId));
+    setPublishedJourneyError(
+      error,
+      'resume-placement',
+      () => showPublishedPlacementResume(worldId),
+      worldId
+    );
+    rerenderPublishedRoute();
     return null;
   }
 }
@@ -2093,10 +2180,17 @@ async function maybeRenderPublishedPlacementResume(journey, generation) {
   try {
     const bundle = await getJourneyCloudApi().resumePlacement(journey.worldId);
     if (generation !== publishedContentState.generation) return true;
+    clearPublishedJourneyError();
     renderPublishedPlacementResumePrompt(bundle);
   } catch (error) {
     if (generation !== publishedContentState.generation) return true;
-    renderPublishedError('words', error, () => showPublishedPlacementResume(journey.worldId));
+    setPublishedJourneyError(
+      error,
+      'resume-placement',
+      () => showPublishedPlacementResume(journey.worldId),
+      journey.worldId
+    );
+    return false;
   }
   return true;
 }
@@ -2396,6 +2490,7 @@ function makePublishedJourneyPanel(world, ranks, journey, activeJourney) {
   const active = existing &&
     String(activeJourney?.worldId || '') === String(world.worldId || '');
   const firstRank = firstJourneyRank(ranks);
+  const journeyError = currentPublishedJourneyError(world.worldId);
   copy.append(
     publishedElement(
       'strong',
@@ -2460,12 +2555,22 @@ function makePublishedJourneyPanel(world, ranks, journey, activeJourney) {
       'published-journey-message',
       'لا توجد رتبة متاحة لبدء الرحلة حاليًا.'
     ));
-  } else if (publishedContentState.journeyAction?.error) {
-    panel.append(publishedElement(
-      'small',
-      'published-journey-message published-journey-error',
-      publishedContentState.journeyAction.error
-    ));
+  } else if (publishedContentState.journeyAction?.error || journeyError) {
+    panel.append(
+      publishedElement(
+        'small',
+        'published-journey-message published-journey-error',
+        publishedContentState.journeyAction?.error || journeyError.text
+      )
+    );
+    if (journeyError?.retry) {
+      panel.append(publishedButton(
+        'إعادة المحاولة',
+        'published-action-btn published-journey-retry-btn',
+        () => retryPublishedJourneyError(),
+        'fa-solid fa-rotate-right'
+      ));
+    }
   }
   return panel;
 }
@@ -2534,6 +2639,7 @@ function makePublishedGateJourneyPanel(world, rank, gate) {
   panel.append(copy);
 
   const action = publishedContentState.journeyAction;
+  const journeyError = currentPublishedJourneyError(world.worldId);
   const pending = Boolean(action?.pending);
   const actions = publishedElement('div', 'published-journey-actions');
   const activeForWorld = String(publishedContentState.activeJourney?.worldId || '') ===
@@ -2633,17 +2739,19 @@ function makePublishedGateJourneyPanel(world, rank, gate) {
       'published-journey-progress',
       `تم تحميل ${Number(action?.completed) || 0} من ${Number(action?.total) || 0}`
     ));
-  } else if (action?.error) {
+  } else if (action?.error || journeyError) {
     panel.append(
       publishedElement(
         'small',
         'published-journey-message published-journey-error',
-        action.error
+        action?.error || journeyError.text
       ),
       publishedButton(
         'إعادة المحاولة',
         'published-action-btn published-journey-retry-btn',
-        () => runPublishedGateLoad(action.type === 'sync'),
+        () => journeyError?.retry
+          ? retryPublishedJourneyError()
+          : runPublishedGateLoad(action?.type === 'sync'),
         'fa-solid fa-rotate-right'
       )
     );
@@ -3457,7 +3565,7 @@ window.openPublishedGate = function(worldId, rankId, gateId) {
 };
 
 window.addEventListener('lootlingua:auth-state', () => {
-  clearPublishedJourneyViewState();
+  clearPublishedJourneyViewState({ clearError: true });
   if (currentView !== 'worlds' || publishedContentState.tab !== 'published') return;
   const route = publishedContentState.route;
   if (!route || route.key === 'worlds') {
