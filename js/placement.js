@@ -2,7 +2,7 @@
   'use strict';
 
   const PLACEMENT_VERSION = 1;
-  const SESSION_STATUSES = Object.freeze(['active', 'completed', 'abandoned']);
+  const SESSION_STATUSES = Object.freeze(['active', 'submitting', 'completed', 'abandoned']);
   const SESSION_OUTCOMES = Object.freeze(['passed', 'failed']);
   const MAX_QUESTIONS = 2000;
 
@@ -87,6 +87,23 @@
     return ids;
   }
 
+  function orderedWordKeys(words, ids) {
+    const byId = new Map(
+      (Array.isArray(words) ? words : []).map((word) => [
+        String(word?.contentWordId || ''),
+        String(word?.wordKey || '').trim(),
+      ])
+    );
+    const keys = ids.map((id) => byId.get(id) || '');
+    if (keys.some((key) => !key)) {
+      throw placementError(
+        'placement/invalid-word-key',
+        'Placement words need a stable word key.'
+      );
+    }
+    return keys;
+  }
+
   function createSessionSeed(input) {
     const ids = orderedWordIds(input?.words);
     const threshold = Number(input?.passThreshold);
@@ -97,12 +114,19 @@
       currentGateId: cleanId(input?.gateId, 'Gate'),
       currentQuestionIndex: 0,
       orderedContentWordIds: ids,
+      orderedWordKeys: orderedWordKeys(input?.words, ids),
       answers: [],
       correctCount: 0,
       totalQuestions: ids.length,
       passThreshold: threshold,
       requiredCorrect: requiredCorrectAnswers(ids.length, threshold),
       status: 'active',
+      answersComplete: false,
+      wordsLinked: true,
+      gateProgressSaved: false,
+      placementCompleted: false,
+      nextGateUnlocked: false,
+      completionStep: 'answering',
       source: 'placement',
       suppressRewards: true,
       placementVersion: PLACEMENT_VERSION,
@@ -121,11 +145,20 @@
       throw placementError('placement/session-complete', 'Placement session has no pending question.');
     }
     const contentWordId = ids[index];
+    const wordKey = Array.isArray(session.orderedWordKeys)
+      ? String(session.orderedWordKeys[index] || '')
+      : '';
     const selectedId = cleanId(selectedContentWordId, 'Selected word');
     const correct = selectedId === contentWordId;
     const answers = [
       ...(Array.isArray(session.answers) ? session.answers : []),
-      { contentWordId, selectedContentWordId: selectedId, correct },
+      {
+        contentWordId,
+        ...(wordKey ? { wordKey } : {}),
+        selectedContentWordId: selectedId,
+        correct,
+        seenAt: Date.now(),
+      },
     ];
     return {
       ...session,
@@ -199,6 +232,7 @@
     placementPassed,
     assessmentId,
     orderedWordIds,
+    orderedWordKeys,
     createSessionSeed,
     answerSession,
     buildQuestion,
