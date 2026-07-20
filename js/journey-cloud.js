@@ -423,20 +423,74 @@ function deterministicLegacyWordId(wordKey) {
   return `published_${core().cleanId(wordKey, 'Word key')}`.slice(0, 500);
 }
 
+const USER_WORD_EDUCATIONAL_FIELDS = Object.freeze([
+  'word',
+  'normalizedWord',
+  'wordKey',
+  'translation',
+  'definition',
+  'definition_ar',
+  'example',
+  'exampleTranslation',
+  'partOfSpeech',
+  'category',
+  'level',
+  'tags',
+  'synonyms',
+  'pronunciation',
+  'notes',
+]);
+
+function contentWordToUserWordFields(word, normalizedIdentity) {
+  const identity = normalizedIdentity || schemaApi().normalizeWordIdentity(word);
+  return {
+    word: String(word?.word || ''),
+    normalizedWord: String(identity.normalizedWord || ''),
+    wordKey: String(identity.wordKey || ''),
+    translation: String(word?.translation || word?.meaning || ''),
+    definition: String(word?.definition || ''),
+    definition_ar: String(word?.definition_ar || word?.definitionAr || ''),
+    example: String(word?.example || ''),
+    exampleTranslation: String(word?.exampleTranslation || ''),
+    partOfSpeech: String(word?.partOfSpeech || ''),
+    category: String(word?.category || ''),
+    level: String(word?.level || word?.difficulty || ''),
+    tags: Array.isArray(word?.tags) ? word.tags.map(String).filter(Boolean) : [],
+    synonyms: Array.isArray(word?.synonyms) ? word.synonyms.map(String).filter(Boolean) : [],
+    pronunciation: String(word?.pronunciation || ''),
+    notes: String(word?.notes || ''),
+  };
+}
+
+function missingEducationalWordPatch(existing, incoming) {
+  const patch = {};
+  USER_WORD_EDUCATIONAL_FIELDS.forEach((field) => {
+    const current = existing?.[field];
+    const next = incoming?.[field];
+    const currentEmpty = Array.isArray(current)
+      ? current.length === 0
+      : !String(current ?? '').trim() || (field === 'category' && current === 'عام');
+    const nextPresent = Array.isArray(next)
+      ? next.length > 0
+      : Boolean(String(next ?? '').trim());
+    if (currentEmpty && nextPresent) patch[field] = next;
+  });
+  if ((!existing?.text && !existing?.word) && incoming.word) patch.text = incoming.word;
+  if (!existing?.meaning && incoming.translation) patch.meaning = incoming.translation;
+  return patch;
+}
+
 function canonicalWordPayload(word, identity, legacyWordId, source) {
   const sourceId = core().contentSourceId(source);
+  const educational = contentWordToUserWordFields(word, identity);
   return {
+    ...educational,
     canonicalId: identity.wordKey,
     normalizationVersion: identity.normalizationVersion,
-    normalizedWord: identity.normalizedWord,
     masteryKey: identity.wordKey,
     legacyWordId,
-    word: String(word.word || ''),
-    translation: String(word.translation || word.meaning || ''),
-    meaning: String(word.translation || word.meaning || ''),
-    example: String(word.example || ''),
-    category: String(word.category || ''),
-    difficulty: String(word.level || word.difficulty || ''),
+    meaning: educational.translation,
+    difficulty: educational.level,
     forgetCount: 0,
     contentRefPath: `content_worlds/${source.worldId}/ranks/${source.rankId}/gates/${source.gateId}/words/${source.contentWordId}`,
     primarySource: {
@@ -456,11 +510,12 @@ function canonicalWordPayload(word, identity, legacyWordId, source) {
 }
 
 function legacyWordPayload(uid, word) {
+  const educational = contentWordToUserWordFields(word);
   return {
-    text: String(word.word || ''),
-    category: String(word.category || 'عام'),
-    meaning: String(word.translation || word.meaning || ''),
-    example: String(word.example || ''),
+    ...educational,
+    text: educational.word,
+    category: educational.category || 'عام',
+    meaning: educational.translation,
     starred: false,
     forgetCount: 0,
     userId: uid,
@@ -484,7 +539,7 @@ function legacyWordPayload(uid, word) {
   };
 }
 
-async function linkPublishedWord(uid, word, personalIndex, operationId) {
+async function linkPublishedWord(uid, word, personalIndex, operationId, options) {
   const identity = schemaApi().normalizeWordIdentity(word);
   if (!identity.normalizedWord || !identity.wordKey) {
     throw journeyCloudError('journey/invalid-word', 'Published word identity is invalid.');
@@ -512,10 +567,6 @@ async function linkPublishedWord(uid, word, personalIndex, operationId) {
         transaction.get(canonicalRef),
         transaction.get(sourceRef),
       ]);
-      if (sourceSnapshot.exists()) {
-        return { linked: false, existingWord: true, contentWordId: source.contentWordId };
-      }
-
       const canonicalData = canonicalSnapshot.exists() ? canonicalSnapshot.data() : null;
       const legacyWordId = String(
         canonicalData?.legacyWordId ||
@@ -531,21 +582,40 @@ async function linkPublishedWord(uid, word, personalIndex, operationId) {
           canonicalWordPayload(word, identity, legacyWordId, source)
         );
       }
+      const incomingWord = legacyWordPayload(uid, word);
       if (!legacySnapshot.exists() && !indexedWord) {
-        transaction.set(legacyRef, legacyWordPayload(uid, word));
+        transaction.set(legacyRef, incomingWord);
+      } else if (legacySnapshot.exists()) {
+        const educationalPatch = missingEducationalWordPatch(
+          legacySnapshot.data() || {},
+          incomingWord
+        );
+        if (Object.keys(educationalPatch).length) {
+          transaction.update(legacyRef, educationalPatch);
+        }
       }
-      transaction.set(sourceRef, {
-        ...source,
-        addedFrom: 'published-gate',
-        operationId,
-        linkedAt: serverTimestamp(),
-      });
+      if (!sourceSnapshot.exists()) {
+        transaction.set(sourceRef, {
+          ...source,
+          addedFrom: 'published-gate',
+          operationId,
+          linkedAt: serverTimestamp(),
+          ...(options?.placementAssessmentId
+            ? {
+              placementAssessmentId: String(options.placementAssessmentId),
+              placementSeenAt: serverTimestamp(),
+            }
+            : {}),
+        });
+      }
       personalIndex.set(identity.wordKey, {
         id: legacyWordId,
-        data: legacySnapshot.exists() ? legacySnapshot.data() : legacyWordPayload(uid, word),
+        data: legacySnapshot.exists()
+          ? { ...legacySnapshot.data(), ...missingEducationalWordPatch(legacySnapshot.data(), incomingWord) }
+          : incomingWord,
       });
       return {
-        linked: true,
+        linked: !sourceSnapshot.exists(),
         existingWord: Boolean(indexedWord || legacySnapshot.exists()),
         contentWordId: source.contentWordId,
       };
@@ -742,7 +812,13 @@ async function runGateWordOperation(worldId, rankId, gateId, options) {
 
   for (const word of targetWords) {
     try {
-      const result = await linkPublishedWord(user.uid, word, personalIndex, operationId);
+      const result = await linkPublishedWord(
+        user.uid,
+        word,
+        personalIndex,
+        operationId,
+        options
+      );
       completed += 1;
       if (result.linked) linkedSources += 1;
       if (result.existingWord) existingWords += 1;
@@ -952,7 +1028,7 @@ async function makePlacementBundle(journey, session) {
     !journey ||
     journey.placementStatus !== 'active' ||
     !session ||
-    session.status !== 'active' ||
+    !['active', 'submitting'].includes(session.status) ||
     String(journey.activePlacementAssessmentId || '') !== String(session.assessmentId || '') ||
     String(journey.activeRankId || '') !== String(session.rankId || '') ||
     String(journey.activeGateId || '') !== String(session.currentGateId || '')
@@ -991,8 +1067,10 @@ async function makePlacementBundle(journey, session) {
 
 async function preparePlacementGate(worldId, rankId, gateId) {
   const user = requireUser();
+  const id = placementCore().assessmentId(rankId, gateId);
   const loadResult = await runGateWordOperation(worldId, rankId, gateId, {
     ...PLACEMENT_SOURCE,
+    placementAssessmentId: id,
     onlyNew: false,
     force: true,
   });
@@ -1012,7 +1090,6 @@ async function preparePlacementGate(worldId, rankId, gateId) {
     contentApi().getPublishedGate(worldId, rankId, gateId),
     listAllGateWords(worldId, rankId, gateId, { force: true }),
   ]);
-  const id = placementCore().assessmentId(rankId, gateId);
   const seed = placementCore().createSessionSeed({
     assessmentId: id,
     worldId,
@@ -1050,7 +1127,7 @@ async function preparePlacementGate(worldId, rankId, gateId) {
       );
     }
     if (sessionSnapshot.exists()) {
-      if (sessionSnapshot.data()?.status !== 'active') {
+      if (!['active', 'submitting'].includes(sessionSnapshot.data()?.status)) {
         throw journeyCloudError(
           'placement/session-complete',
           'This Placement gate has already been completed.'
@@ -1135,7 +1212,9 @@ async function startPlacement(worldId) {
       activeAssessmentId,
       { force: true }
     );
-    if (session?.status === 'active') return makePlacementBundle(journey, session);
+    if (['active', 'submitting', 'completed'].includes(session?.status)) {
+      return makePlacementBundle(journey, session);
+    }
   }
   return preparePlacementGate(
     journey.worldId,
@@ -1158,7 +1237,7 @@ async function resumePlacement(worldId) {
     );
   }
   const session = await getPlacementSession(journey.worldId, assessmentId, { force: true });
-  if (!session || session.status !== 'active') {
+  if (!session || !['active', 'submitting', 'completed'].includes(session.status)) {
     throw journeyCloudError('placement/not-active', 'There is no active Placement session.');
   }
   return makePlacementBundle(journey, session);
@@ -1175,6 +1254,299 @@ function placementResultFields(session, answered) {
   };
 }
 
+async function placementResultFromSaved(worldId, assessmentId) {
+  const [journey, session] = await Promise.all([
+    getJourney(worldId, { force: true }),
+    getPlacementSession(worldId, assessmentId, { force: true }),
+  ]);
+  if (!journey || !session || session.status !== 'completed') {
+    throw journeyCloudError(
+      'placement/result-incomplete',
+      'Placement result has not finished saving.'
+    );
+  }
+
+  const passed = session.outcome === 'passed';
+  const continuationAvailable = passed &&
+    journey.placementStatus === 'active' &&
+    !String(journey.activePlacementAssessmentId || '');
+  let nextRank = null;
+  let nextGate = null;
+  if (continuationAvailable) {
+    [nextRank, nextGate] = await Promise.all([
+      contentApi().getPublishedRank(worldId, journey.activeRankId),
+      contentApi().getPublishedGate(
+        worldId,
+        journey.activeRankId,
+        journey.activeGateId
+      ),
+    ]);
+  }
+  cache.active = journey;
+  return {
+    completed: true,
+    passed,
+    journeyCompleted: passed && journey.placementStatus === 'completed',
+    continuationAvailable,
+    journey,
+    session,
+    nextRank,
+    nextGate,
+    bundle: null,
+  };
+}
+
+async function finalizePlacementResult(worldId, assessmentId) {
+  const user = requireUser();
+  const id = core().cleanId(worldId, 'World');
+  const assessment = placementCore().cleanId(assessmentId, 'Assessment');
+  const before = await getPlacementSession(id, assessment, { force: true });
+  if (!before) {
+    throw journeyCloudError('placement/not-active', 'Placement session was not found.');
+  }
+  if (before.status === 'completed') {
+    const savedJourney = await getJourney(id, { force: true });
+    if (String(savedJourney?.activePlacementAssessmentId || '') !== assessment) {
+      return placementResultFromSaved(id, assessment);
+    }
+  }
+  if (!['submitting', 'completed'].includes(before.status)) {
+    throw journeyCloudError(
+      'placement/result-not-ready',
+      'Placement answers are not ready to be finalized.'
+    );
+  }
+
+  const passed = placementCore().placementPassed(
+    before.correctCount,
+    before.totalQuestions,
+    before.passThreshold
+  );
+  const nextTarget = passed
+    ? await resolveNextContentTarget(id, before.rankId, before.currentGateId)
+    : null;
+  const sessionRef = placementSessionRef(user.uid, id, assessment);
+  const targetJourneyRef = journeyRef(user.uid, id);
+  const progressRef = gateProgressRef(
+    user.uid,
+    id,
+    before.rankId,
+    before.currentGateId
+  );
+
+  if (before.status === 'submitting') {
+    try {
+      await runTransaction(db, async (transaction) => {
+      const snapshots = await Promise.all([
+        transaction.get(sessionRef),
+        transaction.get(progressRef),
+      ]);
+      const session = snapshots[0].data() || {};
+      const progress = snapshots[1].data() || {};
+      if (
+        !snapshots[0].exists() ||
+        !snapshots[1].exists() ||
+        session.status !== 'submitting' ||
+        session.currentQuestionIndex !== session.totalQuestions
+      ) {
+        throw journeyCloudError(
+          'placement/session-mismatch',
+          'Placement session is no longer current.'
+        );
+      }
+
+      const didPass = placementCore().placementPassed(
+        session.correctCount,
+        session.totalQuestions,
+        session.passThreshold
+      );
+      const resultFields = placementResultFields(session, session);
+      const resultAlreadySaved =
+        String(progress.placementAssessmentId || '') === assessment;
+      if (resultAlreadySaved) {
+        const expectedStatus = didPass ? 'cleared' : 'learning';
+        const savedResultMatches =
+          progress.status === expectedStatus &&
+          Number(progress.placementCorrect) === resultFields.placementCorrect &&
+          Number(progress.placementTotal) === resultFields.placementTotal &&
+          Number(progress.placementScore) === resultFields.placementScore &&
+          (didPass
+            ? progress.clearedBy === 'placement'
+            : !progress.clearedBy);
+        if (!savedResultMatches) {
+          throw journeyCloudError(
+            'placement/result-mismatch',
+            'The saved gate result does not match the Placement session.'
+          );
+        }
+      } else {
+        transaction.update(progressRef, {
+          status: didPass ? 'cleared' : 'learning',
+          ...resultFields,
+          ...(didPass
+            ? { clearedAt: serverTimestamp(), clearedBy: 'placement' }
+            : {}),
+          lastActivityAt: serverTimestamp(),
+        });
+      }
+      });
+    } catch (error) {
+      throw journeyOperationError(error, 'save-placement-gate-result', {
+        uid: user.uid,
+        worldId: id,
+        assessmentId: assessment,
+        rankId: before.rankId,
+        gateId: before.currentGateId,
+        completionStep: before.completionStep || 'answers-saved',
+      });
+    }
+  }
+
+  if (before.status === 'submitting') {
+    try {
+      await runTransaction(db, async (transaction) => {
+        const sessionSnapshot = await transaction.get(sessionRef);
+        const session = sessionSnapshot.data() || {};
+        if (
+          !sessionSnapshot.exists() ||
+          session.status !== 'submitting' ||
+          session.currentQuestionIndex !== session.totalQuestions
+        ) {
+          throw journeyCloudError(
+            'placement/session-mismatch',
+            'Placement session is no longer current.'
+          );
+        }
+        const didPass = placementCore().placementPassed(
+          session.correctCount,
+          session.totalQuestions,
+          session.passThreshold
+        );
+        const resultFields = placementResultFields(session, session);
+        const rankCompletedByPlacement = didPass && (
+          !nextTarget ||
+          String(nextTarget.rank.rankId) !== String(session.rankId)
+        );
+        transaction.update(sessionRef, {
+          status: 'completed',
+          outcome: didPass ? 'passed' : 'failed',
+          score: resultFields.placementScore,
+          rankCompletedByPlacement,
+          gateProgressSaved: true,
+          placementCompleted: true,
+          nextGateUnlocked: Boolean(didPass && nextTarget),
+          completionStep: 'result-saved',
+          completedAt: serverTimestamp(),
+          updatedAt: serverTimestamp(),
+        });
+      });
+    } catch (error) {
+      throw journeyOperationError(error, 'complete-placement-session', {
+        uid: user.uid,
+        worldId: id,
+        assessmentId: assessment,
+        rankId: before.rankId,
+        gateId: before.currentGateId,
+        completionStep: 'gate-result-saved',
+      });
+    }
+  }
+
+  try {
+    await runTransaction(db, async (transaction) => {
+      const [journeySnapshot, sessionSnapshot] = await Promise.all([
+        transaction.get(targetJourneyRef),
+        transaction.get(sessionRef),
+      ]);
+      const journey = journeySnapshot.data() || {};
+      const session = sessionSnapshot.data() || {};
+      if (
+        !journeySnapshot.exists() ||
+        !sessionSnapshot.exists() ||
+        session.status !== 'completed'
+      ) {
+        throw journeyCloudError(
+          'placement/session-mismatch',
+          'Placement session is no longer current.'
+        );
+      }
+      if (String(journey.activePlacementAssessmentId || '') !== assessment) {
+        if (!String(journey.activePlacementAssessmentId || '')) return;
+        throw journeyCloudError(
+          'placement/session-mismatch',
+          'Placement session is no longer current.'
+        );
+      }
+      if (
+        journey.status !== 'active' ||
+        journey.placementStatus !== 'active' ||
+        String(journey.activeRankId || '') !== String(session.rankId || '') ||
+        String(journey.activeGateId || '') !== String(session.currentGateId || '')
+      ) {
+        throw journeyCloudError(
+          'placement/session-mismatch',
+          'Placement session is no longer current.'
+        );
+      }
+
+      const didPass = session.outcome === 'passed';
+      if (didPass && nextTarget) {
+        const nextRankId = String(nextTarget.rank.rankId);
+        const nextGateId = String(nextTarget.gate.gateId);
+        transaction.update(targetJourneyRef, {
+          activeRankId: nextRankId,
+          activeGateId: nextGateId,
+          activePlacementAssessmentId: '',
+          unlockedRankIds: Array.from(new Set([
+            ...(journey.unlockedRankIds || []),
+            nextRankId,
+          ])),
+          unlockedGateIds: Array.from(new Set([
+            ...(journey.unlockedGateIds || []),
+            nextGateId,
+          ])),
+          updatedAt: serverTimestamp(),
+        });
+      } else {
+        transaction.update(targetJourneyRef, {
+          placementStatus: 'completed',
+          activePlacementAssessmentId: '',
+          updatedAt: serverTimestamp(),
+        });
+      }
+    });
+  } catch (error) {
+    throw journeyOperationError(error, 'advance-placement-journey', {
+      uid: user.uid,
+      worldId: id,
+      assessmentId: assessment,
+      rankId: before.rankId,
+      gateId: before.currentGateId,
+      completionStep: 'session-completed',
+    });
+  }
+
+  resetCache(user.uid);
+  const result = await placementResultFromSaved(id, assessment);
+  window.dispatchEvent(new CustomEvent(
+    result.continuationAvailable
+      ? 'lootlingua:placement-gate-passed'
+      : 'lootlingua:placement-completed',
+    {
+      detail: {
+        worldId: id,
+        rankId: before.rankId,
+        gateId: before.currentGateId,
+        nextRankId: result.nextRank?.rankId || '',
+        nextGateId: result.nextGate?.gateId || '',
+        passed: result.passed,
+        journeyCompleted: result.journeyCompleted,
+      },
+    }
+  ));
+  return result;
+}
+
 async function answerPlacementQuestion(worldId, assessmentId, selectedContentWordId) {
   const user = requireUser();
   const id = core().cleanId(worldId, 'World');
@@ -1183,134 +1555,61 @@ async function answerPlacementQuestion(worldId, assessmentId, selectedContentWor
   if (!before) {
     throw journeyCloudError('placement/not-active', 'Placement session was not found.');
   }
+  if (before.status === 'submitting' || before.status === 'completed') {
+    return finalizePlacementResult(id, assessment);
+  }
   const answeredPreview = placementCore().answerSession(before, selectedContentWordId);
   const finalAnswer = answeredPreview.currentQuestionIndex === answeredPreview.totalQuestions;
-  const passed = finalAnswer && placementCore().placementPassed(
-    answeredPreview.correctCount,
-    answeredPreview.totalQuestions,
-    answeredPreview.passThreshold
-  );
-  const nextTarget = finalAnswer && passed
-    ? await resolveNextContentTarget(id, before.rankId, before.currentGateId)
-    : null;
   const sessionRef = placementSessionRef(user.uid, id, assessment);
   const targetJourneyRef = journeyRef(user.uid, id);
-  const progressRef = gateProgressRef(user.uid, id, before.rankId, before.currentGateId);
-  const nextProgressRef = nextTarget
-    ? gateProgressRef(
-      user.uid,
-      id,
-      nextTarget.rank.rankId,
-      nextTarget.gate.gateId
-    )
-    : null;
-
-  await runTransaction(db, async (transaction) => {
-    const reads = [
-      transaction.get(targetJourneyRef),
-      transaction.get(sessionRef),
-      transaction.get(progressRef),
-    ];
-    if (nextProgressRef) reads.push(transaction.get(nextProgressRef));
-    const snapshots = await Promise.all(reads);
-    const journeySnapshot = snapshots[0];
-    const sessionSnapshot = snapshots[1];
-    const progressSnapshot = snapshots[2];
-    const journey = journeySnapshot.data() || {};
-    const session = sessionSnapshot.data() || {};
-    if (
-      !journeySnapshot.exists() ||
-      !sessionSnapshot.exists() ||
-      !progressSnapshot.exists() ||
-      journey.status !== 'active' ||
-      journey.placementStatus !== 'active' ||
-      String(journey.activePlacementAssessmentId || '') !== assessment ||
-      String(journey.activeRankId || '') !== String(session.rankId || '') ||
-      String(journey.activeGateId || '') !== String(session.currentGateId || '')
-    ) {
-      throw journeyCloudError(
-        'placement/session-mismatch',
-        'Placement session is no longer current.'
-      );
-    }
-    const answered = placementCore().answerSession(session, selectedContentWordId);
-    const isFinal = answered.currentQuestionIndex === answered.totalQuestions;
-    const didPass = isFinal && placementCore().placementPassed(
-      answered.correctCount,
-      answered.totalQuestions,
-      answered.passThreshold
-    );
-    const sessionUpdate = {
-      currentQuestionIndex: answered.currentQuestionIndex,
-      answers: answered.answers,
-      correctCount: answered.correctCount,
-      updatedAt: serverTimestamp(),
-    };
-
-    if (!isFinal) {
-      transaction.update(sessionRef, sessionUpdate);
-      return;
-    }
-
-    const resultFields = placementResultFields(session, answered);
-    const rankCompletedByPlacement = didPass && (
-      !nextTarget ||
-      String(nextTarget.rank.rankId) !== String(session.rankId)
-    );
-    transaction.update(sessionRef, {
-      ...sessionUpdate,
-      status: 'completed',
-      outcome: didPass ? 'passed' : 'failed',
-      score: resultFields.placementScore,
-      rankCompletedByPlacement,
-      completedAt: serverTimestamp(),
-    });
-    transaction.update(progressRef, {
-      status: didPass ? 'cleared' : 'learning',
-      ...resultFields,
-      ...(didPass
-        ? { clearedAt: serverTimestamp(), clearedBy: 'placement' }
-        : {}),
-      lastActivityAt: serverTimestamp(),
-    });
-
-    if (didPass && nextTarget) {
-      const nextRankId = String(nextTarget.rank.rankId);
-      const nextGateId = String(nextTarget.gate.gateId);
-      transaction.update(targetJourneyRef, {
-        activeRankId: nextRankId,
-        activeGateId: nextGateId,
-        activePlacementAssessmentId: '',
-        unlockedRankIds: Array.from(new Set([
-          ...(journey.unlockedRankIds || []),
-          nextRankId,
-        ])),
-        unlockedGateIds: Array.from(new Set([
-          ...(journey.unlockedGateIds || []),
-          nextGateId,
-        ])),
-        updatedAt: serverTimestamp(),
-      });
-      if (!snapshots[3]?.exists()) {
-        transaction.set(nextProgressRef, {
-          worldId: id,
-          rankId: nextRankId,
-          gateId: nextGateId,
-          status: 'available',
-          journeyVersion: core().JOURNEY_VERSION,
-          lastActivityAt: serverTimestamp(),
-          readyEvidenceCount: 0,
-          clearAttempts: 0,
-        });
+  try {
+    await runTransaction(db, async (transaction) => {
+      const [journeySnapshot, sessionSnapshot] = await Promise.all([
+        transaction.get(targetJourneyRef),
+        transaction.get(sessionRef),
+      ]);
+      const journey = journeySnapshot.data() || {};
+      const session = sessionSnapshot.data() || {};
+      if (
+        !journeySnapshot.exists() ||
+        !sessionSnapshot.exists() ||
+        journey.status !== 'active' ||
+        journey.placementStatus !== 'active' ||
+        String(journey.activePlacementAssessmentId || '') !== assessment ||
+        String(journey.activeRankId || '') !== String(session.rankId || '') ||
+        String(journey.activeGateId || '') !== String(session.currentGateId || '') ||
+        session.status !== 'active'
+      ) {
+        throw journeyCloudError(
+          'placement/session-mismatch',
+          'Placement session is no longer current.'
+        );
       }
-    } else {
-      transaction.update(targetJourneyRef, {
-        placementStatus: 'completed',
-        activePlacementAssessmentId: '',
+      const answered = placementCore().answerSession(session, selectedContentWordId);
+      const isFinal = answered.currentQuestionIndex === answered.totalQuestions;
+      transaction.update(sessionRef, {
+        currentQuestionIndex: answered.currentQuestionIndex,
+        answers: answered.answers,
+        correctCount: answered.correctCount,
+        ...(isFinal
+          ? {
+            status: 'submitting',
+            answersComplete: true,
+            completionStep: 'answers-saved',
+          }
+          : {}),
         updatedAt: serverTimestamp(),
       });
-    }
-  });
+    });
+  } catch (error) {
+    throw journeyOperationError(error, 'save-placement-answer', {
+      uid: user.uid,
+      worldId: id,
+      assessmentId: assessment,
+      rankId: before.rankId,
+      gateId: before.currentGateId,
+    });
+  }
 
   resetCache(user.uid);
   if (!finalAnswer) {
@@ -1323,52 +1622,77 @@ async function answerPlacementQuestion(worldId, assessmentId, selectedContentWor
       bundle: await makePlacementBundle(journey, session),
     };
   }
+  const result = await finalizePlacementResult(id, assessment);
+  return {
+    ...result,
+    correct: answeredPreview.answers.at(-1).correct,
+  };
+}
 
-  if (passed && nextTarget) {
-    const bundle = await preparePlacementGate(
-      id,
-      nextTarget.rank.rankId,
-      nextTarget.gate.gateId
+async function continuePlacement(worldId) {
+  const journey = await getJourney(worldId, { force: true });
+  if (
+    !journey ||
+    journey.status !== 'active' ||
+    journey.placementStatus !== 'active' ||
+    String(journey.activePlacementAssessmentId || '')
+  ) {
+    throw journeyCloudError(
+      'placement/continuation-unavailable',
+      'The next Placement gate is not available.'
     );
-    window.dispatchEvent(new CustomEvent('lootlingua:placement-gate-passed', {
-      detail: {
-        worldId: id,
-        rankId: before.rankId,
-        gateId: before.currentGateId,
-        nextRankId: nextTarget.rank.rankId,
-        nextGateId: nextTarget.gate.gateId,
-      },
-    }));
-    return {
-      completed: true,
-      passed: true,
-      journeyCompleted: false,
-      correct: answeredPreview.answers.at(-1).correct,
-      bundle,
-    };
   }
+  return preparePlacementGate(
+    journey.worldId,
+    journey.activeRankId,
+    journey.activeGateId
+  );
+}
 
+async function stopPlacement(worldId) {
+  const user = requireUser();
+  const id = core().cleanId(worldId, 'World');
+  try {
+    await runTransaction(db, async (transaction) => {
+      const targetRef = journeyRef(user.uid, id);
+      const snapshot = await transaction.get(targetRef);
+      const journey = snapshot.data() || {};
+      if (
+        !snapshot.exists() ||
+        journey.status !== 'active' ||
+        journey.placementStatus !== 'active' ||
+        String(journey.activePlacementAssessmentId || '')
+      ) {
+        throw journeyCloudError(
+          'placement/continuation-unavailable',
+          'Placement cannot be stopped at this point.'
+        );
+      }
+      transaction.update(targetRef, {
+        placementStatus: 'completed',
+        updatedAt: serverTimestamp(),
+      });
+    });
+  } catch (error) {
+    throw journeyOperationError(error, 'stop-placement-between-gates', {
+      uid: user.uid,
+      worldId: id,
+    });
+  }
+  resetCache(user.uid);
   const journey = await getJourney(id, { force: true });
   cache.active = journey;
-  const session = await getPlacementSession(id, assessment, { force: true });
   window.dispatchEvent(new CustomEvent('lootlingua:placement-completed', {
     detail: {
       worldId: id,
-      rankId: before.rankId,
-      gateId: before.currentGateId,
-      passed,
-      journeyCompleted: passed,
+      rankId: journey.activeRankId,
+      gateId: journey.activeGateId,
+      passed: true,
+      journeyCompleted: false,
+      stoppedByUser: true,
     },
   }));
-  return {
-    completed: true,
-    passed,
-    journeyCompleted: passed,
-    correct: answeredPreview.answers.at(-1).correct,
-    journey,
-    session,
-    bundle: null,
-  };
+  return journey;
 }
 
 function resettableGateProgress(data, selection) {
@@ -1453,6 +1777,7 @@ async function abandonPlacementAndStartBeginning(worldId) {
     if (sessionRef && snapshots[2]?.exists() && snapshots[2].data()?.status === 'active') {
       transaction.update(sessionRef, {
         status: 'abandoned',
+        completionStep: 'abandoned',
         abandonedAt: serverTimestamp(),
         updatedAt: serverTimestamp(),
       });
@@ -1528,6 +1853,9 @@ const API = Object.freeze({
   resumePlacement,
   getPlacementSession,
   answerPlacementQuestion,
+  finalizePlacementResult,
+  continuePlacement,
+  stopPlacement,
   abandonPlacementAndStartBeginning,
   getGateProgress,
   listRankGateProgress,
