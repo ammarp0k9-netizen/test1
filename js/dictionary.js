@@ -113,6 +113,15 @@ function wordsSnapshotNeedsFullRender(prev, next) {
     if ((a?.meaning || '') !== (b?.meaning || '')) return true;
     if ((a?.example || '') !== (b?.example || '')) return true;
     if ((a?.category || '') !== (b?.category || '')) return true;
+    if ((a?.partOfSpeech || '') !== (b?.partOfSpeech || '')) return true;
+    if ((a?.definition || '') !== (b?.definition || '')) return true;
+    if ((a?.definition_ar || '') !== (b?.definition_ar || '')) return true;
+    if ((a?.exampleTranslation || '') !== (b?.exampleTranslation || '')) return true;
+    if ((a?.level || '') !== (b?.level || '')) return true;
+    if (JSON.stringify(a?.tags || []) !== JSON.stringify(b?.tags || [])) return true;
+    if (JSON.stringify(a?.synonyms || []) !== JSON.stringify(b?.synonyms || [])) return true;
+    if ((a?.pronunciation || '') !== (b?.pronunciation || '')) return true;
+    if ((a?.notes || '') !== (b?.notes || '')) return true;
     if ((a?.order ?? null) !== (b?.order ?? null)) return true;
     if ((a?.createdAt || '') !== (b?.createdAt || '')) return true;
   }
@@ -1672,13 +1681,12 @@ function handleLiClick(index, el) {
     syncSelectedIndicesFromBulkSelection();
     syncBulkSelectionInDom(key);
   } else {
-    // حفظ حالة الفتح في مصفوفة الكلمات الأصلية
     const word = window.words[index];
     if (word) {
       word.expanded = !word.expanded;
-      persistDictionary();
-      // تحديث الكلاس مباشرة لتوسيع/إغلاق البطاقة بدون إعادة رسم القائمة
+      // Expansion is transient UI state; preserve the virtual window and scroll position.
       el.classList.toggle('show-example', word.expanded);
+      el.setAttribute('aria-expanded', String(word.expanded));
     }
   }
 }
