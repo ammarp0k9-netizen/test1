@@ -199,32 +199,7 @@
     wordsUnsubscribe = onSnapshot(q, (snapshot) => {
       if (auth.currentUser?.uid !== listenerUid) return;
       if (window.__suppressCloudWordsSnapshot) return;
-      const cloudWords = snapshot.docs.map(d => ({
-        id:          d.id,
-        word:        d.data().text   || d.data().word || '',
-        meaning:     d.data().meaning     || '',
-        example:     d.data().example     || '',
-        category:    d.data().category    || 'عام',
-        starred:     d.data().starred     || false,
-        forgetCount: d.data().forgetCount || 0,
-        xpValue:     d.data().xpValue ?? 0,
-        mastery_status: d.data().mastery_status || '',
-        mastery_streak: Number(d.data().mastery_streak) || 0,
-        last_recalled_at: d.data().last_recalled_at || null,
-        first_recalled_at: d.data().first_recalled_at || null,
-        last_recall_day: d.data().last_recall_day || '',
-        last_recall_session_id: d.data().last_recall_session_id || '',
-        last_quizzed_at: d.data().last_quizzed_at || null,
-        quiz_seen_count: Number(d.data().quiz_seen_count) || 0,
-        mastered_once: Boolean(d.data().mastered_once),
-        firstMasteredAt: d.data().firstMasteredAt || null,
-        hasEarnedMasteryXP: Boolean(d.data().hasEarnedMasteryXP),
-        earnedTransitions: Array.isArray(d.data().earnedTransitions) ? d.data().earnedTransitions : [],
-        remasteryAwardCount: Number(d.data().remasteryAwardCount) || 0,
-        xpEconomyVersion: Number(d.data().xpEconomyVersion) || 0,
-        order:       Number.isFinite(d.data().order) ? d.data().order : null,
-        createdAt:   d.data().createdAt?.toDate ? d.data().createdAt.toDate().toISOString() : (d.data().createdAt || null)
-      }));
+      const cloudWords = snapshot.docs.map(mapWordDoc);
 
       if (typeof window.applyCloudWordsFromSnapshot === "function") {
         window.applyCloudWordsFromSnapshot(cloudWords);
@@ -257,31 +232,44 @@
   }
 
   function mapWordDoc(d) {
+    const data = d.data() || {};
     return {
       id:          d.id,
-      word:        d.data().text   || d.data().word || '',
-      meaning:     d.data().meaning     || '',
-      example:     d.data().example     || '',
-      category:    d.data().category    || 'عام',
-      starred:     d.data().starred     || false,
-      forgetCount: d.data().forgetCount || 0,
-      xpValue:     d.data().xpValue ?? 0,
-      mastery_status: d.data().mastery_status || '',
-      mastery_streak: Number(d.data().mastery_streak) || 0,
-      last_recalled_at: d.data().last_recalled_at || null,
-      first_recalled_at: d.data().first_recalled_at || null,
-      last_recall_day: d.data().last_recall_day || '',
-      last_recall_session_id: d.data().last_recall_session_id || '',
-      last_quizzed_at: d.data().last_quizzed_at || null,
-      quiz_seen_count: Number(d.data().quiz_seen_count) || 0,
-      mastered_once: Boolean(d.data().mastered_once),
-      firstMasteredAt: d.data().firstMasteredAt || null,
-      hasEarnedMasteryXP: Boolean(d.data().hasEarnedMasteryXP),
-      earnedTransitions: Array.isArray(d.data().earnedTransitions) ? d.data().earnedTransitions : [],
-      remasteryAwardCount: Number(d.data().remasteryAwardCount) || 0,
-      xpEconomyVersion: Number(d.data().xpEconomyVersion) || 0,
-      order:       Number.isFinite(d.data().order) ? d.data().order : null,
-      createdAt:   d.data().createdAt?.toDate ? d.data().createdAt.toDate().toISOString() : (d.data().createdAt || null)
+      word:        data.text || data.word || '',
+      normalizedWord: data.normalizedWord || '',
+      wordKey: data.wordKey || '',
+      translation: data.translation || data.meaning || '',
+      meaning:     data.meaning || data.translation || '',
+      definition: data.definition || '',
+      definition_ar: data.definition_ar || data.definitionAr || '',
+      example:     data.example || '',
+      exampleTranslation: data.exampleTranslation || '',
+      partOfSpeech: data.partOfSpeech || '',
+      category:    data.category || 'عام',
+      level: data.level || data.difficulty || '',
+      tags: Array.isArray(data.tags) ? data.tags : [],
+      synonyms: Array.isArray(data.synonyms) ? data.synonyms : [],
+      pronunciation: data.pronunciation || '',
+      notes: data.notes || '',
+      starred:     data.starred || false,
+      forgetCount: data.forgetCount || 0,
+      xpValue:     data.xpValue ?? 0,
+      mastery_status: data.mastery_status || '',
+      mastery_streak: Number(data.mastery_streak) || 0,
+      last_recalled_at: data.last_recalled_at || null,
+      first_recalled_at: data.first_recalled_at || null,
+      last_recall_day: data.last_recall_day || '',
+      last_recall_session_id: data.last_recall_session_id || '',
+      last_quizzed_at: data.last_quizzed_at || null,
+      quiz_seen_count: Number(data.quiz_seen_count) || 0,
+      mastered_once: Boolean(data.mastered_once),
+      firstMasteredAt: data.firstMasteredAt || null,
+      hasEarnedMasteryXP: Boolean(data.hasEarnedMasteryXP),
+      earnedTransitions: Array.isArray(data.earnedTransitions) ? data.earnedTransitions : [],
+      remasteryAwardCount: Number(data.remasteryAwardCount) || 0,
+      xpEconomyVersion: Number(data.xpEconomyVersion) || 0,
+      order:       Number.isFinite(data.order) ? data.order : null,
+      createdAt:   data.createdAt?.toDate ? data.createdAt.toDate().toISOString() : (data.createdAt || null)
     };
   }
 
