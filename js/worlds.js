@@ -1287,6 +1287,7 @@ const publishedContentState = {
   placementBundle: null,
   placementPending: false,
   placementFeedback: null,
+  placementFinalizationKey: '',
   wordPager: null,
   wordSnapshot: null,
   wordPageRequest: null,
@@ -1412,6 +1413,7 @@ function clearPublishedJourneyViewState(options) {
   publishedContentState.placementBundle = null;
   publishedContentState.placementPending = false;
   publishedContentState.placementFeedback = null;
+  publishedContentState.placementFinalizationKey = '';
   if (options?.clearError) publishedContentState.journeyError = null;
   setPublishedPlacementMode(false);
 }
@@ -1539,6 +1541,24 @@ function requestJourneySignIn() {
 }
 
 function publishedJourneyErrorText(error) {
+  const code = String(error?.code || '');
+  const operation = String(error?.operation || '');
+  if (
+    (code === 'permission-denied' || code === 'firestore/permission-denied') &&
+    (
+      operation === 'save-placement-gate-result' ||
+      operation === 'complete-placement-session' ||
+      operation === 'advance-placement-journey'
+    )
+  ) {
+    return 'أضيفت الكلمات، لكن تعذر حفظ نتيجة الاختبار وتقدم الرحلة.';
+  }
+  if (
+    (code === 'permission-denied' || code === 'firestore/permission-denied') &&
+    operation === 'save-placement-answer'
+  ) {
+    return 'تعذر تثبيت إجابتك الأخيرة. أعد محاولة الحفظ.';
+  }
   const messages = {
     'journey/sign-in-required': 'سجّل دخولك أولًا لبدء الرحلة.',
     'journey/rank-locked': 'لا توجد رتبة متاحة لبدء الرحلة.',
@@ -1882,6 +1902,10 @@ async function showPublishedPlacementResume(worldId) {
 function renderPublishedPlacementResumePrompt(bundle) {
   const root = publishedViewRoot();
   if (!root) return;
+  if (['submitting', 'completed'].includes(bundle?.session?.status)) {
+    retryPublishedPlacementFinalization(bundle);
+    return;
+  }
   setPublishedPlacementMode(false);
   publishedContentState.placementBundle = bundle;
   publishedContentState.journey = bundle.journey;
@@ -1922,6 +1946,10 @@ function renderPublishedPlacementResumePrompt(bundle) {
 function renderPublishedPlacementAssessment(bundle) {
   const root = publishedViewRoot();
   if (!root) return;
+  if (['submitting', 'completed'].includes(bundle?.session?.status)) {
+    retryPublishedPlacementFinalization(bundle);
+    return;
+  }
   const question = getPlacementContract().buildQuestion(bundle.words, bundle.session);
   if (!question) {
     renderPublishedPlacementResult({
@@ -2016,49 +2044,219 @@ function renderPublishedPlacementAssessment(bundle) {
 async function submitPublishedPlacementAnswer(bundle, question, selectedId) {
   if (publishedContentState.placementPending || publishedContentState.placementFeedback) return;
   const correct = String(selectedId) === String(question.contentWordId);
+  const finalAnswer = question.questionNumber === question.totalQuestions;
   publishedContentState.placementPending = true;
   publishedContentState.placementFeedback = { selectedId: String(selectedId), correct };
   renderPublishedPlacementAssessment(bundle);
   try {
+    const reduceMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+    await new Promise((resolve) => setTimeout(resolve, reduceMotion ? 120 : 820));
+    if (finalAnswer) renderPublishedPlacementSaving(bundle);
     const result = await getJourneyCloudApi().answerPlacementQuestion(
       bundle.journey.worldId,
       bundle.session.assessmentId,
       selectedId
     );
-    await new Promise((resolve) => setTimeout(resolve, 420));
     publishedContentState.placementPending = false;
     publishedContentState.placementFeedback = null;
+    publishedContentState.placementFinalizationKey = '';
     if (!result.completed) {
       renderPublishedPlacementAssessment(result.bundle);
       return;
     }
-    if (result.passed && result.bundle) {
-      renderPublishedPlacementTransition(result.bundle);
+    if (result.continuationAvailable) {
+      renderPublishedPlacementDecision(result);
       return;
     }
     renderPublishedPlacementResult(result);
   } catch (error) {
     publishedContentState.placementPending = false;
     publishedContentState.placementFeedback = null;
+    if (finalAnswer) {
+      renderPublishedPlacementSaveError(bundle, selectedId, error);
+      return;
+    }
     showToast(publishedJourneyErrorText(error), 'danger', 4800);
     renderPublishedPlacementAssessment(bundle);
   }
 }
 
-function renderPublishedPlacementTransition(nextBundle) {
+function renderPublishedPlacementSaving(bundle) {
   const root = publishedViewRoot();
   if (!root) return;
+  setPublishedPlacementMode(true);
+  if (bundle) syncPublishedPlacementRoute(bundle);
   const state = publishedElement('section', 'published-placement-transition');
   state.append(
-    publishedIcon('fa-solid fa-circle-check'),
-    publishedElement('strong', '', 'أحسنت، ننتقل للبوابة التالية.'),
-    publishedElement('span', '', nextBundle.gate.title || 'البوابة التالية')
+    publishedIcon('fa-solid fa-circle-notch fa-spin'),
+    publishedElement('strong', '', 'جارٍ حفظ نتيجتك وكلمات البوابة...'),
+    publishedElement('span', '', 'لن تحتاج إلى إعادة الإجابة عن السؤال الأخير.')
   );
+  state.setAttribute('role', 'status');
+  state.setAttribute('aria-live', 'polite');
   root.replaceChildren(state);
-  setTimeout(() => {
-    if (publishedContentState.route?.key !== 'gate') return;
-    renderPublishedPlacementAssessment(nextBundle);
-  }, 720);
+}
+
+function renderPublishedPlacementSaveError(bundle, selectedId, error) {
+  const root = publishedViewRoot();
+  if (!root) return;
+  setPublishedPlacementMode(true);
+  const operation = String(error?.operation || '');
+  const answerWasSaved = operation === 'save-placement-gate-result' ||
+    operation === 'complete-placement-session' ||
+    operation === 'advance-placement-journey';
+  const gateResultWasSaved = operation === 'complete-placement-session' ||
+    operation === 'advance-placement-journey';
+  const sessionWasCompleted = operation === 'advance-placement-journey';
+  const state = publishedElement('section', 'published-placement-result is-learning');
+  state.append(
+    publishedIcon('fa-solid fa-triangle-exclamation'),
+    publishedElement('strong', '', 'تعذر إكمال حفظ نتيجة الاختبار.'),
+    publishedElement(
+      'p',
+      '',
+      sessionWasCompleted
+        ? 'حُفظت نتيجة البوابة واكتملت الجلسة، لكن تعذر تحديث نقطة الرحلة. أعد محاولة هذه الخطوة فقط.'
+        : gateResultWasSaved
+          ? 'حُفظت نتيجة البوابة، لكن تعذر إتمام الجلسة. أعد محاولة هذه الخطوة فقط.'
+        : answerWasSaved
+          ? 'أضيفت كلمات البوابة وثُبتت إجابتك الأخيرة، لكن تعذر حفظ نتيجة البوابة. أعد محاولة هذه الخطوة فقط.'
+        : 'لم نتلق تأكيد تثبيت الإجابة الأخيرة. أعد المحاولة؛ إن كانت وصلت إلى الخادم فسيُستكمل الحفظ دون تكرارها.'
+    )
+  );
+  const code = String(error?.code || '').trim();
+  if (code) state.append(publishedElement('span', 'published-placement-result-score', code));
+  state.append(publishedButton(
+    'إعادة محاولة الحفظ',
+    'published-action-btn published-placement-primary',
+    () => retryPublishedPlacementFinalization(bundle, selectedId),
+    'fa-solid fa-rotate-right'
+  ));
+  root.replaceChildren(state);
+}
+
+async function retryPublishedPlacementFinalization(bundle, selectedId) {
+  if (!bundle?.journey?.worldId || !bundle?.session?.assessmentId) return;
+  if (publishedContentState.placementPending) return;
+  const key = `${bundle.journey.worldId}/${bundle.session.assessmentId}`;
+  publishedContentState.placementPending = true;
+  publishedContentState.placementFinalizationKey = key;
+  renderPublishedPlacementSaving(bundle);
+  try {
+    const api = getJourneyCloudApi();
+    const result = selectedId
+      ? await api.answerPlacementQuestion(
+        bundle.journey.worldId,
+        bundle.session.assessmentId,
+        selectedId
+      )
+      : await api.finalizePlacementResult(
+        bundle.journey.worldId,
+        bundle.session.assessmentId
+      );
+    publishedContentState.placementPending = false;
+    publishedContentState.placementFeedback = null;
+    publishedContentState.placementFinalizationKey = '';
+    if (result.continuationAvailable) {
+      renderPublishedPlacementDecision(result);
+    } else {
+      renderPublishedPlacementResult(result);
+    }
+  } catch (error) {
+    publishedContentState.placementPending = false;
+    publishedContentState.placementFinalizationKey = '';
+    renderPublishedPlacementSaveError(bundle, selectedId, error);
+  }
+}
+
+function renderPublishedPlacementDecision(result) {
+  const root = publishedViewRoot();
+  if (!root) return;
+  setPublishedPlacementMode(false);
+  const session = result.session || {};
+  const nextGateName = result.nextGate?.title || 'البوابة التالية';
+  const nextRankName = result.nextRank?.title || '';
+  const section = publishedElement('section', 'published-placement-result is-passed');
+  section.append(
+    publishedIcon('fa-solid fa-circle-check'),
+    publishedElement('strong', '', 'أحسنت، اجتزت هذه البوابة.'),
+    publishedElement(
+      'p',
+      '',
+      nextRankName
+        ? `نقطة التحديد التالية: ${nextRankName} · ${nextGateName}`
+        : `نقطة التحديد التالية: ${nextGateName}`
+    ),
+    publishedElement(
+      'span',
+      'published-placement-result-score',
+      `${Number(session.correctCount) || 0} / ${Number(session.totalQuestions) || 0}`
+    )
+  );
+  const actions = publishedElement('div', 'published-placement-resume-actions');
+  actions.append(
+    publishedButton(
+      'اختبر البوابة التالية',
+      'published-action-btn published-placement-primary',
+      () => continuePublishedPlacement(result),
+      'fa-solid fa-arrow-left'
+    ),
+    publishedButton(
+      'توقف هنا وابدأ رحلتك',
+      'published-action-btn published-placement-secondary',
+      () => stopPublishedPlacement(result),
+      'fa-solid fa-book-open-reader'
+    )
+  );
+  section.append(actions);
+  root.replaceChildren(section);
+}
+
+async function continuePublishedPlacement(result) {
+  if (publishedContentState.placementPending) return;
+  publishedContentState.placementPending = true;
+  const root = publishedViewRoot();
+  if (root) {
+    const state = publishedElement('section', 'published-placement-transition');
+    state.append(
+      publishedIcon('fa-solid fa-circle-notch fa-spin'),
+      publishedElement('strong', '', 'جارٍ تجهيز البوابة التالية...'),
+      publishedElement('span', '', result.nextGate?.title || 'البوابة التالية')
+    );
+    root.replaceChildren(state);
+  }
+  try {
+    const bundle = await getJourneyCloudApi().continuePlacement(result.journey.worldId);
+    publishedContentState.placementPending = false;
+    publishedContentState.journey = bundle.journey;
+    publishedContentState.activeJourney = bundle.journey;
+    renderPublishedPlacementAssessment(bundle);
+  } catch (error) {
+    publishedContentState.placementPending = false;
+    showToast(publishedJourneyErrorText(error), 'danger', 4800);
+    renderPublishedPlacementDecision(result);
+  }
+}
+
+async function stopPublishedPlacement(result) {
+  if (publishedContentState.placementPending) return;
+  publishedContentState.placementPending = true;
+  try {
+    const journey = await getJourneyCloudApi().stopPlacement(result.journey.worldId);
+    publishedContentState.placementPending = false;
+    publishedContentState.journey = journey;
+    publishedContentState.activeJourney = journey;
+    setPublishedPlacementMode(false);
+    window.openPublishedGate(
+      journey.worldId,
+      journey.activeRankId,
+      journey.activeGateId
+    );
+  } catch (error) {
+    publishedContentState.placementPending = false;
+    showToast(publishedJourneyErrorText(error), 'danger', 4800);
+    renderPublishedPlacementDecision(result);
+  }
 }
 
 function renderPublishedPlacementResult(result) {
