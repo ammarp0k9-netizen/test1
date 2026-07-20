@@ -4075,6 +4075,43 @@ body.low-end-device .voice-search-btn.is-listening i {
   font-weight: bold; margin-right: 6px; color: var(--text-on-accent, white); display: inline-block;
   vertical-align: middle;
 }
+.pos-tag {
+  display: inline-block;
+  margin-right: 5px;
+  padding: 2px 7px;
+  border: 1px solid color-mix(in srgb, var(--accent2) 36%, var(--border));
+  border-radius: 5px;
+  background: color-mix(in srgb, var(--accent2) 9%, transparent);
+  color: color-mix(in srgb, var(--accent2) 78%, var(--text-white));
+  font-size: 10px;
+  font-weight: 800;
+  vertical-align: middle;
+}
+.word-card-details {
+  display: none;
+  direction: rtl;
+  text-align: right;
+  font-style: normal;
+}
+.show-example .word-card-details {
+  display: grid;
+  gap: 6px;
+}
+.word-detail-row {
+  display: grid;
+  grid-template-columns: minmax(82px, auto) minmax(0, 1fr);
+  gap: 8px;
+  align-items: baseline;
+  line-height: 1.6;
+}
+.word-detail-row strong {
+  color: var(--text-white);
+  font-size: 10px;
+}
+.word-detail-row span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
 .mastery-meter {
   display: inline-flex;
   align-items: center;
@@ -10147,6 +10184,10 @@ body.published-placement-mode .main-content {
 
 .published-placement-result.is-learning {
   border-color: color-mix(in srgb, var(--star) 40%, var(--border));
+}
+
+.published-placement-result.is-passed {
+  border-color: color-mix(in srgb, var(--success) 44%, var(--border));
 }
 
 @keyframes publishedSoundPulse {
