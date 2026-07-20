@@ -7,6 +7,7 @@
     "test:published": "node --test tests/published-content-static.test.mjs",
     "test:journey": "node --test tests/journey.test.mjs tests/journey-static.test.mjs",
     "test:placement": "node --test tests/placement.test.mjs",
+    "test:dictionary": "node --test tests/dictionary-render-static.test.mjs",
     "test:admin:browser": "node tools/admin-rank-browser-smoke.mjs",
     "test:admin:gate-browser": "node tools/admin-gate-browser-smoke.mjs",
     "test:rules": "firebase emulators:exec --only firestore --project demo-lootlingua \"node tests/firestore-rules.test.mjs\"",
