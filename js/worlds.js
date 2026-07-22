@@ -1839,16 +1839,14 @@ async function beginPublishedLevelPlacement(world, cefrLevel) {
 }
 
 async function maybeRenderPublishedLevelPlacementResume(journey, generation) {
-  if (!journey?.activeLevelPlacementAssessmentId) return false;
+  const placement = getLevelPlacementContract();
+  if (!placement.shouldResumeLevelPlacement(null, journey)) return false;
   try {
     const bundle = await getJourneyCloudApi().resumeLevelPlacement(journey.worldId);
     if (generation !== publishedContentState.generation) return true;
+    if (!placement.shouldResumeLevelPlacement(bundle.session, bundle.journey)) return false;
     publishedContentState.levelPlacementBundle = bundle;
-    if (bundle.session.status === 'active') {
-      renderPublishedLevelPlacementResumePrompt(bundle);
-    } else {
-      renderPublishedLevelPlacementResult(bundle);
-    }
+    renderPublishedLevelPlacementResumePrompt(bundle);
     return true;
   } catch (error) {
     if (generation !== publishedContentState.generation) return true;
@@ -2194,8 +2192,11 @@ function levelPlacementSaveSummaryText(summary) {
     `${Number(summary?.sourceLinked) || 0} موجودة وربطناها بالاختبار`,
     `${Number(summary?.alreadyLinked) || 0} مرتبطة مسبقًا`,
   ];
-  if (Number(summary?.restoredReady) > 0) {
-    parts.push(`استعدنا ${Number(summary.restoredReady)} مخفية مع تقدمها`);
+  if (Number(summary?.updatedMissingFields) > 0) {
+    parts.push(`أكملنا بيانات ${Number(summary.updatedMissingFields)} موجودة`);
+  }
+  if (Number(summary?.restored) > 0) {
+    parts.push(`استعدنا ${Number(summary.restored)} مخفية مع تقدمها`);
   }
   return `تم حفظ كلمات الاختبار: ${parts.join('، ')}.`;
 }
@@ -2384,13 +2385,25 @@ async function runPublishedGateLoad(syncOnly) {
       clearPublishedJourneyError();
     }
     rerenderPublishedRoute();
-    if (!result.advancement?.advanced) showToast(
-      result.partial
-        ? `تم تحميل ${result.completed} من ${result.total}.`
-        : (syncOnly ? 'تمت مزامنة الكلمات الجديدة.' : 'تم تحميل البوابة وبدء التعلم.'),
-      result.partial ? 'warning' : 'success',
-      4800
-    );
+    if (!result.advancement?.advanced) {
+      const summary = result.summary || {};
+      const parts = [
+        Number(summary.created) ? `${Number(summary.created)} جديدة` : '',
+        Number(summary.sourceLinked) ? `${Number(summary.sourceLinked)} موجودة رُبطت بالرحلة` : '',
+        Number(summary.updatedMissingFields) ? `${Number(summary.updatedMissingFields)} اكتملت بياناتها` : '',
+        Number(summary.alreadyLinked) ? `${Number(summary.alreadyLinked)} مرتبطة مسبقًا` : '',
+        Number(summary.hiddenPreserved) ? `${Number(summary.hiddenPreserved)} مخفية بقيت محفوظة` : '',
+      ].filter(Boolean);
+      showToast(
+        result.partial
+          ? `تمت معالجة ${result.completed} من ${result.total}. تعذر حفظ ${result.failures.length} ويمكنك إعادة المحاولة.`
+          : (parts.length
+            ? `أصبحت البوابة جاهزة: ${parts.join('، ')}.`
+            : (syncOnly ? 'تمت مزامنة الكلمات الجديدة.' : 'تم تحميل البوابة وبدء التعلم.')),
+        result.partial ? 'warning' : 'success',
+        5600
+      );
+    }
   } catch (error) {
     const journeyError = setPublishedJourneyError(
       error,
@@ -3729,8 +3742,43 @@ function publishedDetailText(value) {
   return String(value || '').trim();
 }
 
+function getPublishedPersonalWords() {
+  return readWordsFromStorage('normal', window.auth?.currentUser?.uid);
+}
+
+function getPublishedUserWord(word) {
+  return window.LootLinguaWordLifecycle?.findUserWordByKey(
+    getPublishedPersonalWords(),
+    word
+  ) || null;
+}
+
+async function restorePublishedGateWord(userWord, publishedWord, button) {
+  if (!userWord || !isDictionaryWordHidden(userWord)) return;
+  if (button) button.disabled = true;
+  try {
+    await window.restoreDictionaryWordById(userWord.id, { notify: false });
+    const word = publishedWord?.word || userWord.word || userWord.text || '';
+    showToast(`تمت استعادة كلمة ”${word}“ إلى قاموسك، وتقدمها السابق محفوظ.`, 'success', 4800);
+    renderPublishedGateWords(
+      publishedContentState.world,
+      publishedContentState.rank,
+      publishedContentState.gate,
+      publishedContentState.wordSnapshot
+    );
+  } catch (error) {
+    if (button) button.disabled = false;
+    showToast('تعذر استعادة الكلمة الآن. لم يتغير تقدمها.', 'danger', 4400);
+  }
+}
+
 function makePublishedWordCard(word) {
-  const card = publishedElement('article', 'published-word-card');
+  const userWord = getPublishedUserWord(word);
+  const hidden = isDictionaryWordHidden(userWord);
+  const card = publishedElement(
+    'article',
+    `published-word-card${hidden ? ' published-word-hidden' : ''}`
+  );
   const content = publishedElement('div', 'published-word-content');
   const identity = publishedElement('div', 'published-word-identity');
   const wordText = publishedElement('strong', 'published-word-text', word.word || '');
@@ -3749,6 +3797,7 @@ function makePublishedWordCard(word) {
   appendMetaChip(meta, word.level, 'fa-solid fa-signal');
   appendMetaChip(meta, word.partOfSpeech, 'fa-solid fa-font');
   appendMetaChip(meta, word.category, 'fa-solid fa-tag');
+  if (hidden) appendMetaChip(meta, 'مخفية من قاموسك', 'fa-solid fa-eye-slash');
   if (meta.childElementCount) content.append(meta);
 
   if (word.example) {
@@ -3796,6 +3845,15 @@ function makePublishedWordCard(word) {
     });
   }
   actions.append(sound);
+  if (hidden) {
+    const restore = publishedButton(
+      'استعادة إلى القاموس',
+      'published-word-restore',
+      () => restorePublishedGateWord(userWord, word, restore),
+      'fa-solid fa-rotate-left'
+    );
+    actions.append(restore);
+  }
 
   let details = null;
   if (detailValues.length) {
@@ -3959,6 +4017,27 @@ function renderPublishedGateWords(world, rank, gate, snapshot) {
   );
   toolbar.append(summary);
   section.append(toolbar);
+
+  const hiddenWordKeys = new Set(getPublishedPersonalWords()
+    .filter((word) => isDictionaryWordHidden(word))
+    .map((word) => window.LootLinguaWordLifecycle?.wordKeyOf(word))
+    .filter(Boolean));
+  const gateWordKeys = new Set(
+    (publishedContentState.gateProgress?.loadedWordKeys || []).map(String)
+  );
+  const hiddenCount = [...hiddenWordKeys].filter((key) => gateWordKeys.has(key)).length;
+  if (hiddenCount) {
+    const notice = publishedElement('div', 'published-hidden-words-note');
+    notice.append(
+      publishedIcon('fa-solid fa-eye-slash'),
+      document.createTextNode(
+        hiddenCount === 1
+          ? 'لديك كلمة مخفية من هذه البوابة. تقدمها محفوظ وستظل تظهر في المراجعات والاختبارات.'
+          : `لديك ${hiddenCount} كلمات مخفية من هذه البوابة. تقدمها محفوظ وستظل تظهر في المراجعات والاختبارات.`
+      )
+    );
+    section.append(notice);
+  }
 
   const page = snapshot?.currentPage;
   if (!page || !page.items.length) {
@@ -4727,7 +4806,19 @@ async function saveWordsToTarget(targetId, wordsToAdd) {
       : window.words;
     if (signedIn && window.saveWordToCloud) {
       for (const word of wordsToAdd) {
-        const realId = await window.saveWordToCloud(word.word, word.category || 'عام', word.meaning || '', word.example || '', word.order ?? 0, word);
+        const realId = await window.saveWordToCloud(
+          word.word,
+          word.category || 'عام',
+          word.meaning || '',
+          word.example || '',
+          word.order ?? 0,
+          {
+            ...word,
+            lifecycleSource: isCustomWorldView()
+              ? { type: 'private-world', customWorldId: String(activeCustomWorldId) }
+              : { type: 'manual' },
+          }
+        );
         if (!realId) throw new Error('target-personal-upload-failed');
         word.id = realId;
       }
@@ -4918,7 +5009,9 @@ window.loadStarredView = function() {
 
 function renderStarredWords() {
   const query = (document.getElementById('starredSearchInput')?.value || '').toLowerCase().trim();
-  let starred = window.words.filter(w => w.starred);
+  let starred = window.words.filter(w =>
+    w.starred && window.LootLinguaWordLifecycle?.isVisibleInDictionaryList(w) !== false
+  );
 
   if (query) {
     starred = starred.filter(w =>
@@ -5100,8 +5193,12 @@ window.loadPersonalDictionary = function() {
 
 window.addFromGame = async function(text, meaning, example, btnEl) {
   const xpGain = 0;
+  const existingWord = window.LootLinguaWordLifecycle?.findUserWordByKey(
+    getPersonalDictionaryWordsSnapshot(),
+    text
+  );
   // تحقق من التكرار
-  if (wordExists(text)) {
+  if (existingWord && !isDictionaryWordHidden(existingWord)) {
     showToast('هذه الكلمة موجودة بالفعل في قاموسك');
     if (btnEl) { btnEl.textContent='✓'; btnEl.disabled=true; btnEl.classList.add('btn-already-added'); }
     return;
@@ -5118,11 +5215,26 @@ window.addFromGame = async function(text, meaning, example, btnEl) {
     refreshFeatureUnlockUI();
   };
   if (canUseCloud) {
-    const realId = await window.saveWordToCloud(text, 'لعبة', meaning, example||'');
+    const realId = await window.saveWordToCloud(
+      text,
+      'لعبة',
+      meaning,
+      example || '',
+      0,
+      { lifecycleSource: { type: 'dictionary-search' }, existingWordId: existingWord?.id }
+    );
     if (realId) {
-      window.words.unshift({id:realId,word:text,meaning,example:example||'',category:'لعبة',starred:false,forgetCount:0,xpValue:xpGain});
+      if (existingWord) {
+        window.words = window.words.map((word) => String(word.id) === String(existingWord.id)
+          ? { ...word, hiddenFromDictionary: false, hiddenFromDictionaryAt: null }
+          : word);
+      } else {
+        window.words.unshift({id:realId,word:text,meaning,example:example||'',category:'لعبة',starred:false,forgetCount:0,xpValue:xpGain});
+      }
       persistDictionary();
-      showToast('تمت الإضافة لقاموسك');
+      showToast(existingWord
+        ? `تمت استعادة كلمة ”${text}“، وتقدمها السابق محفوظ.`
+        : 'تمت الإضافة لقاموسك');
       recordGameDictionaryAdd();
       refreshAfterGameDictionaryAdd();
       if (btnEl) { btnEl.textContent='✓'; btnEl.classList.add('btn-already-added'); }
