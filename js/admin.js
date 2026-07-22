@@ -11,7 +11,7 @@
     'category', 'difficulty', 'languageFrom', 'languageTo', 'order', 'isFeatured'
   ]);
   const EDITABLE_RANK_FIELDS = Object.freeze([
-    'title', 'subtitle', 'description', 'order', 'difficulty', 'unlockConfig'
+    'title', 'subtitle', 'description', 'order', 'difficulty', 'cefrLevel', 'unlockConfig'
   ]);
   const EDITABLE_GATE_FIELDS = Object.freeze([
     'title', 'subtitle', 'description', 'order', 'difficulty',
@@ -243,7 +243,7 @@
     const normalized = {};
     [
       'schemaVersion', 'worldId', 'rankId', 'title', 'subtitle', 'description',
-      'order', 'difficulty', 'status', 'version', 'gateCount', 'wordCount',
+      'order', 'difficulty', 'cefrLevel', 'status', 'version', 'gateCount', 'wordCount',
       'unlockConfig', 'createdAt', 'updatedAt', 'createdBy', 'updatedBy'
     ].forEach((field) => {
       if (Object.prototype.hasOwnProperty.call(data, field)) normalized[field] = data[field];
@@ -1025,7 +1025,14 @@
     const titleLine = makeElement('div', 'admin-world-title-line');
     appendChildren(titleLine, [
       makeElement('h3', 'admin-world-title', rank.title || 'رتبة بلا عنوان'),
-      makeStatusBadge(rank.status)
+      makeStatusBadge(rank.status),
+      makeElement(
+        'span',
+        'admin-count-chip admin-rank-level',
+        root.LootLinguaContentSchema?.CEFR_LEVEL_META?.[
+          root.LootLinguaContentSchema?.normalizeCefrLevel?.(rank.cefrLevel) || 'unclassified'
+        ]?.label || 'غير مصنف'
+      )
     ]);
     appendChildren(identity, [
       titleLine,
@@ -3324,6 +3331,7 @@
       description: String(source.description || ''),
       order: cachedCount(source.order),
       difficulty: String(source.difficulty || ''),
+      cefrLevel: root.LootLinguaContentSchema?.normalizeCefrLevel?.(source.cefrLevel) || 'unclassified',
       initialStatus: unlockConfig.initialStatus === 'available' ? 'available' : 'locked'
     };
   }
@@ -3336,6 +3344,7 @@
       description: String(data.get('description') || '').trim(),
       order: Number(data.get('order')),
       difficulty: String(data.get('difficulty') || '').trim(),
+      cefrLevel: String(data.get('cefrLevel') || 'unclassified'),
       unlockConfig: {
         mode: 'manual_placeholder',
         initialStatus: data.get('initialStatus') === 'available' ? 'available' : 'locked',
@@ -3352,14 +3361,15 @@
 
   function rankCandidateHasPrevious(form, modalState) {
     const values = collectRankForm(form);
-    const candidateOrder = Number(values.order);
     const candidateId = String(modalState.rank?.rankId || 'pending-rank');
+    const candidate = { ...values, rankId: candidateId };
+    const compare = root.LootLinguaContentSchema?.comparePublishedRanks;
     return ui.ranks.some((rank) => {
       const rankId = String(rank.rankId || '');
       if (modalState.rank && rankId === String(modalState.rank.rankId)) return false;
-      const rankOrder = Number(rank.order);
-      if (rankOrder !== candidateOrder) return rankOrder < candidateOrder;
-      return rankId.localeCompare(candidateId, 'en') < 0;
+      return typeof compare === 'function'
+        ? compare(rank, candidate) < 0
+        : Number(rank.order) < Number(values.order);
     });
   }
 
@@ -3461,6 +3471,22 @@
       { name: 'description', label: 'الوصف', value: seed.description, maxLength: 2000, multiline: true, rows: 5, wide: true },
       { name: 'difficulty', label: 'الصعوبة', value: seed.difficulty, maxLength: 80 }
     ].forEach((definition) => grid.append(makeField(definition).wrapper));
+    grid.append(makeSelectField({
+      name: 'cefrLevel',
+      label: 'المستوى اللغوي',
+      value: seed.cefrLevel,
+      required: true,
+      options: [
+        { value: 'A1', label: 'A1 — مبتدئ' },
+        { value: 'A2', label: 'A2 — مبتدئ أعلى' },
+        { value: 'B1', label: 'B1 — متوسط' },
+        { value: 'B2', label: 'B2 — متوسط أعلى' },
+        { value: 'C1', label: 'C1 — متقدم' },
+        { value: 'C2', label: 'C2 — إتقان' },
+        { value: 'unclassified', label: 'غير مصنف' }
+      ],
+      help: 'يحدد قسم الرتبة وترتيبها داخل العالم واختبار المستوى المتاح لها.'
+    }).wrapper);
     grid.append(makeSelectField({
       name: 'initialStatus',
       label: 'الإتاحة الأولية',
@@ -4250,8 +4276,16 @@
       setRankActionError('هذا الانتقال غير مسموح.', { code: 'content/invalid-status-transition' });
       return;
     }
+    const isMixedUnclassifiedPublish = nextStatus === 'published' &&
+      (root.LootLinguaContentSchema?.normalizeCefrLevel?.(rank.cefrLevel) || 'unclassified') === 'unclassified' &&
+      ui.ranks.some((item) => (
+        String(item.rankId || '') !== String(rank.rankId || '') &&
+        (root.LootLinguaContentSchema?.normalizeCefrLevel?.(item.cefrLevel) || 'unclassified') !== 'unclassified'
+      ));
     const question = nextStatus === 'published'
-      ? `نشر الرتبة «${String(rank.title || '')}»؟`
+      ? (isMixedUnclassifiedPublish
+        ? `هذه الرتبة غير مصنفة بينما يحتوي العالم رتبًا بمستويات لغوية. نشر الرتبة «${String(rank.title || '')}» رغم ذلك؟`
+        : `نشر الرتبة «${String(rank.title || '')}»؟`)
       : (nextStatus === 'archived'
         ? `أرشفة الرتبة «${String(rank.title || '')}»؟`
         : `إعادة الرتبة «${String(rank.title || '')}» إلى مسودة؟`);
