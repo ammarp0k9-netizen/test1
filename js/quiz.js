@@ -438,7 +438,10 @@ function getQuizSourceWords(scope = currentQuizSource) {
     source = readWordsFromStorage('normal', uid);
     sourceKey = 'personal';
   }
-  return source.map((w, i) => normalizeQuizWord(w, sourceKey, i)).filter(w => w.word && w.meaning);
+  return source
+    .filter((word) => window.LootLinguaWordLifecycle?.isEligibleForPersonalDictionaryQuiz(word) !== false)
+    .map((w, i) => normalizeQuizWord(w, sourceKey, i))
+    .filter(w => w.word && w.meaning);
 }
 
 function getQuizSourceParts(source = 'personal') {
