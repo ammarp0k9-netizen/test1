@@ -455,6 +455,10 @@ window.openDailyLootBox = function() {
   window.__lootHoldTimer = null;
   const chest = document.getElementById('dailyLootChest');
   const preview = document.getElementById('lootRewardPreview');
+  if (chest) {
+    chest.disabled = true;
+    chest.setAttribute('aria-busy', 'true');
+  }
   chest?.classList.remove('is-charging');
   chest?.classList.add('is-opening');
   if (preview) preview.textContent = 'الصندوق فتح... بنفرز اللوت الآن!';
@@ -463,27 +467,49 @@ window.openDailyLootBox = function() {
   setTimeout(() => {
     revealDailyLootReward(state, reward);
     chest?.classList.remove('is-opening');
+    if (chest) {
+      chest.disabled = false;
+      chest.setAttribute('aria-busy', 'false');
+    }
     window.__lootOpening = false;
   }, 900);
 };
 
-function getTitleProgress(def) {
+function getTitleProgressMetrics() {
   const loot = getLootState();
   const words = getPersonalDictionaryWordsSnapshot();
-  const starred = words.filter(w => w.starred).length;
-  const perfect = loadInt('lootlinguaPerfectQuizzes', 0);
-  const freezeSaves = loadInt(FREEZE_SAVES_KEY, 0);
-  const gameAdds = loadInt(GAME_DICT_ADDS_KEY, 0);
-  const level = getLevelFromXP(loadInt('userXP', 0));
-  const streak = loadInt('dailyStreak', 0);
-  const masteredWords = words.filter(w => getWordMasteryState(w).mastery_status === 'Mastered').length;
+  return {
+    loot,
+    wordCount: words.length,
+    starred: words.filter(w => w.starred).length,
+    perfect: loadInt('lootlinguaPerfectQuizzes', 0),
+    freezeSaves: loadInt(FREEZE_SAVES_KEY, 0),
+    gameAdds: loadInt(GAME_DICT_ADDS_KEY, 0),
+    level: getLevelFromXP(loadInt('userXP', 0)),
+    streak: loadInt('dailyStreak', 0),
+    masteredWords: words.filter(w => getWordMasteryState(w).mastery_status === 'Mastered').length,
+  };
+}
+
+function getTitleProgress(def, metrics = getTitleProgressMetrics()) {
+  const {
+    loot,
+    wordCount,
+    starred,
+    perfect,
+    freezeSaves,
+    gameAdds,
+    level,
+    streak,
+    masteredWords,
+  } = metrics;
   const map = {
     first_spark: `${Math.min(loot.totalOpens || 0, 1)} / 1`,
     loot_hunter: `${Math.min(loot.streak || 0, 7)} / 7`,
     streak_savior: `${Math.min(freezeSaves, 1)} / 1`,
     game_explorer: `${Math.min(gameAdds, 1)} / 1`,
-    word_collector: `${Math.min(words.length, 25)} / 25`,
-    dictionary_keeper: `${Math.min(words.length, 50)} / 50`,
+    word_collector: `${Math.min(wordCount, 25)} / 25`,
+    dictionary_keeper: `${Math.min(wordCount, 50)} / 50`,
     star_chaser: `${Math.min(starred, 10)} / 10`,
     first_mastery: `${Math.min(masteredWords, 1)} / 1`,
     mastery_circle: `${Math.min(masteredWords, 10)} / 10`,
@@ -528,12 +554,13 @@ function renderTitlesGrid() {
   const state = getTitleState();
   const unlocked = new Set(state.unlocked || []);
   const unlockedCount = TITLE_DEFS.filter(def => unlocked.has(def.id)).length;
+  const metrics = getTitleProgressMetrics();
   const progress = document.getElementById('titleProgressText');
   if (progress) progress.textContent = `فتحت ${unlockedCount} من ${TITLE_DEFS.length} ألقاب.`;
   grid.innerHTML = TITLE_DEFS.map(def => {
     const isUnlocked = unlocked.has(def.id);
     const cls = isUnlocked ? 'title-card unlocked' : 'title-card locked';
-    const progressText = getTitleProgress(def);
+    const progressText = getTitleProgress(def, metrics);
     return `
       <article class="${cls}" title="${escapeHtml(def.how)}">
         <div class="title-icon">${renderTitleIcon(def)}</div>
@@ -577,11 +604,13 @@ function renderLootSummary() {
   }
   if (slots) {
     const rewards = state.rewards || [];
+    const freezeCount = getStreakFreezeCount();
+    const unlockedTitleCount = getTitleState().unlocked?.length || 0;
     const slotRenderKey = JSON.stringify([
       ready,
       state.streak || 0,
-      getStreakFreezeCount(),
-      getTitleState().unlocked?.length || 0,
+      freezeCount,
+      unlockedTitleCount,
       rewards[0] || null,
     ]);
     if (slots.dataset.renderKey !== slotRenderKey) {
@@ -595,12 +624,12 @@ function renderLootSummary() {
       <article class="treasure-slot">
         <i class="fa-solid fa-fire-flame-curved" aria-hidden="true"></i>
         <h3>سلسلة اللوت</h3>
-        <p>${state.streak || 0} يوم متتالي | Freeze: ${getStreakFreezeCount()}.</p>
+        <p>${state.streak || 0} يوم متتالي | Freeze: ${freezeCount}.</p>
       </article>
       <article class="treasure-slot">
         <i class="fa-solid fa-medal" aria-hidden="true"></i>
         <h3>الألقاب المفتوحة</h3>
-        <p>${getTitleState().unlocked?.length || 0} لقب حالياً.</p>
+        <p>${unlockedTitleCount} لقب حالياً.</p>
       </article>
       <article class="treasure-slot">
         <i class="fa-solid fa-scroll" aria-hidden="true"></i>
@@ -2004,15 +2033,27 @@ async function submitPublishedLevelPlacementAnswer(bundle, question, selectedId)
   publishedContentState.levelPlacementPending = true;
   publishedContentState.levelPlacementFeedback = { selectedId: String(selectedId), correct };
   renderPublishedLevelPlacementAssessment(bundle);
+  const trace = window.LootLinguaOperations?.startTrace('level-placement-ui-answer');
+  trace?.stage('feedback-visible');
+  const operationUi = window.LootLinguaOperations?.beginStatus({
+    scope: 'level-placement-answer',
+    host: document.querySelector('.published-level-placement-view'),
+    loadingMessage: 'جارٍ تثبيت الإجابة...',
+    longWaitMessage: 'تستغرق المزامنة وقتًا أطول من المعتاد، وإجابتك ما زالت محفوظة هنا.',
+  });
   try {
     const reduceMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
-    await new Promise((resolve) => setTimeout(resolve, reduceMotion ? 100 : 620));
     const beforeRound = Number(bundle.session.adaptiveRound || 0);
-    const next = await getJourneyCloudApi().answerLevelPlacementQuestion(
+    const savePromise = getJourneyCloudApi().answerLevelPlacementQuestion(
       bundle.journey.worldId,
       bundle.session.assessmentId,
       selectedId
     );
+    const [next] = await Promise.all([
+      savePromise,
+      new Promise((resolve) => setTimeout(resolve, reduceMotion ? 100 : 520)),
+    ]);
+    trace?.stage('answer-saved');
     publishedContentState.levelPlacementPending = false;
     publishedContentState.levelPlacementFeedback = null;
     publishedContentState.levelPlacementBundle = next;
@@ -2023,14 +2064,32 @@ async function submitPublishedLevelPlacementAnswer(bundle, question, selectedId)
         showToast('نحتاج سؤالين إضافيين لتحديد مكانك بدقة.', 'info', 3600);
       }
       renderPublishedLevelPlacementAssessment(next);
+      trace?.count('rerenderCount').stage('next-question-visible').end({
+        questionIndex: next.session.currentQuestionIndex,
+      });
+      operationUi?.clear();
       return;
     }
     renderPublishedLevelPlacementResult(next);
+    trace?.count('rerenderCount').stage('result-visible').end({ completed: true });
+    operationUi?.clear();
   } catch (error) {
     publishedContentState.levelPlacementPending = false;
     publishedContentState.levelPlacementFeedback = null;
     showToast(publishedJourneyErrorText(error), 'danger', 4800);
     renderPublishedLevelPlacementAssessment(bundle);
+    const retryUi = window.LootLinguaOperations?.beginStatus({
+      scope: 'level-placement-answer-retry',
+      host: document.querySelector('.published-level-placement-view'),
+      loadingMessage: 'تعذر تثبيت الإجابة.',
+    });
+    retryUi?.fail('تعذر تثبيت الإجابة. أعد هذه الخطوة فقط.', () => {
+      retryUi.clear();
+      submitPublishedLevelPlacementAnswer(bundle, question, selectedId);
+    });
+    operationUi?.clear();
+    trace?.warn(error?.code || error?.message || 'level-placement-ui-failed')
+      .end({ failed: true });
   }
 }
 
@@ -3755,9 +3814,17 @@ function getPublishedUserWord(word) {
 
 async function restorePublishedGateWord(userWord, publishedWord, button) {
   if (!userWord || !isDictionaryWordHidden(userWord)) return;
-  if (button) button.disabled = true;
+  const operationUi = window.LootLinguaOperations?.beginStatus({
+    scope: `published-word-restore:${String(userWord.id)}`,
+    host: button?.closest('.published-word-card'),
+    buttons: button ? [button] : [],
+    buttonBusyLabel: 'جارٍ الاستعادة...',
+    loadingMessage: 'جارٍ استعادة الكلمة...',
+    longWaitMessage: 'تستغرق الاستعادة وقتًا أطول من المعتاد، ولن تتكرر العملية.',
+  });
   try {
     await window.restoreDictionaryWordById(userWord.id, { notify: false });
+    operationUi?.complete('تمت استعادة الكلمة.');
     const word = publishedWord?.word || userWord.word || userWord.text || '';
     showToast(`تمت استعادة كلمة ”${word}“ إلى قاموسك، وتقدمها السابق محفوظ.`, 'success', 4800);
     renderPublishedGateWords(
@@ -3767,7 +3834,10 @@ async function restorePublishedGateWord(userWord, publishedWord, button) {
       publishedContentState.wordSnapshot
     );
   } catch (error) {
-    if (button) button.disabled = false;
+    operationUi?.fail(
+      'تعذرت الاستعادة. يمكنك إعادة المحاولة بأمان.',
+      () => restorePublishedGateWord(userWord, publishedWord, button)
+    );
     showToast('تعذر استعادة الكلمة الآن. لم يتغير تقدمها.', 'danger', 4400);
   }
 }
@@ -4693,13 +4763,25 @@ function getSelectedWordsForWorldManage() {
     .filter(Boolean);
 }
 
-function makeCopiedWord(word) {
+function makeCopiedWord(word, operationId = '', options = {}) {
   return applyKnownSharedMastery({
     ...word,
-    id: `${Date.now()}_${Math.random().toString(36).slice(2, 9)}`,
     order: 0,
+    operationId,
+    removePrivateWorldId: options.removePrivateWorldId || '',
+    removePrivateMembershipId: options.removePrivateMembershipId || '',
     createdAt: new Date().toISOString(),
   });
+}
+
+function getWorldManageWordKey(word) {
+  return window.LootLinguaWordLifecycle?.wordKeyOf?.(word) ||
+    normalizeWord(word?.word || word?.text || '');
+}
+
+function getWorldManageOperationId(targetId, mode, words) {
+  const keys = words.map(getWorldManageWordKey).filter(Boolean).sort();
+  return `world-manage:${mode}:${String(targetId)}:${keys.join(',')}`.slice(0, 180);
 }
 
 function getTargetDictionaryWords(targetId) {
@@ -4760,7 +4842,7 @@ function renderWorldManageTargets() {
   if (summary) summary.textContent = `الكلمات المحددة: ${selectedCount}`;
   const targets = getWorldManageTargets();
   const targetHtml = targets.map(target => `
-    <button type="button" class="world-manage-target" onclick="applyWorldManageToTarget('${escapeHtml(String(target.id))}', '${pendingWorldManageAction}')">
+    <button type="button" class="world-manage-target" data-world-target="${escapeHtml(String(target.id))}" onclick="applyWorldManageToTarget('${escapeHtml(String(target.id))}', '${pendingWorldManageAction}')">
       <span>${escapeHtml(target.emoji)}</span>
       <strong>${escapeHtml(target.label)}</strong>
       <small>${escapeHtml(target.desc)}</small>
@@ -4796,7 +4878,7 @@ window.setWorldManageAction = function(action) {
   renderWorldManageTargets();
 };
 
-async function saveWordsToTarget(targetId, wordsToAdd) {
+async function saveWordsToTarget(targetId, wordsToAdd, options = {}) {
   if (!wordsToAdd.length) return [];
   const uid = window.auth?.currentUser?.uid;
   const signedIn = Boolean(window.auth?.currentUser);
@@ -4805,7 +4887,7 @@ async function saveWordsToTarget(targetId, wordsToAdd) {
       ? readWordsFromStorage('normal', uid)
       : window.words;
     if (signedIn && window.saveWordToCloud) {
-      for (const word of wordsToAdd) {
+      await Promise.all(wordsToAdd.map(async (word) => {
         const realId = await window.saveWordToCloud(
           word.word,
           word.category || 'عام',
@@ -4814,15 +4896,19 @@ async function saveWordsToTarget(targetId, wordsToAdd) {
           word.order ?? 0,
           {
             ...word,
-            lifecycleSource: isCustomWorldView()
-              ? { type: 'private-world', customWorldId: String(activeCustomWorldId) }
-              : { type: 'manual' },
+            lifecycleSource: { type: 'manual' },
+            operationId: options.operationId,
           }
         );
         if (!realId) throw new Error('target-personal-upload-failed');
         word.id = realId;
-      }
+      }));
     }
+    wordsToAdd.forEach((word) => {
+      delete word.operationId;
+      delete word.removePrivateWorldId;
+      delete word.removePrivateMembershipId;
+    });
     const next = [...wordsToAdd, ...currentPersonal];
     reindexWordOrder(next);
     writeWordsToStorage(next, 'normal', uid);
@@ -4833,12 +4919,25 @@ async function saveWordsToTarget(targetId, wordsToAdd) {
     ? window.words
     : readCustomWorldWordsFromStorage(targetId, uid);
   if (signedIn && window.saveCustomWorldWordToCloud) {
-    for (const word of wordsToAdd) {
-      const realId = await window.saveCustomWorldWordToCloud(targetId, word);
+    await Promise.all(wordsToAdd.map(async (word) => {
+      const realId = await window.saveCustomWorldWordToCloud(targetId, {
+        ...word,
+        operationId: options.operationId,
+      });
       if (!realId) throw new Error('target-world-upload-failed');
       word.id = realId;
-    }
+    }));
+  } else {
+    wordsToAdd.forEach((word) => {
+      const key = getWorldManageWordKey(word);
+      if (key) word.id = `private_${key}`.slice(0, 500);
+    });
   }
+  wordsToAdd.forEach((word) => {
+    delete word.operationId;
+    delete word.removePrivateWorldId;
+    delete word.removePrivateMembershipId;
+  });
   const next = [...wordsToAdd, ...targetWords];
   reindexWordOrder(next);
   writeCustomWorldWordsToStorage(targetId, next, uid);
@@ -4853,39 +4952,117 @@ function showSkippedDuplicateWordsNotice(skipped, targetId = 'personal') {
   showToast(`لم يتم نقل ${skipped.length} كلمة لأنها موجودة مسبقاً في ${getTargetDictionaryLabel(targetId)}: ${names}${more}`, 'warning', 6200);
 }
 
-window.applyWorldManageToTarget = async function(targetId, action = pendingWorldManageAction) {
+let worldManageOperationPromise = null;
+
+window.applyWorldManageToTarget = function(targetId, action = pendingWorldManageAction) {
+  if (worldManageOperationPromise) return worldManageOperationPromise;
   const selected = getSelectedWordsForWorldManage();
-  if (!selected.length) return;
+  if (!selected.length) return Promise.resolve(false);
   const mode = action === 'copy' ? 'copy' : 'move';
-  try {
+  const sourceCustomWorldId = isCustomWorldView() ? String(activeCustomWorldId) : '';
+  const operationId = getWorldManageOperationId(targetId, mode, selected);
+  const operationScope = `world-manage:${operationId}`;
+  const wrap = document.getElementById('worldManageTargets');
+  const buttons = [...document.querySelectorAll('#worldManageTargets .world-manage-target')];
+  const targetButton = wrap?.querySelector(`[data-world-target="${cssEscapeValue(String(targetId))}"]`);
+  buttons.forEach((button) => {
+    button.disabled = true;
+    button.setAttribute('aria-busy', String(button === targetButton));
+  });
+  const operationUi = window.LootLinguaOperations?.beginStatus({
+    scope: operationScope,
+    host: wrap,
+    buttons: targetButton ? [targetButton] : [],
+    buttonBusyLabel: 'جارٍ النقل...',
+    loadingMessage: 'جارٍ نقل الكلمات...',
+    longWaitMessage: 'تستغرق المزامنة وقتًا أطول من المعتاد، ولم نكرر العملية.',
+  });
+  const trace = window.LootLinguaOperations?.startTrace('world-manage-words', {
+    mode,
+    source: sourceCustomWorldId ? 'private-world' : 'personal',
+    target: targetId === 'personal' ? 'personal' : 'private-world',
+    wordCount: selected.length,
+  });
+
+  const task = async () => {
+    let failed = false;
+    try {
+      trace?.stage('validation-complete');
     const { movable, skipped } = splitWordsByExistingInTarget(targetId, selected);
     if (!movable.length) {
       showSkippedDuplicateWordsNotice(skipped, targetId);
-      return;
+        operationUi?.complete('الكلمات موجودة مسبقًا في الوجهة.');
+        return false;
     }
-    const copiedWords = movable.map(makeCopiedWord);
-    await saveWordsToTarget(targetId, copiedWords);
-    if (mode === 'move') {
-      const selectedSet = new Set(movable.map(word => String(word.id)));
-      const sourceIds = movable.map(word => String(word.id));
-      window.words = window.words.filter(word => !selectedSet.has(String(word.id)));
-      reindexWordOrder(window.words);
-      writeActiveWordsToStorage(window.words);
-      if (window.auth?.currentUser) {
-        await Promise.all(sourceIds.map(id => deleteActiveWordFromCloud(id)));
+      const removeSourceMembership = mode === 'move' &&
+        sourceCustomWorldId &&
+        String(targetId) !== sourceCustomWorldId;
+      const copiedWords = movable.map((word) => makeCopiedWord(word, operationId, {
+        removePrivateWorldId: removeSourceMembership ? sourceCustomWorldId : '',
+        removePrivateMembershipId: removeSourceMembership ? String(word.id) : '',
+      }));
+      await saveWordsToTarget(targetId, copiedWords, { operationId });
+      trace?.stage(
+        removeSourceMembership ? 'memberships-moved-atomically' : 'target-memberships-saved',
+        { saved: copiedWords.length }
+      );
+
+      if (removeSourceMembership) {
+        const movedIds = new Set(movable.map((word) => String(word.id)));
+        const sourceWords = readCustomWorldWordsFromStorage(sourceCustomWorldId)
+          .filter((word) => !movedIds.has(String(word.id)));
+        reindexWordOrder(sourceWords);
+        writeCustomWorldWordsToStorage(sourceCustomWorldId, sourceWords);
+        if (isCustomWorldView() && String(activeCustomWorldId) === sourceCustomWorldId) {
+          window.words = sourceWords;
+        }
+        trace?.stage('source-membership-removed', { removed: movable.length });
       }
-    }
+
     hideModal('worldManageModal');
-    window.exitSelectionMode();
-    renderCustomWorldCards();
-    renderLimit = 20;
-    render();
+      window.exitSelectionMode({ renderView: false });
+      if (removeSourceMembership) {
+        renderLimit = 20;
+        render();
+        trace?.count('rerenderCount');
+      }
     if (skipped.length) showSkippedDuplicateWordsNotice(skipped, targetId);
-    showToast(mode === 'copy' ? `تم نسخ ${movable.length} كلمة` : `تم نقل ${movable.length} كلمة`, 'success');
-  } catch (err) {
+      operationUi?.complete('اكتملت مزامنة الكلمات.');
+      operationUi?.clear();
+      const linkedFromPersonal = !sourceCustomWorldId && targetId !== 'personal';
+      showToast(
+        linkedFromPersonal
+          ? `تم ربط ${movable.length} كلمة بالعالم الخاص`
+          : (mode === 'copy' ? `تم نسخ ${movable.length} كلمة` : `تم نقل ${movable.length} كلمة`),
+        'success'
+      );
+      trace?.stage('ui-complete');
+      return true;
+    } catch (err) {
+      failed = true;
     console.warn('worldManage:', err);
+      operationUi?.fail(
+        'تعذر إكمال المزامنة. الكلمات الناجحة لن تتكرر عند إعادة المحاولة.',
+        () => setTimeout(() => window.applyWorldManageToTarget(targetId, mode), 0)
+      );
     showToast('ما قدرنا نكمل العملية سحابياً. الكلمات بقيت في مكانها.', 'danger', 5200);
-  }
+      trace?.warn(err?.code || err?.message || 'world-manage-failed');
+      return false;
+    } finally {
+      buttons.forEach((button) => {
+        button.disabled = false;
+        button.setAttribute('aria-busy', 'false');
+      });
+      trace?.end({ failed });
+    }
+  };
+
+  const runner = window.LootLinguaOperations?.runExclusive || ((scope, callback) => callback());
+  worldManageOperationPromise = runner(operationScope, task);
+  worldManageOperationPromise.finally(() => {
+    worldManageOperationPromise = null;
+  });
+  return worldManageOperationPromise;
 };
 
 window.openDeleteCustomWorldModal = function(worldId) {
@@ -4960,7 +5137,31 @@ window.loadTreasureView = function() {
 
   const view = document.getElementById('treasureView');
   if (view) view.style.display = 'block';
-  renderTreasureRoom();
+  const trace = window.LootLinguaOperations?.startTrace('treasure-open');
+  const operationUi = window.LootLinguaOperations?.beginStatus({
+    scope: 'treasure-open',
+    host: view,
+    loadingMessage: 'جارٍ تجهيز الكنز...',
+    longWaitMessage: 'يستغرق تجهيز الكنز وقتًا أطول من المعتاد...',
+  });
+  trace?.stage('shell-visible');
+  (window.LootLinguaOperations?.nextPaint?.() || Promise.resolve()).then(() => {
+    if (currentView !== 'treasure') {
+      operationUi?.clear();
+      trace?.warn('route-changed-before-render').end({ cancelled: true });
+      return;
+    }
+    renderTreasureRoom();
+    trace?.count('rerenderCount').stage('treasure-rendered').end({
+      firestoreReads: 0,
+      activeCountdownListeners: window.__lootCountdownTimer ? 1 : 0,
+    });
+    operationUi?.complete('الكنز جاهز.');
+    setTimeout(() => operationUi?.clear(), 180);
+  }).catch((error) => {
+    operationUi?.fail('تعذر تجهيز الكنز.', () => window.loadTreasureView());
+    trace?.warn(error?.message || error).end({ failed: true });
+  });
 
   document.querySelector('.page-header h1').innerHTML = '<i class="fa-solid fa-gem" aria-hidden="true"></i> صفحة الكنز';
   window.scrollTo({ top: 0, behavior: 'smooth' });
