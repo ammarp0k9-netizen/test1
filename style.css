@@ -9671,6 +9671,50 @@ html[dir="ltr"] .worlds-tabs[data-active-tab="custom"]::before {
     0 11px 24px rgba(0, 0, 0, .15);
 }
 
+.published-word-card.published-word-hidden {
+  opacity: .78;
+  border-color: color-mix(in srgb, var(--text-gray) 42%, var(--border));
+}
+
+.published-word-restore {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  width: min(132px, 28vw);
+  min-height: 34px;
+  padding: 6px 9px;
+  border: 1px solid color-mix(in srgb, var(--accent) 45%, var(--border));
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--accent) 12%, var(--surface-bg));
+  color: var(--text-white);
+  font: inherit;
+  font-size: 10px;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.published-word-restore:disabled {
+  opacity: .55;
+  cursor: wait;
+}
+
+.published-hidden-words-note {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 10px 12px;
+  border-inline-start: 3px solid var(--star);
+  background: color-mix(in srgb, var(--star) 8%, transparent);
+  color: var(--text-gray);
+  font-size: 12px;
+  line-height: 1.7;
+}
+
+.published-hidden-words-note i {
+  color: var(--star);
+}
+
 .published-word-content {
   grid-area: content;
   display: grid;
