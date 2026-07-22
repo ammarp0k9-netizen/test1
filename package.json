@@ -12,6 +12,7 @@
     "test:word-lifecycle": "node --test tests/word-lifecycle.test.mjs",
     "test:quiz": "node --test tests/quiz-lifecycle.test.mjs",
     "test:srs": "node --test tests/srs-lifecycle.test.mjs",
+    "test:performance": "node --test tests/performance-regression.test.mjs",
     "test:admin:browser": "node tools/admin-rank-browser-smoke.mjs",
     "test:admin:gate-browser": "node tools/admin-gate-browser-smoke.mjs",
     "test:rules": "firebase emulators:exec --only firestore --project demo-lootlingua \"node tests/firestore-rules.test.mjs\"",
