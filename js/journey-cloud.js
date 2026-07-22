@@ -29,6 +29,7 @@ const cache = {
   rankGateProgress: new Map(),
   gateWords: new Map(),
   placementSessions: new Map(),
+  levelPlacementSessions: new Map(),
 };
 
 function core() {
@@ -46,6 +47,17 @@ function contentApi() {
 function placementCore() {
   const api = window.LootLinguaPlacement;
   if (!api) throw journeyCloudError('placement/unavailable', 'Placement contract is unavailable.');
+  return api;
+}
+
+function levelPlacementCore() {
+  const api = window.LootLinguaLevelPlacement;
+  if (!api) {
+    throw journeyCloudError(
+      'level-placement/unavailable',
+      'Level Placement contract is unavailable.'
+    );
+  }
   return api;
 }
 
@@ -104,6 +116,7 @@ function resetCache(uid) {
   cache.rankGateProgress.clear();
   cache.gateWords.clear();
   cache.placementSessions.clear();
+  cache.levelPlacementSessions.clear();
 }
 
 function record(snapshot, idField) {
@@ -143,6 +156,14 @@ function placementSessionRef(uid, worldId, assessmentId) {
     journeyRef(uid, worldId),
     'placementSessions',
     placementCore().cleanId(assessmentId, 'Assessment')
+  );
+}
+
+function levelPlacementSessionRef(uid, worldId, assessmentId) {
+  return doc(
+    journeyRef(uid, worldId),
+    'levelPlacementSessions',
+    levelPlacementCore().cleanId(assessmentId, 'Assessment')
   );
 }
 
@@ -240,10 +261,7 @@ async function listRankGateProgress(worldId, rankId, options) {
 async function resolveJourneyStart(worldId) {
   const api = contentApi();
   const world = await api.getPublishedWorld(worldId);
-  const ranks = core().stableContentOrder(
-    await api.listPublishedRanks(world.worldId),
-    'rankId'
-  );
+  const ranks = core().stableRankOrder(await api.listPublishedRanks(world.worldId));
   const firstRank = ranks.find((rank) => core().canAccessRank(rank, null));
   if (!firstRank) {
     throw journeyCloudError('journey/rank-locked', 'No published rank is available.');
@@ -264,10 +282,7 @@ async function resolveJourneyStart(worldId) {
 
 async function resolveNextContentTarget(worldId, rankId, gateId) {
   const api = contentApi();
-  const ranks = core().stableContentOrder(
-    await api.listPublishedRanks(worldId),
-    'rankId'
-  );
+  const ranks = core().stableRankOrder(await api.listPublishedRanks(worldId));
   const gatesByRank = new Map();
   await Promise.all(ranks.map(async (rank) => {
     const id = String(rank.rankId || '');
@@ -480,8 +495,9 @@ function missingEducationalWordPatch(existing, incoming) {
   return patch;
 }
 
-function canonicalWordPayload(word, identity, legacyWordId, source) {
-  const sourceId = core().contentSourceId(source);
+function canonicalWordPayload(word, identity, legacyWordId, source, options) {
+  const sourceId = String(options?.sourceId || core().contentSourceId(source));
+  const addedFrom = String(options?.sourceType || 'published-gate');
   const educational = contentWordToUserWordFields(word, identity);
   return {
     ...educational,
@@ -499,7 +515,7 @@ function canonicalWordPayload(word, identity, legacyWordId, source) {
       gateId: source.gateId,
       contentWordId: source.contentWordId,
       sourceId,
-      addedFrom: 'published-gate',
+      addedFrom,
     },
     sourceCount: 1,
     schemaVersion: 1,
@@ -557,8 +573,17 @@ async function linkPublishedWord(uid, word, personalIndex, operationId, options)
     gateId: core().cleanId(word.gateId, 'Gate'),
     contentWordId: core().cleanId(word.contentWordId, 'Word'),
   };
+  const sourceType = options?.sourceType === 'level-placement'
+    ? 'level-placement'
+    : 'published-gate';
+  const assessmentId = sourceType === 'level-placement'
+    ? levelPlacementCore().cleanId(options?.assessmentId, 'Assessment')
+    : '';
+  const sourceId = sourceType === 'level-placement'
+    ? core().levelPlacementSourceId({ assessmentId, contentWordId: source.contentWordId })
+    : core().contentSourceId(source);
   const canonicalRef = doc(db, 'users', uid, 'contentWords', identity.wordKey);
-  const sourceRef = doc(canonicalRef, 'sources', core().contentSourceId(source));
+  const sourceRef = doc(canonicalRef, 'sources', sourceId);
   const indexedWord = personalIndex.get(identity.wordKey);
 
   try {
@@ -575,11 +600,16 @@ async function linkPublishedWord(uid, word, personalIndex, operationId, options)
       );
       const legacyRef = doc(db, 'users', uid, 'words', legacyWordId);
       const legacySnapshot = await transaction.get(legacyRef);
+      const restoredReady = Boolean(canonicalSnapshot.exists() && !legacySnapshot.exists() && !indexedWord);
+      const created = Boolean(!canonicalSnapshot.exists() && !legacySnapshot.exists() && !indexedWord);
 
       if (!canonicalSnapshot.exists()) {
         transaction.set(
           canonicalRef,
-          canonicalWordPayload(word, identity, legacyWordId, source)
+          canonicalWordPayload(word, identity, legacyWordId, source, {
+            sourceId,
+            sourceType,
+          })
         );
       }
       const incomingWord = legacyWordPayload(uid, word);
@@ -597,9 +627,17 @@ async function linkPublishedWord(uid, word, personalIndex, operationId, options)
       if (!sourceSnapshot.exists()) {
         transaction.set(sourceRef, {
           ...source,
-          addedFrom: 'published-gate',
+          addedFrom: sourceType,
           operationId,
           linkedAt: serverTimestamp(),
+          ...(sourceType === 'level-placement'
+            ? {
+              type: sourceType,
+              assessmentId,
+              cefrLevel: levelPlacementCore().assertClassifiedLevel(options?.cefrLevel),
+              placementResult: options?.placementResult === 'correct' ? 'correct' : 'incorrect',
+            }
+            : {}),
           ...(options?.placementAssessmentId
             ? {
               placementAssessmentId: String(options.placementAssessmentId),
@@ -618,6 +656,10 @@ async function linkPublishedWord(uid, word, personalIndex, operationId, options)
         linked: !sourceSnapshot.exists(),
         existingWord: Boolean(indexedWord || legacySnapshot.exists()),
         contentWordId: source.contentWordId,
+        created,
+        sourceLinked: !created && !restoredReady && !sourceSnapshot.exists(),
+        alreadyLinked: sourceSnapshot.exists(),
+        restoredReady,
       };
     });
   } catch (error) {
@@ -1806,6 +1848,607 @@ async function abandonPlacementAndStartBeginning(worldId) {
   return fresh;
 }
 
+async function loadPublishedLevelContent(worldId, cefrLevel, options) {
+  const level = levelPlacementCore().assertClassifiedLevel(cefrLevel);
+  const ranks = core().stableRankOrder(
+    await contentApi().listPublishedRanks(worldId, options)
+  ).filter((rank) => schemaApi().normalizeCefrLevel(rank.cefrLevel) === level);
+  const rankBundles = await Promise.all(ranks.map(async (rank) => {
+    const gates = core().stableContentOrder(
+      await contentApi().listPublishedGates(worldId, rank.rankId, options),
+      'gateId'
+    );
+    const gateBundles = await Promise.all(gates.map(async (gate) => ({
+      gate,
+      words: await listAllGateWords(worldId, rank.rankId, gate.gateId, options),
+    })));
+    return { rank, gates: gateBundles };
+  }));
+  return { cefrLevel: level, ranks, rankBundles };
+}
+
+async function getLevelPlacementSession(worldId, assessmentId, options) {
+  const user = requireUser();
+  const world = core().cleanId(worldId, 'World');
+  const assessment = levelPlacementCore().cleanId(assessmentId, 'Assessment');
+  const key = `${world}/${assessment}`;
+  if (!options?.force && cache.levelPlacementSessions.has(key)) {
+    return cache.levelPlacementSessions.get(key);
+  }
+  const snapshot = await getDoc(levelPlacementSessionRef(user.uid, world, assessment));
+  const session = record(snapshot, 'assessmentId');
+  cache.levelPlacementSessions.set(key, session);
+  return session;
+}
+
+async function makeLevelPlacementBundle(journey, session) {
+  if (
+    !journey ||
+    !session ||
+    String(journey.worldId || '') !== String(session.worldId || '') ||
+    String(journey.activeLevelPlacementAssessmentId || '') !== String(session.assessmentId || '') ||
+    !['active', 'submitting', 'awaiting-decision', 'paused'].includes(session.status)
+  ) {
+    throw journeyCloudError(
+      'level-placement/session-mismatch',
+      'Level Placement session does not match the active journey.'
+    );
+  }
+  const world = await contentApi().getPublishedWorld(journey.worldId);
+  return {
+    journey,
+    session,
+    world,
+    executionContext: { source: 'level-placement', suppressRewards: true },
+  };
+}
+
+function nextClassifiedLevel(cefrLevel) {
+  const levels = schemaApi().CEFR_LEVELS.filter((level) => level !== 'unclassified');
+  const index = levels.indexOf(schemaApi().normalizeCefrLevel(cefrLevel));
+  return index >= 0 ? (levels[index + 1] || '') : '';
+}
+
+async function resolveFirstLevelTarget(worldId, cefrLevel) {
+  const level = schemaApi().normalizeCefrLevel(cefrLevel);
+  if (!level || level === 'unclassified') return null;
+  const ranks = core().stableRankOrder(await contentApi().listPublishedRanks(worldId))
+    .filter((rank) => schemaApi().normalizeCefrLevel(rank.cefrLevel) === level);
+  for (const rank of ranks) {
+    const gate = core().stableContentOrder(
+      await contentApi().listPublishedGates(worldId, rank.rankId),
+      'gateId'
+    )[0];
+    if (gate) return { rank, gate };
+  }
+  return null;
+}
+
+async function startLevelPlacement(worldId, cefrLevel, options) {
+  const user = requireUser();
+  const world = core().cleanId(worldId, 'World');
+  const level = levelPlacementCore().assertClassifiedLevel(cefrLevel);
+  let journey = await startJourney(world);
+  if (journey.placementStatus === 'active') {
+    throw journeyCloudError(
+      'level-placement/legacy-active',
+      'Finish or abandon the legacy Gate Placement before starting Level Placement.'
+    );
+  }
+  const activeAssessmentId = String(journey.activeLevelPlacementAssessmentId || '');
+  if (activeAssessmentId) {
+    const activeSession = await getLevelPlacementSession(world, activeAssessmentId, { force: true });
+    if (activeSession && ['active', 'submitting', 'awaiting-decision', 'paused'].includes(activeSession.status)) {
+      if (String(activeSession.cefrLevel) !== level) {
+        throw journeyCloudError(
+          'level-placement/session-active',
+          'Another Level Placement session is already active.'
+        );
+      }
+      return makeLevelPlacementBundle(journey, activeSession);
+    }
+  }
+  if ((journey.passedCefrLevels || []).includes(level) && !options?.restart) {
+    throw journeyCloudError(
+      'level-placement/already-passed',
+      'This level has already been passed.'
+    );
+  }
+  if (!levelPlacementCore().canStartLevelPlacement(level, journey)) {
+    throw journeyCloudError('level-placement/locked', 'The previous level must be passed first.');
+  }
+
+  const content = await loadPublishedLevelContent(world, level, { force: Boolean(options?.force) });
+  const seed = levelPlacementCore().createAssessmentSeed(
+    world,
+    level,
+    globalThis.crypto?.randomUUID?.() || `${Date.now()}_${Math.random()}`
+  );
+  const assessment = levelPlacementCore().assessmentId(world, level, seed);
+  const sample = levelPlacementCore().buildLevelSample({
+    cefrLevel: level,
+    assessmentSeed: seed,
+    rankBundles: content.rankBundles,
+  });
+  const seedData = levelPlacementCore().createSessionSeed({
+    assessmentId: assessment,
+    worldId: world,
+    sample,
+  });
+  const targetJourneyRef = journeyRef(user.uid, world);
+  const sessionRef = levelPlacementSessionRef(user.uid, world, assessment);
+  try {
+    await runTransaction(db, async (transaction) => {
+      const [journeySnapshot, sessionSnapshot] = await Promise.all([
+        transaction.get(targetJourneyRef),
+        transaction.get(sessionRef),
+      ]);
+      const current = journeySnapshot.data() || {};
+      if (!journeySnapshot.exists() || current.status !== 'active') {
+        throw journeyCloudError('journey/not-active', 'This world is not the active journey.');
+      }
+      if (String(current.activeLevelPlacementAssessmentId || '')) {
+        throw journeyCloudError(
+          'level-placement/session-active',
+          'Another Level Placement session is already active.'
+        );
+      }
+      if (!levelPlacementCore().canStartLevelPlacement(level, current)) {
+        throw journeyCloudError('level-placement/locked', 'The previous level must be passed first.');
+      }
+      if (sessionSnapshot.exists()) {
+        throw journeyCloudError('level-placement/session-exists', 'Level Placement session already exists.');
+      }
+      transaction.set(sessionRef, {
+        ...seedData,
+        startedAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      });
+      transaction.update(targetJourneyRef, {
+        placementStatus: current.placementStatus === 'not-started'
+          ? 'declined'
+          : current.placementStatus,
+        activeLevelPlacementAssessmentId: assessment,
+        activeLevelPlacementCefrLevel: level,
+        levelPlacementStatus: 'active',
+        levelPlacementVersion: levelPlacementCore().LEVEL_PLACEMENT_VERSION,
+        passedCefrLevels: Array.from(new Set(current.passedCefrLevels || [])),
+        updatedAt: serverTimestamp(),
+      });
+    });
+  } catch (error) {
+    throw journeyOperationError(error, 'start-level-placement', {
+      uid: user.uid,
+      worldId: world,
+      cefrLevel: level,
+      assessmentId: assessment,
+    });
+  }
+  resetCache(user.uid);
+  journey = await getJourney(world, { force: true });
+  cache.active = journey;
+  const session = await getLevelPlacementSession(world, assessment, { force: true });
+  return makeLevelPlacementBundle(journey, session);
+}
+
+async function resumeLevelPlacement(worldId) {
+  const journey = await getJourney(worldId, { force: true });
+  const assessment = String(journey?.activeLevelPlacementAssessmentId || '');
+  if (!journey || !assessment) {
+    throw journeyCloudError(
+      'level-placement/not-active',
+      'There is no active Level Placement session.'
+    );
+  }
+  const session = await getLevelPlacementSession(journey.worldId, assessment, { force: true });
+  return makeLevelPlacementBundle(journey, session);
+}
+
+async function levelPlacementUnlockedIds(worldId, session) {
+  const rankIds = new Set(session.passedRankIds || []);
+  if (session.recommendedStartRankId) rankIds.add(session.recommendedStartRankId);
+  const gateIds = new Set();
+  await Promise.all([...rankIds].map(async (rankId) => {
+    const gates = await contentApi().listPublishedGates(worldId, rankId);
+    if ((session.passedRankIds || []).includes(rankId)) {
+      gates.forEach((gate) => gateIds.add(String(gate.gateId)));
+    } else {
+      const first = core().stableContentOrder(gates, 'gateId')[0];
+      if (first) gateIds.add(String(first.gateId));
+    }
+  }));
+  return { rankIds, gateIds };
+}
+
+async function applyLevelPlacementResult(worldId, assessmentId) {
+  const user = requireUser();
+  const world = core().cleanId(worldId, 'World');
+  const assessment = levelPlacementCore().cleanId(assessmentId, 'Assessment');
+  const session = await getLevelPlacementSession(world, assessment, { force: true });
+  if (!session || session.status !== 'awaiting-decision') {
+    throw journeyCloudError(
+      'level-placement/result-not-ready',
+      'Level Placement result is not ready.'
+    );
+  }
+  if (session.resultApplied === true) {
+    const journey = await getJourney(world, { force: true });
+    return makeLevelPlacementBundle(journey, session);
+  }
+
+  let targetRankId = String(session.recommendedStartRankId || '');
+  let targetGateId = String(session.recommendedStartGateId || '');
+  let nextLevel = '';
+  if (session.passedLevel) {
+    nextLevel = nextClassifiedLevel(session.cefrLevel);
+    const nextTarget = nextLevel ? await resolveFirstLevelTarget(world, nextLevel) : null;
+    targetRankId = String(nextTarget?.rank?.rankId || '');
+    targetGateId = String(nextTarget?.gate?.gateId || '');
+  }
+  const unlocked = await levelPlacementUnlockedIds(world, session);
+  if (targetRankId) unlocked.rankIds.add(targetRankId);
+  if (targetGateId) unlocked.gateIds.add(targetGateId);
+  const resultUnlockedRankIds = [...unlocked.rankIds];
+  const resultUnlockedGateIds = [...unlocked.gateIds];
+
+  const targetJourneyRef = journeyRef(user.uid, world);
+  const sessionRef = levelPlacementSessionRef(user.uid, world, assessment);
+  const targetProgressRef = targetRankId && targetGateId
+    ? gateProgressRef(user.uid, world, targetRankId, targetGateId)
+    : null;
+  try {
+    await runTransaction(db, async (transaction) => {
+      const reads = [transaction.get(targetJourneyRef), transaction.get(sessionRef)];
+      if (targetProgressRef) reads.push(transaction.get(targetProgressRef));
+      const snapshots = await Promise.all(reads);
+      const journey = snapshots[0].data() || {};
+      const currentSession = snapshots[1].data() || {};
+      if (
+        !snapshots[0].exists() ||
+        !snapshots[1].exists() ||
+        String(journey.activeLevelPlacementAssessmentId || '') !== assessment ||
+        currentSession.status !== 'awaiting-decision'
+      ) {
+        throw journeyCloudError(
+          'level-placement/session-mismatch',
+          'Level Placement result is no longer current.'
+        );
+      }
+      if (currentSession.resultApplied === true) return;
+      const passedLevels = Array.from(new Set([
+        ...(journey.passedCefrLevels || []),
+        ...(currentSession.passedLevel ? [currentSession.cefrLevel] : []),
+      ])).sort((left, right) => (
+        schemaApi().getCefrLevelOrder(left) - schemaApi().getCefrLevelOrder(right)
+      ));
+      const partialLevels = Array.from(new Set([
+        ...(journey.partialCefrLevels || []),
+        ...(!currentSession.passedLevel && currentSession.passedRankIds?.length
+          ? [currentSession.cefrLevel]
+          : []),
+      ])).filter((level) => !passedLevels.includes(level));
+      transaction.update(targetJourneyRef, {
+        ...(targetRankId ? { activeRankId: targetRankId } : {}),
+        ...(targetGateId ? { activeGateId: targetGateId } : {}),
+        unlockedRankIds: Array.from(new Set([
+          ...(journey.unlockedRankIds || []),
+          ...resultUnlockedRankIds,
+        ])),
+        unlockedGateIds: Array.from(new Set([
+          ...(journey.unlockedGateIds || []),
+          ...resultUnlockedGateIds,
+        ])),
+        passedCefrLevels: passedLevels,
+        partialCefrLevels: partialLevels,
+        levelPlacementStatus: 'awaiting-decision',
+        updatedAt: serverTimestamp(),
+      });
+      transaction.update(sessionRef, {
+        resultApplied: true,
+        nextCefrLevel: nextLevel,
+        resultStartRankId: targetRankId,
+        resultStartGateId: targetGateId,
+        resultUnlockedRankIds,
+        resultUnlockedGateIds,
+        updatedAt: serverTimestamp(),
+      });
+      if (targetProgressRef && !snapshots[2].exists()) {
+        transaction.set(targetProgressRef, {
+          worldId: world,
+          rankId: targetRankId,
+          gateId: targetGateId,
+          status: 'available',
+          journeyVersion: core().JOURNEY_VERSION,
+          readyEvidenceCount: 0,
+          clearAttempts: 0,
+          lastActivityAt: serverTimestamp(),
+        });
+      }
+    });
+  } catch (error) {
+    throw journeyOperationError(error, 'apply-level-placement-result', {
+      uid: user.uid,
+      worldId: world,
+      assessmentId: assessment,
+      cefrLevel: session.cefrLevel,
+    });
+  }
+  resetCache(user.uid);
+  const journey = await getJourney(world, { force: true });
+  cache.active = journey;
+  const savedSession = await getLevelPlacementSession(world, assessment, { force: true });
+  window.dispatchEvent(new CustomEvent('lootlingua:level-placement-result', {
+    detail: {
+      worldId: world,
+      cefrLevel: savedSession.cefrLevel,
+      passedLevel: Boolean(savedSession.passedLevel),
+      recommendedStartRankId: savedSession.recommendedStartRankId || '',
+    },
+  }));
+  return makeLevelPlacementBundle(journey, savedSession);
+}
+
+async function answerLevelPlacementQuestion(worldId, assessmentId, selectedQuestionId) {
+  const user = requireUser();
+  const world = core().cleanId(worldId, 'World');
+  const assessment = levelPlacementCore().cleanId(assessmentId, 'Assessment');
+  const sessionRef = levelPlacementSessionRef(user.uid, world, assessment);
+  const journeyReference = journeyRef(user.uid, world);
+  let preview = null;
+  try {
+    await runTransaction(db, async (transaction) => {
+      const [journeySnapshot, sessionSnapshot] = await Promise.all([
+        transaction.get(journeyReference),
+        transaction.get(sessionRef),
+      ]);
+      const journey = journeySnapshot.data() || {};
+      const session = sessionSnapshot.data() || {};
+      if (
+        !journeySnapshot.exists() ||
+        !sessionSnapshot.exists() ||
+        String(journey.activeLevelPlacementAssessmentId || '') !== assessment ||
+        session.status !== 'active'
+      ) {
+        throw journeyCloudError(
+          'level-placement/session-mismatch',
+          'Level Placement session is no longer current.'
+        );
+      }
+      preview = levelPlacementCore().answerSession(session, selectedQuestionId);
+      const roundComplete = preview.currentQuestionIndex === preview.orderedQuestionIds.length;
+      const next = roundComplete ? levelPlacementCore().finalizeRound(preview) : preview;
+      transaction.update(sessionRef, {
+        status: next.status,
+        currentQuestionIndex: next.currentQuestionIndex,
+        orderedQuestionIds: next.orderedQuestionIds,
+        answers: next.answers,
+        correctCount: next.correctCount,
+        adaptiveRound: next.adaptiveRound,
+        adaptiveRankIds: next.adaptiveRankIds,
+        perRankStats: next.perRankStats,
+        ambiguousRankIds: next.ambiguousRankIds,
+        recommendedStartRankId: next.recommendedStartRankId,
+        recommendedStartGateId: next.recommendedStartGateId,
+        passedRankIds: next.passedRankIds,
+        passedPrefixLength: next.passedPrefixLength,
+        passedLevel: next.passedLevel,
+        ...(next.status === 'awaiting-decision'
+          ? { answersCompletedAt: serverTimestamp(), resultApplied: false }
+          : {}),
+        updatedAt: serverTimestamp(),
+      });
+    });
+  } catch (error) {
+    throw journeyOperationError(error, 'save-level-placement-answer', {
+      uid: user.uid,
+      worldId: world,
+      assessmentId: assessment,
+    });
+  }
+  resetCache(user.uid);
+  let journey = await getJourney(world, { force: true });
+  cache.active = journey;
+  let session = await getLevelPlacementSession(world, assessment, { force: true });
+  if (session.status === 'awaiting-decision') {
+    return applyLevelPlacementResult(world, assessment);
+  }
+  return {
+    ...(await makeLevelPlacementBundle(journey, session)),
+    correct: Boolean(preview?.answers?.at(-1)?.correct),
+    adaptiveStarted: session.adaptiveRound > Number(preview?.adaptiveRound || 0),
+  };
+}
+
+async function saveLevelPlacementWords(worldId, assessmentId, choice) {
+  const user = requireUser();
+  const world = core().cleanId(worldId, 'World');
+  const assessment = levelPlacementCore().cleanId(assessmentId, 'Assessment');
+  const session = await getLevelPlacementSession(world, assessment, { force: true });
+  if (!session || !['awaiting-decision', 'paused', 'completed'].includes(session.status)) {
+    throw journeyCloudError(
+      'level-placement/result-not-ready',
+      'Level Placement words cannot be saved yet.'
+    );
+  }
+  const selectedChoice = String(choice || session.saveWordChoice || '');
+  if (
+    session.saveWordChoice &&
+    session.saveWordChoice !== 'undecided' &&
+    session.saveWordChoice !== selectedChoice
+  ) {
+    throw journeyCloudError(
+      'level-placement/save-choice-locked',
+      'The Placement word choice has already been saved.'
+    );
+  }
+  const initialIds = levelPlacementCore().wordIdsForSaveChoice(session, selectedChoice);
+  const savedIds = new Set((session.saveWordSavedIds || []).map(String));
+  const previousPending = (session.saveWordPendingIds || []).map(String);
+  const targetIds = previousPending.length
+    ? previousPending
+    : initialIds.filter((id) => !savedIds.has(String(id)));
+  const byId = new Map((session.selectedWords || []).map((word) => [String(word.questionId), word]));
+  const answerById = new Map((session.answers || []).map((answer) => [String(answer.questionId), answer]));
+  const personalIndex = targetIds.length ? await readPersonalWordIndex(user.uid) : new Map();
+  const summary = {
+    created: Number(session.saveWordSummary?.created) || 0,
+    sourceLinked: Number(session.saveWordSummary?.sourceLinked) || 0,
+    alreadyLinked: Number(session.saveWordSummary?.alreadyLinked) || 0,
+    restoredReady: Number(session.saveWordSummary?.restoredReady) || 0,
+    failed: 0,
+  };
+  const failures = [];
+  for (const id of targetIds) {
+    const word = byId.get(String(id));
+    const answer = answerById.get(String(id));
+    if (!word || !answer) {
+      failures.push({
+        questionId: String(id),
+        code: 'level-placement/word-unavailable',
+        message: 'Placement word is unavailable.',
+      });
+      continue;
+    }
+    try {
+      const result = await linkPublishedWord(
+        user.uid,
+        {
+          ...word,
+          worldId: world,
+          rankId: word.rankId,
+          gateId: word.gateId,
+          status: 'published',
+        },
+        personalIndex,
+        `level-placement:${assessment}`,
+        {
+          sourceType: 'level-placement',
+          assessmentId: assessment,
+          cefrLevel: session.cefrLevel,
+          placementResult: answer.correct ? 'correct' : 'incorrect',
+          suppressRewards: true,
+        }
+      );
+      savedIds.add(String(id));
+      if (result.created) summary.created += 1;
+      else if (result.restoredReady) summary.restoredReady += 1;
+      else if (result.sourceLinked) summary.sourceLinked += 1;
+      else if (result.alreadyLinked) summary.alreadyLinked += 1;
+    } catch (error) {
+      failures.push({
+        questionId: String(id),
+        code: String(error?.code || 'journey/operation-failed'),
+        message: String(error?.message || 'Word save failed.'),
+      });
+    }
+  }
+  summary.failed = failures.length;
+  const sessionRef = levelPlacementSessionRef(user.uid, world, assessment);
+  await runTransaction(db, async (transaction) => {
+    const snapshot = await transaction.get(sessionRef);
+    const current = snapshot.data() || {};
+    if (!snapshot.exists() || String(current.assessmentId || assessment) !== assessment) {
+      throw journeyCloudError('level-placement/session-mismatch', 'Placement session changed.');
+    }
+    transaction.update(sessionRef, {
+      saveWordChoice: selectedChoice,
+      saveWordPendingIds: failures.map((failure) => failure.questionId),
+      saveWordSavedIds: [...savedIds],
+      saveWordFailures: failures,
+      saveWordSummary: summary,
+      wordsSaveCompletedAt: failures.length ? null : serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    });
+  });
+  cache.levelPlacementSessions.delete(`${world}/${assessment}`);
+  return {
+    choice: selectedChoice,
+    summary,
+    failures,
+    partial: failures.length > 0,
+    saved: targetIds.length - failures.length,
+    total: targetIds.length,
+    session: await getLevelPlacementSession(world, assessment, { force: true }),
+  };
+}
+
+async function finishLevelPlacement(worldId, assessmentId, action) {
+  const user = requireUser();
+  const world = core().cleanId(worldId, 'World');
+  const assessment = levelPlacementCore().cleanId(assessmentId, 'Assessment');
+  const pause = action === 'pause';
+  const targetJourneyRef = journeyRef(user.uid, world);
+  const sessionRef = levelPlacementSessionRef(user.uid, world, assessment);
+  await runTransaction(db, async (transaction) => {
+    const [journeySnapshot, sessionSnapshot] = await Promise.all([
+      transaction.get(targetJourneyRef),
+      transaction.get(sessionRef),
+    ]);
+    const journey = journeySnapshot.data() || {};
+    const session = sessionSnapshot.data() || {};
+    if (
+      !journeySnapshot.exists() ||
+      !sessionSnapshot.exists() ||
+      String(journey.activeLevelPlacementAssessmentId || '') !== assessment ||
+      !['awaiting-decision', 'paused'].includes(session.status)
+    ) {
+      throw journeyCloudError('level-placement/session-mismatch', 'Placement session changed.');
+    }
+    transaction.update(sessionRef, {
+      status: pause ? 'paused' : 'completed',
+      ...(pause ? { pausedAt: serverTimestamp() } : { completedAt: serverTimestamp() }),
+      updatedAt: serverTimestamp(),
+    });
+    transaction.update(targetJourneyRef, {
+      levelPlacementStatus: pause ? 'paused' : 'completed',
+      ...(pause
+        ? {}
+        : { activeLevelPlacementAssessmentId: '', activeLevelPlacementCefrLevel: '' }),
+      updatedAt: serverTimestamp(),
+    });
+  });
+  resetCache(user.uid);
+  const journey = await getJourney(world, { force: true });
+  cache.active = journey;
+  return journey;
+}
+
+async function abandonLevelPlacement(worldId) {
+  const user = requireUser();
+  const world = core().cleanId(worldId, 'World');
+  const journey = await getJourney(world, { force: true });
+  const assessment = String(journey?.activeLevelPlacementAssessmentId || '');
+  if (!assessment) {
+    throw journeyCloudError('level-placement/not-active', 'There is no active Level Placement.');
+  }
+  const targetJourneyRef = journeyRef(user.uid, world);
+  const sessionRef = levelPlacementSessionRef(user.uid, world, assessment);
+  await runTransaction(db, async (transaction) => {
+    const [journeySnapshot, sessionSnapshot] = await Promise.all([
+      transaction.get(targetJourneyRef),
+      transaction.get(sessionRef),
+    ]);
+    if (!journeySnapshot.exists() || !sessionSnapshot.exists()) {
+      throw journeyCloudError('level-placement/session-mismatch', 'Placement session changed.');
+    }
+    transaction.update(sessionRef, {
+      status: 'abandoned',
+      abandonedAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    });
+    transaction.update(targetJourneyRef, {
+      activeLevelPlacementAssessmentId: '',
+      activeLevelPlacementCefrLevel: '',
+      levelPlacementStatus: 'abandoned',
+      updatedAt: serverTimestamp(),
+    });
+  });
+  resetCache(user.uid);
+  const fresh = await getJourney(world, { force: true });
+  cache.active = fresh;
+  return fresh;
+}
+
 function invalidate(scope) {
   const target = String(scope || 'all');
   if (target === 'all' || target === 'active') cache.active = undefined;
@@ -1816,6 +2459,7 @@ function invalidate(scope) {
   }
   if (target === 'all' || target === 'words') cache.gateWords.clear();
   if (target === 'all' || target === 'placement') cache.placementSessions.clear();
+  if (target === 'all' || target === 'level-placement') cache.levelPlacementSessions.clear();
 }
 
 function installJourneyMasteryHook() {
@@ -1857,6 +2501,15 @@ const API = Object.freeze({
   continuePlacement,
   stopPlacement,
   abandonPlacementAndStartBeginning,
+  startLevelPlacement,
+  resumeLevelPlacement,
+  getLevelPlacementSession,
+  answerLevelPlacementQuestion,
+  applyLevelPlacementResult,
+  saveLevelPlacementWords,
+  finishLevelPlacement,
+  abandonLevelPlacement,
+  loadPublishedLevelContent,
   getGateProgress,
   listRankGateProgress,
   getJourneyGateState: core().getJourneyGateState,
