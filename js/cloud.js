@@ -463,6 +463,22 @@
     };
   }
 
+  function privateWorldMembershipId(wordKey) {
+    return deterministicUserWordId(wordKey);
+  }
+
+  function privateWorldMembershipRef(uid, worldId, wordKey) {
+    return doc(
+      db,
+      'users',
+      uid,
+      'customWorlds',
+      String(worldId),
+      'words',
+      privateWorldMembershipId(wordKey)
+    );
+  }
+
   async function upsertUserWordWithSource(input = {}) {
     const user = auth.currentUser;
     if (!user) throw wordLifecycleError('word-lifecycle/sign-in-required', 'Sign in is required.');
@@ -481,27 +497,71 @@
     const source = sourceIdentity(input.source, identity);
     const canonicalRef = doc(db, 'users', user.uid, 'contentWords', identity.wordKey);
     const sourceRef = doc(canonicalRef, 'sources', source.sourceId);
+    const membershipRef = input.privateWorldMembership === true && source.type === 'private-world'
+      ? privateWorldMembershipRef(user.uid, source.customWorldId, identity.wordKey)
+      : null;
+    const removePrivateWorldId = String(input.removePrivateWorldId || '').trim();
+    const removePrivateSource = removePrivateWorldId &&
+      !(source.type === 'private-world' && source.customWorldId === removePrivateWorldId)
+      ? sourceIdentity({ type: 'private-world', customWorldId: removePrivateWorldId }, identity)
+      : null;
+    const removePrivateSourceRef = removePrivateSource
+      ? doc(canonicalRef, 'sources', removePrivateSource.sourceId)
+      : null;
+    const removePrivateMembershipId = String(
+      input.removePrivateMembershipId || privateWorldMembershipId(identity.wordKey)
+    ).replace(/\//g, '_').slice(0, 500);
+    const removePrivateMembershipRef = removePrivateSource
+      ? doc(
+        db,
+        'users',
+        user.uid,
+        'customWorlds',
+        removePrivateWorldId,
+        'words',
+        removePrivateMembershipId
+      )
+      : null;
     const localWord = lifecycle.findUserWordByKey(window.words || [], identity.wordKey);
+    const trace = window.LootLinguaOperations?.startTrace('word-source-upsert', {
+      sourceType: source.type,
+      hasPrivateWorldMembership: Boolean(membershipRef),
+    });
 
     try {
-      return await runTransaction(db, async (transaction) => {
-        const [canonicalSnapshot, sourceSnapshot] = await Promise.all([
+      const result = await runTransaction(db, async (transaction) => {
+        const [canonicalSnapshot, sourceSnapshot, removePrivateSourceSnapshot] = await Promise.all([
           transaction.get(canonicalRef),
           transaction.get(sourceRef),
+          removePrivateSourceRef
+            ? transaction.get(removePrivateSourceRef)
+            : Promise.resolve(null),
         ]);
+        trace?.count('firestoreReads', removePrivateSourceRef ? 3 : 2);
         const canonical = canonicalSnapshot.exists() ? canonicalSnapshot.data() : null;
         const legacyWordId = String(
           input.existingWordId || canonical?.legacyWordId || localWord?.id ||
           deterministicUserWordId(identity.wordKey)
         );
         const legacyRef = doc(db, 'users', user.uid, 'words', legacyWordId);
-        const legacySnapshot = await transaction.get(legacyRef);
+        const [legacySnapshot, membershipSnapshot, removePrivateMembershipSnapshot] = await Promise.all([
+          transaction.get(legacyRef),
+          membershipRef ? transaction.get(membershipRef) : Promise.resolve(null),
+          removePrivateMembershipRef
+            ? transaction.get(removePrivateMembershipRef)
+            : Promise.resolve(null),
+        ]);
+        trace?.count(
+          'firestoreReads',
+          1 + (membershipRef ? 1 : 0) + (removePrivateMembershipRef ? 1 : 0)
+        );
         const legacy = legacySnapshot.exists() ? legacySnapshot.data() : null;
         const incomingLegacy = legacyWordPayload(user.uid, word, identity, input);
         const educationalPatch = legacy ? missingEducationalPatch(legacy, incomingLegacy) : {};
         const wasHidden = legacy?.hiddenFromDictionary === true;
         const restored = Boolean(input.restoreHidden === true && wasHidden);
         const sourceLinked = !sourceSnapshot.exists();
+        const sourceRemoved = Boolean(removePrivateSourceSnapshot?.exists());
         const created = !canonicalSnapshot.exists() && !legacySnapshot.exists();
 
         if (!canonicalSnapshot.exists()) {
@@ -511,25 +571,53 @@
             legacyWordId,
             source
           ));
-        } else if (sourceLinked) {
+          trace?.count('firestoreWrites');
+        } else if (sourceLinked !== sourceRemoved) {
           transaction.update(canonicalRef, {
-            sourceCount: Math.max(0, Number(canonical?.sourceCount) || 0) + 1,
+            sourceCount: Math.max(
+              0,
+              (Number(canonical?.sourceCount) || 0) +
+                (sourceLinked ? 1 : 0) -
+                (sourceRemoved ? 1 : 0)
+            ),
             updatedAt: serverTimestamp(),
           });
+          trace?.count('firestoreWrites');
         }
 
         if (!legacySnapshot.exists()) {
           transaction.set(legacyRef, incomingLegacy);
+          trace?.count('firestoreWrites');
         } else {
           const patch = { ...educationalPatch };
           if (restored) {
             patch.hiddenFromDictionary = false;
             patch.hiddenFromDictionaryAt = null;
           }
-          if (Object.keys(patch).length) transaction.update(legacyRef, patch);
+          if (Object.keys(patch).length) {
+            transaction.update(legacyRef, patch);
+            trace?.count('firestoreWrites');
+          }
         }
         if (sourceLinked) {
           transaction.set(sourceRef, sourceDocumentPayload(source, input.operationId));
+          trace?.count('firestoreWrites');
+        }
+        const membershipLinked = Boolean(membershipRef && !membershipSnapshot?.exists());
+        if (membershipLinked) {
+          transaction.set(membershipRef, legacyWordPayload(user.uid, word, identity, {
+            hiddenOnCreate: false,
+          }));
+          trace?.count('firestoreWrites');
+        }
+        if (sourceRemoved) {
+          transaction.delete(removePrivateSourceRef);
+          trace?.count('firestoreWrites');
+        }
+        const membershipRemoved = Boolean(removePrivateMembershipSnapshot?.exists());
+        if (membershipRemoved) {
+          transaction.delete(removePrivateMembershipRef);
+          trace?.count('firestoreWrites');
         }
 
         const updatedMissingFields = Object.keys(educationalPatch).length > 0;
@@ -550,11 +638,18 @@
           sourceId: source.sourceId,
           sourceType: source.type,
           linked: sourceLinked,
+          membershipLinked,
+          membershipRemoved,
+          sourceRemoved,
+          membershipWordId: membershipRef ? privateWorldMembershipId(identity.wordKey) : '',
           existingWord: !created,
           restoredReady: restored,
         };
       });
+      trace?.stage('transaction-complete').end({ status: result.status });
+      return result;
     } catch (error) {
+      trace?.warn(error?.code || error?.message || 'word-source-upsert-failed').end({ failed: true });
       if (!error.code) error.code = 'word-lifecycle/failed';
       throw error;
     }
@@ -574,6 +669,96 @@
       sourceId: item.id,
       ...(item.data() || {}),
     })));
+  }
+
+  async function removePrivateWorldMembership(worldId, membershipWordId, wordOrKey) {
+    const user = auth.currentUser;
+    if (!user || !worldId || !membershipWordId) {
+      throw wordLifecycleError(
+        'word-lifecycle/invalid-private-membership',
+        'Private world membership is unavailable.'
+      );
+    }
+    const lifecycle = wordLifecycleApi();
+    const identity = lifecycle.normalizeIdentity(wordOrKey || {});
+    const wordKey = identity.wordKey;
+    const membershipRef = doc(
+      db,
+      'users',
+      user.uid,
+      'customWorlds',
+      String(worldId),
+      'words',
+      String(membershipWordId)
+    );
+    if (!wordKey) {
+      await deleteDoc(membershipRef);
+      return { removed: true, sourceRemoved: false, sourceCount: null };
+    }
+
+    const canonicalRef = doc(db, 'users', user.uid, 'contentWords', wordKey);
+    const source = sourceIdentity({ type: 'private-world', customWorldId: String(worldId) }, identity);
+    const sourceRef = doc(canonicalRef, 'sources', source.sourceId);
+    const trace = window.LootLinguaOperations?.startTrace('private-world-membership-remove');
+    try {
+      const result = await runTransaction(db, async (transaction) => {
+        const [canonicalSnapshot, sourceSnapshot, membershipSnapshot] = await Promise.all([
+          transaction.get(canonicalRef),
+          transaction.get(sourceRef),
+          transaction.get(membershipRef),
+        ]);
+        trace?.count('firestoreReads', 3);
+        const canonical = canonicalSnapshot.exists() ? canonicalSnapshot.data() : null;
+        const legacyWordId = String(canonical?.legacyWordId || '');
+        const legacyRef = legacyWordId
+          ? doc(db, 'users', user.uid, 'words', legacyWordId)
+          : null;
+        const legacySnapshot = legacyRef ? await transaction.get(legacyRef) : null;
+        if (legacyRef) trace?.count('firestoreReads');
+
+        if (membershipSnapshot.exists()) {
+          transaction.delete(membershipRef);
+          trace?.count('firestoreWrites');
+        }
+        const sourceRemoved = sourceSnapshot.exists();
+        const sourceCount = Math.max(
+          0,
+          (Number(canonical?.sourceCount) || 0) - (sourceRemoved ? 1 : 0)
+        );
+        if (sourceRemoved) {
+          transaction.delete(sourceRef);
+          trace?.count('firestoreWrites');
+          if (canonicalSnapshot.exists()) {
+            transaction.update(canonicalRef, {
+              sourceCount,
+              updatedAt: serverTimestamp(),
+            });
+            trace?.count('firestoreWrites');
+          }
+        }
+        const deleteOrphanedLegacy = Boolean(
+          legacySnapshot?.exists() &&
+          legacySnapshot.data()?.hiddenFromDictionary === true &&
+          sourceCount === 0
+        );
+        if (deleteOrphanedLegacy) {
+          transaction.delete(legacyRef);
+          trace?.count('firestoreWrites');
+        }
+        return {
+          removed: membershipSnapshot.exists(),
+          sourceRemoved,
+          sourceCount,
+          deletedOrphanedWord: deleteOrphanedLegacy,
+        };
+      });
+      trace?.stage('transaction-complete').end(result);
+      return result;
+    } catch (error) {
+      trace?.warn(error?.code || error?.message || 'private-membership-remove-failed')
+        .end({ failed: true });
+      throw error;
+    }
   }
 
   async function setUserWordDictionaryVisibility(wordId, visible) {
@@ -634,12 +819,14 @@
     getUserWordSourceSummary,
     setUserWordDictionaryVisibility,
     deletePersonalUserWord,
+    removePrivateWorldMembership,
   });
   window.upsertUserWordWithSource = upsertUserWordWithSource;
   window.getUserWordSourceSummary = getUserWordSourceSummary;
   window.hideUserWordFromDictionary = (wordId) => setUserWordDictionaryVisibility(wordId, false);
   window.restoreUserWordToDictionary = (wordId) => setUserWordDictionaryVisibility(wordId, true);
   window.deletePersonalUserWord = deletePersonalUserWord;
+  window.removePrivateWorldMembership = removePrivateWorldMembership;
 
   function loadCustomWorldsFromCloud(user) {
     if (!user) return;
@@ -713,6 +900,92 @@
     } catch (error) {
       console.warn('saveGlobalWordMasteryToCloud:', error.code || error.message);
       return false;
+    }
+  };
+
+  window.claimXPEventsInCloud = async function(payloads = []) {
+    const user = auth.currentUser;
+    const items = (Array.isArray(payloads) ? payloads : [])
+      .map((payload, index) => ({
+        index,
+        eventId: String(payload?.eventId || '').replace(/\//g, '_').slice(0, 500),
+        amount: Math.max(0, Math.floor(Number(payload?.amount) || 0)),
+        reason: String(payload?.reason || ''),
+        baselineXP: Math.max(0, Number(payload?.baselineXP) || 0),
+        xpEconomyVersion: Number(payload?.xpEconomyVersion) || 2,
+      }))
+      .filter((item) => item.eventId && item.amount);
+    if (!user || !items.length) return { results: [], userXP: 0 };
+
+    const fixedAmounts = {
+      word_transition_new_learning: 2,
+      word_transition_learning_reviewing: 4,
+      word_mastered_first: 8,
+      word_remastered: 3,
+    };
+    const transitionSuffixes = {
+      word_transition_new_learning: ':new_learning',
+      word_transition_learning_reviewing: ':learning_reviewing',
+      word_mastered_first: ':reviewing_mastered',
+      word_remastered: ':remastered:1',
+    };
+    const profileRef = doc(db, 'users', user.uid, 'meta', 'profile');
+    const eventRefs = items.map((item) => doc(db, 'users', user.uid, 'meta', `xp_event_${item.eventId}`));
+    const trace = window.LootLinguaOperations?.startTrace('quiz-xp-batch', {
+      eventCount: items.length,
+    });
+
+    try {
+      const result = await runTransaction(db, async (transaction) => {
+        const snapshots = await Promise.all([
+          transaction.get(profileRef),
+          ...eventRefs.map((ref) => transaction.get(ref)),
+        ]);
+        trace?.count('firestoreReads', snapshots.length);
+        const profileSnapshot = snapshots[0];
+        let nextXP = Math.max(
+          Number(profileSnapshot.data()?.userXP) || 0,
+          ...items.map((item) => item.baselineXP)
+        );
+        const seen = new Set();
+        const results = items.map((item, index) => {
+          const expectedAmount = fixedAmounts[item.reason];
+          const valid = Boolean(
+            expectedAmount &&
+            item.amount === expectedAmount &&
+            item.eventId.startsWith('word_transition:') &&
+            item.eventId.endsWith(transitionSuffixes[item.reason])
+          );
+          if (!valid) return { eventId: item.eventId, awarded: false, invalid: true };
+          if (seen.has(item.eventId) || snapshots[index + 1].exists()) {
+            return { eventId: item.eventId, awarded: false, duplicate: true };
+          }
+          seen.add(item.eventId);
+          nextXP += item.amount;
+          transaction.set(eventRefs[index], {
+            amount: item.amount,
+            reason: item.reason,
+            xpEconomyVersion: item.xpEconomyVersion,
+            createdAt: new Date(),
+          });
+          trace?.count('firestoreWrites');
+          return { eventId: item.eventId, awarded: true, duplicate: false };
+        });
+        if (results.some((item) => item.awarded)) {
+          transaction.set(profileRef, {
+            userXP: nextXP,
+            xpEconomyVersion: Math.max(...items.map((item) => item.xpEconomyVersion)),
+            updatedAt: new Date(),
+          }, { merge: true });
+          trace?.count('firestoreWrites');
+        }
+        return { results, userXP: nextXP };
+      });
+      trace?.stage('transaction-complete').end({ awarded: result.results.filter((item) => item.awarded).length });
+      return result;
+    } catch (error) {
+      trace?.warn(error?.code || error?.message || 'quiz-xp-batch-failed').end({ failed: true });
+      throw error;
     }
   };
 
@@ -844,7 +1117,11 @@
     try {
       const wordsRef = collection(db, "users", user.uid, "customWorlds", String(worldId), "words");
       const snap = await getDocs(wordsRef);
-      await Promise.all(snap.docs.map(d => deleteDoc(d.ref)));
+      await Promise.all(snap.docs.map((item) => removePrivateWorldMembership(
+        String(worldId),
+        item.id,
+        item.data()
+      )));
       await deleteDoc(doc(db, "users", user.uid, "customWorlds", String(worldId)));
       return true;
     } catch (e) {
@@ -856,44 +1133,18 @@
   window.saveCustomWorldWordToCloud = async function(worldId, word = {}) {
     const user = auth.currentUser;
     if (!user || !worldId) return null;
-    const docId = String(word.id || `${Date.now()}_${Math.random().toString(36).slice(2, 9)}`)
-      .replace(/\//g, '_')
-      .slice(0, 500);
     try {
-      await upsertUserWordWithSource({
+      const result = await upsertUserWordWithSource({
         word,
         source: { type: 'private-world', customWorldId: String(worldId) },
+        privateWorldMembership: true,
         restoreHidden: false,
         hiddenOnCreate: true,
-        operationId: `private-world:${String(worldId)}`,
+        operationId: word.operationId || `private-world:${String(worldId)}`,
+        removePrivateWorldId: word.removePrivateWorldId,
+        removePrivateMembershipId: word.removePrivateMembershipId,
       });
-      await setDoc(doc(db, "users", user.uid, "customWorlds", String(worldId), "words", docId), {
-        text: word.word || word.text || '',
-        category: word.category || 'عام',
-        meaning: word.meaning || '',
-        example: word.example || '',
-        starred: Boolean(word.starred),
-        forgetCount: Number(word.forgetCount) || 0,
-        userId: user.uid,
-        xpValue: word.xpValue ?? 0,
-        mastery_status: word.mastery_status || 'New',
-        mastery_streak: Number(word.mastery_streak) || 0,
-        last_recalled_at: word.last_recalled_at || null,
-        first_recalled_at: word.first_recalled_at || null,
-        last_recall_day: word.last_recall_day || '',
-        last_recall_session_id: word.last_recall_session_id || '',
-        last_quizzed_at: word.last_quizzed_at || null,
-        quiz_seen_count: Number(word.quiz_seen_count) || 0,
-        mastered_once: Boolean(word.mastered_once),
-        firstMasteredAt: word.firstMasteredAt || null,
-        hasEarnedMasteryXP: Boolean(word.hasEarnedMasteryXP),
-        earnedTransitions: Array.isArray(word.earnedTransitions) ? word.earnedTransitions : [],
-        remasteryAwardCount: Number(word.remasteryAwardCount) || 0,
-        xpEconomyVersion: Number(word.xpEconomyVersion) || 0,
-        order: Number.isFinite(word.order) ? word.order : 0,
-        createdAt: word.createdAt || new Date()
-      }, { merge: false });
-      return docId;
+      return result.membershipWordId || null;
     } catch (e) {
       console.error("saveCustomWorldWordToCloud:", e);
       return null;
@@ -930,11 +1181,11 @@
     catch (e) { console.error("updateCustomWorldWordInCloud:", e); }
   };
 
-  window.deleteCustomWorldWordFromCloud = async function(worldId, id) {
+  window.deleteCustomWorldWordFromCloud = async function(worldId, id, word) {
     const user = auth.currentUser;
     if (!user || !worldId || !id) return false;
     try {
-      await deleteDoc(doc(db, "users", user.uid, "customWorlds", String(worldId), "words", String(id)));
+      await removePrivateWorldMembership(String(worldId), String(id), word || {});
       return true;
     } catch (e) {
       console.error("deleteCustomWorldWordFromCloud:", e);
@@ -960,6 +1211,8 @@
         restoreHidden: true,
         existingWordId: source.existingWordId,
         operationId: source.operationId || 'personal-word-upsert',
+        removePrivateWorldId: source.removePrivateWorldId,
+        removePrivateMembershipId: source.removePrivateMembershipId,
       });
       window.__lastUserWordLifecycleResult = result;
       return result.wordId;
