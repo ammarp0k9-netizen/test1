@@ -7,7 +7,7 @@
   import {
     getFirestore, collection, addDoc, query,
     orderBy, deleteDoc, doc, updateDoc, onSnapshot, serverTimestamp,
-    getDoc, setDoc, getDocs, runTransaction
+    getDoc, setDoc, getDocs, runTransaction, writeBatch
   } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
 
   const firebaseConfig = {
@@ -268,10 +268,378 @@
       earnedTransitions: Array.isArray(data.earnedTransitions) ? data.earnedTransitions : [],
       remasteryAwardCount: Number(data.remasteryAwardCount) || 0,
       xpEconomyVersion: Number(data.xpEconomyVersion) || 0,
+      hiddenFromDictionary: data.hiddenFromDictionary === true,
+      hiddenFromDictionaryAt: data.hiddenFromDictionaryAt?.toDate
+        ? data.hiddenFromDictionaryAt.toDate().toISOString()
+        : (data.hiddenFromDictionaryAt || null),
       order:       Number.isFinite(data.order) ? data.order : null,
       createdAt:   data.createdAt?.toDate ? data.createdAt.toDate().toISOString() : (data.createdAt || null)
     };
   }
+
+  const USER_WORD_EDUCATIONAL_FIELDS = Object.freeze([
+    'word', 'normalizedWord', 'wordKey', 'translation', 'definition',
+    'definition_ar', 'example', 'exampleTranslation', 'partOfSpeech',
+    'category', 'level', 'tags', 'synonyms', 'pronunciation', 'notes',
+  ]);
+
+  function wordLifecycleApi() {
+    if (!window.LootLinguaWordLifecycle) {
+      const error = new Error('Word lifecycle contract is unavailable.');
+      error.code = 'word-lifecycle/unavailable';
+      throw error;
+    }
+    return window.LootLinguaWordLifecycle;
+  }
+
+  function wordLifecycleError(code, message, cause) {
+    const error = new Error(message || code, cause ? { cause } : undefined);
+    error.code = code;
+    return error;
+  }
+
+  function deterministicUserWordId(wordKey) {
+    return `published_${String(wordKey || '').replace(/\//g, '_')}`.slice(0, 500);
+  }
+
+  function educationalWordFields(word, identity) {
+    const source = word && typeof word === 'object' ? word : {};
+    return {
+      word: String(source.word || source.text || ''),
+      normalizedWord: String(identity.normalizedWord || ''),
+      wordKey: String(identity.wordKey || ''),
+      translation: String(source.translation || source.meaning || ''),
+      definition: String(source.definition || ''),
+      definition_ar: String(source.definition_ar || source.definitionAr || ''),
+      example: String(source.example || ''),
+      exampleTranslation: String(source.exampleTranslation || ''),
+      partOfSpeech: String(source.partOfSpeech || ''),
+      category: String(source.category || ''),
+      level: String(source.level || source.difficulty || source.cefrLevel || ''),
+      tags: Array.isArray(source.tags) ? source.tags.map(String).filter(Boolean) : [],
+      synonyms: Array.isArray(source.synonyms) ? source.synonyms.map(String).filter(Boolean) : [],
+      pronunciation: String(source.pronunciation || ''),
+      notes: String(source.notes || ''),
+    };
+  }
+
+  function missingEducationalPatch(existing, incoming) {
+    const patch = {};
+    USER_WORD_EDUCATIONAL_FIELDS.forEach((field) => {
+      const current = existing?.[field];
+      const next = incoming?.[field];
+      const currentEmpty = Array.isArray(current)
+        ? current.length === 0
+        : !String(current ?? '').trim() || (field === 'category' && current === 'عام');
+      const nextPresent = Array.isArray(next)
+        ? next.length > 0
+        : Boolean(String(next ?? '').trim());
+      if (currentEmpty && nextPresent) patch[field] = next;
+    });
+    if ((!existing?.text && !existing?.word) && incoming.word) patch.text = incoming.word;
+    if (!existing?.meaning && incoming.translation) patch.meaning = incoming.translation;
+    return patch;
+  }
+
+  function sourceIdentity(source, identity) {
+    const lifecycle = wordLifecycleApi();
+    const input = source && typeof source === 'object' ? source : {};
+    const type = lifecycle.normalizeSourceType(input.type || input.addedFrom);
+    const safe = (value) => String(value || '').trim().replace(/\//g, '_').slice(0, 500);
+    let sourceId = '';
+    if (type === 'published-gate') {
+      sourceId = window.LootLinguaJourney.contentSourceId(input);
+    } else if (type === 'level-placement') {
+      sourceId = window.LootLinguaJourney.levelPlacementSourceId(input);
+    } else if (type === 'private-world') {
+      sourceId = `private_world_${safe(input.customWorldId)}`;
+    } else if (type === 'dictionary-search') {
+      sourceId = 'dictionary_search';
+    } else if (type === 'import') {
+      sourceId = `import_${safe(input.importId) || 'account'}`;
+    } else {
+      sourceId = 'manual';
+    }
+    if (!sourceId || sourceId.includes('/')) {
+      throw wordLifecycleError('word-lifecycle/invalid-source', 'Word source is invalid.');
+    }
+    return { ...input, type, sourceId, wordKey: identity.wordKey };
+  }
+
+  function sourceDocumentPayload(source, operationId) {
+    const payload = {
+      addedFrom: source.type,
+      operationId: String(operationId || `word-${source.sourceId}`).slice(0, 180),
+      linkedAt: serverTimestamp(),
+    };
+    if (source.type === 'published-gate' || source.type === 'level-placement') {
+      Object.assign(payload, {
+        worldId: String(source.worldId || ''),
+        rankId: String(source.rankId || ''),
+        gateId: String(source.gateId || ''),
+        contentWordId: String(source.contentWordId || ''),
+      });
+    }
+    if (source.type === 'published-gate' && source.placementAssessmentId) {
+      payload.placementAssessmentId = String(source.placementAssessmentId);
+      payload.placementSeenAt = serverTimestamp();
+    }
+    if (source.type === 'level-placement') {
+      Object.assign(payload, {
+        type: 'level-placement',
+        assessmentId: String(source.assessmentId || ''),
+        cefrLevel: String(source.cefrLevel || ''),
+        placementResult: source.placementResult === 'correct' ? 'correct' : 'incorrect',
+      });
+    }
+    if (source.type === 'private-world') payload.customWorldId = String(source.customWorldId || '');
+    if (source.type === 'import') payload.importId = String(source.importId || 'account');
+    return payload;
+  }
+
+  function primarySourcePayload(source) {
+    const payload = { sourceId: source.sourceId, addedFrom: source.type };
+    ['worldId', 'rankId', 'gateId', 'contentWordId', 'customWorldId', 'importId']
+      .forEach((field) => {
+        if (source[field]) payload[field] = String(source[field]);
+      });
+    return payload;
+  }
+
+  function canonicalWordPayload(word, identity, legacyWordId, source) {
+    const educational = educationalWordFields(word, identity);
+    const hierarchy = source.type === 'published-gate' || source.type === 'level-placement';
+    return {
+      ...educational,
+      canonicalId: identity.wordKey,
+      normalizationVersion: identity.normalizationVersion,
+      masteryKey: identity.wordKey,
+      legacyWordId,
+      meaning: educational.translation,
+      difficulty: educational.level,
+      forgetCount: 0,
+      ...(hierarchy ? {
+        contentRefPath: `content_worlds/${source.worldId}/ranks/${source.rankId}/gates/${source.gateId}/words/${source.contentWordId}`,
+      } : {}),
+      primarySource: primarySourcePayload(source),
+      sourceCount: 1,
+      schemaVersion: 1,
+      createdAt: serverTimestamp(),
+      joinedAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    };
+  }
+
+  function legacyWordPayload(uid, word, identity, options) {
+    const educational = educationalWordFields(word, identity);
+    const hidden = options?.hiddenOnCreate === true;
+    return {
+      ...educational,
+      text: educational.word,
+      category: educational.category || 'عام',
+      meaning: educational.translation,
+      starred: Boolean(word?.starred),
+      forgetCount: Number(word?.forgetCount) || 0,
+      userId: uid,
+      xpValue: word?.xpValue ?? 0,
+      mastery_status: word?.mastery_status || 'New',
+      mastery_streak: Number(word?.mastery_streak) || 0,
+      last_recalled_at: word?.last_recalled_at || null,
+      first_recalled_at: word?.first_recalled_at || null,
+      last_recall_day: word?.last_recall_day || '',
+      last_recall_session_id: word?.last_recall_session_id || '',
+      last_quizzed_at: word?.last_quizzed_at || null,
+      quiz_seen_count: Number(word?.quiz_seen_count) || 0,
+      mastered_once: Boolean(word?.mastered_once),
+      firstMasteredAt: word?.firstMasteredAt || null,
+      hasEarnedMasteryXP: Boolean(word?.hasEarnedMasteryXP),
+      earnedTransitions: Array.isArray(word?.earnedTransitions) ? word.earnedTransitions : [],
+      remasteryAwardCount: Number(word?.remasteryAwardCount) || 0,
+      xpEconomyVersion: Number(word?.xpEconomyVersion) || 0,
+      hiddenFromDictionary: hidden,
+      hiddenFromDictionaryAt: hidden ? serverTimestamp() : null,
+      order: Number.isFinite(word?.order) ? word.order : 0,
+      createdAt: word?.createdAt || serverTimestamp(),
+    };
+  }
+
+  async function upsertUserWordWithSource(input = {}) {
+    const user = auth.currentUser;
+    if (!user) throw wordLifecycleError('word-lifecycle/sign-in-required', 'Sign in is required.');
+    if (input.uid && String(input.uid) !== user.uid) {
+      throw wordLifecycleError('word-lifecycle/user-mismatch', 'Word owner does not match the signed-in user.');
+    }
+    const lifecycle = wordLifecycleApi();
+    const word = input.word && typeof input.word === 'object' ? input.word : { word: input.word };
+    const identity = lifecycle.normalizeIdentity(word);
+    if (!identity.normalizedWord || !identity.wordKey) {
+      throw wordLifecycleError('word-lifecycle/invalid-word', 'Word identity is invalid.');
+    }
+    if (word.wordKey && String(word.wordKey) !== identity.wordKey) {
+      throw wordLifecycleError('word-lifecycle/identity-mismatch', 'Word identity is inconsistent.');
+    }
+    const source = sourceIdentity(input.source, identity);
+    const canonicalRef = doc(db, 'users', user.uid, 'contentWords', identity.wordKey);
+    const sourceRef = doc(canonicalRef, 'sources', source.sourceId);
+    const localWord = lifecycle.findUserWordByKey(window.words || [], identity.wordKey);
+
+    try {
+      return await runTransaction(db, async (transaction) => {
+        const [canonicalSnapshot, sourceSnapshot] = await Promise.all([
+          transaction.get(canonicalRef),
+          transaction.get(sourceRef),
+        ]);
+        const canonical = canonicalSnapshot.exists() ? canonicalSnapshot.data() : null;
+        const legacyWordId = String(
+          input.existingWordId || canonical?.legacyWordId || localWord?.id ||
+          deterministicUserWordId(identity.wordKey)
+        );
+        const legacyRef = doc(db, 'users', user.uid, 'words', legacyWordId);
+        const legacySnapshot = await transaction.get(legacyRef);
+        const legacy = legacySnapshot.exists() ? legacySnapshot.data() : null;
+        const incomingLegacy = legacyWordPayload(user.uid, word, identity, input);
+        const educationalPatch = legacy ? missingEducationalPatch(legacy, incomingLegacy) : {};
+        const wasHidden = legacy?.hiddenFromDictionary === true;
+        const restored = Boolean(input.restoreHidden === true && wasHidden);
+        const sourceLinked = !sourceSnapshot.exists();
+        const created = !canonicalSnapshot.exists() && !legacySnapshot.exists();
+
+        if (!canonicalSnapshot.exists()) {
+          transaction.set(canonicalRef, canonicalWordPayload(
+            word,
+            identity,
+            legacyWordId,
+            source
+          ));
+        } else if (sourceLinked) {
+          transaction.update(canonicalRef, {
+            sourceCount: Math.max(0, Number(canonical?.sourceCount) || 0) + 1,
+            updatedAt: serverTimestamp(),
+          });
+        }
+
+        if (!legacySnapshot.exists()) {
+          transaction.set(legacyRef, incomingLegacy);
+        } else {
+          const patch = { ...educationalPatch };
+          if (restored) {
+            patch.hiddenFromDictionary = false;
+            patch.hiddenFromDictionaryAt = null;
+          }
+          if (Object.keys(patch).length) transaction.update(legacyRef, patch);
+        }
+        if (sourceLinked) {
+          transaction.set(sourceRef, sourceDocumentPayload(source, input.operationId));
+        }
+
+        const updatedMissingFields = Object.keys(educationalPatch).length > 0;
+        const flags = {
+          created,
+          restored,
+          sourceLinked: !created && !restored && sourceLinked,
+          alreadyLinked: !created && !restored && !sourceLinked && !updatedMissingFields,
+          updatedMissingFields: !created && !restored && !sourceLinked && updatedMissingFields,
+        };
+        return {
+          status: lifecycle.resultType(flags),
+          ...flags,
+          educationalFieldsUpdated: Object.keys(educationalPatch),
+          hiddenPreserved: wasHidden && !restored,
+          wordKey: identity.wordKey,
+          wordId: legacyWordId,
+          sourceId: source.sourceId,
+          sourceType: source.type,
+          linked: sourceLinked,
+          existingWord: !created,
+          restoredReady: restored,
+        };
+      });
+    } catch (error) {
+      if (!error.code) error.code = 'word-lifecycle/failed';
+      throw error;
+    }
+  }
+
+  async function getUserWordSourceSummary(wordOrKey) {
+    const user = auth.currentUser;
+    if (!user) throw wordLifecycleError('word-lifecycle/sign-in-required', 'Sign in is required.');
+    const lifecycle = wordLifecycleApi();
+    const wordKey = lifecycle.wordKeyOf(wordOrKey);
+    if (!wordKey) return lifecycle.summarizeSources([]);
+    const canonicalRef = doc(db, 'users', user.uid, 'contentWords', wordKey);
+    const canonicalSnapshot = await getDoc(canonicalRef);
+    if (!canonicalSnapshot.exists()) return lifecycle.summarizeSources([]);
+    const snapshot = await getDocs(collection(canonicalRef, 'sources'));
+    return lifecycle.summarizeSources(snapshot.docs.map((item) => ({
+      sourceId: item.id,
+      ...(item.data() || {}),
+    })));
+  }
+
+  async function setUserWordDictionaryVisibility(wordId, visible) {
+    const user = auth.currentUser;
+    if (!user || !wordId) throw wordLifecycleError('word-lifecycle/invalid-word', 'Word is unavailable.');
+    await updateDoc(doc(db, 'users', user.uid, 'words', String(wordId)), {
+      hiddenFromDictionary: !visible,
+      hiddenFromDictionaryAt: visible ? null : serverTimestamp(),
+    });
+    return { wordId: String(wordId), hiddenFromDictionary: !visible };
+  }
+
+  async function deletePersonalUserWord(wordId, wordOrKey, knownSourceSummary) {
+    const user = auth.currentUser;
+    if (!user || !wordId) {
+      throw wordLifecycleError('word-lifecycle/invalid-word', 'Word is unavailable.');
+    }
+    const lifecycle = wordLifecycleApi();
+    const wordKey = lifecycle.wordKeyOf(wordOrKey);
+    const legacyRef = doc(db, 'users', user.uid, 'words', String(wordId));
+    if (!wordKey) {
+      await deleteDoc(legacyRef);
+      return { deleted: true, wordId: String(wordId), sourceCount: 0 };
+    }
+    const canonicalRef = doc(db, 'users', user.uid, 'contentWords', wordKey);
+    const summary = knownSourceSummary || await getUserWordSourceSummary(wordKey);
+    if (summary?.hasJourneySource) {
+      throw wordLifecycleError(
+        'word-lifecycle/journey-delete-forbidden',
+        'Journey-linked words must be hidden instead of deleted.'
+      );
+    }
+    const canonicalSnapshot = await getDoc(canonicalRef);
+    const batch = writeBatch(db);
+    batch.delete(legacyRef);
+    (summary?.sources || []).forEach((source) => {
+      if (!source?.sourceId || lifecycle.isJourneySourceType(source.addedFrom)) return;
+      batch.delete(doc(canonicalRef, 'sources', String(source.sourceId)));
+    });
+    if (
+      canonicalSnapshot.exists() &&
+      Number.isFinite(Number(canonicalSnapshot.data()?.sourceCount)) &&
+      Number(canonicalSnapshot.data().sourceCount) > 0
+    ) {
+      batch.update(canonicalRef, { sourceCount: 0, updatedAt: serverTimestamp() });
+    }
+    await batch.commit();
+    return {
+      deleted: true,
+      wordId: String(wordId),
+      wordKey,
+      sourceCount: (summary?.sources || []).length,
+    };
+  }
+
+  window.LootLinguaWordLifecycleCloud = Object.freeze({
+    upsertUserWordWithSource,
+    getUserWordSourceSummary,
+    setUserWordDictionaryVisibility,
+    deletePersonalUserWord,
+  });
+  window.upsertUserWordWithSource = upsertUserWordWithSource;
+  window.getUserWordSourceSummary = getUserWordSourceSummary;
+  window.hideUserWordFromDictionary = (wordId) => setUserWordDictionaryVisibility(wordId, false);
+  window.restoreUserWordToDictionary = (wordId) => setUserWordDictionaryVisibility(wordId, true);
+  window.deletePersonalUserWord = deletePersonalUserWord;
 
   function loadCustomWorldsFromCloud(user) {
     if (!user) return;
@@ -492,6 +860,13 @@
       .replace(/\//g, '_')
       .slice(0, 500);
     try {
+      await upsertUserWordWithSource({
+        word,
+        source: { type: 'private-world', customWorldId: String(worldId) },
+        restoreHidden: false,
+        hiddenOnCreate: true,
+        operationId: `private-world:${String(worldId)}`,
+      });
       await setDoc(doc(db, "users", user.uid, "customWorlds", String(worldId), "words", docId), {
         text: word.word || word.text || '',
         category: word.category || 'عام',
@@ -571,35 +946,23 @@
     const user = auth.currentUser;
     if (!user) return null;
     const source = extra && typeof extra === 'object' ? extra : {};
-    const createdAt = source.createdAt || new Date();
     try {
-      const ref = await addDoc(collection(db, "users", user.uid, "words"), {
-        text: wordText || source.word || source.text || '',
-        category: wordCategory || source.category || 'عام',
-        meaning: meaning || source.meaning || '',
-        example: example || source.example || '',
-        starred: Boolean(source.starred),
-        forgetCount: Number(source.forgetCount) || 0,
-        userId: user.uid,
-        xpValue: source.xpValue ?? 0,
-        mastery_status: source.mastery_status || 'New',
-        mastery_streak: Number(source.mastery_streak) || 0,
-        last_recalled_at: source.last_recalled_at || null,
-        first_recalled_at: source.first_recalled_at || null,
-        last_recall_day: source.last_recall_day || '',
-        last_recall_session_id: source.last_recall_session_id || '',
-        last_quizzed_at: source.last_quizzed_at || null,
-        quiz_seen_count: Number(source.quiz_seen_count) || 0,
-        mastered_once: Boolean(source.mastered_once),
-        firstMasteredAt: source.firstMasteredAt || null,
-        hasEarnedMasteryXP: Boolean(source.hasEarnedMasteryXP),
-        earnedTransitions: Array.isArray(source.earnedTransitions) ? source.earnedTransitions : [],
-        remasteryAwardCount: Number(source.remasteryAwardCount) || 0,
-        xpEconomyVersion: Number(source.xpEconomyVersion) || 0,
-        order: Number.isFinite(order) ? order : (Number.isFinite(source.order) ? source.order : 0),
-        createdAt
+      const result = await upsertUserWordWithSource({
+        word: {
+          ...source,
+          word: wordText || source.word || source.text || '',
+          category: wordCategory || source.category || 'عام',
+          meaning: meaning || source.meaning || '',
+          example: example || source.example || '',
+          order: Number.isFinite(order) ? order : source.order,
+        },
+        source: source.lifecycleSource || { type: 'manual' },
+        restoreHidden: true,
+        existingWordId: source.existingWordId,
+        operationId: source.operationId || 'personal-word-upsert',
       });
-      return ref.id;
+      window.__lastUserWordLifecycleResult = result;
+      return result.wordId;
     } catch (e) { console.error("فشل الرفع:", e); return null; }
   };
 
