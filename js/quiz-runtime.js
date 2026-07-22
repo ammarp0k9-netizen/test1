@@ -1,4 +1,4 @@
-async function commitVerifiedQuizResults() {
+async function commitVerifiedQuizResults(trace, onStage) {
   if (!activeQuizSession || !isVerifiedQuizMode(activeQuizSession.mode)) return { xp: 0, masteredCount: 0, correctCount: 0, total: 0 };
   const byWord = new Map();
   quizSessionResults.forEach(result => {
@@ -15,6 +15,7 @@ async function commitVerifiedQuizResults() {
   let correctCount = 0;
   const masteredIds = new Set();
   const advancedWords = [];
+  const transitionEntries = [];
 
   const sourceWords = getQuizSourceWords(activeQuizSession.source || currentQuizSource);
   for (const word of sourceWords) {
@@ -22,7 +23,26 @@ async function commitVerifiedQuizResults() {
     if (!result) continue;
     if (result.correct) correctCount++;
     const update = computeSrsUpdate(word, result.correct, activeQuizSession.id, result.answeredAt || Date.now());
-    const awarded = await awardWordTransitionXP(word, update, activeQuizSession.id);
+    transitionEntries.push({ word, result, update });
+  }
+  trace?.stage('srs-calculated', { transitionCount: transitionEntries.length });
+  onStage?.('applying-rewards');
+  const batch = typeof awardWordTransitionXPBatch === 'function'
+    ? await awardWordTransitionXPBatch(transitionEntries, activeQuizSession.id)
+    : {
+      awards: await Promise.all(transitionEntries.map((entry) =>
+        awardWordTransitionXP(entry.word, entry.update, activeQuizSession.id)
+      )),
+      pendingCount: 0,
+    };
+  trace?.stage('xp-committed', {
+    eventCount: batch.awards.filter((amount) => amount > 0).length,
+    pendingCount: batch.pendingCount || 0,
+  });
+  onStage?.('committing-learning');
+
+  transitionEntries.forEach(({ word, result, update }, index) => {
+    const awarded = batch.awards[index] || 0;
     xp += awarded;
     if (update.advanced && awarded > 0) {
       advancedWords.push({ word: word.word, nextStatus: update.nextStatus });
@@ -35,7 +55,7 @@ async function commitVerifiedQuizResults() {
     const forgetCount = result.correct ? Math.max((word.forgetCount || 0) - 1, 0) : (word.forgetCount || 0) + 1;
     const updated = { ...word, ...update.state, forgetCount };
     updateQuizWordInSource(word.id, updated, word.quizSource || activeQuizSession.source || currentQuizSource);
-  }
+  });
 
   const totalUnique = byWord.size;
 
@@ -49,8 +69,17 @@ async function commitVerifiedQuizResults() {
     }
   }
   if (masteredCount > 0) recordChestMasteredWords(masteredIds);
-  if (isEditableDictionaryView()) render();
-  return { xp, masteredCount, correctCount, total: totalUnique };
+  if (isEditableDictionaryView()) {
+    render();
+    trace?.count('rerenderCount');
+  }
+  return {
+    xp,
+    masteredCount,
+    correctCount,
+    total: totalUnique,
+    pendingRewards: Number(batch.pendingCount) || 0,
+  };
 }
 
 function markRemember() {
@@ -65,16 +94,82 @@ function markRemember() {
   else { finishQuizRun(); }
 }
 
-let quizFinishInFlight = false;
+const QUIZ_FINISH_TRANSITIONS = Object.freeze({
+  answering: ['final-answer-locked'],
+  'final-answer-locked': ['saving-result'],
+  'saving-result': ['applying-rewards', 'committing-learning', 'completed', 'save-failed'],
+  'applying-rewards': ['committing-learning', 'save-partial-failure', 'save-failed'],
+  'committing-learning': ['completed', 'save-partial-failure', 'save-failed'],
+  'save-partial-failure': ['completed', 'saving-result'],
+  'save-failed': ['saving-result'],
+  completed: ['answering'],
+});
+let quizFinishState = 'answering';
+let quizFinishPromise = null;
+let quizFinishUi = null;
 
-async function finishQuizRun() {
-  if (quizFinishInFlight) return;
-  quizFinishInFlight = true;
+function setQuizFinishState(nextState, options = {}) {
+  const allowed = QUIZ_FINISH_TRANSITIONS[quizFinishState] || [];
+  if (nextState !== quizFinishState && !allowed.includes(nextState)) {
+    throw new Error(`Invalid quiz finish transition: ${quizFinishState} -> ${nextState}`);
+  }
+  quizFinishState = nextState;
+  const host = document.getElementById('quizView');
+  if (!quizFinishUi && nextState !== 'answering') {
+    ['quizViewCard', 'quizTimeAttackView', 'quizScrambleView'].forEach((id) => {
+      const element = document.getElementById(id);
+      if (element) element.style.display = 'none';
+    });
+    quizFinishUi = window.LootLinguaOperations?.beginStatus({
+      scope: 'quiz-finish',
+      host,
+      loadingMessage: 'جارٍ حفظ نتيجتك...',
+      longWaitMessage: 'يستغرق الحفظ وقتًا أطول من المعتاد، لكن إجاباتك محفوظة.',
+    });
+  }
+  const messages = {
+    'final-answer-locked': 'تم تثبيت إجابتك الأخيرة.',
+    'saving-result': 'جارٍ حفظ نتيجتك...',
+    'committing-learning': 'جارٍ تثبيت تقدم كلماتك...',
+    'applying-rewards': 'جارٍ تطبيق المكافآت بأمان...',
+    completed: options.message || 'تم حفظ النتيجة.',
+    'save-partial-failure': options.message || 'حُفظت النتيجة، وتعذر حفظ بعض المكافآت.',
+    'save-failed': options.message || 'تعذر حفظ النتيجة.',
+  };
+  if (nextState === 'completed') quizFinishUi?.complete(messages[nextState]);
+  else if (nextState === 'save-partial-failure') {
+    quizFinishUi?.set('partial-success', messages[nextState], options.retry);
+  } else if (nextState === 'save-failed') {
+    quizFinishUi?.fail(messages[nextState], options.retry);
+  } else if (nextState !== 'answering') {
+    quizFinishUi?.set('loading', messages[nextState]);
+  }
+}
+
+function resetQuizFinishState() {
+  quizFinishUi?.clear();
+  quizFinishUi = null;
+  quizFinishState = 'answering';
+  quizFinishPromise = null;
+}
+
+function finishQuizRun() {
+  if (quizFinishPromise) return quizFinishPromise;
+  const retrying = quizFinishState === 'save-failed';
+  setQuizFinishState(retrying ? 'saving-result' : 'final-answer-locked');
   stopTimeAttackTimer();
-  const verified = activeQuizSession && isVerifiedQuizMode(activeQuizSession.mode);
-  const commit = verified
-    ? await commitVerifiedQuizResults()
-    : { xp: 0, correctCount: currentQuizWords.length - currentQuizMistakes, total: currentQuizWords.length };
+  const trace = window.LootLinguaOperations?.startTrace('quiz-finish', {
+    questionCount: currentQuizWords.length,
+  });
+  trace?.stage('ui-feedback-visible');
+
+  quizFinishPromise = (async () => {
+    await (window.LootLinguaOperations?.nextPaint?.() || Promise.resolve());
+    setQuizFinishState('saving-result');
+    const verified = activeQuizSession && isVerifiedQuizMode(activeQuizSession.mode);
+    const commit = verified
+      ? await commitVerifiedQuizResults(trace, (stage) => setQuizFinishState(stage))
+      : { xp: 0, correctCount: currentQuizWords.length - currentQuizMistakes, total: currentQuizWords.length };
   const accuracy = commit.total > 0 ? commit.correctCount / commit.total : 0;
   const fullyCompleted = verified && quizIndex >= currentQuizWords.length;
   const exposureCompleted = currentQuizWords.length > 0 &&
@@ -98,8 +193,22 @@ async function finishQuizRun() {
     requestProfileCloudSave();
   }
   if (verified) {
+    trace?.stage('primary-result-ready', { accuracy });
+    if (commit.pendingRewards > 0) {
+      setQuizFinishState('save-partial-failure', {
+        message: 'حُفظت نتيجتك، وبعض مكافآت XP ستُعاد مزامنتها.',
+        retry: () => retryPendingXPEvents(),
+      });
+    } else {
+      setQuizFinishState('completed', {
+        message: `تم حفظ النتيجة: ${Math.round(accuracy * 100)}% دقة.`,
+      });
+    }
     playQuizCompletionSound();
+    trace?.stage('audio-started');
     if (accuracy >= 0.9 || commit.xp > 0) launchConfetti();
+  } else {
+    setQuizFinishState('completed', { message: 'تمت مراجعة البطاقات.' });
   }
   clearActiveQuizSessionStorage();
   activeQuizSession = null;
@@ -113,8 +222,26 @@ async function finishQuizRun() {
     : 'تمت مراجعة البطاقات بدون XP. أحسنت!',
     'success',
     3600);
-  quizFinishInFlight = false;
-  setTimeout(closeQuiz, 600);
+    trace?.stage('navigation-scheduled').end({
+      accuracy,
+      xp: commit.xp,
+      pendingRewards: commit.pendingRewards || 0,
+    });
+    setTimeout(() => {
+      resetQuizFinishState();
+      closeQuiz();
+    }, commit.pendingRewards > 0 ? 1800 : 600);
+    return commit;
+  })().catch((error) => {
+    trace?.warn(error?.code || error?.message || 'quiz-finish-failed').end({ failed: true });
+    quizFinishPromise = null;
+    setQuizFinishState('save-failed', {
+      message: 'تعذر حفظ النتيجة. إجاباتك ما زالت محفوظة للمحاولة من جديد.',
+      retry: () => finishQuizRun(),
+    });
+    return null;
+  });
+  return quizFinishPromise;
 }
 
 function markForgot() {
