@@ -276,6 +276,7 @@ function render(options = {}) {
 
   let filtered = window.words.filter(w => {
     if (!w.word) return false;
+    if (window.LootLinguaWordLifecycle?.isVisibleInDictionaryList(w) === false) return false;
     const wm = w.word.toLowerCase().includes(query);
     const mm = (w.meaning  || '').toLowerCase().includes(query);
     const em = (w.example  || '').toLowerCase().includes(query);
