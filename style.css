@@ -11405,3 +11405,102 @@ body.onboarding-active .onboarding-active-target {
     height: 24px;
   }
 }
+/* Published CEFR levels and Level Placement */
+.published-level-section {
+  width: 100%;
+  margin-top: 22px;
+  padding-top: 18px;
+  border-top: 1px solid color-mix(in srgb, var(--border-color, #cbd5e1) 72%, transparent);
+}
+
+.published-level-header {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 18px;
+  margin-bottom: 14px;
+}
+
+.published-level-header-copy,
+.published-level-summary {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  min-width: 0;
+}
+
+.published-level-header-copy > strong {
+  font-size: 1.35rem;
+  color: var(--text-color, #0f172a);
+}
+
+.published-level-header-copy > span {
+  font-weight: 800;
+}
+
+.published-level-header-copy > small,
+.published-level-summary > span,
+.published-level-save-summary {
+  color: var(--text-gray, #64748b);
+}
+
+.published-level-summary {
+  align-items: flex-end;
+  text-align: end;
+  flex: 0 0 auto;
+}
+
+.published-level-test-btn {
+  min-height: 38px;
+}
+
+.published-level-state-locked .published-level-header {
+  opacity: .68;
+}
+
+.published-level-save-panel,
+.published-level-result-list {
+  width: min(100%, 680px);
+  display: grid;
+  gap: 12px;
+  padding: 16px 0;
+  border-top: 1px solid color-mix(in srgb, var(--border-color, #cbd5e1) 68%, transparent);
+  border-bottom: 1px solid color-mix(in srgb, var(--border-color, #cbd5e1) 68%, transparent);
+}
+
+.published-level-result-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 12px;
+}
+
+.published-level-result-row small {
+  color: var(--text-gray, #64748b);
+}
+
+@media (max-width: 680px) {
+  .published-level-header {
+    align-items: stretch;
+    flex-direction: column;
+    gap: 12px;
+  }
+
+  .published-level-summary {
+    align-items: stretch;
+    text-align: start;
+  }
+
+  .published-level-test-btn {
+    width: 100%;
+  }
+
+  .published-level-result-row {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  .published-level-result-row small {
+    grid-column: 1 / -1;
+  }
+}
