@@ -51,6 +51,13 @@
       });
   }
 
+  function stableRankOrder(ranks) {
+    const compare = root.LootLinguaContentSchema?.comparePublishedRanks;
+    return typeof compare === 'function'
+      ? (Array.isArray(ranks) ? ranks : []).slice().sort(compare)
+      : stableContentOrder(ranks, 'rankId');
+  }
+
   function initialAccessStatus(item) {
     return item?.unlockConfig?.initialStatus === 'available' ? 'available' : 'locked';
   }
@@ -92,7 +99,7 @@
   }
 
   function selectJourneyStart(ranks, gatesByRank) {
-    const orderedRanks = stableContentOrder(ranks, 'rankId');
+    const orderedRanks = stableRankOrder(ranks);
     const firstRank = orderedRanks.find((rank) => canAccessRank(rank, null));
     if (!firstRank) return null;
     const rankId = itemId(firstRank, 'rankId');
@@ -106,7 +113,7 @@
   }
 
   function selectNextJourneyTarget(ranks, gatesByRank, currentRankId, currentGateId) {
-    const orderedRanks = stableContentOrder(ranks, 'rankId')
+    const orderedRanks = stableRankOrder(ranks)
       .filter((rank) => rank?.status === 'published');
     const rankIndex = orderedRanks.findIndex(
       (rank) => itemId(rank, 'rankId') === String(currentRankId || '')
@@ -170,6 +177,12 @@
     return `published_${parts.map(encodeURIComponent).join('~')}`;
   }
 
+  function levelPlacementSourceId(source) {
+    const assessment = cleanId(source?.assessmentId, 'Assessment');
+    const word = cleanId(source?.contentWordId, 'Word');
+    return `level_placement_${encodeURIComponent(assessment)}~${encodeURIComponent(word)}`;
+  }
+
   function gateProgressPathKey(worldId, rankId, gateId) {
     return [
       cleanId(worldId, 'World'),
@@ -223,6 +236,7 @@
     journeyError,
     cleanId,
     stableContentOrder,
+    stableRankOrder,
     initialAccessStatus,
     journeyOwnsWorld,
     canAccessRank,
@@ -232,6 +246,7 @@
     selectNextJourneyTarget,
     createJourneySeed,
     contentSourceId,
+    levelPlacementSourceId,
     gateProgressPathKey,
     detectNewContentWordIds,
     canTransitionGateProgress,
