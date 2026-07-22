@@ -223,7 +223,8 @@ async function updateActiveWordInCloud(id, data) {
 async function deleteActiveWordFromCloud(id) {
   if (isCustomWorldView()) {
     if (!window.deleteCustomWorldWordFromCloud) return !hasSignedInUser();
-    return await window.deleteCustomWorldWordFromCloud(activeCustomWorldId, id);
+    const word = window.words.find((item) => String(item.id) === String(id));
+    return await window.deleteCustomWorldWordFromCloud(activeCustomWorldId, id, word);
   }
   if (!window.deleteWordFromCloud) return !hasSignedInUser();
   return await window.deleteWordFromCloud(id);
@@ -233,7 +234,7 @@ async function deleteWordFromCapturedScope(id, customWorldId, word, sourceSummar
   if (!hasSignedInUser()) return true;
   if (customWorldId) {
     if (!window.deleteCustomWorldWordFromCloud) return false;
-    return await window.deleteCustomWorldWordFromCloud(customWorldId, id);
+    return await window.deleteCustomWorldWordFromCloud(customWorldId, id, word);
   }
   if (window.deletePersonalUserWord) {
     const result = await window.deletePersonalUserWord(id, word, sourceSummary);
@@ -279,20 +280,24 @@ async function restoreExistingDictionaryWord(existingWord, incomingWord, sourceT
   return result;
 }
 
-window.restoreDictionaryWordById = async function(wordId, options = {}) {
-  const personalWords = readWordsFromStorage('normal', window.auth?.currentUser?.uid);
-  const existing = personalWords.find((word) => String(word.id) === String(wordId));
-  if (!existing) return null;
-  if (hasSignedInUser()) await window.restoreUserWordToDictionary?.(existing.id);
-  const restored = { ...existing, hiddenFromDictionary: false, hiddenFromDictionaryAt: null };
-  const next = personalWords.map((word) => String(word.id) === String(existing.id) ? restored : word);
-  writeWordsToStorage(next, 'normal', window.auth?.currentUser?.uid);
-  if (!isCustomWorldView()) window.words = next;
-  if (currentView === 'personal') render();
-  if (options.notify !== false) {
-    showToast(`تمت استعادة كلمة ”${existing.word || existing.text}“ إلى قاموسك، وتقدمها السابق محفوظ.`, 'success', 4800);
-  }
-  return restored;
+window.restoreDictionaryWordById = function(wordId, options = {}) {
+  const scope = `dictionary-restore:${String(wordId || '')}`;
+  const runner = window.LootLinguaOperations?.runExclusive || ((key, task) => task());
+  return runner(scope, async () => {
+    const personalWords = readWordsFromStorage('normal', window.auth?.currentUser?.uid);
+    const existing = personalWords.find((word) => String(word.id) === String(wordId));
+    if (!existing) return null;
+    if (hasSignedInUser()) await window.restoreUserWordToDictionary?.(existing.id);
+    const restored = { ...existing, hiddenFromDictionary: false, hiddenFromDictionaryAt: null };
+    const next = personalWords.map((word) => String(word.id) === String(existing.id) ? restored : word);
+    writeWordsToStorage(next, 'normal', window.auth?.currentUser?.uid);
+    if (!isCustomWorldView()) window.words = next;
+    if (currentView === 'personal') render();
+    if (options.notify !== false) {
+      showToast(`تمت استعادة كلمة ”${existing.word || existing.text}“ إلى قاموسك، وتقدمها السابق محفوظ.`, 'success', 4800);
+    }
+    return restored;
+  });
 };
 
 let isExpanded = false;
