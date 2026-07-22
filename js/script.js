@@ -2678,7 +2678,18 @@ window.confirmGuestMigration = async function() {
     let uploaded = 0;
     for (const word of toMove) {
       const realId = window.saveWordToCloud
-        ? await window.saveWordToCloud(word.word || word.text, word.category || 'عام', word.meaning || '', word.example || '', word.order ?? 0, word)
+        ? await window.saveWordToCloud(
+          word.word || word.text,
+          word.category || 'عام',
+          word.meaning || '',
+          word.example || '',
+          word.order ?? 0,
+          {
+            ...word,
+            lifecycleSource: { type: 'import', importId: 'guest-migration' },
+            operationId: 'guest-migration',
+          }
+        )
         : null;
       if (!realId) throw new Error('cloud-upload-failed');
       window.words.unshift({
