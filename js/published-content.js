@@ -147,7 +147,12 @@ async function listPublishedRanks(worldId, options) {
     const snapshot = await getDocs(orderedPublishedQuery(ranksCollection(parentWorldId)));
     const items = snapshot.docs.map((item) =>
       record(item, 'rankId', { worldId: parentWorldId })
-    );
+    ).sort((left, right) => {
+      const compare = window.LootLinguaContentSchema?.comparePublishedRanks;
+      return typeof compare === 'function'
+        ? compare(left, right)
+        : Number(left.order || 0) - Number(right.order || 0);
+    });
     cache.ranks.set(parentWorldId, items);
     items.forEach((item) =>
       cache.records.ranks.set(recordKey(parentWorldId, item.rankId), item)
