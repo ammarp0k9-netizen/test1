@@ -583,6 +583,18 @@
     return passed.has(levels[index - 1]);
   }
 
+  function shouldResumeLevelPlacement(session, journey) {
+    const assessmentId = String(journey?.activeLevelPlacementAssessmentId || '');
+    if (!assessmentId) return false;
+    const resumableStatuses = ['active', 'submitting'];
+    if (!session) {
+      return resumableStatuses.includes(String(journey?.levelPlacementStatus || ''));
+    }
+    return String(session.assessmentId || '') === assessmentId &&
+      String(session.worldId || '') === String(journey?.worldId || '') &&
+      resumableStatuses.includes(String(session.status || ''));
+  }
+
   function wordIdsForSaveChoice(session, choice) {
     if (!SAVE_WORD_CHOICES.includes(choice) || choice === 'undecided') {
       throw levelPlacementError('level-placement/invalid-save-choice', 'Save choice is invalid.');
@@ -618,6 +630,7 @@
     finalizeRound,
     longestContiguousPassedPrefix,
     canStartLevelPlacement,
+    shouldResumeLevelPlacement,
     wordIdsForSaveChoice,
   });
 
