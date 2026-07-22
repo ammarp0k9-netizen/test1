@@ -582,6 +582,40 @@ async function linkPublishedWord(uid, word, personalIndex, operationId, options)
   const sourceId = sourceType === 'level-placement'
     ? core().levelPlacementSourceId({ assessmentId, contentWordId: source.contentWordId })
     : core().contentSourceId(source);
+  const lifecycleCloud = window.LootLinguaWordLifecycleCloud;
+  if (lifecycleCloud?.upsertUserWordWithSource) {
+    const indexedWord = personalIndex.get(identity.wordKey);
+    const result = await lifecycleCloud.upsertUserWordWithSource({
+      uid,
+      word,
+      existingWordId: indexedWord?.id,
+      operationId,
+      restoreHidden: options?.restoreHidden === true,
+      source: {
+        ...source,
+        type: sourceType,
+        ...(sourceType === 'level-placement'
+          ? {
+            assessmentId,
+            cefrLevel: levelPlacementCore().assertClassifiedLevel(options?.cefrLevel),
+            placementResult: options?.placementResult === 'correct' ? 'correct' : 'incorrect',
+          }
+          : {}),
+        ...(options?.placementAssessmentId
+          ? { placementAssessmentId: String(options.placementAssessmentId) }
+          : {}),
+      },
+    });
+    personalIndex.set(identity.wordKey, {
+      id: result.wordId,
+      data: {
+        ...(indexedWord?.data || {}),
+        ...contentWordToUserWordFields(word, identity),
+        hiddenFromDictionary: result.hiddenPreserved,
+      },
+    });
+    return result;
+  }
   const canonicalRef = doc(db, 'users', uid, 'contentWords', identity.wordKey);
   const sourceRef = doc(canonicalRef, 'sources', sourceId);
   const indexedWord = personalIndex.get(identity.wordKey);
@@ -851,6 +885,15 @@ async function runGateWordOperation(worldId, rankId, gateId, options) {
   let completed = 0;
   let linkedSources = 0;
   let existingWords = 0;
+  const lifecycleSummary = window.LootLinguaWordLifecycle?.emptySummary?.() || {
+    created: 0,
+    restored: 0,
+    sourceLinked: 0,
+    alreadyLinked: 0,
+    updatedMissingFields: 0,
+    failed: 0,
+    hiddenPreserved: 0,
+  };
 
   for (const word of targetWords) {
     try {
@@ -864,6 +907,7 @@ async function runGateWordOperation(worldId, rankId, gateId, options) {
       completed += 1;
       if (result.linked) linkedSources += 1;
       if (result.existingWord) existingWords += 1;
+      window.LootLinguaWordLifecycle?.addResultToSummary?.(lifecycleSummary, result);
     } catch (error) {
       const failure = journeyOperationError(
         error,
@@ -881,6 +925,7 @@ async function runGateWordOperation(worldId, rankId, gateId, options) {
         message: failure.message,
         operation: failure.operation,
       });
+      lifecycleSummary.failed += 1;
     }
     options?.onProgress?.({
       completed,
@@ -921,6 +966,7 @@ async function runGateWordOperation(worldId, rankId, gateId, options) {
     total: targetWords.length,
     linkedSources,
     existingWords,
+    summary: lifecycleSummary,
     failures,
     errorCode: firstFailure?.code || '',
     errorMessage: firstFailure?.message || '',
@@ -2294,7 +2340,10 @@ async function saveLevelPlacementWords(worldId, assessmentId, choice) {
     created: Number(session.saveWordSummary?.created) || 0,
     sourceLinked: Number(session.saveWordSummary?.sourceLinked) || 0,
     alreadyLinked: Number(session.saveWordSummary?.alreadyLinked) || 0,
-    restoredReady: Number(session.saveWordSummary?.restoredReady) || 0,
+    restored: Number(session.saveWordSummary?.restored) ||
+      Number(session.saveWordSummary?.restoredReady) || 0,
+    updatedMissingFields: Number(session.saveWordSummary?.updatedMissingFields) || 0,
+    hiddenPreserved: Number(session.saveWordSummary?.hiddenPreserved) || 0,
     failed: 0,
   };
   const failures = [];
@@ -2327,13 +2376,11 @@ async function saveLevelPlacementWords(worldId, assessmentId, choice) {
           cefrLevel: session.cefrLevel,
           placementResult: answer.correct ? 'correct' : 'incorrect',
           suppressRewards: true,
+          restoreHidden: true,
         }
       );
       savedIds.add(String(id));
-      if (result.created) summary.created += 1;
-      else if (result.restoredReady) summary.restoredReady += 1;
-      else if (result.sourceLinked) summary.sourceLinked += 1;
-      else if (result.alreadyLinked) summary.alreadyLinked += 1;
+      window.LootLinguaWordLifecycle?.addResultToSummary?.(summary, result);
     } catch (error) {
       failures.push({
         questionId: String(id),
@@ -2401,9 +2448,8 @@ async function finishLevelPlacement(worldId, assessmentId, action) {
     });
     transaction.update(targetJourneyRef, {
       levelPlacementStatus: pause ? 'paused' : 'completed',
-      ...(pause
-        ? {}
-        : { activeLevelPlacementAssessmentId: '', activeLevelPlacementCefrLevel: '' }),
+      activeLevelPlacementAssessmentId: '',
+      activeLevelPlacementCefrLevel: '',
       updatedAt: serverTimestamp(),
     });
   });
