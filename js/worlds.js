@@ -1288,6 +1288,10 @@ const publishedContentState = {
   placementPending: false,
   placementFeedback: null,
   placementFinalizationKey: '',
+  levelPlacementBundle: null,
+  levelPlacementPending: false,
+  levelPlacementFeedback: null,
+  levelPlacementReviewOpen: false,
   wordPager: null,
   wordSnapshot: null,
   wordPageRequest: null,
@@ -1398,6 +1402,16 @@ function getPlacementContract() {
   return api;
 }
 
+function getLevelPlacementContract() {
+  const api = window.LootLinguaLevelPlacement;
+  if (!api) {
+    const error = new Error('Level Placement contract is unavailable.');
+    error.code = 'level-placement/unavailable';
+    throw error;
+  }
+  return api;
+}
+
 function setPublishedPlacementMode(active) {
   document.body.classList.toggle('published-placement-mode', Boolean(active));
   if (active) setTreasureEntryVisible(false);
@@ -1414,6 +1428,10 @@ function clearPublishedJourneyViewState(options) {
   publishedContentState.placementPending = false;
   publishedContentState.placementFeedback = null;
   publishedContentState.placementFinalizationKey = '';
+  publishedContentState.levelPlacementBundle = null;
+  publishedContentState.levelPlacementPending = false;
+  publishedContentState.levelPlacementFeedback = null;
+  publishedContentState.levelPlacementReviewOpen = false;
   if (options?.clearError) publishedContentState.journeyError = null;
   setPublishedPlacementMode(false);
 }
@@ -1472,7 +1490,7 @@ async function readPublishedGateProgress(worldId, rankId, gateId, journey, optio
 
 function firstJourneyRank(ranks) {
   return getJourneyContract()
-    .stableContentOrder(ranks, 'rankId')
+    .stableRankOrder(ranks)
     .find((rank) => getJourneyContract().canAccessRank(rank, null)) || null;
 }
 
@@ -1492,6 +1510,14 @@ function publishedGateJourneyState(gate, rank, gates, ranks, journey, progress) 
     rank,
     isFirstEligibleGate,
   });
+}
+
+function canRevealPublishedGateWords(gateState, journey) {
+  const adminState = typeof window.getLootLinguaAdminState === 'function'
+    ? window.getLootLinguaAdminState()
+    : null;
+  if (adminState?.resolved && adminState.isAdmin) return true;
+  return Boolean(journey && gateState !== 'locked');
 }
 
 function rerenderPublishedRoute() {
@@ -1567,6 +1593,10 @@ function publishedJourneyErrorText(error) {
     'placement/choice-required': 'اختر اختبار تحديد المستوى أو ابدأ من البداية.',
     'placement/content-changed': 'تغيّرت كلمات البوابة. ألغِ الاختبار وابدأ من البداية.',
     'placement/gate-load-incomplete': 'لم يكتمل تحميل كلمات البوابة. أعد المحاولة.',
+    'level-placement/locked': 'أكمل المستوى السابق قبل بدء هذا الاختبار.',
+    'level-placement/legacy-active': 'لديك اختبار بوابة قديم غير مكتمل. أكمله أو ألغِه أولًا.',
+    'level-placement/no-words': 'لا توجد كلمات كافية لبناء اختبار هذا المستوى.',
+    'level-placement/session-active': 'لديك اختبار مستوى نشط بالفعل.',
     'journey/no-published-words': 'لا توجد كلمات منشورة في هذه البوابة لتحميلها.',
     'permission-denied': 'تعذر حفظ كلمات الرحلة في حسابك. أعد المحاولة.',
     'firestore/permission-denied': 'تعذر حفظ كلمات الرحلة في حسابك. أعد المحاولة.',
@@ -1758,6 +1788,516 @@ async function beginPublishedPlacement(world) {
     showToast(journeyError.text, 'danger', 4800);
     return null;
   }
+}
+
+function publishedLevelState(cefrLevel, journey) {
+  const level = getLevelPlacementContract().normalizeLevel(cefrLevel);
+  if (level === 'unclassified') return 'unclassified';
+  if ((journey?.passedCefrLevels || []).includes(level)) return 'passed';
+  if (
+    String(journey?.activeLevelPlacementCefrLevel || '') === level &&
+    ['active', 'awaiting-decision', 'paused'].includes(journey?.levelPlacementStatus)
+  ) return 'in-progress';
+  if ((journey?.partialCefrLevels || []).includes(level)) return 'partially-passed';
+  return getLevelPlacementContract().canStartLevelPlacement(level, journey)
+    ? 'available'
+    : 'locked';
+}
+
+async function beginPublishedLevelPlacement(world, cefrLevel) {
+  if (!window.auth?.currentUser) {
+    requestJourneySignIn();
+    return null;
+  }
+  if (publishedContentState.levelPlacementPending) return null;
+  publishedContentState.levelPlacementPending = true;
+  rerenderPublishedRoute();
+  try {
+    const bundle = await getJourneyCloudApi().startLevelPlacement(
+      world.worldId,
+      cefrLevel
+    );
+    publishedContentState.levelPlacementPending = false;
+    publishedContentState.levelPlacementBundle = bundle;
+    publishedContentState.journey = bundle.journey;
+    publishedContentState.activeJourney = bundle.journey;
+    clearPublishedJourneyError();
+    renderPublishedLevelPlacementAssessment(bundle);
+    return bundle;
+  } catch (error) {
+    publishedContentState.levelPlacementPending = false;
+    const journeyError = setPublishedJourneyError(
+      error,
+      'start-level-placement',
+      () => beginPublishedLevelPlacement(world, cefrLevel),
+      world.worldId
+    );
+    rerenderPublishedRoute();
+    showToast(journeyError.text, 'danger', 4800);
+    return null;
+  }
+}
+
+async function maybeRenderPublishedLevelPlacementResume(journey, generation) {
+  if (!journey?.activeLevelPlacementAssessmentId) return false;
+  try {
+    const bundle = await getJourneyCloudApi().resumeLevelPlacement(journey.worldId);
+    if (generation !== publishedContentState.generation) return true;
+    publishedContentState.levelPlacementBundle = bundle;
+    if (bundle.session.status === 'active') {
+      renderPublishedLevelPlacementResumePrompt(bundle);
+    } else {
+      renderPublishedLevelPlacementResult(bundle);
+    }
+    return true;
+  } catch (error) {
+    if (generation !== publishedContentState.generation) return true;
+    setPublishedJourneyError(
+      error,
+      'resume-level-placement',
+      () => showPublishedLevelPlacementResume(journey.worldId),
+      journey.worldId
+    );
+    return false;
+  }
+}
+
+async function showPublishedLevelPlacementResume(worldId) {
+  try {
+    const bundle = await getJourneyCloudApi().resumeLevelPlacement(worldId);
+    publishedContentState.levelPlacementBundle = bundle;
+    if (bundle.session.status === 'active') renderPublishedLevelPlacementResumePrompt(bundle);
+    else renderPublishedLevelPlacementResult(bundle);
+    return bundle;
+  } catch (error) {
+    setPublishedJourneyError(
+      error,
+      'resume-level-placement',
+      () => showPublishedLevelPlacementResume(worldId),
+      worldId
+    );
+    rerenderPublishedRoute();
+    return null;
+  }
+}
+
+function renderPublishedLevelPlacementResumePrompt(bundle) {
+  const root = publishedViewRoot();
+  if (!root) return;
+  setPublishedPlacementMode(false);
+  const session = bundle.session;
+  const section = publishedElement('section', 'published-placement-resume published-level-placement-resume');
+  const icon = publishedElement('span', 'published-placement-resume-icon');
+  icon.append(publishedIcon('fa-solid fa-chart-line'));
+  const copy = publishedElement('div', 'published-placement-resume-copy');
+  copy.append(
+    publishedElement('strong', '', 'لديك اختبار مستوى غير مكتمل'),
+    publishedElement(
+      'p',
+      '',
+      `${session.cefrLevel} · السؤال ${Number(session.currentQuestionIndex) + 1} من ${session.orderedQuestionIds.length}`
+    )
+  );
+  const actions = publishedElement('div', 'published-placement-resume-actions');
+  actions.append(
+    publishedButton(
+      'متابعة الاختبار',
+      'published-action-btn published-placement-primary',
+      () => renderPublishedLevelPlacementAssessment(bundle),
+      'fa-solid fa-play'
+    ),
+    publishedButton(
+      'إلغاء الاختبار',
+      'published-action-btn published-placement-secondary',
+      () => abandonPublishedLevelPlacement(bundle),
+      'fa-solid fa-xmark'
+    )
+  );
+  section.append(icon, copy, actions);
+  root.replaceChildren(section);
+}
+
+function renderPublishedLevelPlacementAssessment(bundle) {
+  const root = publishedViewRoot();
+  if (!root) return;
+  const session = bundle.session;
+  if (session.status !== 'active') {
+    renderPublishedLevelPlacementResult(bundle);
+    return;
+  }
+  const question = getLevelPlacementContract().buildQuestion(session);
+  if (!question) {
+    renderPublishedLevelPlacementResult(bundle);
+    return;
+  }
+  setPublishedPlacementMode(true);
+  publishedContentState.levelPlacementBundle = bundle;
+  const feedback = publishedContentState.levelPlacementFeedback;
+  const pending = publishedContentState.levelPlacementPending;
+  const section = publishedElement('section', 'published-placement-view published-level-placement-view');
+  const top = publishedElement('header', 'published-placement-top');
+  const identity = publishedElement('div', 'published-placement-identity');
+  identity.append(
+    publishedElement('small', '', bundle.world.title || 'العالم'),
+    publishedElement('strong', '', `اختبار مستوى ${session.cefrLevel}`),
+    publishedElement('span', '', 'اختبار مختصر موزع على رتب المستوى')
+  );
+  const exit = publishedElement('button', 'published-placement-exit');
+  exit.type = 'button';
+  exit.title = 'الخروج من اختبار المستوى';
+  exit.setAttribute('aria-label', 'الخروج من اختبار المستوى');
+  exit.append(publishedIcon('fa-solid fa-xmark'));
+  exit.addEventListener('click', () => renderPublishedLevelPlacementExit(bundle));
+  top.append(identity, exit);
+
+  const progress = publishedElement('div', 'published-placement-progress');
+  const progressLabel = publishedElement('span', 'published-placement-progress-label');
+  progressLabel.append(
+    publishedElement('strong', '', `${question.questionNumber} / ${question.totalQuestions}`),
+    publishedElement('small', '', session.adaptiveRound ? 'جولة التحديد الإضافية' : 'السؤال الحالي')
+  );
+  const track = publishedElement('span', 'published-placement-progress-track');
+  const fill = publishedElement('span', 'published-placement-progress-fill');
+  fill.style.width = `${Math.max(4, (session.currentQuestionIndex / question.totalQuestions) * 100)}%`;
+  track.append(fill);
+  progress.append(progressLabel, track);
+
+  const questionBox = publishedElement('div', 'published-placement-question');
+  questionBox.append(
+    publishedElement('small', '', 'اختر المعنى الصحيح'),
+    publishedElement('h3', '', question.prompt)
+  );
+  questionBox.querySelector('h3')?.setAttribute('dir', 'ltr');
+  const options = publishedElement('div', 'published-placement-options');
+  question.options.forEach((option, index) => {
+    const button = publishedElement('button', 'published-placement-option');
+    button.type = 'button';
+    button.disabled = pending || Boolean(feedback);
+    button.append(
+      publishedElement('span', 'published-placement-option-key', String(index + 1)),
+      publishedElement('span', 'published-placement-option-text', option.text)
+    );
+    if (feedback) {
+      const isCorrect = option.questionId === question.questionId;
+      const isSelected = option.questionId === feedback.selectedId;
+      if (isCorrect) button.classList.add('is-correct');
+      if (isSelected && !isCorrect) button.classList.add('is-incorrect');
+    }
+    button.addEventListener('click', () => submitPublishedLevelPlacementAnswer(
+      bundle,
+      question,
+      option.questionId
+    ));
+    options.append(button);
+  });
+  const feedbackText = publishedElement(
+    'p',
+    'published-placement-feedback',
+    feedback ? (feedback.correct ? 'إجابة صحيحة.' : 'تم تثبيت الإجابة.') : ''
+  );
+  feedbackText.setAttribute('aria-live', 'polite');
+  section.append(top, progress, questionBox, options, feedbackText);
+  root.replaceChildren(section);
+}
+
+async function submitPublishedLevelPlacementAnswer(bundle, question, selectedId) {
+  if (publishedContentState.levelPlacementPending || publishedContentState.levelPlacementFeedback) return;
+  const correct = String(selectedId) === String(question.questionId);
+  publishedContentState.levelPlacementPending = true;
+  publishedContentState.levelPlacementFeedback = { selectedId: String(selectedId), correct };
+  renderPublishedLevelPlacementAssessment(bundle);
+  try {
+    const reduceMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+    await new Promise((resolve) => setTimeout(resolve, reduceMotion ? 100 : 620));
+    const beforeRound = Number(bundle.session.adaptiveRound || 0);
+    const next = await getJourneyCloudApi().answerLevelPlacementQuestion(
+      bundle.journey.worldId,
+      bundle.session.assessmentId,
+      selectedId
+    );
+    publishedContentState.levelPlacementPending = false;
+    publishedContentState.levelPlacementFeedback = null;
+    publishedContentState.levelPlacementBundle = next;
+    publishedContentState.journey = next.journey;
+    publishedContentState.activeJourney = next.journey;
+    if (next.session.status === 'active') {
+      if (Number(next.session.adaptiveRound || 0) > beforeRound) {
+        showToast('نحتاج سؤالين إضافيين لتحديد مكانك بدقة.', 'info', 3600);
+      }
+      renderPublishedLevelPlacementAssessment(next);
+      return;
+    }
+    renderPublishedLevelPlacementResult(next);
+  } catch (error) {
+    publishedContentState.levelPlacementPending = false;
+    publishedContentState.levelPlacementFeedback = null;
+    showToast(publishedJourneyErrorText(error), 'danger', 4800);
+    renderPublishedLevelPlacementAssessment(bundle);
+  }
+}
+
+function appendPublishedLevelPlacementStats(section, session) {
+  if (!publishedContentState.levelPlacementReviewOpen) return;
+  const list = publishedElement('div', 'published-level-result-list');
+  (session.orderedRankIds || []).forEach((rankId) => {
+    const stat = session.perRankStats?.[rankId] || {};
+    const row = publishedElement('div', 'published-level-result-row');
+    row.append(
+      publishedElement('strong', '', session.rankTitles?.[rankId] || rankId),
+      publishedElement('span', '', `${Number(stat.correct) || 0} / ${Number(stat.asked) || 0}`),
+      publishedElement('small', '', {
+        passed: 'متجاوزة',
+        failed: 'نقطة تعلم',
+        ambiguous: 'تحتاج مراجعة',
+        'insufficient-sample': 'عينة محدودة',
+      }[stat.status] || '')
+    );
+    list.append(row);
+  });
+  section.append(list);
+}
+
+function renderPublishedLevelPlacementResult(bundle) {
+  const root = publishedViewRoot();
+  if (!root) return;
+  setPublishedPlacementMode(false);
+  const session = bundle.session;
+  const passedLevel = Boolean(session.passedLevel);
+  const rankName = session.rankTitles?.[session.recommendedStartRankId] || 'الرتبة المقترحة';
+  const section = publishedElement(
+    'section',
+    `published-placement-result published-level-placement-result ${passedLevel ? 'is-passed' : 'is-learning'}`
+  );
+  section.append(
+    publishedIcon(passedLevel ? 'fa-solid fa-circle-check' : 'fa-solid fa-location-dot'),
+    publishedElement(
+      'strong',
+      '',
+      passedLevel
+        ? `اجتزت مستوى ${session.cefrLevel}.`
+        : 'حددنا أفضل نقطة لبداية رحلتك.'
+    ),
+    publishedElement(
+      'p',
+      '',
+      passedLevel
+        ? 'تم حفظ نتيجة المستوى وفتح المستوى التالي دون بدء اختبار جديد تلقائيًا.'
+        : `أساسياتك جيدة. أفضل نقطة تبدأ منها هي رتبة «${rankName}».`
+    ),
+    publishedElement(
+      'span',
+      'published-placement-result-score',
+      `${Number(session.correctCount) || 0} / ${(session.answers || []).length}`
+    )
+  );
+
+  const savePanel = publishedElement('div', 'published-level-save-panel');
+  savePanel.append(publishedElement('strong', '', 'هل تريد حفظ كلمات الاختبار للمراجعة؟'));
+  const saveActions = publishedElement('div', 'published-placement-resume-actions');
+  const pendingWordIds = session.saveWordPendingIds || [];
+  const saveChoiceResolved = session.saveWordChoice !== 'undecided';
+  const saveDecisionComplete = saveChoiceResolved && pendingWordIds.length === 0;
+  if (pendingWordIds.length) {
+    saveActions.append(publishedButton(
+      'إعادة حفظ الكلمات المتعثرة',
+      'published-action-btn published-placement-primary',
+      () => savePublishedLevelPlacementWords(bundle, session.saveWordChoice),
+      'fa-solid fa-rotate-right'
+    ));
+  } else if (!saveChoiceResolved) {
+    saveActions.append(
+      publishedButton(
+        'حفظ الكلمات التي أخطأت بها فقط',
+        'published-action-btn published-placement-primary',
+        () => savePublishedLevelPlacementWords(bundle, 'incorrect-only'),
+        'fa-solid fa-bookmark'
+      ),
+      publishedButton(
+        'حفظ جميع كلمات الاختبار',
+        'published-action-btn',
+        () => savePublishedLevelPlacementWords(bundle, 'all'),
+        'fa-solid fa-layer-group'
+      ),
+      publishedButton(
+        'عدم حفظ الكلمات',
+        'published-action-btn published-placement-secondary',
+        () => savePublishedLevelPlacementWords(bundle, 'none'),
+        'fa-solid fa-ban'
+      )
+    );
+  } else {
+    const summary = session.saveWordSummary || {};
+    savePanel.append(publishedElement(
+      'span',
+      'published-level-save-summary',
+      session.saveWordChoice === 'none'
+        ? 'اخترت عدم حفظ كلمات الاختبار.'
+        : levelPlacementSaveSummaryText(summary)
+    ));
+    if (session.saveWordChoice !== 'none' && (session.saveWordSavedIds || []).length) {
+      saveActions.append(publishedButton(
+        'إنشاء عالم للكلمات',
+        'published-action-btn',
+        () => openLevelPlacementWorldSuggestion(bundle),
+        'fa-solid fa-plus'
+      ));
+    }
+  }
+  savePanel.append(saveActions);
+  section.append(savePanel);
+
+  const actions = publishedElement('div', 'published-placement-resume-actions');
+  if (saveDecisionComplete && passedLevel && session.nextCefrLevel) {
+    actions.append(publishedButton(
+      `اختبار مستوى ${session.nextCefrLevel}`,
+      'published-action-btn published-placement-primary',
+      () => continueToNextPublishedLevel(bundle),
+      'fa-solid fa-chart-line'
+    ));
+  } else if (
+    saveDecisionComplete &&
+    session.recommendedStartRankId &&
+    session.recommendedStartGateId
+  ) {
+    actions.append(publishedButton(
+      'ابدأ من هذه الرتبة',
+      'published-action-btn published-placement-primary',
+      () => beginPublishedJourneyAtLevelResult(bundle),
+      'fa-solid fa-play'
+    ));
+  }
+  actions.append(
+    publishedButton(
+      publishedContentState.levelPlacementReviewOpen ? 'إخفاء النتيجة' : 'مراجعة النتيجة',
+      'published-action-btn',
+      () => {
+        publishedContentState.levelPlacementReviewOpen = !publishedContentState.levelPlacementReviewOpen;
+        renderPublishedLevelPlacementResult(bundle);
+      },
+      'fa-solid fa-list-check'
+    ),
+    publishedButton(
+      'التوقف هنا',
+      'published-action-btn published-placement-secondary',
+      () => pausePublishedLevelPlacement(bundle),
+      'fa-regular fa-clock'
+    )
+  );
+  section.append(actions);
+  appendPublishedLevelPlacementStats(section, session);
+  root.replaceChildren(section);
+}
+
+function levelPlacementSaveSummaryText(summary) {
+  const parts = [
+    `${Number(summary?.created) || 0} جديدة`,
+    `${Number(summary?.sourceLinked) || 0} موجودة وربطناها بالاختبار`,
+    `${Number(summary?.alreadyLinked) || 0} مرتبطة مسبقًا`,
+  ];
+  if (Number(summary?.restoredReady) > 0) {
+    parts.push(`استعدنا ${Number(summary.restoredReady)} مخفية مع تقدمها`);
+  }
+  return `تم حفظ كلمات الاختبار: ${parts.join('، ')}.`;
+}
+
+async function savePublishedLevelPlacementWords(bundle, choice) {
+  if (publishedContentState.levelPlacementPending) return;
+  publishedContentState.levelPlacementPending = true;
+  try {
+    const result = await getJourneyCloudApi().saveLevelPlacementWords(
+      bundle.journey.worldId,
+      bundle.session.assessmentId,
+      choice
+    );
+    publishedContentState.levelPlacementPending = false;
+    const next = { ...bundle, session: result.session };
+    publishedContentState.levelPlacementBundle = next;
+    const summary = result.summary;
+    const message = result.partial
+      ? `تم حفظ ${result.saved} من ${result.total} كلمات. تعذر حفظ ${result.failures.length} ويمكنك إعادة المحاولة.`
+      : (choice === 'none'
+        ? 'لم تُحفظ أي كلمة من الاختبار.'
+        : levelPlacementSaveSummaryText(summary));
+    showToast(message, result.partial ? 'warning' : 'success', 6200);
+    renderPublishedLevelPlacementResult(next);
+  } catch (error) {
+    publishedContentState.levelPlacementPending = false;
+    showToast(publishedJourneyErrorText(error), 'danger', 5200);
+    renderPublishedLevelPlacementResult(bundle);
+  }
+}
+
+async function beginPublishedJourneyAtLevelResult(bundle) {
+  const journey = await getJourneyCloudApi().finishLevelPlacement(
+    bundle.journey.worldId,
+    bundle.session.assessmentId,
+    'complete'
+  );
+  publishedContentState.journey = journey;
+  publishedContentState.activeJourney = journey;
+  window.openPublishedGate(journey.worldId, journey.activeRankId, journey.activeGateId);
+}
+
+async function continueToNextPublishedLevel(bundle) {
+  const journey = await getJourneyCloudApi().finishLevelPlacement(
+    bundle.journey.worldId,
+    bundle.session.assessmentId,
+    'complete'
+  );
+  publishedContentState.journey = journey;
+  publishedContentState.activeJourney = journey;
+  await beginPublishedLevelPlacement(bundle.world, bundle.session.nextCefrLevel);
+}
+
+async function pausePublishedLevelPlacement(bundle) {
+  await getJourneyCloudApi().finishLevelPlacement(
+    bundle.journey.worldId,
+    bundle.session.assessmentId,
+    'pause'
+  );
+  setPublishedPlacementMode(false);
+  window.openPublishedWorldsRoot();
+}
+
+function renderPublishedLevelPlacementExit(bundle) {
+  const root = publishedViewRoot();
+  if (!root) return;
+  setPublishedPlacementMode(false);
+  const section = publishedElement('section', 'published-placement-exit-view');
+  section.append(
+    publishedIcon('fa-solid fa-door-open'),
+    publishedElement('strong', '', 'ماذا تريد أن تفعل؟'),
+    publishedElement('p', '', 'يمكنك متابعة الاختبار من السؤال نفسه لاحقًا، أو إلغاؤه صراحةً.')
+  );
+  const actions = publishedElement('div', 'published-placement-exit-actions');
+  actions.append(
+    publishedButton('متابعة الاختبار', 'published-action-btn published-placement-primary', () => renderPublishedLevelPlacementAssessment(bundle), 'fa-solid fa-play'),
+    publishedButton('متابعة لاحقًا', 'published-action-btn', () => window.openPublishedWorld(bundle.journey.worldId), 'fa-regular fa-clock'),
+    publishedButton('إلغاء الاختبار', 'published-action-btn published-placement-secondary', () => abandonPublishedLevelPlacement(bundle), 'fa-solid fa-xmark')
+  );
+  section.append(actions);
+  root.replaceChildren(section);
+}
+
+async function abandonPublishedLevelPlacement(bundle) {
+  if (!window.confirm('إلغاء اختبار المستوى؟ ستبقى رحلة العالم محفوظة.')) return;
+  await getJourneyCloudApi().abandonLevelPlacement(bundle.journey.worldId);
+  setPublishedPlacementMode(false);
+  window.openPublishedWorld(bundle.journey.worldId);
+}
+
+function openLevelPlacementWorldSuggestion(bundle) {
+  window.__pendingLevelPlacementWorldContext = {
+    assessmentId: bundle.session.assessmentId,
+    worldId: bundle.session.worldId,
+    cefrLevel: bundle.session.cefrLevel,
+    selectedContentWordIds: bundle.session.selectedContentWordIds,
+  };
+  window.openCustomWorldModal({
+    suggestedName: `ثغراتي في ${bundle.session.cefrLevel}`,
+    suggestedDescription: 'كلمات من اختبار تحديد المستوى',
+    levelPlacementAssessmentId: bundle.session.assessmentId,
+  });
 }
 
 function updatePublishedGateProgressText(progress) {
@@ -2717,21 +3257,14 @@ function makePublishedJourneyPanel(world, ranks, journey, activeJourney) {
   );
   if (choosing) {
     const choices = publishedElement('div', 'published-journey-start-choices');
-    const placement = publishedButton(
-      'ابدأ اختبار تحديد المستوى',
-      'published-action-btn published-journey-btn published-journey-cta',
-      () => beginPublishedPlacement(world),
-      'fa-solid fa-location-crosshairs'
-    );
     const beginning = publishedButton(
       'ابدأ من البداية',
-      'published-action-btn published-journey-btn',
+      'published-action-btn published-journey-btn published-journey-cta',
       () => beginPublishedJourneyFromStart(world),
       'fa-solid fa-forward-step'
     );
-    placement.disabled = !firstRank;
     beginning.disabled = !firstRank;
-    choices.append(placement, beginning);
+    choices.append(beginning);
     panel.append(choices);
   } else {
   const button = publishedButton(
@@ -2856,21 +3389,14 @@ function makePublishedGateJourneyPanel(world, rank, gate) {
     locked.disabled = true;
     actions.append(locked);
   } else if (needsPlacementChoice) {
-    const placement = publishedButton(
-      pending ? 'جارٍ تجهيز الاختبار' : 'اختبار تحديد المستوى',
-      'published-action-btn published-journey-btn published-journey-cta',
-      () => beginPublishedPlacement(world),
-      pending ? 'fa-solid fa-circle-notch fa-spin' : 'fa-solid fa-location-crosshairs'
-    );
     const beginning = publishedButton(
       pending ? 'جارٍ تجهيز الرحلة' : 'ابدأ من البداية',
-      'published-action-btn published-journey-btn',
+      'published-action-btn published-journey-btn published-journey-cta',
       () => beginPublishedJourneyFromStart(world),
       pending ? 'fa-solid fa-circle-notch fa-spin' : 'fa-solid fa-forward-step'
     );
-    placement.disabled = pending;
     beginning.disabled = pending;
-    actions.append(placement, beginning);
+    actions.append(beginning);
   } else if (!publishedContentState.journey || !activeForWorld) {
     const start = publishedButton(
       pending ? 'جارٍ تجهيز الرحلة' : 'ابدأ الرحلة',
@@ -3033,6 +3559,76 @@ function renderPublishedWorlds(items, activeJourney) {
   root.replaceChildren(content);
 }
 
+function makePublishedLevelSection(world, cefrLevel, ranks, journey) {
+  const schema = window.LootLinguaContentSchema;
+  const meta = schema.CEFR_LEVEL_META[cefrLevel];
+  const state = publishedLevelState(cefrLevel, journey);
+  const section = publishedElement(
+    'section',
+    `published-level-section published-level-${cefrLevel.toLowerCase()} published-level-state-${state}`
+  );
+  const header = publishedElement('header', 'published-level-header');
+  const copy = publishedElement('div', 'published-level-header-copy');
+  copy.append(
+    publishedElement('strong', '', meta.label),
+    publishedElement('span', '', meta.name),
+    publishedElement('small', '', meta.description)
+  );
+  const gateCount = ranks.reduce((sum, rank) => sum + (Number(rank.gateCount) || 0), 0);
+  const wordCount = ranks.reduce((sum, rank) => sum + (Number(rank.wordCount) || 0), 0);
+  const summary = publishedElement('div', 'published-level-summary');
+  summary.append(publishedElement(
+    'span',
+    '',
+    `${ranks.length} رتب · ${gateCount} بوابة${wordCount ? ` · ${wordCount} كلمة` : ''}`
+  ));
+  if (cefrLevel !== 'unclassified') {
+    const labels = {
+      locked: 'اختبار المستوى مقفل',
+      available: `اختبار مستوى ${cefrLevel}`,
+      'in-progress': 'متابعة اختبار المستوى',
+      passed: 'تم اجتياز المستوى',
+      'partially-passed': 'متابعة من نقطة البداية',
+    };
+    const button = publishedButton(
+      labels[state] || `اختبار مستوى ${cefrLevel}`,
+      'published-action-btn published-level-test-btn',
+      () => {
+        if (state === 'in-progress') showPublishedLevelPlacementResume(world.worldId);
+        else if (state === 'partially-passed' && journey?.activeRankId && journey?.activeGateId) {
+          window.openPublishedGate(world.worldId, journey.activeRankId, journey.activeGateId);
+        }
+        else beginPublishedLevelPlacement(world, cefrLevel);
+      },
+      state === 'passed'
+        ? 'fa-solid fa-circle-check'
+        : (state === 'locked' ? 'fa-solid fa-lock' : 'fa-solid fa-location-crosshairs')
+    );
+    button.disabled = state === 'locked' || state === 'passed' ||
+      publishedContentState.levelPlacementPending;
+    summary.append(button);
+  }
+  header.append(copy, summary);
+  section.append(header);
+  const grid = publishedElement('div', 'published-card-grid published-level-rank-grid');
+  const initialRank = firstJourneyRank(ranks);
+  ranks.forEach((rank) => {
+    const rankState = (
+      journey
+        ? getJourneyContract().canAccessRank(rank, journey)
+        : String(rank.rankId || '') === String(initialRank?.rankId || '')
+    ) ? 'available' : 'locked';
+    grid.append(makePublishedHierarchyCard(
+      'rank',
+      rank,
+      () => window.openPublishedRank(world.worldId, rank.rankId),
+      { journeyState: rankState }
+    ));
+  });
+  section.append(grid);
+  return section;
+}
+
 function renderPublishedRanks(world, ranks, journey, activeJourney) {
   const root = publishedViewRoot();
   if (!root) return;
@@ -3056,24 +3652,13 @@ function renderPublishedRanks(world, ranks, journey, activeJourney) {
   if (!ranks.length) {
     section.append(renderPublishedEmpty('لا توجد رتب منشورة في هذا العالم.', 'fa-solid fa-ranking-star'));
   } else {
-    const grid = publishedElement('div', 'published-card-grid');
-    const initialRank = firstJourneyRank(ranks);
-    ranks.forEach((rank) => {
-      const rankState = (
-        journey
-          ? getJourneyContract().canAccessRank(rank, journey)
-          : String(rank.rankId || '') === String(initialRank?.rankId || '')
-      )
-        ? 'available'
-        : 'locked';
-      grid.append(makePublishedHierarchyCard(
-        'rank',
-        rank,
-        () => window.openPublishedRank(world.worldId, rank.rankId),
-        { journeyState: rankState }
-      ));
+    const groups = window.LootLinguaContentSchema.groupRanksByCefrLevel(ranks);
+    window.LootLinguaContentSchema.CEFR_LEVELS.forEach((level) => {
+      const levelRanks = groups.get(level) || [];
+      if (levelRanks.length) {
+        section.append(makePublishedLevelSection(world, level, levelRanks, journey));
+      }
     });
-    section.append(grid);
   }
   content.append(section);
   root.replaceChildren(content);
@@ -3353,9 +3938,11 @@ function renderPublishedGateWords(world, rank, gate, snapshot) {
     publishedContentState.journey,
     publishedContentState.gateProgress
   );
-  if (gateState === 'locked') {
+  if (!canRevealPublishedGateWords(gateState, publishedContentState.journey)) {
     section.append(renderPublishedEmpty(
-      'أكمل البوابة السابقة لفتح كلمات هذه البوابة.',
+      gateState === 'locked'
+        ? 'أكمل البوابة السابقة لفتح كلمات هذه البوابة.'
+        : 'تظهر كلمات هذه البوابة بعد بدء التعلم.',
       'fa-solid fa-lock'
     ));
     root.replaceChildren(section);
@@ -3606,6 +4193,9 @@ async function loadPublishedRouteData(route, options) {
       publishedContentState.ranks = ranks;
       publishedContentState.journey = journeyContext.journey;
       publishedContentState.activeJourney = journeyContext.activeJourney;
+      if (await maybeRenderPublishedLevelPlacementResume(journeyContext.journey, generation)) {
+        return;
+      }
       if (await maybeRenderPublishedPlacementResume(journeyContext.journey, generation)) {
         return;
       }
@@ -3639,6 +4229,9 @@ async function loadPublishedRouteData(route, options) {
       publishedContentState.journey = journeyContext.journey;
       publishedContentState.activeJourney = journeyContext.activeJourney;
       publishedContentState.gateProgressById = gateProgressById;
+      if (await maybeRenderPublishedLevelPlacementResume(journeyContext.journey, generation)) {
+        return;
+      }
       if (await maybeRenderPublishedPlacementResume(journeyContext.journey, generation)) {
         return;
       }
@@ -3678,6 +4271,9 @@ async function loadPublishedRouteData(route, options) {
     if (gateProgress) {
       publishedContentState.gateProgressById.set(String(params.gateId), gateProgress);
     }
+    if (await maybeRenderPublishedLevelPlacementResume(journeyContext.journey, generation)) {
+      return;
+    }
     if (await maybeRenderPublishedPlacementResume(journeyContext.journey, generation)) {
       return;
     }
@@ -3689,7 +4285,7 @@ async function loadPublishedRouteData(route, options) {
       journeyContext.journey,
       gateProgress
     );
-    if (gateState === 'locked') {
+    if (!canRevealPublishedGateWords(gateState, journeyContext.journey)) {
       renderPublishedGateWords(world, rank, gate, null);
       return;
     }
@@ -3852,8 +4448,18 @@ window.openCustomWorldModal = function(options = {}) {
   if (title) title.textContent = world ? 'تعديل العالم' : 'إنشاء عالم جديد';
   if (saveBtn) saveBtn.textContent = world ? 'حفظ التعديل' : 'إنشاء عالم';
   if (icon) icon.textContent = world?.emoji || '+';
-  if (nameInput) nameInput.value = world?.name || '';
-  if (descInput) descInput.value = world?.description || '';
+  if (nameInput) nameInput.value = world?.name || String(options.suggestedName || '');
+  if (descInput) descInput.value = world?.description || String(options.suggestedDescription || '');
+  if (options.levelPlacementAssessmentId) {
+    document.getElementById('customWorldModal')?.setAttribute(
+      'data-level-placement-assessment-id',
+      String(options.levelPlacementAssessmentId)
+    );
+  } else {
+    document.getElementById('customWorldModal')?.removeAttribute(
+      'data-level-placement-assessment-id'
+    );
+  }
   setEmojiPickerValue(world?.emoji || '📘');
   showModal('customWorldModal');
   setTimeout(() => nameInput?.focus(), 60);
