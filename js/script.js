@@ -582,14 +582,14 @@ window.enterSelectionMode = function(id) {
   render();
 };
 
-window.exitBulkDeleteMode = function() {
+window.exitBulkDeleteMode = function(options = {}) {
   if (isReorderMode) isReorderMode = false;
   isBulkDeleteMode = false;
   bulkSelectedWordIds.clear();
   selectedIndices = [];
   document.body.classList.remove('selection-mode-active');
   clearBulkSelectionInDom();
-  render();
+  if (options.renderView !== false) render();
 };
 
 window.exitSelectionMode = window.exitBulkDeleteMode;
