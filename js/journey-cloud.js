@@ -1028,7 +1028,7 @@ async function makePlacementBundle(journey, session) {
     !journey ||
     journey.placementStatus !== 'active' ||
     !session ||
-    !['active', 'submitting'].includes(session.status) ||
+    !['active', 'submitting', 'completed'].includes(session.status) ||
     String(journey.activePlacementAssessmentId || '') !== String(session.assessmentId || '') ||
     String(journey.activeRankId || '') !== String(session.rankId || '') ||
     String(journey.activeGateId || '') !== String(session.currentGateId || '')
