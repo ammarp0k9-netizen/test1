@@ -28,6 +28,26 @@
     assessmentVersion: 1
   });
 
+  var CEFR_LEVELS = Object.freeze([
+    'A1',
+    'A2',
+    'B1',
+    'B2',
+    'C1',
+    'C2',
+    'unclassified'
+  ]);
+
+  var CEFR_LEVEL_META = deepFreeze({
+    A1: { label: 'A1', name: 'المستوى المبتدئ', description: 'أساسيات اللغة والمواقف اليومية البسيطة.' },
+    A2: { label: 'A2', name: 'المبتدئ الأعلى', description: 'تواصل يومي أوسع ومفردات أكثر استقلالًا.' },
+    B1: { label: 'B1', name: 'المستوى المتوسط', description: 'فهم المواقف الشائعة والتعبير بوضوح.' },
+    B2: { label: 'B2', name: 'المتوسط الأعلى', description: 'تواصل مرن وفهم محتوى أكثر تعقيدًا.' },
+    C1: { label: 'C1', name: 'المستوى المتقدم', description: 'استخدام دقيق ومرن للغة في سياقات متنوعة.' },
+    C2: { label: 'C2', name: 'مستوى الإتقان', description: 'فهم متقدم وتعبير شديد الدقة.' },
+    unclassified: { label: 'غير مصنف', name: 'محتوى غير مصنف', description: 'رتب قديمة لم تُربط بمستوى لغوي بعد.' }
+  });
+
   var START_RANK_COPY = deepFreeze({
     actionLabel: 'ابدأ الرتبة',
     description: 'ستنضم جميع كلمات هذه الرتبة إلى رحلة مراجعتك تدريجيًا.',
@@ -430,6 +450,38 @@
     };
   }
 
+  function normalizeCefrLevel(value) {
+    var level = String(value || '').trim();
+    return CEFR_LEVELS.indexOf(level) >= 0 ? level : 'unclassified';
+  }
+
+  function getCefrLevelOrder(value) {
+    var index = CEFR_LEVELS.indexOf(normalizeCefrLevel(value));
+    return index < 0 ? CEFR_LEVELS.length - 1 : index;
+  }
+
+  function comparePublishedRanks(left, right) {
+    var levelOrder = getCefrLevelOrder(left && left.cefrLevel) -
+      getCefrLevelOrder(right && right.cefrLevel);
+    if (levelOrder) return levelOrder;
+    var leftOrder = Number(left && left.order);
+    var rightOrder = Number(right && right.order);
+    var safeLeft = Number.isFinite(leftOrder) ? leftOrder : Number.MAX_SAFE_INTEGER;
+    var safeRight = Number.isFinite(rightOrder) ? rightOrder : Number.MAX_SAFE_INTEGER;
+    if (safeLeft !== safeRight) return safeLeft - safeRight;
+    return String(left && (left.rankId || left.id) || '')
+      .localeCompare(String(right && (right.rankId || right.id) || ''), 'en');
+  }
+
+  function groupRanksByCefrLevel(ranks) {
+    var groups = new Map();
+    CEFR_LEVELS.forEach(function createLevel(level) { groups.set(level, []); });
+    (Array.isArray(ranks) ? ranks : []).slice().sort(comparePublishedRanks).forEach(function addRank(rank) {
+      groups.get(normalizeCefrLevel(rank && rank.cefrLevel)).push(rank);
+    });
+    return groups;
+  }
+
   function cleanSchemaVersion(raw, context, path) {
     if (raw === undefined || raw === null || raw === '') return SCHEMA_VERSION;
     if (raw !== SCHEMA_VERSION) {
@@ -597,7 +649,7 @@
     var source = getObjectInput(input, context, path);
     checkUnknownFields(source, new Set([
       'schemaVersion', 'worldId', 'rankId', 'id', 'title', 'subtitle',
-      'description', 'order', 'difficulty', 'status', 'version', 'gateCount', 'wordCount',
+      'description', 'order', 'difficulty', 'cefrLevel', 'status', 'version', 'gateCount', 'wordCount',
       'unlockConfig', 'createdAt', 'updatedAt', 'createdBy', 'updatedBy'
     ]), context, path);
 
@@ -610,6 +662,7 @@
       description: cleanString(source.description, { max: LIMITS.description }, context, path + '.description'),
       order: cleanInteger(source.order, 0, 0, LIMITS.order, context, path + '.order'),
       difficulty: cleanString(source.difficulty, { max: LIMITS.token, singleLine: true }, context, path + '.difficulty'),
+      cefrLevel: cleanEnum(source.cefrLevel, CEFR_LEVELS, 'unclassified', context, path + '.cefrLevel'),
       status: cleanEnum(source.status, CONTENT_STATUSES, 'draft', context, path + '.status'),
       version: cleanInteger(source.version, 1, 1, LIMITS.count, context, path + '.version'),
       gateCount: cleanInteger(source.gateCount, 0, 0, LIMITS.count, context, path + '.gateCount'),
@@ -1274,12 +1327,18 @@
     UNLOCK_MODES: UNLOCK_MODES,
     DEFAULT_UNLOCK_CONFIG: DEFAULT_UNLOCK_CONFIG,
     ENTRY_ASSESSMENT_DEFAULTS: ENTRY_ASSESSMENT_DEFAULTS,
+    CEFR_LEVELS: CEFR_LEVELS,
+    CEFR_LEVEL_META: CEFR_LEVEL_META,
     START_RANK_COPY: START_RANK_COPY,
     LIMITS: LIMITS,
     SchemaValidationError: SchemaValidationError,
     normalizeWord: normalizeWord,
     getWordMasteryKey: getWordMasteryKey,
     normalizeWordIdentity: normalizeWordIdentity,
+    normalizeCefrLevel: normalizeCefrLevel,
+    getCefrLevelOrder: getCefrLevelOrder,
+    comparePublishedRanks: comparePublishedRanks,
+    groupRanksByCefrLevel: groupRanksByCefrLevel,
     resolveEntryAssessmentPassRatio: resolveEntryAssessmentPassRatio,
     containsRawHtml: containsRawHtml,
     validateSafeValue: validateSafeValue,
