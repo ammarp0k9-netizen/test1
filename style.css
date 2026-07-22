@@ -11548,3 +11548,43 @@ body.onboarding-active .onboarding-active-target {
     grid-column: 1 / -1;
   }
 }
+.operation-status {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  width: 100%;
+  min-height: 48px;
+  padding: 10px 14px;
+  color: var(--text-main);
+  background: color-mix(in srgb, var(--surface) 88%, transparent);
+  border: 1px solid color-mix(in srgb, var(--border) 78%, transparent);
+  border-radius: 8px;
+  font-size: 0.92rem;
+}
+
+.operation-status-long-wait,
+.operation-status-partial-success {
+  border-color: color-mix(in srgb, var(--star) 55%, var(--border));
+}
+
+.operation-status-retryable-error {
+  border-color: color-mix(in srgb, var(--danger) 62%, var(--border));
+}
+
+.operation-status-completed {
+  border-color: color-mix(in srgb, var(--success) 58%, var(--border));
+}
+
+.operation-status-retry {
+  display: inline-grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  flex: 0 0 34px;
+  color: inherit;
+  background: transparent;
+  border: 1px solid currentColor;
+  border-radius: 50%;
+  cursor: pointer;
+}
