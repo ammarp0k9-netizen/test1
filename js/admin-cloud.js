@@ -80,6 +80,7 @@ const RANK_EDITABLE_FIELDS = Object.freeze([
   'description',
   'order',
   'difficulty',
+  'cefrLevel',
   'status',
   'unlockConfig',
 ]);
@@ -1104,14 +1105,7 @@ function compareWorlds(left, right) {
 }
 
 function compareRanks(left, right) {
-  const leftOrder = Number.isSafeInteger(left.order) ? left.order : Number.MAX_SAFE_INTEGER;
-  const rightOrder = Number.isSafeInteger(right.order) ? right.order : Number.MAX_SAFE_INTEGER;
-  if (leftOrder !== rightOrder) return leftOrder - rightOrder;
-  const byTitle = String(left.title || '').localeCompare(String(right.title || ''), undefined, {
-    sensitivity: 'base',
-    numeric: true,
-  });
-  return byTitle || String(left.rankId).localeCompare(String(right.rankId));
+  return getContentSchema().comparePublishedRanks(left, right);
 }
 
 function compareGates(left, right) {
