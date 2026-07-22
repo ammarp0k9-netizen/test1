@@ -2241,12 +2241,16 @@ async function answerLevelPlacementQuestion(worldId, assessmentId, selectedQuest
   const sessionRef = levelPlacementSessionRef(user.uid, world, assessment);
   const journeyReference = journeyRef(user.uid, world);
   let preview = null;
+  let savedJourney = null;
+  let savedSession = null;
+  const trace = window.LootLinguaOperations?.startTrace('level-placement-answer');
   try {
     await runTransaction(db, async (transaction) => {
       const [journeySnapshot, sessionSnapshot] = await Promise.all([
         transaction.get(journeyReference),
         transaction.get(sessionRef),
       ]);
+      trace?.count('firestoreReads', 2);
       const journey = journeySnapshot.data() || {};
       const session = sessionSnapshot.data() || {};
       if (
@@ -2263,6 +2267,8 @@ async function answerLevelPlacementQuestion(worldId, assessmentId, selectedQuest
       preview = levelPlacementCore().answerSession(session, selectedQuestionId);
       const roundComplete = preview.currentQuestionIndex === preview.orderedQuestionIds.length;
       const next = roundComplete ? levelPlacementCore().finalizeRound(preview) : preview;
+      savedJourney = { ...journey, worldId: world };
+      savedSession = { ...next, assessmentId: assessment, worldId: world };
       transaction.update(sessionRef, {
         status: next.status,
         currentQuestionIndex: next.currentQuestionIndex,
@@ -2283,26 +2289,35 @@ async function answerLevelPlacementQuestion(worldId, assessmentId, selectedQuest
           : {}),
         updatedAt: serverTimestamp(),
       });
+      trace?.count('firestoreWrites');
     });
   } catch (error) {
+    trace?.warn(error?.code || error?.message || 'level-placement-answer-failed')
+      .end({ failed: true });
     throw journeyOperationError(error, 'save-level-placement-answer', {
       uid: user.uid,
       worldId: world,
       assessmentId: assessment,
     });
   }
-  resetCache(user.uid);
-  let journey = await getJourney(world, { force: true });
-  cache.active = journey;
-  let session = await getLevelPlacementSession(world, assessment, { force: true });
-  if (session.status === 'awaiting-decision') {
+  cache.journeys.set(world, savedJourney);
+  cache.active = savedJourney;
+  cache.levelPlacementSessions.set(`${world}/${assessment}`, savedSession);
+  trace?.stage('transaction-complete');
+  if (savedSession.status === 'awaiting-decision') {
+    trace?.stage('round-complete').end({ finalQuestion: true });
     return applyLevelPlacementResult(world, assessment);
   }
-  return {
-    ...(await makeLevelPlacementBundle(journey, session)),
+  const bundle = {
+    ...(await makeLevelPlacementBundle(savedJourney, savedSession)),
     correct: Boolean(preview?.answers?.at(-1)?.correct),
-    adaptiveStarted: session.adaptiveRound > Number(preview?.adaptiveRound || 0),
+    adaptiveStarted: savedSession.adaptiveRound > Number(preview?.adaptiveRound || 0),
   };
+  trace?.stage('bundle-ready').end({
+    pageIndex: savedSession.currentQuestionIndex,
+    avoidedForcedReads: 2,
+  });
+  return bundle;
 }
 
 async function saveLevelPlacementWords(worldId, assessmentId, choice) {
