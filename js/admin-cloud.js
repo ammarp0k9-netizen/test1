@@ -2,18 +2,24 @@ import { getApps } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app
 import { getAuth } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js";
 import {
   collection,
-  collectionGroup,
+  deleteDoc,
   doc,
   documentId,
+  endBefore,
+  getCountFromServer,
   getDoc,
   getDocs,
   getFirestore,
+  increment,
   limit,
+  limitToLast,
   orderBy,
   query,
   runTransaction,
   serverTimestamp,
   startAfter,
+  Timestamp,
+  updateDoc,
   where,
 } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
 import {
@@ -26,6 +32,7 @@ const auth = app ? getAuth(app) : null;
 const db = app ? getFirestore(app) : null;
 const functions = app ? getFunctions(app) : null;
 const contentWorlds = db ? collection(db, 'content_worlds') : null;
+const contentWordImportStaging = db ? collection(db, 'content_word_import_staging') : null;
 const deleteContentWorld = functions ? httpsCallable(functions, 'deleteContentWorld') : null;
 const duplicateContentRank = functions ? httpsCallable(functions, 'duplicateContentRank') : null;
 const deleteContentRank = functions ? httpsCallable(functions, 'deleteContentRank') : null;
@@ -73,6 +80,7 @@ const RANK_EDITABLE_FIELDS = Object.freeze([
   'description',
   'order',
   'difficulty',
+  'cefrLevel',
   'status',
   'unlockConfig',
 ]);
@@ -154,7 +162,53 @@ const WORD_INPUT_FIELDS = new Set([
 const WORD_PAGE_SIZE_DEFAULT = 50;
 const WORD_PAGE_SIZE_MAX = 100;
 const BULK_WORD_LIMIT = 100;
+const MAX_GATE_DRAFT_PUBLISH_BATCHES = 100;
 const WORD_CURSOR_PREFIX = 'llw1_';
+const STAGING_CURSOR_PREFIX = 'lls1_';
+const STAGING_IMPORT_LIMIT = 100;
+const WORD_SORTS = Object.freeze({
+  newest: Object.freeze([
+    Object.freeze({ field: 'createdAt', direction: 'desc' }),
+  ]),
+  oldest: Object.freeze([
+    Object.freeze({ field: 'createdAt', direction: 'asc' }),
+  ]),
+  order: Object.freeze([
+    Object.freeze({ field: 'order', direction: 'asc' }),
+  ]),
+  'word-asc': Object.freeze([
+    Object.freeze({ field: 'normalizedWord', direction: 'asc' }),
+  ]),
+  'word-desc': Object.freeze([
+    Object.freeze({ field: 'normalizedWord', direction: 'desc' }),
+  ]),
+  updated: Object.freeze([
+    Object.freeze({ field: 'updatedAt', direction: 'desc' }),
+  ]),
+});
+const STAGING_SORTS = Object.freeze({
+  newest: Object.freeze([
+    Object.freeze({ field: 'importedAt', direction: 'desc' }),
+    Object.freeze({ field: 'importBatchId', direction: 'desc' }),
+    Object.freeze({ field: 'sourceOrder', direction: 'asc' }),
+  ]),
+  oldest: Object.freeze([
+    Object.freeze({ field: 'importedAt', direction: 'asc' }),
+    Object.freeze({ field: 'importBatchId', direction: 'asc' }),
+    Object.freeze({ field: 'sourceOrder', direction: 'asc' }),
+  ]),
+  'file-order': Object.freeze([
+    Object.freeze({ field: 'sourceFileName', direction: 'asc' }),
+    Object.freeze({ field: 'importBatchId', direction: 'asc' }),
+    Object.freeze({ field: 'sourceOrder', direction: 'asc' }),
+  ]),
+  'word-asc': Object.freeze([
+    Object.freeze({ field: 'normalizedWord', direction: 'asc' }),
+  ]),
+  'word-desc': Object.freeze([
+    Object.freeze({ field: 'normalizedWord', direction: 'desc' }),
+  ]),
+});
 const BASE64URL_ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_';
 let checkRevision = 0;
 let operationSequence = 0;
@@ -273,6 +327,16 @@ function mapAdminCloudError(error, fallbackCode) {
     conflict.sourceCode = sourceCode;
     return conflict;
   }
+  if (sourceCode === 'failed-precondition' || sourceCode === 'functions/failed-precondition') {
+    const message = String(error?.message || '');
+    const failedPrecondition = adminCloudError(
+      /\bindex\b/i.test(message) ? 'admin/index-required' : 'admin/failed-precondition',
+      message || 'The request requires a Firestore precondition that is not ready.',
+      error?.details
+    );
+    failedPrecondition.sourceCode = sourceCode;
+    return failedPrecondition;
+  }
   const mappedCodes = {
     'unauthenticated': 'admin/auth-required',
     'functions/unauthenticated': 'admin/auth-required',
@@ -284,8 +348,6 @@ function mapAdminCloudError(error, fallbackCode) {
     'functions/already-exists': 'admin/already-exists',
     'aborted': 'admin/conflict',
     'functions/aborted': 'admin/conflict',
-    'failed-precondition': 'admin/conflict',
-    'functions/failed-precondition': 'admin/conflict',
     'invalid-argument': 'admin/invalid-argument',
     'functions/invalid-argument': 'admin/invalid-argument',
     'deadline-exceeded': 'admin/timeout',
@@ -351,6 +413,21 @@ function getContentSchema() {
   return schema;
 }
 
+function getWordListDataApi() {
+  const api = window.LootLinguaWordListData;
+  if (
+    !api ||
+    typeof api.normalizeQuery !== 'function' ||
+    typeof api.createQuerySignature !== 'function'
+  ) {
+    throw adminCloudError(
+      'admin/query-normalizer-unavailable',
+      'The shared word-list query normalizer is unavailable.'
+    );
+  }
+  return api;
+}
+
 function requireWorldId(value) {
   const worldId = typeof value === 'string' ? value : '';
   if (!worldId || worldId.length > 128 || !/^[A-Za-z0-9][A-Za-z0-9_-]*$/.test(worldId)) {
@@ -387,8 +464,40 @@ function requireContentWordId(value) {
   return contentWordId;
 }
 
+function requireStagingWordId(value) {
+  const stagingWordId = typeof value === 'string' ? value : '';
+  if (
+    !stagingWordId ||
+    stagingWordId.length > 128 ||
+    !/^staging_[a-f0-9]{64}$/.test(stagingWordId)
+  ) {
+    throw adminCloudError('admin/invalid-argument', 'A valid stagingWordId is required.');
+  }
+  return stagingWordId;
+}
+
+function requireImportBatchId(value) {
+  const importBatchId = typeof value === 'string' ? value : '';
+  if (
+    !importBatchId ||
+    importBatchId.length > 128 ||
+    !/^[A-Za-z0-9][A-Za-z0-9_-]*$/.test(importBatchId)
+  ) {
+    throw adminCloudError('admin/invalid-argument', 'A valid importBatchId is required.');
+  }
+  return importBatchId;
+}
+
+function requireSourceFileName(value) {
+  const sourceFileName = typeof value === 'string' ? value.trim() : '';
+  if (!sourceFileName || sourceFileName.length > 240 || /[\u0000-\u001f\u007f]/.test(sourceFileName)) {
+    throw adminCloudError('admin/invalid-argument', 'A valid sourceFileName is required.');
+  }
+  return sourceFileName;
+}
+
 function requireWordPageSize(value) {
-  const pageSize = value === undefined ? WORD_PAGE_SIZE_DEFAULT : value;
+  const pageSize = Number(value === undefined ? WORD_PAGE_SIZE_DEFAULT : value);
   if (!Number.isSafeInteger(pageSize) || pageSize < 1 || pageSize > WORD_PAGE_SIZE_MAX) {
     throw adminCloudError(
       'admin/invalid-argument',
@@ -396,6 +505,60 @@ function requireWordPageSize(value) {
     );
   }
   return pageSize;
+}
+
+function requireWordListDirection(value) {
+  if (value === undefined) return 'forward';
+  if (value !== 'forward' && value !== 'backward') {
+    throw adminCloudError('admin/invalid-argument', 'direction must be forward or backward.');
+  }
+  return value;
+}
+
+function requireListSort(value, definitions, fallback) {
+  const sort = getWordListDataApi().normalizeQuery({
+    sourceType: 'list-sort',
+    sort: value,
+  }).sort || fallback;
+  if (!Object.prototype.hasOwnProperty.call(definitions, sort)) {
+    throw adminCloudError('admin/invalid-argument', 'The requested list sort is invalid.');
+  }
+  return sort;
+}
+
+function requireListFilters(value, allowedFields) {
+  const source = getWordListDataApi().normalizeQuery({
+    sourceType: 'list-filters',
+    filters: value,
+  }).filters;
+  requireOptions(source, allowedFields, 'List filters must be an object.', true);
+  const output = {};
+  Object.keys(source).forEach((field) => {
+    const filterValue = source[field];
+    if (
+      typeof filterValue !== 'string' ||
+      !filterValue.trim() ||
+      filterValue.length > 240
+    ) {
+      throw adminCloudError('admin/invalid-argument', 'List filter values must be non-empty strings.');
+    }
+    output[field] = filterValue.trim();
+  });
+  if (Object.keys(output).length > 1) {
+    throw adminCloudError(
+      'admin/unsupported-filter-combination',
+      'Use one server-side filter at a time to keep the index contract bounded.'
+    );
+  }
+  return Object.freeze(output);
+}
+
+function requirePrefixSearch(value) {
+  if (value === undefined || value === null || value === '') return '';
+  if (typeof value !== 'string' || value.length > 200) {
+    throw adminCloudError('admin/invalid-argument', 'Search text is invalid.');
+  }
+  return getContentSchema().normalizeWord(value);
 }
 
 function encodeBase64UrlAscii(value) {
@@ -418,7 +581,7 @@ function encodeBase64UrlAscii(value) {
 }
 
 function decodeBase64UrlAscii(value) {
-  if (!value || value.length > 1024 || !/^[A-Za-z0-9_-]+$/.test(value)) {
+  if (!value || value.length > 4096 || !/^[A-Za-z0-9_-]+$/.test(value)) {
     throw adminCloudError('admin/invalid-argument', 'The page cursor is invalid.');
   }
   let output = '';
@@ -443,24 +606,64 @@ function decodeBase64UrlAscii(value) {
   return output;
 }
 
-function encodeWordPageToken(worldId, rankId, gateId, word) {
-  return WORD_CURSOR_PREFIX + encodeBase64UrlAscii(JSON.stringify({
-    v: 1,
-    w: worldId,
-    r: rankId,
-    g: gateId,
-    o: word.order,
-    i: word.contentWordId,
+function serializeCursorValue(value) {
+  if (
+    value &&
+    typeof value === 'object' &&
+    Number.isSafeInteger(value.seconds) &&
+    Number.isSafeInteger(value.nanoseconds)
+  ) {
+    return { t: 'timestamp', s: value.seconds, n: value.nanoseconds };
+  }
+  if (typeof value === 'string') return { t: 'string', v: encodeURIComponent(value) };
+  if (typeof value === 'number' && Number.isFinite(value)) return { t: 'number', v: value };
+  throw adminCloudError('admin/corrupt-data', 'A paginated record has an invalid sort value.');
+}
+
+function deserializeCursorValue(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw adminCloudError('admin/invalid-argument', 'The page cursor contains invalid data.');
+  }
+  if (
+    value.t === 'timestamp' &&
+    Number.isSafeInteger(value.s) &&
+    Number.isSafeInteger(value.n) &&
+    value.n >= 0 &&
+    value.n < 1000000000
+  ) {
+    return new Timestamp(value.s, value.n);
+  }
+  if (value.t === 'string' && typeof value.v === 'string' && value.v.length <= 3000) {
+    try {
+      const decoded = decodeURIComponent(value.v);
+      if (decoded.length <= 500) return decoded;
+    } catch {
+      // Fall through to the canonical cursor error.
+    }
+  }
+  if (value.t === 'number' && typeof value.v === 'number' && Number.isFinite(value.v)) {
+    return value.v;
+  }
+  throw adminCloudError('admin/invalid-argument', 'The page cursor contains invalid data.');
+}
+
+function encodePageToken(prefix, scope, querySignature, sortFields, record, recordId) {
+  return prefix + encodeBase64UrlAscii(JSON.stringify({
+    v: 2,
+    s: scope,
+    q: querySignature,
+    k: sortFields.map((item) => serializeCursorValue(record[item.field])),
+    i: recordId,
   }));
 }
 
-function decodeWordPageToken(token, worldId, rankId, gateId) {
-  if (typeof token !== 'string' || !token.startsWith(WORD_CURSOR_PREFIX)) {
+function decodePageToken(token, prefix, scope, querySignature, sortFields, requireId) {
+  if (typeof token !== 'string' || !token.startsWith(prefix)) {
     throw adminCloudError('admin/invalid-argument', 'The page cursor is invalid.');
   }
   let cursor;
   try {
-    cursor = JSON.parse(decodeBase64UrlAscii(token.slice(WORD_CURSOR_PREFIX.length)));
+    cursor = JSON.parse(decodeBase64UrlAscii(token.slice(prefix.length)));
   } catch (error) {
     if (error?.code === 'admin/invalid-argument') throw error;
     throw adminCloudError('admin/invalid-argument', 'The page cursor is invalid.');
@@ -469,21 +672,48 @@ function decodeWordPageToken(token, worldId, rankId, gateId) {
     ? Object.keys(cursor).sort()
     : [];
   if (
-    keys.join(',') !== 'g,i,o,r,v,w' ||
-    cursor.v !== 1 ||
-    cursor.w !== worldId ||
-    cursor.r !== rankId ||
-    cursor.g !== gateId ||
-    !Number.isSafeInteger(cursor.o) ||
-    cursor.o < 0 ||
-    cursor.o > 1000000
+    keys.join(',') !== 'i,k,q,s,v' ||
+    cursor.v !== 2 ||
+    cursor.s !== scope ||
+    cursor.q !== querySignature ||
+    !Array.isArray(cursor.k) ||
+    cursor.k.length !== sortFields.length
   ) {
-    throw adminCloudError('admin/invalid-argument', 'The page cursor is invalid for this gate.');
+    throw adminCloudError('admin/invalid-argument', 'The page cursor is invalid for this query.');
   }
-  return Object.freeze({
-    order: cursor.o,
-    contentWordId: requireContentWordId(cursor.i),
-  });
+  return Object.freeze([
+    ...cursor.k.map(deserializeCursorValue),
+    requireId(cursor.i),
+  ]);
+}
+
+function encodeWordPageToken(worldId, rankId, gateId, querySignature, sortFields, word) {
+  return encodePageToken(
+    WORD_CURSOR_PREFIX,
+    `${worldId}/${rankId}/${gateId}`,
+    querySignature,
+    sortFields,
+    word,
+    word.contentWordId
+  );
+}
+
+function decodeWordPageToken(
+  token,
+  worldId,
+  rankId,
+  gateId,
+  querySignature,
+  sortFields
+) {
+  return decodePageToken(
+    token,
+    WORD_CURSOR_PREFIX,
+    `${worldId}/${rankId}/${gateId}`,
+    querySignature,
+    sortFields,
+    requireContentWordId
+  );
 }
 
 async function deriveContentWordId(normalizedWord, normalizationVersion) {
@@ -509,6 +739,11 @@ async function deriveContentWordId(normalizedWord, normalizationVersion) {
     byte.toString(16).padStart(2, '0')
   ).join('');
   return requireContentWordId(`word_${hex}`);
+}
+
+async function deriveStagingWordId(normalizedWord, normalizationVersion) {
+  const contentWordId = await deriveContentWordId(normalizedWord, normalizationVersion);
+  return requireStagingWordId(contentWordId.replace(/^word_/, 'staging_'));
 }
 
 function requireOperationId(value) {
@@ -818,6 +1053,36 @@ function wordsCollection(worldId, rankId, gateId) {
   return collection(doc(gatesCollection(worldId, rankId), gateId), 'words');
 }
 
+async function incrementWordCountersBestEffort(worldId, rankId, gateId, uid) {
+  try {
+    const results = await Promise.allSettled([
+      updateDoc(doc(contentWorlds, worldId), {
+        wordCount: increment(1),
+        updatedAt: serverTimestamp(),
+        updatedBy: uid,
+      }),
+      updateDoc(doc(ranksCollection(worldId), rankId), {
+        wordCount: increment(1),
+        updatedAt: serverTimestamp(),
+        updatedBy: uid,
+      }),
+      updateDoc(doc(gatesCollection(worldId, rankId), gateId), {
+        wordCount: increment(1),
+        updatedAt: serverTimestamp(),
+        updatedBy: uid,
+      }),
+    ]);
+    if (!results.some((result) => result.status === 'rejected')) {
+      return;
+    }
+  } catch {
+    // Counter drift is acceptable here; the word write already committed.
+  }
+  if (typeof console !== 'undefined') {
+    console.warn('[LootLingua] Word saved, but one or more word counters were not incremented.');
+  }
+}
+
 function wordRecord(snapshot, worldId, rankId, gateId) {
   return {
     ...(snapshot.data() || {}),
@@ -840,14 +1105,7 @@ function compareWorlds(left, right) {
 }
 
 function compareRanks(left, right) {
-  const leftOrder = Number.isSafeInteger(left.order) ? left.order : Number.MAX_SAFE_INTEGER;
-  const rightOrder = Number.isSafeInteger(right.order) ? right.order : Number.MAX_SAFE_INTEGER;
-  if (leftOrder !== rightOrder) return leftOrder - rightOrder;
-  const byTitle = String(left.title || '').localeCompare(String(right.title || ''), undefined, {
-    sensitivity: 'base',
-    numeric: true,
-  });
-  return byTitle || String(left.rankId).localeCompare(String(right.rankId));
+  return getContentSchema().comparePublishedRanks(left, right);
 }
 
 function compareGates(left, right) {
@@ -1108,7 +1366,7 @@ function assertStoredWord(existing, worldId, rankId, gateId, contentWordId) {
   }
 }
 
-async function findWordDuplicates(
+async function findGateWordDuplicate(
   context,
   worldId,
   rankId,
@@ -1116,64 +1374,28 @@ async function findWordDuplicates(
   normalizedWord,
   excludedContentWordId
 ) {
-  const [gateSnapshot, worldSnapshot] = await Promise.all([
-    getDocs(query(
-      wordsCollection(worldId, rankId, gateId),
-      where('normalizedWord', '==', normalizedWord),
-      limit(2)
-    )),
-    getDocs(query(
-      collectionGroup(db, 'words'),
-      where('worldId', '==', worldId),
-      where('normalizedWord', '==', normalizedWord),
-      limit(WORD_PAGE_SIZE_MAX + 1)
-    )),
-  ]);
+  const contentWordId = await deriveContentWordId(normalizedWord, 1);
+  const snapshot = await getDoc(doc(
+    wordsCollection(worldId, rankId, gateId),
+    contentWordId
+  ));
   assertAdminContext(context);
-  const worldMatches = worldSnapshot.docs
-    .map((item) => ({ ...(item.data() || {}), contentWordId: item.id }))
-    .filter((item) => !(
-      item.rankId === rankId &&
-      item.gateId === gateId &&
-      item.contentWordId === excludedContentWordId
-    ));
-  const gateMatches = gateSnapshot.docs
-    .map((item) => ({ ...(item.data() || {}), contentWordId: item.id }))
-    .filter((item) => item.contentWordId !== excludedContentWordId);
-  const byPath = new Map();
-  worldMatches.concat(gateMatches).forEach((item) => {
-    byPath.set([
-      item.worldId,
-      item.rankId,
-      item.gateId,
-      item.contentWordId,
-    ].join('/'), item);
-  });
-  const matches = Array.from(byPath.values());
-  const visibleMatches = matches.slice(0, WORD_PAGE_SIZE_MAX).map((item) => ({
-    worldId: item.worldId,
-    rankId: item.rankId,
-    gateId: item.gateId,
-    contentWordId: item.contentWordId,
-    status: item.status,
-  }));
-  const duplicateInGate = matches.some((item) =>
-    item.rankId === rankId && item.gateId === gateId
-  );
-  const duplicateInRank = matches.some((item) => item.rankId === rankId);
-  const duplicateInWorld = matches.length > 0;
-  const duplicateScopes = [];
-  if (duplicateInGate) duplicateScopes.push('gate');
-  if (duplicateInRank) duplicateScopes.push('rank');
-  if (duplicateInWorld) duplicateScopes.push('world');
+  const duplicateInGate = snapshot.exists() && contentWordId !== excludedContentWordId;
+  const matched = duplicateInGate ? wordRecord(snapshot, worldId, rankId, gateId) : null;
   return Object.freeze({
     normalizedWord,
     duplicateInGate,
-    duplicateInRank,
-    duplicateInWorld,
-    duplicateScopes: Object.freeze(duplicateScopes),
-    matches: Object.freeze(visibleMatches),
-    hasMore: worldSnapshot.docs.length > WORD_PAGE_SIZE_MAX,
+    duplicateInRank: false,
+    duplicateInWorld: false,
+    duplicateScopes: Object.freeze(duplicateInGate ? ['gate'] : []),
+    matches: Object.freeze(matched ? [{
+      worldId,
+      rankId,
+      gateId,
+      contentWordId,
+      status: matched.status,
+    }] : []),
+    hasMore: false,
   });
 }
 
@@ -1769,11 +1991,118 @@ async function updateGate(worldId, rankId, gateId, payload, expectedVersion) {
 async function setGateStatus(worldId, rankId, gateId, status, expectedVersion) {
   try {
     const context = await requireAdminContext();
+    let publishedDraftWordCount = 0;
+    if (status === 'published') {
+      const parentWorldId = requireWorldId(worldId);
+      const parentRankId = requireRankId(rankId);
+      const id = requireGateId(gateId);
+      const version = requireExpectedVersion(expectedVersion);
+      const snapshot = await getDoc(doc(gatesCollection(parentWorldId, parentRankId), id));
+      assertAdminContext(context);
+      if (!snapshot.exists()) {
+        throw adminCloudError('admin/not-found', 'Gate not found.');
+      }
+      const existing = snapshot.data() || {};
+      assertStoredGate(existing, parentWorldId, parentRankId, id);
+      if (existing.version !== version) {
+        throw adminCloudError('admin/version-conflict', 'The gate was changed by another request.', {
+          expectedVersion: version,
+          actualVersion: existing.version,
+        });
+      }
+      if (existing.status !== 'draft') {
+        throw adminCloudError(
+          'content/invalid-status-transition',
+          'Only a draft gate can be published.'
+        );
+      }
+      publishedDraftWordCount = await publishDraftWordsForGate(
+        context,
+        parentWorldId,
+        parentRankId,
+        id
+      );
+    }
     const result = await updateGate(worldId, rankId, gateId, { status }, expectedVersion);
     assertAdminContext(context);
-    return result;
+    return status === 'published'
+      ? { ...result, publishedDraftWordCount }
+      : result;
   } catch (error) {
     throw mapAdminCloudError(error, 'admin/status-update-failed');
+  }
+}
+
+async function publishDraftWordsForGate(context, worldId, rankId, gateId) {
+  let publishedDraftWordCount = 0;
+  for (let batchIndex = 0; batchIndex < MAX_GATE_DRAFT_PUBLISH_BATCHES; batchIndex += 1) {
+    const snapshot = await getDocs(query(
+      wordsCollection(worldId, rankId, gateId),
+      where('status', '==', 'draft'),
+      limit(BULK_WORD_LIMIT)
+    ));
+    assertAdminContext(context);
+    if (!snapshot.docs.length) return publishedDraftWordCount;
+
+    const draftWords = snapshot.docs.map((item) =>
+      wordRecord(item, worldId, rankId, gateId)
+    );
+    draftWords.forEach((word) => assertStoredWord(
+      word,
+      worldId,
+      rankId,
+      gateId,
+      word.contentWordId
+    ));
+    await bulkSetWordStatus(
+      worldId,
+      rankId,
+      gateId,
+      'published',
+      draftWords.map((word) => ({
+        contentWordId: word.contentWordId,
+        expectedVersion: word.version,
+      }))
+    );
+    assertAdminContext(context);
+    publishedDraftWordCount += draftWords.length;
+  }
+  throw adminCloudError(
+    'admin/publish-incomplete',
+    'Gate draft publication exceeded the safe batch limit.',
+    { publishedDraftWordCount }
+  );
+}
+
+async function publishGateDraftWords(worldId, rankId, gateId) {
+  try {
+    const context = await requireAdminContext();
+    const parentWorldId = requireWorldId(worldId);
+    const parentRankId = requireRankId(rankId);
+    const id = requireGateId(gateId);
+    const snapshot = await getDoc(doc(gatesCollection(parentWorldId, parentRankId), id));
+    assertAdminContext(context);
+    if (!snapshot.exists()) {
+      throw adminCloudError('admin/not-found', 'Gate not found.');
+    }
+    const gate = snapshot.data() || {};
+    assertStoredGate(gate, parentWorldId, parentRankId, id);
+    if (gate.status !== 'published') {
+      throw adminCloudError(
+        'content/invalid-status-transition',
+        'Draft-word repair is only available for a published gate.'
+      );
+    }
+    const publishedDraftWordCount = await publishDraftWordsForGate(
+      context,
+      parentWorldId,
+      parentRankId,
+      id
+    );
+    assertAdminContext(context);
+    return { publishedDraftWordCount };
+  } catch (error) {
+    throw mapAdminCloudError(error, 'admin/bulk-update-failed');
   }
 }
 
@@ -1914,19 +2243,181 @@ async function requestDeleteGate(worldId, rankId, gateId, options) {
   }
 }
 
-async function listWords(worldId, rankId, gateId, options) {
+function stagingWordRecord(snapshot) {
+  return {
+    ...(snapshot.data() || {}),
+    stagingWordId: snapshot.id,
+  };
+}
+
+function buildStagingEducationalFields(payload, uid) {
+  const cleaned = buildWordCreateCandidate(
+    payload,
+    'staging-world',
+    'staging-rank',
+    'staging-gate',
+    'staging-preview',
+    uid
+  );
+  const output = {
+    schemaVersion: cleaned.schemaVersion,
+    normalizationVersion: cleaned.normalizationVersion,
+    word: cleaned.word,
+    normalizedWord: cleaned.normalizedWord,
+    wordKey: cleaned.wordKey,
+    translation: cleaned.translation,
+    order: cleaned.order,
+  };
+  WORD_EDITABLE_FIELDS.forEach((field) => {
+    if (field !== 'status' && Object.prototype.hasOwnProperty.call(cleaned, field)) {
+      output[field] = cleaned[field];
+    }
+  });
+  return output;
+}
+
+function stagingCreatePayload(record, metadata, uid) {
+  return {
+    ...record,
+    stagingWordId: metadata.stagingWordId,
+    importBatchId: metadata.importBatchId,
+    sourceFileName: metadata.sourceFileName,
+    sourceOrder: metadata.sourceOrder,
+    stagingStatus: 'pending',
+    importedAt: serverTimestamp(),
+    createdAt: serverTimestamp(),
+    updatedAt: serverTimestamp(),
+    createdBy: uid,
+    updatedBy: uid,
+  };
+}
+
+async function importStagingWords(entries, options) {
   try {
     const context = await requireAdminContext();
-    const parentWorldId = requireWorldId(worldId);
-    const parentRankId = requireRankId(rankId);
-    const parentGateId = requireGateId(gateId);
+    if (!Array.isArray(entries) || entries.length < 1 || entries.length > STAGING_IMPORT_LIMIT) {
+      throw adminCloudError(
+        'admin/invalid-argument',
+        `A staging import requires from 1 to ${STAGING_IMPORT_LIMIT} words.`
+      );
+    }
     const settings = requireOptions(
       options,
-      new Set(['pageSize', 'pageToken', 'cursor']),
-      'Word list options must be an object.',
+      new Set(['importBatchId', 'sourceFileName']),
+      'Staging import options must be an object.'
+    );
+    const importBatchId = settings.importBatchId
+      ? requireImportBatchId(settings.importBatchId)
+      : requireImportBatchId(`import_${generateOperationId()}`);
+    const sourceFileName = requireSourceFileName(settings.sourceFileName);
+    const prepared = [];
+    const seen = new Set();
+    for (let index = 0; index < entries.length; index += 1) {
+      const source = requireOptions(
+        entries[index],
+        new Set(['payload', 'sourceOrder', 'index']),
+        'Each staging import entry must contain a payload and sourceOrder.'
+      );
+      const sourceOrder = source.sourceOrder === undefined ? index : source.sourceOrder;
+      if (!Number.isSafeInteger(sourceOrder) || sourceOrder < 0 || sourceOrder > 1000000) {
+        throw adminCloudError('admin/invalid-argument', 'sourceOrder is invalid.');
+      }
+      const educational = buildStagingEducationalFields(source.payload, context.uid);
+      if (seen.has(educational.normalizedWord)) {
+        throw adminCloudError('import/duplicate-in-file', 'The import contains a duplicate word.');
+      }
+      seen.add(educational.normalizedWord);
+      const stagingWordId = await deriveStagingWordId(
+        educational.normalizedWord,
+        educational.normalizationVersion
+      );
+      prepared.push({
+        sourceIndex: Number.isSafeInteger(source.index) ? source.index : index,
+        sourceOrder,
+        educational,
+        stagingWordId,
+        reference: doc(contentWordImportStaging, stagingWordId),
+      });
+    }
+    assertAdminContext(context);
+    const result = await runTransaction(db, async (transaction) => {
+      const snapshots = await Promise.all(prepared.map((item) =>
+        transaction.get(item.reference)
+      ));
+      assertAdminContext(context);
+      const results = prepared.map((item, index) => {
+        const existing = snapshots[index];
+        if (existing.exists()) {
+          const duplicate = stagingWordRecord(existing);
+          return {
+            index: item.sourceIndex,
+            stagingWordId: item.stagingWordId,
+            state: 'duplicate-staging',
+            importBatchId: duplicate.importBatchId || '',
+            sourceFileName: duplicate.sourceFileName || '',
+          };
+        }
+        transaction.set(item.reference, stagingCreatePayload(item.educational, {
+          stagingWordId: item.stagingWordId,
+          importBatchId,
+          sourceFileName,
+          sourceOrder: item.sourceOrder,
+        }, context.uid));
+        return {
+          index: item.sourceIndex,
+          stagingWordId: item.stagingWordId,
+          state: 'staged',
+          importBatchId,
+          sourceFileName,
+        };
+      });
+      return results;
+    });
+    assertAdminContext(context);
+    return {
+      importBatchId,
+      sourceFileName,
+      results: result,
+      summary: {
+        total: result.length,
+        staged: result.filter((item) => item.state === 'staged').length,
+        duplicates: result.filter((item) => item.state === 'duplicate-staging').length,
+      },
+    };
+  } catch (error) {
+    throw mapAdminCloudError(error, 'admin/staging-import-failed');
+  }
+}
+
+async function listStagingWords(options) {
+  try {
+    const context = await requireAdminContext();
+    const listData = getWordListDataApi();
+    const settings = requireOptions(
+      options,
+      new Set(['pageSize', 'pageToken', 'cursor', 'direction', 'sort', 'filters']),
+      'Staging list options must be an object.',
       true
     );
-    const pageSize = requireWordPageSize(settings.pageSize);
+    const normalizedQuery = listData.normalizeQuery({
+      sourceType: 'admin-content-word-import-staging',
+      sort: settings.sort,
+      filters: settings.filters,
+      pageSize: settings.pageSize === undefined ? WORD_PAGE_SIZE_DEFAULT : settings.pageSize,
+    });
+    const pageSize = requireWordPageSize(normalizedQuery.pageSize);
+    const direction = requireWordListDirection(settings.direction);
+    const sort = requireListSort(normalizedQuery.sort, STAGING_SORTS, 'newest');
+    const filters = requireListFilters(
+      normalizedQuery.filters,
+      new Set(['level', 'partOfSpeech', 'sourceFileName', 'importBatchId'])
+    );
+    if (Object.keys(filters).length && sort !== 'newest') {
+      throw adminCloudError(
+        'admin/unsupported-sort-combination',
+        'Filtered staging lists use newest-first sorting.'
+      );
+    }
     if (
       settings.pageToken !== undefined &&
       settings.cursor !== undefined &&
@@ -1935,27 +2426,433 @@ async function listWords(worldId, rankId, gateId, options) {
       throw adminCloudError('admin/invalid-argument', 'pageToken and cursor must match.');
     }
     const pageToken = settings.pageToken ?? settings.cursor ?? '';
-    const constraints = [
-      orderBy('order', 'asc'),
-      orderBy(documentId(), 'asc'),
-    ];
+    const sortFields = STAGING_SORTS[sort];
+    const querySignature = listData.createQuerySignature({
+      ...normalizedQuery,
+      sort,
+      filters,
+      pageSize,
+    });
+    const constraints = [];
+    Object.entries(filters).forEach(([field, value]) => {
+      constraints.push(where(field, '==', value));
+    });
+    sortFields.forEach((item) => constraints.push(orderBy(item.field, item.direction)));
+    const documentDirection = sortFields[sortFields.length - 1].direction;
+    constraints.push(orderBy(documentId(), documentDirection));
     if (pageToken) {
-      const cursor = decodeWordPageToken(
+      const values = decodePageToken(
+        pageToken,
+        STAGING_CURSOR_PREFIX,
+        'content_word_import_staging',
+        querySignature,
+        sortFields,
+        requireStagingWordId
+      );
+      constraints.push(direction === 'backward'
+        ? endBefore(...values)
+        : startAfter(...values));
+    }
+    constraints.push(direction === 'backward' ? limitToLast(pageSize + 1) : limit(pageSize + 1));
+    const snapshot = await getDocs(query(contentWordImportStaging, ...constraints));
+    assertAdminContext(context);
+    const hasPrevious = direction === 'backward'
+      ? snapshot.docs.length > pageSize
+      : Boolean(pageToken);
+    const hasNext = direction === 'backward' ? true : snapshot.docs.length > pageSize;
+    const pageDocs = direction === 'backward' && hasPrevious
+      ? snapshot.docs.slice(1)
+      : snapshot.docs.slice(0, pageSize);
+    const items = pageDocs.map(stagingWordRecord);
+    const encode = (item) => encodePageToken(
+      STAGING_CURSOR_PREFIX,
+      'content_word_import_staging',
+      querySignature,
+      sortFields,
+      item,
+      item.stagingWordId
+    );
+    const startCursor = items.length ? encode(items[0]) : null;
+    const endCursor = items.length ? encode(items[items.length - 1]) : null;
+    const beforeCursor = direction === 'backward'
+      ? (hasPrevious ? encode(stagingWordRecord(snapshot.docs[0])) : null)
+      : (pageToken || null);
+    return {
+      items,
+      pageSize,
+      direction,
+      sort,
+      filters,
+      querySignature,
+      hasMore: hasNext,
+      hasNext,
+      hasPrevious,
+      beforeCursor,
+      firstCursor: startCursor,
+      startCursor,
+      endCursor,
+      nextCursor: hasNext ? endCursor : null,
+      nextPageToken: hasNext ? endCursor : null,
+    };
+  } catch (error) {
+    throw mapAdminCloudError(error, 'admin/staging-list-failed');
+  }
+}
+
+async function countStagingWords() {
+  try {
+    const context = await requireAdminContext();
+    const snapshot = await getCountFromServer(contentWordImportStaging);
+    assertAdminContext(context);
+    return Number(snapshot.data().count) || 0;
+  } catch (error) {
+    throw mapAdminCloudError(error, 'admin/staging-count-failed');
+  }
+}
+
+async function getStagingWord(stagingWordId) {
+  try {
+    const context = await requireAdminContext();
+    const id = requireStagingWordId(stagingWordId);
+    const snapshot = await getDoc(doc(contentWordImportStaging, id));
+    assertAdminContext(context);
+    if (!snapshot.exists()) {
+      throw adminCloudError('admin/not-found', 'Staging word not found.');
+    }
+    return stagingWordRecord(snapshot);
+  } catch (error) {
+    throw mapAdminCloudError(error, 'admin/staging-read-failed');
+  }
+}
+
+async function deleteStagingWords(stagingWordIds) {
+  try {
+    const context = await requireAdminContext();
+    if (
+      !Array.isArray(stagingWordIds) ||
+      stagingWordIds.length < 1 ||
+      stagingWordIds.length > BULK_WORD_LIMIT
+    ) {
+      throw adminCloudError('admin/invalid-argument', 'Select from 1 to 100 staging words.');
+    }
+    const ids = Array.from(new Set(stagingWordIds.map(requireStagingWordId)));
+    if (ids.length !== stagingWordIds.length) {
+      throw adminCloudError('admin/invalid-argument', 'Staging word IDs must be unique.');
+    }
+    const references = ids.map((id) => doc(contentWordImportStaging, id));
+    const deleted = await runTransaction(db, async (transaction) => {
+      const snapshots = await Promise.all(references.map((reference) =>
+        transaction.get(reference)
+      ));
+      assertAdminContext(context);
+      let count = 0;
+      snapshots.forEach((snapshot, index) => {
+        if (!snapshot.exists()) return;
+        transaction.delete(references[index]);
+        count += 1;
+      });
+      return count;
+    });
+    assertAdminContext(context);
+    return { requested: ids.length, deleted };
+  } catch (error) {
+    throw mapAdminCloudError(error, 'admin/staging-delete-failed');
+  }
+}
+
+function stagingDistributionPayload(staging) {
+  const payload = {};
+  WORD_EDITABLE_FIELDS.forEach((field) => {
+    if (field !== 'status' && Object.prototype.hasOwnProperty.call(staging, field)) {
+      payload[field] = staging[field];
+    }
+  });
+  payload.schemaVersion = staging.schemaVersion;
+  payload.normalizationVersion = staging.normalizationVersion;
+  payload.status = 'draft';
+  return payload;
+}
+
+async function distributeStagingWords(stagingWordIds, target, options) {
+  const context = await requireAdminContext();
+  const destination = requireWordTarget(target);
+  const settings = requireOptions(
+    options,
+    new Set(['onProgress']),
+    'Distribution options must be an object.',
+    true
+  );
+  if (
+    !Array.isArray(stagingWordIds) ||
+    stagingWordIds.length < 1 ||
+    stagingWordIds.length > BULK_WORD_LIMIT
+  ) {
+    throw adminCloudError('admin/invalid-argument', 'Select from 1 to 100 staging words.');
+  }
+  const ids = Array.from(new Set(stagingWordIds.map(requireStagingWordId)));
+  if (ids.length !== stagingWordIds.length) {
+    throw adminCloudError('admin/invalid-argument', 'Staging word IDs must be unique.');
+  }
+  const operationId = generateOperationId();
+  const results = [];
+  for (let index = 0; index < ids.length; index += 1) {
+    const stagingWordId = ids[index];
+    const reference = doc(contentWordImportStaging, stagingWordId);
+    let result;
+    try {
+      const snapshot = await getDoc(reference);
+      assertAdminContext(context);
+      if (!snapshot.exists()) {
+        result = { stagingWordId, state: 'missing' };
+      } else {
+        const staging = stagingWordRecord(snapshot);
+        const previousTarget = staging.distributionTarget || {};
+        const sameTarget =
+          previousTarget.worldId === destination.worldId &&
+          previousTarget.rankId === destination.rankId &&
+          previousTarget.gateId === destination.gateId;
+        let recoveredContentWordId = '';
+        if (staging.stagingStatus === 'distributing' && sameTarget) {
+          const targetContentWordId = await deriveContentWordId(
+            staging.normalizedWord,
+            staging.normalizationVersion
+          );
+          const targetDocument = await getDoc(doc(
+            wordsCollection(destination.worldId, destination.rankId, destination.gateId),
+            targetContentWordId
+          ));
+          assertAdminContext(context);
+          if (
+            targetDocument.exists() &&
+            targetDocument.data().normalizedWord === staging.normalizedWord
+          ) {
+            recoveredContentWordId = targetContentWordId;
+            await updateDoc(reference, {
+              stagingStatus: 'distributed',
+              distributionTarget: destination,
+              distributionOperationId: operationId,
+              distributedContentWordId: targetContentWordId,
+              distributedAt: serverTimestamp(),
+              updatedAt: serverTimestamp(),
+              updatedBy: context.uid,
+            });
+          }
+        }
+        if (
+          (staging.stagingStatus === 'distributed' && sameTarget) ||
+          recoveredContentWordId
+        ) {
+          await deleteDoc(reference);
+          result = {
+            stagingWordId,
+            state: 'recovered',
+            contentWordId: recoveredContentWordId || staging.distributedContentWordId || '',
+          };
+        } else {
+          await updateDoc(reference, {
+            stagingStatus: 'distributing',
+            distributionTarget: destination,
+            distributionOperationId: operationId,
+            updatedAt: serverTimestamp(),
+            updatedBy: context.uid,
+          });
+          let created;
+          try {
+            created = await createWord(
+              destination.worldId,
+              destination.rankId,
+              destination.gateId,
+              stagingDistributionPayload(staging)
+            );
+          } catch (error) {
+            await updateDoc(reference, {
+              stagingStatus: 'pending',
+              updatedAt: serverTimestamp(),
+              updatedBy: context.uid,
+            }).catch(() => {});
+            if (error?.code === 'content/duplicate-word-in-gate') {
+              result = { stagingWordId, state: 'duplicate-gate' };
+            } else {
+              throw error;
+            }
+          }
+          if (created) {
+            await updateDoc(reference, {
+              stagingStatus: 'distributed',
+              distributionTarget: destination,
+              distributionOperationId: operationId,
+              distributedContentWordId: created.contentWordId,
+              distributedAt: serverTimestamp(),
+              updatedAt: serverTimestamp(),
+              updatedBy: context.uid,
+            });
+            try {
+              await deleteDoc(reference);
+              result = {
+                stagingWordId,
+                state: 'distributed',
+                contentWordId: created.contentWordId,
+              };
+            } catch {
+              result = {
+                stagingWordId,
+                state: 'distributed-pending-cleanup',
+                contentWordId: created.contentWordId,
+              };
+            }
+          }
+        }
+      }
+    } catch (error) {
+      result = {
+        stagingWordId,
+        state: 'failed',
+        code: String(error?.code || 'admin/staging-distribution-failed'),
+      };
+    }
+    results.push(result);
+    if (typeof settings.onProgress === 'function') {
+      settings.onProgress({
+        completed: index + 1,
+        total: ids.length,
+        distributed: results.filter((item) =>
+          item.state === 'distributed' || item.state === 'recovered'
+        ).length,
+        duplicates: results.filter((item) => item.state === 'duplicate-gate').length,
+        failed: results.filter((item) =>
+          item.state === 'failed' || item.state === 'distributed-pending-cleanup'
+        ).length,
+      });
+    }
+  }
+  assertAdminContext(context);
+  return {
+    operationId,
+    target: destination,
+    results,
+    summary: {
+      total: results.length,
+      distributed: results.filter((item) =>
+        item.state === 'distributed' || item.state === 'recovered'
+      ).length,
+      duplicates: results.filter((item) => item.state === 'duplicate-gate').length,
+      failed: results.filter((item) =>
+        item.state === 'failed' || item.state === 'distributed-pending-cleanup'
+      ).length,
+      remaining: results.filter((item) =>
+        item.state !== 'distributed' && item.state !== 'recovered' && item.state !== 'missing'
+      ).length,
+    },
+  };
+}
+
+async function listWords(worldId, rankId, gateId, options) {
+  try {
+    const context = await requireAdminContext();
+    const listData = getWordListDataApi();
+    const parentWorldId = requireWorldId(worldId);
+    const parentRankId = requireRankId(rankId);
+    const parentGateId = requireGateId(gateId);
+    const settings = requireOptions(
+      options,
+      new Set(['pageSize', 'pageToken', 'cursor', 'direction', 'sort', 'filters', 'search']),
+      'Word list options must be an object.',
+      true
+    );
+    const normalizedQuery = listData.normalizeQuery({
+      sourceType: 'admin-content-words',
+      worldId: parentWorldId,
+      rankId: parentRankId,
+      gateId: parentGateId,
+      sort: settings.sort,
+      filters: settings.filters,
+      search: settings.search,
+      pageSize: settings.pageSize === undefined ? WORD_PAGE_SIZE_DEFAULT : settings.pageSize,
+    });
+    const pageSize = requireWordPageSize(normalizedQuery.pageSize);
+    const direction = requireWordListDirection(settings.direction);
+    const filters = requireListFilters(
+      normalizedQuery.filters,
+      new Set(['status', 'level', 'partOfSpeech', 'category'])
+    );
+    const search = requirePrefixSearch(normalizedQuery.search);
+    if (search && Object.keys(filters).length) {
+      throw adminCloudError(
+        'admin/unsupported-filter-combination',
+        'Prefix search cannot be combined with another filter.'
+      );
+    }
+    const sort = requireListSort(normalizedQuery.sort, WORD_SORTS, 'newest');
+    if (search && sort !== 'word-asc') {
+      throw adminCloudError(
+        'admin/unsupported-sort-combination',
+        'Prefix search requires alphabetical sorting.'
+      );
+    }
+    if (Object.keys(filters).length && sort !== 'newest') {
+      throw adminCloudError(
+        'admin/unsupported-sort-combination',
+        'Filtered word lists use newest-first sorting.'
+      );
+    }
+    const sortFields = WORD_SORTS[sort];
+    const querySignature = listData.createQuerySignature({
+      ...normalizedQuery,
+      sort,
+      filters,
+      search,
+      pageSize,
+    });
+    if (
+      settings.pageToken !== undefined &&
+      settings.cursor !== undefined &&
+      settings.pageToken !== settings.cursor
+    ) {
+      throw adminCloudError('admin/invalid-argument', 'pageToken and cursor must match.');
+    }
+    const pageToken = settings.pageToken ?? settings.cursor ?? '';
+    const constraints = [];
+    Object.entries(filters).forEach(([field, value]) => {
+      constraints.push(where(field, '==', value));
+    });
+    if (search) {
+      constraints.push(where('normalizedWord', '>=', search));
+      constraints.push(where('normalizedWord', '<=', `${search}\uf8ff`));
+    }
+    sortFields.forEach((item) => constraints.push(orderBy(item.field, item.direction)));
+    const documentDirection = sortFields[sortFields.length - 1].direction;
+    constraints.push(orderBy(documentId(), documentDirection));
+    if (pageToken) {
+      const cursorValues = decodeWordPageToken(
         pageToken,
         parentWorldId,
         parentRankId,
-        parentGateId
+        parentGateId,
+        querySignature,
+        sortFields
       );
-      constraints.push(startAfter(cursor.order, cursor.contentWordId));
+      if (direction === 'backward') {
+        constraints.push(endBefore(...cursorValues));
+      } else {
+        constraints.push(startAfter(...cursorValues));
+      }
     }
-    constraints.push(limit(pageSize + 1));
+    constraints.push(direction === 'backward' ? limitToLast(pageSize + 1) : limit(pageSize + 1));
     const snapshot = await getDocs(query(
       wordsCollection(parentWorldId, parentRankId, parentGateId),
       ...constraints
     ));
     assertAdminContext(context);
-    const hasMore = snapshot.docs.length > pageSize;
-    const items = snapshot.docs.slice(0, pageSize).map((item) =>
+    const hasPrevious = direction === 'backward'
+      ? snapshot.docs.length > pageSize
+      : Boolean(pageToken);
+    const hasNext = direction === 'backward'
+      ? true
+      : snapshot.docs.length > pageSize;
+    const pageDocs = direction === 'backward' && hasPrevious
+      ? snapshot.docs.slice(1)
+      : snapshot.docs.slice(0, pageSize);
+    const items = pageDocs.map((item) =>
       wordRecord(item, parentWorldId, parentRankId, parentGateId)
     );
     items.forEach((item) => assertStoredWord(
@@ -1965,20 +2862,55 @@ async function listWords(worldId, rankId, gateId, options) {
       parentGateId,
       item.contentWordId
     ));
-    const nextPageToken = hasMore && items.length
+    const firstCursor = items.length
       ? encodeWordPageToken(
         parentWorldId,
         parentRankId,
         parentGateId,
+        querySignature,
+        sortFields,
+        items[0]
+      )
+      : null;
+    const endCursor = items.length
+      ? encodeWordPageToken(
+        parentWorldId,
+        parentRankId,
+        parentGateId,
+        querySignature,
+        sortFields,
         items[items.length - 1]
       )
       : null;
+    const beforeCursor = direction === 'backward'
+      ? (hasPrevious
+        ? encodeWordPageToken(
+          parentWorldId,
+          parentRankId,
+          parentGateId,
+          querySignature,
+          sortFields,
+          wordRecord(snapshot.docs[0], parentWorldId, parentRankId, parentGateId)
+        )
+        : null)
+      : (pageToken || null);
     return {
       items,
       pageSize,
-      hasMore,
-      nextPageToken,
-      nextCursor: nextPageToken,
+      direction,
+      sort,
+      filters,
+      search,
+      querySignature,
+      hasMore: hasNext,
+      hasNext,
+      hasPrevious,
+      beforeCursor,
+      firstCursor,
+      startCursor: firstCursor,
+      endCursor,
+      nextPageToken: hasNext ? endCursor : null,
+      nextCursor: hasNext ? endCursor : null,
     };
   } catch (error) {
     throw mapAdminCloudError(error, 'admin/list-failed');
@@ -2033,7 +2965,7 @@ async function inspectWordDuplicates(worldId, rankId, gateId, word, options) {
       translation: 'preview',
       status: 'draft',
     });
-    return await findWordDuplicates(
+    return await findGateWordDuplicate(
       context,
       parentWorldId,
       parentRankId,
@@ -2073,45 +3005,14 @@ async function createWord(worldId, rankId, gateId, payload) {
       contentWordId,
       context.uid
     );
-    const duplicateAnalysis = await findWordDuplicates(
-      context,
-      parentWorldId,
-      parentRankId,
-      parentGateId,
-      word.normalizedWord,
-      ''
-    );
-    if (duplicateAnalysis.duplicateInGate) {
-      throw adminCloudError(
-        'content/duplicate-word-in-gate',
-        'The normalized word already exists in this gate.',
-        duplicateAnalysis
-      );
-    }
-
-    const worldReference = doc(contentWorlds, parentWorldId);
-    const rankReference = doc(ranksCollection(parentWorldId), parentRankId);
-    const gateReference = doc(gatesCollection(parentWorldId, parentRankId), parentGateId);
     const wordReference = doc(
       wordsCollection(parentWorldId, parentRankId, parentGateId),
       contentWordId
     );
     const savedWord = await runTransaction(db, async (transaction) => {
       assertAdminContext(context);
-      const worldSnapshot = await transaction.get(worldReference);
-      const rankSnapshot = await transaction.get(rankReference);
-      const gateSnapshot = await transaction.get(gateReference);
       const existingWordSnapshot = await transaction.get(wordReference);
       assertAdminContext(context);
-      if (!worldSnapshot.exists()) {
-        throw adminCloudError('admin/not-found', 'Parent world not found.');
-      }
-      if (!rankSnapshot.exists()) {
-        throw adminCloudError('admin/not-found', 'Parent rank not found.');
-      }
-      if (!gateSnapshot.exists()) {
-        throw adminCloudError('admin/not-found', 'Parent gate not found.');
-      }
       if (existingWordSnapshot.exists()) {
         const collision = existingWordSnapshot.data() || {};
         throw adminCloudError(
@@ -2123,26 +3024,6 @@ async function createWord(worldId, rankId, gateId, payload) {
             : 'The deterministic word identity is already occupied.'
         );
       }
-      const existingWorld = worldSnapshot.data() || {};
-      const existingRank = rankSnapshot.data() || {};
-      const existingGate = gateSnapshot.data() || {};
-      assertStoredWorld(existingWorld, parentWorldId);
-      assertStoredRank(existingRank, parentWorldId, parentRankId);
-      assertStoredGate(existingGate, parentWorldId, parentRankId, parentGateId);
-      const nextWorldWordCount = existingWorld.wordCount + 1;
-      const nextRankWordCount = existingRank.wordCount + 1;
-      const nextGateWordCount = existingGate.wordCount + 1;
-      const maxCount = getContentSchema().LIMITS.count;
-      if (
-        !Number.isSafeInteger(nextWorldWordCount) ||
-        !Number.isSafeInteger(nextRankWordCount) ||
-        !Number.isSafeInteger(nextGateWordCount) ||
-        nextWorldWordCount > maxCount ||
-        nextRankWordCount > maxCount ||
-        nextGateWordCount > maxCount
-      ) {
-        throw adminCloudError('admin/corrupt-data', 'The parent wordCount cannot be incremented safely.');
-      }
       const saved = {
         ...word,
         createdAt: serverTimestamp(),
@@ -2151,31 +3032,16 @@ async function createWord(worldId, rankId, gateId, payload) {
         updatedBy: context.uid,
       };
       transaction.set(wordReference, saved);
-      transaction.update(gateReference, {
-        wordCount: nextGateWordCount,
-        updatedAt: serverTimestamp(),
-        updatedBy: context.uid,
-      });
-      transaction.update(rankReference, {
-        wordCount: nextRankWordCount,
-        updatedAt: serverTimestamp(),
-        updatedBy: context.uid,
-      });
-      transaction.update(worldReference, {
-        wordCount: nextWorldWordCount,
-        updatedAt: serverTimestamp(),
-        updatedBy: context.uid,
-      });
       return saved;
     });
     assertAdminContext(context);
-    return {
-      ...savedWord,
-      duplicateAnalysis: {
-        ...duplicateAnalysis,
-        duplicateScopes: duplicateAnalysis.duplicateScopes.filter((scope) => scope !== 'gate'),
-      },
-    };
+    void incrementWordCountersBestEffort(
+      parentWorldId,
+      parentRankId,
+      parentGateId,
+      context.uid
+    );
+    return savedWord;
   } catch (error) {
     throw mapAdminCloudError(error, 'admin/create-failed');
   }
@@ -2277,6 +3143,76 @@ async function archiveWord(worldId, rankId, gateId, contentWordId, expectedVersi
     return result;
   } catch (error) {
     throw mapAdminCloudError(error, 'admin/archive-failed');
+  }
+}
+
+async function bulkSetWordStatus(worldId, rankId, gateId, status, items) {
+  try {
+    const context = await requireAdminContext();
+    const parentWorldId = requireWorldId(worldId);
+    const parentRankId = requireRankId(rankId);
+    const parentGateId = requireGateId(gateId);
+    if (!['published', 'archived'].includes(status)) {
+      throw adminCloudError('admin/invalid-argument', 'Bulk word status is invalid.');
+    }
+    const canonicalItems = requireBulkWordItems(items);
+    const savedWords = await runTransaction(db, async (transaction) => {
+      assertAdminContext(context);
+      const currentWords = await Promise.all(canonicalItems.map(async (item) => {
+        const reference = doc(
+          wordsCollection(parentWorldId, parentRankId, parentGateId),
+          item.contentWordId
+        );
+        const snapshot = await transaction.get(reference);
+        return { item, reference, snapshot };
+      }));
+      assertAdminContext(context);
+      const updates = currentWords.map(({ item, reference, snapshot }) => {
+        if (!snapshot.exists()) {
+          throw adminCloudError('admin/not-found', 'Word not found.');
+        }
+        const existing = snapshot.data() || {};
+        assertStoredWord(existing, parentWorldId, parentRankId, parentGateId, item.contentWordId);
+        if (existing.version !== item.expectedVersion) {
+          throw adminCloudError('admin/version-conflict', 'A word was changed by another request.', {
+            contentWordId: item.contentWordId,
+            expectedVersion: item.expectedVersion,
+            actualVersion: existing.version,
+          });
+        }
+        const word = buildWordUpdateCandidate(
+          existing,
+          { status },
+          parentWorldId,
+          parentRankId,
+          parentGateId,
+          item.contentWordId,
+          context.uid,
+          existing.version + 1
+        );
+        return {
+          reference,
+          saved: {
+            ...word,
+            worldId: parentWorldId,
+            rankId: parentRankId,
+            gateId: parentGateId,
+            contentWordId: item.contentWordId,
+            version: existing.version + 1,
+            createdAt: existing.createdAt,
+            createdBy: existing.createdBy,
+            updatedAt: serverTimestamp(),
+            updatedBy: context.uid,
+          },
+        };
+      });
+      updates.forEach(({ reference, saved }) => transaction.set(reference, saved));
+      return updates.map(({ saved }) => saved);
+    });
+    assertAdminContext(context);
+    return savedWords;
+  } catch (error) {
+    throw mapAdminCloudError(error, 'admin/bulk-update-failed');
   }
 }
 
@@ -2479,11 +3415,13 @@ async function bulkWordOperation(worldId, rankId, gateId, action, items, options
 }
 
 async function bulkPublishWords(worldId, rankId, gateId, items, options) {
-  return bulkWordOperation(worldId, rankId, gateId, 'publish', items, options);
+  requireOptions(options, new Set(['operationId']), 'Bulk publish options must be an object.', true);
+  return bulkSetWordStatus(worldId, rankId, gateId, 'published', items);
 }
 
 async function bulkArchiveWords(worldId, rankId, gateId, items, options) {
-  return bulkWordOperation(worldId, rankId, gateId, 'archive', items, options);
+  requireOptions(options, new Set(['operationId']), 'Bulk archive options must be an object.', true);
+  return bulkSetWordStatus(worldId, rankId, gateId, 'archived', items);
 }
 
 async function bulkMoveWords(worldId, rankId, gateId, items, target, options) {
@@ -2569,9 +3507,16 @@ window.LootLinguaAdminCloud = Object.freeze({
   createGate,
   updateGate,
   setGateStatus,
+  publishGateDraftWords,
   duplicateGateAsDraft,
   moveGate,
   requestDeleteGate,
+  importStagingWords,
+  listStagingWords,
+  countStagingWords,
+  getStagingWord,
+  deleteStagingWords,
+  distributeStagingWords,
   listWords,
   getWord,
   inspectWordDuplicates,

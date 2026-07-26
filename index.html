@@ -1,26 +1,41 @@
 ﻿<!DOCTYPE html>
 <html lang="ar" dir="rtl">
 <head>
-  <script type="text/javascript">
-    (function(l) {
-      if (l.search.indexOf('?p=') === 0) {
-        var params = new URLSearchParams(l.search);
-        var path = (params.get('p') || '/dictionary').replace(/~and~/g, '&');
-        var query = params.get('q');
-        var base = l.pathname.replace(/\/$/, '');
-        if (path === '/' && query && query.indexOf('p=') === 0) query = '';
-        var target = (path === '/' && base ? base : base + path) +
-          (query ? '?' + query.replace(/~and~/g, '&') : '') + l.hash;
-        window.history.replaceState(null, null, target);
-        return;
-      }
-      if (l.search[1] === '/' ) {
-        var decoded = l.search.slice(1).split('&').map(function(s) { return s.replace(/~and~/g, '&') }).join('?');
-        window.history.replaceState(null, null, l.pathname.slice(0, -1) + decoded + l.hash);
-      }
-    }(window.location));
-  </script>
   <meta charset="UTF-8">
+  <script>
+    (function (location, document) {
+      var segments = location.pathname.split('/').filter(Boolean);
+      var projectBase = location.hostname.endsWith('.github.io') && segments.length
+        ? '/' + segments[0]
+        : '';
+      var assetBase = document.createElement('base');
+      assetBase.href = location.protocol === 'file:' ? './' : projectBase + '/';
+      document.head.appendChild(assetBase);
+
+      var params = new URLSearchParams(location.search);
+
+      if (!params.has('p')) return;
+
+      var path = params.get('p') || '/';
+      var query = params.get('q') || '';
+
+      if (!path.startsWith('/')) {
+        path = '/' + path;
+      }
+
+      var target =
+        projectBase +
+        (path === '/' ? '' : path) +
+        (query ? '?' + query : '') +
+        location.hash;
+
+      window.history.replaceState(
+        window.history.state,
+        '',
+        target || '/'
+      );
+    })(window.location, document);
+  </script>
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <!-- Google Analytics -->
   <script async src="https://www.googletagmanager.com/gtag/js?id=G-C06S6C7JYT"></script>
@@ -44,9 +59,8 @@
   <meta name="twitter:title" content="LootLingua | قاموس الأساطير">
   <meta name="twitter:description" content="تعلم الكلمات الإنجليزية عبر قاموس ألعاب، كويزات، XP، مستويات، وصندوق كنز يومي.">
   <!-- Dictionary API on Render: POST /api/dictionary (عادي) + POST /api/gamer-dictionary (جيمر→جيمر). Backend: dictionary-server/index.js -->
-  <link rel="icon" type="image/png" href="ammar1.png">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
-  <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="style.css?v=20260722-2">
 </head>
 <body class="legend-dock-visible">
 
@@ -476,31 +490,40 @@
       <h2>عوالم الأساطير</h2>
       <p>اختر عالمك.</p>
     </div>
-    <div class="worlds-grid" id="worldsGrid">
-      <button type="button" class="world-card world-card-minecraft" data-feature="minecraft" onclick="return onWorldCardClick(event, 'minecraft', function () { loadGameDictionary('minecraft'); });">
-        <span class="world-card-icon-wrap">
-          <span class="world-card-icon"><i class="fas fa-cube" aria-hidden="true"></i></span>
-          <span class="world-card-lock-overlay" aria-hidden="true"><i class="fa-solid fa-lock"></i></span>
-        </span>
-        <strong>Minecraft</strong>
-        <span class="world-card-desc">قاموس بلوكات ومغامرات</span>
-      </button>
-      <button type="button" class="world-card world-card-pubg" data-feature="pubg" onclick="return onWorldCardClick(event, 'pubg', function () { loadGameDictionary('pubg'); });">
-        <span class="world-card-icon-wrap">
-          <span class="world-card-icon"><i class="fas fa-crosshairs" aria-hidden="true"></i></span>
-          <span class="world-card-lock-overlay" aria-hidden="true"><i class="fa-solid fa-lock"></i></span>
-        </span>
-        <strong>PUBG</strong>
-        <span class="world-card-desc">مصطلحات البقاء والمعركة</span>
-      </button>
-      <button type="button" class="world-card world-card-starred" data-feature="starred" onclick="return onWorldCardClick(event, 'starred', function () { loadStarredView(); });">
-        <span class="world-card-icon-wrap">
-          <span class="world-card-icon"><i class="fas fa-star" aria-hidden="true"></i></span>
-          <span class="world-card-lock-overlay" aria-hidden="true"><i class="fa-solid fa-lock"></i></span>
-        </span>
-        <strong>الكلمات الصعبة</strong>
-        <span class="world-card-desc">شوف الكلمات اللي حددت عليها بنجمة</span>
-      </button>
+    <div class="worlds-tabs" role="tablist" aria-label="مصدر العوالم" data-active-tab="published">
+      <button id="publishedWorldsTab" class="worlds-tab active" type="button" role="tab" aria-selected="true" aria-controls="publishedWorldsPanel" onclick="showPublishedWorldsTab()">العوالم الجاهزة</button>
+      <button id="customWorldsTab" class="worlds-tab" type="button" role="tab" aria-selected="false" aria-controls="customWorldsPanel" onclick="showCustomWorldsTab()">عوالمي الخاصة</button>
+    </div>
+    <div id="publishedWorldsPanel" class="worlds-tab-panel" role="tabpanel" aria-labelledby="publishedWorldsTab">
+      <div id="publishedContentView" class="published-content-view" aria-live="polite"></div>
+    </div>
+    <div id="customWorldsPanel" class="worlds-tab-panel" role="tabpanel" aria-labelledby="customWorldsTab" hidden>
+      <div class="worlds-grid" id="worldsGrid">
+        <button type="button" class="world-card world-card-minecraft" data-feature="minecraft" onclick="return onWorldCardClick(event, 'minecraft', function () { loadGameDictionary('minecraft'); });">
+          <span class="world-card-icon-wrap">
+            <span class="world-card-icon"><i class="fas fa-cube" aria-hidden="true"></i></span>
+            <span class="world-card-lock-overlay" aria-hidden="true"><i class="fa-solid fa-lock"></i></span>
+          </span>
+          <strong>Minecraft</strong>
+          <span class="world-card-desc">قاموس بلوكات ومغامرات</span>
+        </button>
+        <button type="button" class="world-card world-card-pubg" data-feature="pubg" onclick="return onWorldCardClick(event, 'pubg', function () { loadGameDictionary('pubg'); });">
+          <span class="world-card-icon-wrap">
+            <span class="world-card-icon"><i class="fas fa-crosshairs" aria-hidden="true"></i></span>
+            <span class="world-card-lock-overlay" aria-hidden="true"><i class="fa-solid fa-lock"></i></span>
+          </span>
+          <strong>PUBG</strong>
+          <span class="world-card-desc">مصطلحات البقاء والمعركة</span>
+        </button>
+        <button type="button" class="world-card world-card-starred" data-feature="starred" onclick="return onWorldCardClick(event, 'starred', function () { loadStarredView(); });">
+          <span class="world-card-icon-wrap">
+            <span class="world-card-icon"><i class="fas fa-star" aria-hidden="true"></i></span>
+            <span class="world-card-lock-overlay" aria-hidden="true"><i class="fa-solid fa-lock"></i></span>
+          </span>
+          <strong>الكلمات الصعبة</strong>
+          <span class="world-card-desc">شوف الكلمات اللي حددت عليها بنجمة</span>
+        </button>
+      </div>
     </div>
   </section>
 
@@ -693,7 +716,7 @@
         <h3><i class="fa-solid fa-user-gear"></i> إعدادات الحساب</h3>
         <button id="loginBtn" class="auth-btn profile-auth-btn" onclick="login()"><i class="fa-brands fa-google" aria-hidden="true"></i> تسجيل دخول بـ Google</button>
         <button id="logoutBtn" class="auth-btn profile-auth-btn" onclick="showModal('logoutModal')"><i class="fa-solid fa-right-from-bracket" aria-hidden="true"></i> تسجيل الخروج</button>
-        <button id="adminEntryBtn" type="button" class="auth-btn profile-auth-btn admin-profile-entry" hidden>
+        <button id="adminEntryBtn" type="button" class="auth-btn profile-auth-btn admin-profile-entry" hidden disabled aria-hidden="true" tabindex="-1" style="display:none">
           <i class="fa-solid fa-shield-halved" aria-hidden="true"></i> إدارة المحتوى الجاهز
         </button>
       </section>
@@ -857,13 +880,74 @@
 <div id="worldManageModal" class="custom-modal world-manage-modal" role="dialog" aria-modal="true" aria-labelledby="worldManageTitle" onclick="if (event.target === this) hideModal('worldManageModal')">
   <div class="modal-content world-manage-content" onclick="event.stopPropagation()">
     <div class="modal-icon"><i class="fa-solid fa-layer-group" aria-hidden="true"></i></div>
-    <h2 id="worldManageTitle">إدارة العالم</h2>
-    <p id="worldManageSummary">اختر العملية والوجهة.</p>
-    <div class="world-manage-tabs" role="group" aria-label="نوع العملية">
-      <button type="button" class="active" data-world-action="move" onclick="setWorldManageAction('move')">نقل إلى عالم</button>
-      <button type="button" data-world-action="copy" onclick="setWorldManageAction('copy')">نسخ إلى عالم</button>
-    </div>
+    <h2 id="worldManageTitle">اختر العالم</h2>
+    <p id="worldManageSummary">اختر الوجهة التي تريد إضافة الكلمات إليها.</p>
     <div id="worldManageTargets" class="world-manage-targets"></div>
+  </div>
+</div>
+
+<div id="worldManageChoiceModal" class="custom-modal world-manage-modal" role="dialog" aria-modal="true" aria-labelledby="worldManageChoiceTitle" onclick="if (event.target === this) closeWorldManageChoiceModal()">
+  <div class="modal-content world-manage-content" onclick="event.stopPropagation()">
+    <button type="button" class="modal-close-btn" onclick="closeWorldManageChoiceModal()" aria-label="إغلاق"><i class="fa-solid fa-xmark" aria-hidden="true"></i></button>
+    <div class="modal-icon"><i class="fa-solid fa-arrow-right-arrow-left" aria-hidden="true"></i></div>
+    <h2 id="worldManageChoiceTitle">كيف تريد إضافة الكلمات إلى هذا العالم؟</h2>
+    <p id="worldManageChoiceTarget"></p>
+    <div class="world-manage-choice-list">
+      <button type="button" class="world-manage-choice" onclick="confirmWorldManageChoice('move')">
+        <i class="fa-solid fa-arrow-right-arrow-left" aria-hidden="true"></i>
+        <span><strong>نقل</strong><small>تختفي من قاموسك الشخصي واختباراته، وتبقى داخل العالم المختار.</small></span>
+      </button>
+      <button type="button" class="world-manage-choice" onclick="confirmWorldManageChoice('copy')">
+        <i class="fa-regular fa-copy" aria-hidden="true"></i>
+        <span><strong>نسخ</strong><small>تبقى في قاموسك الشخصي وتُضاف أيضًا إلى العالم المختار.</small></span>
+      </button>
+      <button type="button" class="btn-cancel" onclick="closeWorldManageChoiceModal()">إلغاء</button>
+    </div>
+  </div>
+</div>
+
+<div id="privateMembershipDispositionModal" class="custom-modal private-membership-disposition-modal" role="dialog" aria-modal="true" aria-labelledby="privateMembershipDispositionTitle" onclick="if (event.target === this) cancelPrivateMembershipDisposition()">
+  <div class="modal-content" onclick="event.stopPropagation()">
+    <button type="button" class="modal-close-btn" onclick="cancelPrivateMembershipDisposition()" aria-label="إغلاق"><i class="fa-solid fa-xmark" aria-hidden="true"></i></button>
+    <div class="modal-icon"><i class="fa-solid fa-layer-group" aria-hidden="true"></i></div>
+    <h2 id="privateMembershipDispositionTitle">هذه آخر عضوية خاصة للكلمة</h2>
+    <p id="privateMembershipDispositionText">اختر مكان الكلمة بعد إزالتها من هذا العالم.</p>
+    <div class="private-membership-disposition-actions">
+      <button type="button" id="privateMembershipReturnBtn" class="btn-confirm">
+        <i class="fa-solid fa-arrow-rotate-left" aria-hidden="true"></i>
+        <span>إعادتها إلى القاموس الشخصي</span>
+      </button>
+      <button type="button" id="privateMembershipRemoveBtn" class="btn-cancel danger-choice">
+        <i class="fa-solid fa-trash-can" aria-hidden="true"></i>
+        <span>إزالتها</span>
+      </button>
+    </div>
+  </div>
+</div>
+
+<div id="levelPlacementExitModal" class="custom-modal level-placement-exit-modal" role="dialog" aria-modal="true" aria-labelledby="levelPlacementExitTitle" onclick="if (event.target === this) closeLevelPlacementExitModal()">
+  <div class="modal-content" onclick="event.stopPropagation()">
+    <button type="button" class="modal-close-btn" onclick="closeLevelPlacementExitModal()" aria-label="إغلاق"><i class="fa-solid fa-xmark" aria-hidden="true"></i></button>
+    <div class="modal-icon"><i class="fa-solid fa-door-open" aria-hidden="true"></i></div>
+    <h2 id="levelPlacementExitTitle">مغادرة اختبار المستوى؟</h2>
+    <p>سيتم حفظ تقدمك، ويمكنك العودة إلى الاختبار لاحقًا.</p>
+    <div class="modal-buttons">
+      <button type="button" id="levelPlacementContinueBtn" class="btn-cancel" onclick="closeLevelPlacementExitModal()">متابعة الاختبار</button>
+      <button type="button" id="levelPlacementLeaveBtn" class="btn-confirm" onclick="confirmLevelPlacementExit()">المغادرة والحفظ</button>
+    </div>
+  </div>
+</div>
+
+<div id="gateReadinessInfoModal" class="custom-modal gate-readiness-info-modal" role="dialog" aria-modal="true" aria-labelledby="gateReadinessInfoTitle" onclick="if (event.target === this) hideModal('gateReadinessInfoModal')">
+  <div class="modal-content" onclick="event.stopPropagation()">
+    <button type="button" class="modal-close-btn" onclick="hideModal('gateReadinessInfoModal')" aria-label="إغلاق"><i class="fa-solid fa-xmark" aria-hidden="true"></i></button>
+    <div class="modal-icon"><i class="fa-solid fa-route" aria-hidden="true"></i></div>
+    <h2 id="gateReadinessInfoTitle">ما معنى الاستعداد؟</h2>
+    <p>الاستعداد لاجتياز البوابة يقيس مراجعات قصيرة وموثوقة لكلمات البوابة خلال يومين، حتى يظهر اختبار الاجتياز في الوقت المناسب.</p>
+    <p>ألوان الكلمات وحالة SRS تنظّم مواعيد مراجعتك الطويلة، أما الإتقان فهو هدف أبعد. لذلك لا يضيف هذا النظام مؤشرًا جديدًا إلى كل كلمة.</p>
+    <div class="modal-buttons">
+      <button type="button" class="btn-confirm" onclick="hideModal('gateReadinessInfoModal')">فهمت</button>
+    </div>
   </div>
 </div>
 
@@ -961,7 +1045,7 @@
 </div>
 
 <!-- ══ FIREBASE ══ -->
-<script type="module" src="js/cloud.js"></script>
+<script type="module" src="js/cloud.js?v=20260722-2"></script>
 
 <!-- ══ STATS PANEL ══ -->
 <div id="statsPanel" class="stats-overlay" style="display:none;">
@@ -996,22 +1080,35 @@
 
 <!-- ══ FIREBASE PROFILE SYNC ══ -->
 <script type="module" src="js/profile-cloud.js"></script>
-<script type="module" src="js/admin-cloud.js"></script>
+<script type="module" src="js/published-content.js?v=20260722-1"></script>
+<script type="module" src="js/journey-cloud.js?v=20260722-1"></script>
+<script type="module" src="js/admin-cloud.js?v=20260719-4"></script>
 
 <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
-<script src="js/core.js"></script>
+<script src="js/core.js?v=20260719-3"></script>
+<script src="js/operation-runtime.js?v=20260722-1"></script>
 <script src="js/storage.js"></script>
-<script src="js/content-schema.js"></script>
+<script src="js/content-schema.js?v=20260722-1"></script>
+<script src="js/word-lifecycle.js?v=20260722-1"></script>
+<script src="js/journey.js?v=20260722-1"></script>
+<script src="js/learning-evidence.js?v=20260723-1"></script>
+<script src="js/gate-clear.js?v=20260723-1"></script>
+<script src="js/placement.js?v=20260720-1"></script>
+<script src="js/level-placement.js?v=20260722-1"></script>
+<script src="js/admin-word-import.js"></script>
+<script src="js/word-list-data.js?v=20260719-3"></script>
 <script src="js/script.js"></script>
 <script src="js/xp.js"></script>
-<script src="js/dictionary.js"></script>
-<script src="js/worlds.js"></script>
-<script src="js/admin.js"></script>
-<script src="js/dictionary-render.js"></script>
+<script src="js/xp-batch.js?v=20260722-1"></script>
+<script src="js/dictionary.js?v=20260720-1"></script>
+<script src="js/worlds.js?v=20260722-2"></script>
+<script src="js/admin.js?v=20260719-5"></script>
+<script src="js/dictionary-render.js?v=20260720-1"></script>
 <script src="js/srs.js"></script>
 <script src="js/quiz.js"></script>
 <script src="js/srs-transitions.js"></script>
-<script src="js/quiz-runtime.js"></script>
+<script src="js/srs-transition-batch.js?v=20260722-1"></script>
+<script src="js/quiz-runtime.js?v=20260722-2"></script>
 <script src="js/core-runtime.js"></script>
 </body>
 </html>

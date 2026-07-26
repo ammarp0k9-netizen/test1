@@ -73,6 +73,45 @@ function getWordWindowRange(total, listEl, resetWindow, scrollYOverride) {
   };
 }
 
+function wordDetailText(value) {
+  if (Array.isArray(value)) return value.map(String).filter(Boolean).join('، ');
+  return String(value || '').trim();
+}
+
+function renderWordDetailRow(label, value, options = {}) {
+  const text = wordDetailText(value);
+  if (!text) return '';
+  const dir = options.dir ? ` dir="${options.dir}"` : '';
+  const lang = options.lang ? ` lang="${options.lang}"` : '';
+  return `
+    <div class="word-detail-row"${dir}${lang}>
+      <strong>${escapeHtml(label)}</strong>
+      <span>${escapeHtml(text)}</span>
+    </div>`;
+}
+
+function renderWordCardDetails(w) {
+  const meaning = wordDetailText(w.meaning);
+  const definitionAr = wordDetailText(w.definition_ar || w.definitionAr);
+  const definition = wordDetailText(w.definition);
+  const rows = [];
+  if (definitionAr && definitionAr !== meaning) {
+    rows.push(renderWordDetailRow('التعريف بالعربية', definitionAr));
+  }
+  if (definition && definition !== meaning && definition !== definitionAr) {
+    rows.push(renderWordDetailRow('Definition', definition, { dir: 'ltr', lang: 'en' }));
+  }
+  rows.push(renderWordDetailRow('Example', w.example, { dir: 'ltr', lang: 'en' }));
+  rows.push(renderWordDetailRow('ترجمة المثال', w.exampleTranslation));
+  rows.push(renderWordDetailRow('النطق', w.pronunciation, { dir: 'ltr', lang: 'en' }));
+  rows.push(renderWordDetailRow('المستوى', w.level));
+  rows.push(renderWordDetailRow('المرادفات', w.synonyms, { dir: 'ltr', lang: 'en' }));
+  rows.push(renderWordDetailRow('الوسوم', w.tags));
+  rows.push(renderWordDetailRow('ملاحظات', w.notes));
+  const content = rows.filter(Boolean).join('');
+  return content ? `<div class="example-box word-card-details">${content}</div>` : '';
+}
+
 function renderWordCard(w, query, indexMap) {
   const ri   = indexMap?.get(String(w.id)) ?? window.words.findIndex(x => x.id === w.id);
   const drag = isReorderMode
@@ -84,9 +123,13 @@ function renderWordCard(w, query, indexMap) {
                w.expanded ? 'show-example' : '']
     .filter(Boolean).join(' ');
   const safeId = w.id.replace(/'/g, "\\'");
+  const returnToPersonalAction = isCustomWorldView() &&
+    window.LootLinguaWordLifecycle?.isMovedToPrivateWorld?.(w)
+    ? `<button class="icon-circle return-personal-btn" data-tip="إعادة للقاموس الشخصي" data-action="return-personal" data-id="${safeId}"><i class="fa-solid fa-arrow-rotate-left"></i></button>`
+    : '';
 
   return `
-    <li ${drag} class="${cls}" data-action="toggle-expand" data-index="${ri}" data-id="${safeId}">
+    <li ${drag} class="${cls}" data-action="toggle-expand" data-index="${ri}" data-id="${safeId}" aria-expanded="${Boolean(w.expanded)}">
       <div class="word-body" style="flex:1;min-width:0;" data-action="toggle-expand" data-index="${ri}">
         <div style="display:flex;align-items:flex-start;gap:8px;margin-bottom:4px;">
           <button class="star-btn ${w.starred ? 'active' : ''}" data-tip="صعبة"
@@ -96,13 +139,14 @@ function renderWordCard(w, query, indexMap) {
           <div>
             <div class="word-text">
               ${highlightText(w.word, query)}
-              <span class="cat-tag tag-${safeClassToken(w.category)}">${escapeHtml(w.category)}</span>
+              ${w.category ? `<span class="cat-tag tag-${safeClassToken(w.category)}">${escapeHtml(w.category)}</span>` : ''}
+              ${w.partOfSpeech ? `<span class="pos-tag">${escapeHtml(w.partOfSpeech)}</span>` : ''}
               ${renderMasteryIndicator(w)}
             </div>
             <div class="meaning-text">${highlightText(w.meaning, query)}</div>
           </div>
         </div>
-        ${w.example ? `<div class="example-box"><b>Ex:</b> ${highlightText(w.example, query)}</div>` : ''}
+        ${renderWordCardDetails(w)}
       </div>
       ${isReorderMode
         ? '<span style="font-size:20px;color:var(--text-gray);padding:0 8px;flex-shrink:0;">☰</span>'
@@ -110,6 +154,7 @@ function renderWordCard(w, query, indexMap) {
           ? `<span class="selection-state">${bulkSelectedWordIds.has(String(w.id)) ? 'محدد' : 'تحديد'}</span>`
         : `<div class="actions">
              <button class="icon-circle sound-btn" data-tip="نطق" data-action="sound" data-id="${safeId}"><i class="fas fa-volume-up"></i></button>
+             ${returnToPersonalAction}
              <button class="icon-circle edit-btn"  data-tip="تعديل" data-action="edit" data-id="${safeId}"><i class="fas fa-edit"></i></button>
              <button class="icon-circle del-btn"   data-tip="حذف" data-action="delete" data-id="${safeId}"><i class="fas fa-trash-alt"></i></button>
            </div>`
@@ -236,6 +281,7 @@ function render(options = {}) {
 
   let filtered = window.words.filter(w => {
     if (!w.word) return false;
+    if (window.LootLinguaWordLifecycle?.isVisibleInDictionaryList(w) === false) return false;
     const wm = w.word.toLowerCase().includes(query);
     const mm = (w.meaning  || '').toLowerCase().includes(query);
     const em = (w.example  || '').toLowerCase().includes(query);
@@ -399,6 +445,7 @@ document.addEventListener('DOMContentLoaded', () => {
       case 'star':   window.toggleStar(id, e); break;
       case 'sound':  window.playSound(id, e);  break;
       case 'edit':   window.editWord(id, e);   break;
+      case 'return-personal': window.returnPrivateWordToPersonalDictionary?.(id, e); break;
       case 'delete':
         if (suppressDeleteClickOnce) {
           suppressDeleteClickOnce = false;

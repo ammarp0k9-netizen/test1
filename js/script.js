@@ -582,14 +582,14 @@ window.enterSelectionMode = function(id) {
   render();
 };
 
-window.exitBulkDeleteMode = function() {
+window.exitBulkDeleteMode = function(options = {}) {
   if (isReorderMode) isReorderMode = false;
   isBulkDeleteMode = false;
   bulkSelectedWordIds.clear();
   selectedIndices = [];
   document.body.classList.remove('selection-mode-active');
   clearBulkSelectionInDom();
-  render();
+  if (options.renderView !== false) render();
 };
 
 window.exitSelectionMode = window.exitBulkDeleteMode;
@@ -1171,18 +1171,33 @@ const APP_OVERLAY_ROUTES = {
 const APP_ROUTE_TO_VIEW = Object.fromEntries(Object.entries(APP_VIEW_ROUTES).map(([k, v]) => [v, k]));
 const APP_ROUTE_TO_MODAL = Object.fromEntries(Object.entries(APP_MODAL_ROUTES).map(([k, v]) => [v, k]));
 const APP_ROUTE_TO_OVERLAY = Object.fromEntries(Object.entries(APP_OVERLAY_ROUTES).map(([k, v]) => [v, k]));
-const APP_PROJECT_BASE_PATH = '/LootLingua';
+const APP_PROJECT_BASE_PATH = (() => {
+  if (!location.hostname.endsWith('.github.io')) {
+    return '';
+  }
+
+  const segments = location.pathname
+    .split('/')
+    .filter(Boolean);
+
+  return segments.length ? `/${segments[0]}` : '';
+})();
 let appRouteSyncing = false;
 let appRoutingReady = false;
 
 function getAppBasePath() {
-  const pathname = location.pathname || '/';
-  const isGithubPages = location.hostname.endsWith('github.io');
-  const isProjectPath = pathname === APP_PROJECT_BASE_PATH || pathname.startsWith(APP_PROJECT_BASE_PATH + '/');
-  return isGithubPages || isProjectPath ? APP_PROJECT_BASE_PATH : '';
+  return APP_PROJECT_BASE_PATH;
 }
 
 function getAppRoutePath(kind, key) {
+  if (kind === 'published') {
+    const params = key && typeof key === 'object' ? key : {};
+    const parts = ['worlds'];
+    if (params.worldId) parts.push(encodeURIComponent(params.worldId));
+    if (params.rankId) parts.push('ranks', encodeURIComponent(params.rankId));
+    if (params.gateId) parts.push('gates', encodeURIComponent(params.gateId));
+    return getAppBasePath() + '/' + parts.join('/');
+  }
   const slug = kind === 'modal'
     ? APP_MODAL_ROUTES[key]
     : kind === 'overlay'
@@ -1201,6 +1216,31 @@ function parseAppRoute() {
   }
   const slug = pathname.replace(/^\/+|\/+$/g, '');
   if (!slug) return { kind: 'view', key: 'personal' };
+  const parts = slug.split('/').filter(Boolean);
+  if (parts[0] === APP_VIEW_ROUTES.worlds && parts.length > 1) {
+    if (parts.length === 2) {
+      return {
+        kind: 'published',
+        key: 'world',
+        params: { worldId: parts[1] }
+      };
+    }
+    if (parts.length === 4 && parts[2] === 'ranks') {
+      return {
+        kind: 'published',
+        key: 'rank',
+        params: { worldId: parts[1], rankId: parts[3] }
+      };
+    }
+    if (parts.length === 6 && parts[2] === 'ranks' && parts[4] === 'gates') {
+      return {
+        kind: 'published',
+        key: 'gate',
+        params: { worldId: parts[1], rankId: parts[3], gateId: parts[5] }
+      };
+    }
+    return { kind: 'published', key: 'not-found', params: {} };
+  }
   if (APP_ROUTE_TO_VIEW[slug]) return { kind: 'view', key: APP_ROUTE_TO_VIEW[slug] };
   if (APP_ROUTE_TO_MODAL[slug]) return { kind: 'modal', key: APP_ROUTE_TO_MODAL[slug] };
   if (APP_ROUTE_TO_OVERLAY[slug]) return { kind: 'overlay', key: APP_ROUTE_TO_OVERLAY[slug] };
@@ -1209,8 +1249,15 @@ function parseAppRoute() {
 
 function setAppRoute(kind, key, options = {}) {
   if (!appRoutingReady || appRouteSyncing) return;
-  const path = getAppRoutePath(kind, key);
-  const state = { lootlingua: true, kind, key, source: options.source || (options.replace ? 'replace' : 'push') };
+  const routeKey = kind === 'published' ? (options.params || {}) : key;
+  const path = getAppRoutePath(kind, routeKey);
+  const state = {
+    lootlingua: true,
+    kind,
+    key,
+    ...(kind === 'published' ? { params: routeKey } : {}),
+    source: options.source || (options.replace ? 'replace' : 'push')
+  };
   try {
     if (location.pathname === path) {
       history.replaceState({ ...state, source: history.state?.source || state.source }, '', path);
@@ -1224,6 +1271,10 @@ function setAppRoute(kind, key, options = {}) {
 
 function setAppViewRoute(viewKey, options = {}) {
   setAppRoute('view', viewKey, options);
+}
+
+function setPublishedContentRoute(key, params, options = {}) {
+  setAppRoute('published', key, { ...options, params });
 }
 
 function closeRouteOverlays() {
@@ -1321,6 +1372,12 @@ function applyAppRoute(route = parseAppRoute()) {
   closeRouteOverlays();
   if (route.kind === 'view') {
     openRouteView(route.key);
+  } else if (route.kind === 'published') {
+    if (typeof window.loadPublishedContentRoute === 'function') {
+      window.loadPublishedContentRoute(route);
+    } else {
+      openRouteView('worlds');
+    }
   } else {
     openRouteView(currentView || 'personal');
     openRouteOverlay(route.kind, route.key);
@@ -1334,7 +1391,10 @@ function handleInitialRouting() {
   const route = parseAppRoute();
   appRoutingReady = true;
   try {
-    const path = getAppRoutePath(route.kind, route.key);
+    const path = getAppRoutePath(
+      route.kind,
+      route.kind === 'published' ? route.params : route.key
+    );
     const state = { lootlingua: true, ...route, source: 'initial' };
     if (location.pathname === path) {
       history.replaceState(state, '', location.href);
@@ -1370,17 +1430,64 @@ function closeRouteEntry(kind, key, fallbackClose) {
   fallbackClose();
 }
 
+let activeModalFocusContext = null;
+
+function getModalFocusableElements(modal) {
+  return [...modal.querySelectorAll(
+    'button:not(:disabled), [href], input:not(:disabled), select:not(:disabled), textarea:not(:disabled), [tabindex]:not([tabindex="-1"])'
+  )].filter((element) => !element.hidden && getComputedStyle(element).display !== 'none');
+}
+
 function showModal(id) {
   const modal = document.getElementById(id);
   if (!modal) return;
+  if (activeModalFocusContext?.modal && activeModalFocusContext.modal !== modal) {
+    activeModalFocusContext.modal.removeEventListener('keydown', activeModalFocusContext.trap);
+  }
+  const returnFocus = document.activeElement;
+  const trap = (event) => {
+    if (event.key !== 'Tab') return;
+    const focusable = getModalFocusableElements(modal);
+    if (!focusable.length) {
+      event.preventDefault();
+      modal.focus();
+      return;
+    }
+    const first = focusable[0];
+    const last = focusable[focusable.length - 1];
+    if (event.shiftKey && document.activeElement === first) {
+      event.preventDefault();
+      last.focus();
+    } else if (!event.shiftKey && document.activeElement === last) {
+      event.preventDefault();
+      first.focus();
+    }
+  };
+  modal.addEventListener('keydown', trap);
+  activeModalFocusContext = { modal, returnFocus, trap };
   modal.style.display = 'flex';
+  modal.setAttribute('aria-hidden', 'false');
+  if (!modal.hasAttribute('tabindex')) modal.tabIndex = -1;
+  requestAnimationFrame(() => {
+    const focusable = getModalFocusableElements(modal);
+    (focusable[0] || modal).focus({ preventScroll: true });
+  });
   if (APP_MODAL_ROUTES[id]) setAppRoute('modal', id);
 }
 
 function hideModal(id) {
   const close = () => {
     const modal = document.getElementById(id);
-    if (modal) modal.style.display = 'none';
+    if (modal) {
+      modal.style.display = 'none';
+      modal.setAttribute('aria-hidden', 'true');
+    }
+    if (activeModalFocusContext?.modal === modal) {
+      modal?.removeEventListener('keydown', activeModalFocusContext.trap);
+      const returnFocus = activeModalFocusContext.returnFocus;
+      activeModalFocusContext = null;
+      if (returnFocus?.isConnected) requestAnimationFrame(() => returnFocus.focus({ preventScroll: true }));
+    }
   };
   if (APP_MODAL_ROUTES[id]) closeRouteEntry('modal', id, close);
   else close();
@@ -2618,7 +2725,18 @@ window.confirmGuestMigration = async function() {
     let uploaded = 0;
     for (const word of toMove) {
       const realId = window.saveWordToCloud
-        ? await window.saveWordToCloud(word.word || word.text, word.category || 'عام', word.meaning || '', word.example || '', word.order ?? 0, word)
+        ? await window.saveWordToCloud(
+          word.word || word.text,
+          word.category || 'عام',
+          word.meaning || '',
+          word.example || '',
+          word.order ?? 0,
+          {
+            ...word,
+            lifecycleSource: { type: 'import', importId: 'guest-migration' },
+            operationId: 'guest-migration',
+          }
+        )
         : null;
       if (!realId) throw new Error('cloud-upload-failed');
       window.words.unshift({

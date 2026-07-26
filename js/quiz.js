@@ -418,6 +418,10 @@ function normalizeQuizWord(item, source, index) {
     last_quizzed_at: mastery.last_quizzed_at,
     quiz_seen_count: mastery.quiz_seen_count,
     mastered_once: mastery.mastered_once,
+    personalDictionaryState: item.personalDictionaryState || 'active',
+    hiddenFromDictionary: item.hiddenFromDictionary === true,
+    wordKey: item.wordKey || window.LootLinguaWordLifecycle?.wordKeyOf?.(item) || '',
+    customWorldId: sourceId.startsWith('custom:') ? sourceId.slice(7) : '',
     isGameQuizWord: false,
     quizSource: sourceId
   };
@@ -438,7 +442,16 @@ function getQuizSourceWords(scope = currentQuizSource) {
     source = readWordsFromStorage('normal', uid);
     sourceKey = 'personal';
   }
-  return source.map((w, i) => normalizeQuizWord(w, sourceKey, i)).filter(w => w.word && w.meaning);
+  const eligibility = sourceKey.startsWith('custom:')
+    ? (word) => window.LootLinguaWordLifecycle?.isEligibleForPrivateWorldQuiz(
+      word,
+      sourceKey.slice(7)
+    ) !== false
+    : (word) => window.LootLinguaWordLifecycle?.isEligibleForPersonalDictionaryQuiz(word) !== false;
+  return source
+    .filter(eligibility)
+    .map((w, i) => normalizeQuizWord(w, sourceKey, i))
+    .filter(w => w.word && w.meaning);
 }
 
 function getQuizSourceParts(source = 'personal') {

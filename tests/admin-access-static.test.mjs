@@ -36,7 +36,11 @@ assert.doesNotMatch(
 assert.doesNotMatch(adminCloud, /@|password|secret/i, 'Admin access module contains an email/password/secret marker');
 assert.match(cloud, /lootlingua:auth-state/, 'Main Auth listener does not notify account-safe role state');
 assert.equal((cloud.match(/initializeApp\(/g) || []).length, 1, 'Firebase must still initialize exactly once');
-assert.equal((html.match(/src="js\/admin-cloud\.js"/g) || []).length, 1, 'Admin claim module must be loaded exactly once');
-assert.equal((html.match(/src="js\/content-schema\.js"/g) || []).length, 1, 'Content schema must be loaded exactly once');
+assert.equal((html.match(/src="js\/admin-cloud\.js(?:\?[^"]+)?"/g) || []).length, 1, 'Admin claim module must be loaded exactly once');
+assert.equal(
+  (html.match(/src="js\/content-schema\.js(?:\?[^"]+)?"/g) || []).length,
+  1,
+  'Content schema must be loaded exactly once'
+);
 
 console.log('Admin access is token-based and non-persistent; only account-scoped idempotency IDs survive reloads.');

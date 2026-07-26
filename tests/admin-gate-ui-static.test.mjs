@@ -26,7 +26,7 @@ test('rank rows open a sorted gate-management view with a four-level breadcrumb'
 test('gate UI requires the complete cloud facade and never writes Firestore directly', () => {
   for (const method of [
     'listGates', 'getGate', 'createGate', 'updateGate', 'setGateStatus',
-    'duplicateGateAsDraft', 'moveGate', 'requestDeleteGate',
+    'publishGateDraftWords', 'duplicateGateAsDraft', 'moveGate', 'requestDeleteGate',
   ]) {
     assert.match(source, new RegExp(`'${method}'`));
   }
@@ -39,7 +39,7 @@ test('gate editor stores a nullable ratio and resolves the central 75 percent de
   assert.match(source, /rawThreshold === '' \? null : Number\(rawThreshold\) \/ 100/);
   assert.match(source, /entryAssessmentPassRatio/);
   assert.match(source, /اتركه فارغًا لاستخدام الافتراضي المركزي/);
-  assert.match(source, /هذه العتبة لاختبار الدخول فقط؛ منطق الفتح بعد التعلّم لم يُحسم/);
+  assert.match(source, /فتح البوابات يعتمد على إكمال تعلم البوابة السابقة/);
   assert.doesNotMatch(functionSection('collectGateForm', 'gateFormSignature'), /0\.75/);
 });
 
@@ -53,7 +53,8 @@ test('gate create and update validate with the shared schema and carry optimisti
 test('gate status, duplicate, move, and delete mutations are awaited before success feedback', () => {
   for (const [name, nextName, awaitedCall] of [
     ['saveGateEditor', 'loadFreshGateForEditor', 'await api.updateGate'],
-    ['changeGateStatus', 'duplicateGateAsDraft', 'await getCloudApi().setGateStatus'],
+    ['changeGateStatus', 'publishRemainingGateDraftWords', 'await getCloudApi().setGateStatus'],
+    ['publishRemainingGateDraftWords', 'duplicateGateAsDraft', 'await getCloudApi().publishGateDraftWords'],
     ['duplicateGateAsDraft', 'createClientOperationId', 'await getCloudApi().duplicateGateAsDraft'],
     ['moveGate', 'openDeleteGateDialog', 'await getCloudApi().moveGate'],
     ['deleteGate', 'openDeleteRankDialog', 'await getCloudApi().requestDeleteGate'],
@@ -63,6 +64,16 @@ test('gate status, duplicate, move, and delete mutations are awaited before succ
     const successIndex = section.indexOf("'success'");
     assert.ok(awaitIndex >= 0 && successIndex > awaitIndex, `${name} reports success too early`);
   }
+});
+
+test('published gates expose an explicit draft-word repair without touching archived words', () => {
+  assert.match(source, /makeButton\([^,]+,\s*'publish-gate-draft-words'/);
+  const section = functionSection('publishRemainingGateDraftWords', 'duplicateGateAsDraft');
+  assert.match(section, /gate\.status !== 'published'/);
+  assert.match(section, /await getCloudApi\(\)\.publishGateDraftWords/);
+  assert.match(section, /publishedDraftWordCount/);
+  assert.match(section, /الكلمات المؤرشفة ستبقى مؤرشفة/);
+  assert.match(source, /action === 'publish-gate-draft-words'/);
 });
 
 test('gate move chooses another world and rank, confirms the exact title, and reuses an operation id', () => {
@@ -100,7 +111,7 @@ test('gate list exposes word counts and assessment meaning without claiming coun
   assert.match(source, /cachedCount\(gate\.wordCount\)/);
   assert.match(source, /عتبة اختبار الدخول فقط/);
   assert.match(source, /لا تمنح XP أو إتقانًا/);
-  assert.match(source, /منطق فتح المحتوى بعد التعلّم لم يُحسم بعد/);
+  assert.match(source, /تفتح البوابة التالية بعد إكمال تعلم الحالية/);
   assert.match(source, /عدد مخزن مؤقتًا · لم يتم التحقق/);
 });
 

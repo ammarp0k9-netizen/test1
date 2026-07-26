@@ -106,7 +106,45 @@ test('exports one frozen classic-IIFE API', () => {
 
 test('uses the required content and progress statuses', () => {
   assert.deepEqual(schema.CONTENT_STATUSES, ['draft', 'published', 'archived']);
-  assert.deepEqual(schema.PROGRESS_STATUSES, ['locked', 'available', 'active', 'completed']);
+  assert.deepEqual(
+    schema.PROGRESS_STATUSES,
+    ['locked', 'available', 'learning', 'ready', 'cleared']
+  );
+});
+
+test('centralizes the official CEFR rank field and keeps old ranks unclassified', () => {
+  assert.deepEqual(schema.CEFR_LEVELS, [
+    'A1', 'A2', 'B1', 'B2', 'C1', 'C2', 'unclassified'
+  ]);
+  assert.equal(schema.cleanRank(baseRank()).cefrLevel, 'unclassified');
+  assert.equal(schema.cleanRank(baseRank({ cefrLevel: 'B2' })).cefrLevel, 'B2');
+  assert.throws(
+    () => schema.cleanRank(baseRank({ cefrLevel: 'beginner' })),
+    (error) => error instanceof schema.SchemaValidationError
+  );
+});
+
+test('sorts ranks by CEFR, then stored order, then stable rank ID', () => {
+  const ranks = [
+    baseRank({ rankId: 'a2-first', cefrLevel: 'A2', order: 0 }),
+    baseRank({ rankId: 'a1-z', cefrLevel: 'A1', order: 9 }),
+    baseRank({ rankId: 'a1-b', cefrLevel: 'A1', order: 2 }),
+    baseRank({ rankId: 'a1-a', cefrLevel: 'A1', order: 2 }),
+  ].sort(schema.comparePublishedRanks);
+  assert.deepEqual(ranks.map((rank) => rank.rankId), [
+    'a1-a', 'a1-b', 'a1-z', 'a2-first'
+  ]);
+});
+
+test('groups classified and legacy ranks into separate ordered sections', () => {
+  const groups = schema.groupRanksByCefrLevel([
+    baseRank({ rankId: 'legacy' }),
+    baseRank({ rankId: 'b1', cefrLevel: 'B1' }),
+    baseRank({ rankId: 'a1', cefrLevel: 'A1' }),
+  ]);
+  assert.deepEqual(groups.get('A1').map((rank) => rank.rankId), ['a1']);
+  assert.deepEqual(groups.get('B1').map((rank) => rank.rankId), ['b1']);
+  assert.deepEqual(groups.get('unclassified').map((rank) => rank.rankId), ['legacy']);
 });
 
 test('keeps unlock decisions as manual placeholders only', () => {

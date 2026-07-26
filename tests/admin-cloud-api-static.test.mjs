@@ -46,7 +46,22 @@ assert.match(
 );
 assert.equal((worldListBlock.match(/await getDocs\(/g) || []).length, 1, 'World listing must use one one-shot query.');
 assert.equal((rankListBlock.match(/await getDocs\(/g) || []).length, 1, 'Rank listing must use one one-shot query.');
-assert.doesNotMatch(source, /onSnapshot|deleteDoc/, 'The content API must not subscribe or delete recursively in the browser.');
+assert.doesNotMatch(source, /onSnapshot/, 'The content API must not subscribe in the browser.');
+assert.doesNotMatch(
+  source,
+  /'failed-precondition': 'admin\/conflict'|'functions\/failed-precondition': 'admin\/conflict'/,
+  'Firestore failed-precondition errors must not be mislabeled as content conflicts.'
+);
+assert.match(source, /'admin\/index-required'/, 'Missing Firestore indexes need a distinct admin error.');
+const preparedDeleteSection = source.slice(
+  source.indexOf('async function requestDeleteWorld('),
+  source.indexOf('async function listRanks(')
+);
+assert.doesNotMatch(
+  preparedDeleteSection,
+  /deleteDoc/,
+  'Prepared parent content must remain backend-deleted.'
+);
 assert.match(source, /runTransaction\(db/, 'World writes must use transactions.');
 assert.match(source, /existing\.version !== version/, 'World updates lack optimistic version checks.');
 assert.match(source, /createdAt: existing\.createdAt/, 'World updates do not preserve createdAt.');

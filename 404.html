@@ -1,20 +1,42 @@
 <!DOCTYPE html>
 <html>
-  <head>
-    <meta charset="utf-8">
-    <title>LootLingua</title>
-    <script type="text/javascript">
-      var l = window.location;
-      var isGithubProjectPage = l.hostname.endsWith('github.io') &&
-        l.pathname.split('/')[1] === 'LootLingua';
-      var segmentCount = isGithubProjectPage ? 1 : 0;
-      l.replace(
-        l.protocol + '//' + l.hostname + (l.port ? ':' + l.port : '') +
-        l.pathname.split('/').slice(0, 1 + segmentCount).join('/') + '/?p=/' +
-        l.pathname.slice(1).split('/').slice(segmentCount).join('/').replace(/&/g, '~and~') +
-        (l.search ? '&q=' + l.search.slice(1).replace(/&/g, '~and~') : '') + l.hash
+<head>
+  <meta charset="utf-8">
+  <title>LootLingua</title>
+
+  <script>
+    (function () {
+      var location = window.location;
+      var parts = location.pathname.split('/').filter(Boolean);
+      var isGitHubPages = location.hostname.endsWith('.github.io');
+
+      var projectBase = isGitHubPages && parts.length
+        ? '/' + parts[0]
+        : '';
+
+      var routeParts = isGitHubPages
+        ? parts.slice(1)
+        : parts;
+
+      var route = '/' + routeParts.join('/');
+
+      var params = new URLSearchParams();
+      params.set('p', route || '/');
+
+      if (location.search) {
+        params.set('q', location.search.slice(1));
+      }
+
+      location.replace(
+        location.origin +
+        projectBase +
+        '/?' +
+        params.toString() +
+        location.hash
       );
-    </script>
-  </head>
-  <body></body>
+    })();
+  </script>
+</head>
+
+<body></body>
 </html>

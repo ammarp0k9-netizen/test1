@@ -12,6 +12,18 @@ function wordExistsInWords(text, sourceWords) {
 function activeDictionaryWordExists(text) {
   return wordExistsInWords(text, getActiveDictionaryWords());
 }
+function getWordLifecycleContract() {
+  return window.LootLinguaWordLifecycle;
+}
+function findActiveDictionaryWord(text) {
+  const lifecycle = getWordLifecycleContract();
+  return lifecycle?.findUserWordByKey
+    ? lifecycle.findUserWordByKey(getActiveDictionaryWords(), text)
+    : getActiveDictionaryWords().find(w => normalizeWord(w.word || w.text) === normalizeWord(text)) || null;
+}
+function isDictionaryWordHidden(word) {
+  return getWordLifecycleContract()?.isHiddenFromDictionary?.(word) === true;
+}
 function getActiveDictionaryMessageLabel() {
   return isCustomWorldView() ? 'هذا العالم' : 'قاموسك الشخصي';
 }
@@ -113,6 +125,17 @@ function wordsSnapshotNeedsFullRender(prev, next) {
     if ((a?.meaning || '') !== (b?.meaning || '')) return true;
     if ((a?.example || '') !== (b?.example || '')) return true;
     if ((a?.category || '') !== (b?.category || '')) return true;
+    if ((a?.partOfSpeech || '') !== (b?.partOfSpeech || '')) return true;
+    if ((a?.definition || '') !== (b?.definition || '')) return true;
+    if ((a?.definition_ar || '') !== (b?.definition_ar || '')) return true;
+    if ((a?.exampleTranslation || '') !== (b?.exampleTranslation || '')) return true;
+    if ((a?.level || '') !== (b?.level || '')) return true;
+    if (JSON.stringify(a?.tags || []) !== JSON.stringify(b?.tags || [])) return true;
+    if (JSON.stringify(a?.synonyms || []) !== JSON.stringify(b?.synonyms || [])) return true;
+    if ((a?.pronunciation || '') !== (b?.pronunciation || '')) return true;
+    if ((a?.notes || '') !== (b?.notes || '')) return true;
+    if (Boolean(a?.hiddenFromDictionary) !== Boolean(b?.hiddenFromDictionary)) return true;
+    if ((a?.hiddenFromDictionaryAt || null) !== (b?.hiddenFromDictionaryAt || null)) return true;
     if ((a?.order ?? null) !== (b?.order ?? null)) return true;
     if ((a?.createdAt || '') !== (b?.createdAt || '')) return true;
   }
@@ -200,21 +223,82 @@ async function updateActiveWordInCloud(id, data) {
 async function deleteActiveWordFromCloud(id) {
   if (isCustomWorldView()) {
     if (!window.deleteCustomWorldWordFromCloud) return !hasSignedInUser();
-    return await window.deleteCustomWorldWordFromCloud(activeCustomWorldId, id);
+    const word = window.words.find((item) => String(item.id) === String(id));
+    return await window.deleteCustomWorldWordFromCloud(activeCustomWorldId, id, word);
   }
   if (!window.deleteWordFromCloud) return !hasSignedInUser();
   return await window.deleteWordFromCloud(id);
 }
 
-async function deleteWordFromCapturedScope(id, customWorldId) {
+async function deleteWordFromCapturedScope(id, customWorldId, word, sourceSummary, options = {}) {
   if (!hasSignedInUser()) return true;
   if (customWorldId) {
     if (!window.deleteCustomWorldWordFromCloud) return false;
-    return await window.deleteCustomWorldWordFromCloud(customWorldId, id);
+    return await window.deleteCustomWorldWordFromCloud(customWorldId, id, word, options);
+  }
+  if (window.deletePersonalUserWord) {
+    const result = await window.deletePersonalUserWord(id, word, sourceSummary);
+    return result?.deleted === true;
   }
   if (!window.deleteWordFromCloud) return false;
   return await window.deleteWordFromCloud(id);
 }
+
+async function restoreExistingDictionaryWord(existingWord, incomingWord, sourceType = 'manual') {
+  if (!existingWord) return null;
+  let result = null;
+  if (hasSignedInUser()) {
+    if (!window.upsertUserWordWithSource) return null;
+    result = await window.upsertUserWordWithSource({
+      word: { ...incomingWord, id: existingWord.id },
+      existingWordId: existingWord.id,
+      source: { type: sourceType },
+      restoreHidden: true,
+      operationId: `${sourceType}:restore`,
+    });
+  } else {
+    result = {
+      status: 'restored',
+      restored: true,
+      wordId: existingWord.id,
+      wordKey: getWordLifecycleContract()?.wordKeyOf?.(existingWord) || '',
+    };
+  }
+  window.words = window.words.map((word) => String(word.id) === String(existingWord.id)
+    ? {
+      ...word,
+      hiddenFromDictionary: false,
+      hiddenFromDictionaryAt: null,
+      meaning: word.meaning || incomingWord.meaning || '',
+      example: word.example || incomingWord.example || '',
+      category: word.category && word.category !== 'عام'
+        ? word.category
+        : (incomingWord.category || word.category || 'عام'),
+    }
+    : word);
+  persistDictionary();
+  return result;
+}
+
+window.restoreDictionaryWordById = function(wordId, options = {}) {
+  const scope = `dictionary-restore:${String(wordId || '')}`;
+  const runner = window.LootLinguaOperations?.runExclusive || ((key, task) => task());
+  return runner(scope, async () => {
+    const personalWords = readWordsFromStorage('normal', window.auth?.currentUser?.uid);
+    const existing = personalWords.find((word) => String(word.id) === String(wordId));
+    if (!existing) return null;
+    if (hasSignedInUser()) await window.restoreUserWordToDictionary?.(existing.id);
+    const restored = { ...existing, hiddenFromDictionary: false, hiddenFromDictionaryAt: null };
+    const next = personalWords.map((word) => String(word.id) === String(existing.id) ? restored : word);
+    writeWordsToStorage(next, 'normal', window.auth?.currentUser?.uid);
+    if (!isCustomWorldView()) window.words = next;
+    if (currentView === 'personal') render();
+    if (options.notify !== false) {
+      showToast(`تمت استعادة كلمة ”${existing.word || existing.text}“ إلى قاموسك، وتقدمها السابق محفوظ.`, 'success', 4800);
+    }
+    return restored;
+  });
+};
 
 let isExpanded = false;
 window.isExpanded = isExpanded;
@@ -363,7 +447,27 @@ window.addWord = async function() {
   } else {
     // Spam: max 30 words per minute
     if (!rateLimit('addWord', 30, 60000)) { btn.disabled=false; return; }
-    if (activeDictionaryWordExists(w)) { showToast('هذه الكلمة موجودة بالفعل في هذا القاموس!'); btn.disabled=false; return; }
+    const existingWord = findActiveDictionaryWord(w);
+    if (existingWord && !isDictionaryWordHidden(existingWord)) {
+      showToast('هذه الكلمة موجودة بالفعل في هذا القاموس!');
+      btn.disabled=false;
+      return;
+    }
+    if (existingWord && isDictionaryWordHidden(existingWord) && !isCustomWorldView()) {
+      await restoreExistingDictionaryWord(existingWord, {
+        word: w,
+        meaning: m,
+        example: ex,
+        category: c,
+      }, 'manual');
+      clearInputs();
+      setAddFormExpanded(false);
+      btn.disabled = false;
+      renderLimit = 20;
+      render();
+      showToast(`تمت استعادة كلمة ”${w}“، وتقدمها السابق محفوظ.`, 'success', 4800);
+      return;
+    }
     const newWord = applyKnownSharedMastery({ id:Date.now().toString(), word:w, meaning:m, example:ex, category:c, starred:false, forgetCount:0, xpValue:0, order:0 });
     window.words.unshift(newWord);
     reindexWordOrder(window.words);
@@ -453,17 +557,27 @@ function resetDeleteModalCopy() {
   const modal = document.querySelector('#deleteModal .modal-content');
   const title = modal?.querySelector('h2');
   const text = modal?.querySelector('p');
+  const confirm = document.getElementById('deleteConfirmBtn');
   if (title) title.textContent = 'حذف الكلمة؟';
   if (text) text.textContent = 'هذا الإجراء لا يمكن التراجع عنه';
+  if (confirm) confirm.textContent = 'نعم، احذف';
 }
 
-function configureDeleteModal(wordsToDelete) {
+function configureDeleteModal(wordsToDelete, journeyLinkedCount = 0) {
   const modal = document.querySelector('#deleteModal .modal-content');
   const title = modal?.querySelector('h2');
   const text = modal?.querySelector('p');
-  if (wordsToDelete.length > 1) {
+  const confirm = document.getElementById('deleteConfirmBtn');
+  if (wordsToDelete.length === 1 && journeyLinkedCount === 1) {
+    if (title) title.textContent = 'إخفاء الكلمة؟';
+    if (text) text.textContent = 'هذه الكلمة مرتبطة برحلة تعليمية. سيتم إخفاؤها من قاموسك مع الاحتفاظ بتقدمها وارتباطها بالرحلة.';
+    if (confirm) confirm.textContent = 'إخفاء الكلمة';
+  } else if (wordsToDelete.length > 1) {
     if (title) title.textContent = `هل أنت متأكد من حذف ${wordsToDelete.length} من الكلمات؟`;
-    if (text) text.textContent = 'هذا الإجراء لا يمكن التراجع عنه';
+    if (text) text.textContent = journeyLinkedCount
+      ? `سيتم إخفاء ${journeyLinkedCount} مرتبطة برحلة، وحذف ${wordsToDelete.length - journeyLinkedCount} كلمة شخصية.`
+      : 'هذا الإجراء لا يمكن التراجع عنه';
+    if (confirm) confirm.textContent = journeyLinkedCount ? 'تنفيذ' : 'نعم، احذف';
   } else {
     resetDeleteModalCopy();
   }
@@ -471,7 +585,61 @@ function configureDeleteModal(wordsToDelete) {
   modal?.querySelector('.xp-delete-warn')?.remove();
 }
 
-function confirmDeleteWords(ids, { fromBulk = false } = {}) {
+let pendingPrivateMembershipDisposition = null;
+
+window.cancelPrivateMembershipDisposition = function() {
+  pendingPrivateMembershipDisposition = null;
+  hideModal('privateMembershipDispositionModal');
+  pendingDeleteId = null;
+};
+
+window.confirmPrivateMembershipDisposition = function(disposition) {
+  const pending = pendingPrivateMembershipDisposition;
+  if (!pending) return;
+  pendingPrivateMembershipDisposition = null;
+  hideModal('privateMembershipDispositionModal');
+  confirmDeleteWords(pending.ids, {
+    fromBulk: pending.fromBulk,
+    privateDisposition: disposition,
+    privateDispositionIds: pending.dispositionIds,
+  });
+};
+
+function showPrivateMembershipDisposition(words, impacts, ids, fromBulk) {
+  const journeyLinked = impacts.some((impact) => impact.hasJourneySource);
+  const count = impacts.length;
+  const title = document.getElementById('privateMembershipDispositionTitle');
+  const text = document.getElementById('privateMembershipDispositionText');
+  const returnBtn = document.getElementById('privateMembershipReturnBtn');
+  const removeBtn = document.getElementById('privateMembershipRemoveBtn');
+  if (title) title.textContent = count === 1
+    ? 'هذه آخر عضوية خاصة للكلمة'
+    : `هذه آخر عضوية خاصة لـ ${count} كلمات`;
+  if (text) text.textContent = journeyLinked
+    ? 'بعض الكلمات مرتبطة برحلة تعليمية، لذلك يمكن إعادتها لقاموسك أو إبقاؤها خارج القائمة مع حفظ التقدم.'
+    : 'اختر إعادتها إلى قاموسك الشخصي أو حذفها نهائيًا بعد إزالتها من هذا العالم.';
+  if (returnBtn) {
+    returnBtn.onclick = () => window.confirmPrivateMembershipDisposition('return-personal');
+  }
+  if (removeBtn) {
+    const disposition = journeyLinked ? 'keep-hidden' : 'delete';
+    const label = removeBtn.querySelector('span');
+    if (label) label.textContent = journeyLinked ? 'إبقاؤها خارج القاموس' : 'حذفها نهائيًا';
+    removeBtn.onclick = () => window.confirmPrivateMembershipDisposition(disposition);
+  }
+  pendingPrivateMembershipDisposition = {
+    ids,
+    fromBulk,
+    dispositionIds: impacts.map((impact) => impact.wordId),
+  };
+  showModal('privateMembershipDispositionModal');
+}
+
+async function confirmDeleteWords(ids, {
+  fromBulk = false,
+  privateDisposition = '',
+  privateDispositionIds = [],
+} = {}) {
   const uniqueIds = [...new Set((Array.isArray(ids) ? ids : [ids]).map(String).filter(Boolean))];
   const wordsToDelete = uniqueIds
     .map(id => window.words.find(w => String(w.id) === id))
@@ -479,9 +647,54 @@ function confirmDeleteWords(ids, { fromBulk = false } = {}) {
   if (!wordsToDelete.length) return;
 
   pendingDeleteId = uniqueIds[0];
-  configureDeleteModal(wordsToDelete);
   const deleteCustomWorldId = isCustomWorldView() ? String(activeCustomWorldId) : null;
   const deleteScopeKey = deleteCustomWorldId ? `custom:${deleteCustomWorldId}` : 'personal';
+  const actionById = new Map(uniqueIds.map((id) => [id, 'delete']));
+  const sourceSummaryById = new Map();
+  const privateImpactById = new Map();
+  const dispositionIdSet = new Set(privateDispositionIds.map(String));
+  if (deleteCustomWorldId && hasSignedInUser()) {
+    try {
+      const impacts = await Promise.all(wordsToDelete.map(async (word) => ({
+        wordId: String(word.id),
+        ...(await window.getPrivateWorldRemovalImpact?.(deleteCustomWorldId, word)),
+      })));
+      impacts.forEach((impact) => privateImpactById.set(impact.wordId, impact));
+      const requiringDisposition = impacts.filter((impact) => impact.requiresDisposition);
+      if (!privateDisposition && requiringDisposition.length) {
+        showPrivateMembershipDisposition(
+          wordsToDelete,
+          requiringDisposition,
+          uniqueIds,
+          fromBulk
+        );
+        return;
+      }
+    } catch (error) {
+      showToast('تعذر التحقق من عضوية الكلمات. لم نغيّر هذا العالم.', 'danger', 5200);
+      pendingDeleteId = null;
+      return;
+    }
+  }
+  if (!deleteCustomWorldId && hasSignedInUser()) {
+    try {
+      const summaries = await Promise.all(wordsToDelete.map((word) =>
+        window.getUserWordSourceSummary?.(word) || Promise.resolve({ hasJourneySource: false })
+      ));
+      summaries.forEach((summary, index) => {
+        sourceSummaryById.set(String(wordsToDelete[index].id), summary);
+        if (summary?.hasJourneySource) {
+          actionById.set(String(wordsToDelete[index].id), 'hide');
+        }
+      });
+    } catch (error) {
+      showToast('تعذر التحقق من ارتباط الكلمة بالرحلة. لم نغيّر قاموسك.', 'danger', 5200);
+      pendingDeleteId = null;
+      return;
+    }
+  }
+  const journeyLinkedCount = [...actionById.values()].filter((action) => action === 'hide').length;
+  configureDeleteModal(wordsToDelete, journeyLinkedCount);
 
   document.getElementById('deleteConfirmBtn').onclick = async function() {
     hideModal('deleteModal');
@@ -495,24 +708,53 @@ function confirmDeleteWords(ids, { fromBulk = false } = {}) {
     });
 
     setTimeout(async () => {
-      const results = await Promise.all(uniqueIds.map(id => deleteWordFromCapturedScope(id, deleteCustomWorldId)));
-      if (results.some(result => result !== true)) {
-        uniqueIds.forEach((id) => {
+      const results = await Promise.all(uniqueIds.map(async (id) => {
+        const action = actionById.get(id) || 'delete';
+        const word = wordsToDelete.find((item) => String(item.id) === id);
+        try {
+          const result = action === 'hide'
+            ? await window.hideUserWordFromDictionary?.(id)
+            : await deleteWordFromCapturedScope(
+              id,
+              deleteCustomWorldId,
+              word,
+              sourceSummaryById.get(id),
+              deleteCustomWorldId ? {
+                impact: privateImpactById.get(id),
+                disposition: dispositionIdSet.has(id) ? privateDisposition : '',
+              } : {}
+            );
+          return { id, action, ok: action === 'hide' ? Boolean(result) : result === true };
+        } catch (error) {
+          return { id, action, ok: false, error };
+        }
+      }));
+      const failed = results.filter((result) => !result.ok);
+      if (failed.length) {
+        failed.forEach(({ id }) => {
           const card = document.querySelector(`.word-card[data-id="${cssEscapeValue(id)}"]`);
           if (card) {
             card.style.opacity = '';
             card.style.transform = '';
           }
         });
-        showToast('تعذر حذف الكلمة من السحابة، لذلك لم نغيّر قاموسك.', 'danger', 5200);
-        pendingDeleteId = null;
-        return;
+        showToast(`تمت معالجة ${results.length - failed.length} من ${results.length}. تعذر حفظ ${failed.length} ويمكنك إعادة المحاولة.`, 'warning', 5600);
       }
 
-      const deleteSet = new Set(uniqueIds);
+      const successful = results.filter((result) => result.ok);
+      const deleteSet = new Set(successful
+        .filter((result) => result.action === 'delete')
+        .map((result) => result.id));
+      const hideSet = new Set(successful
+        .filter((result) => result.action === 'hide')
+        .map((result) => result.id));
       const stillInDeleteScope = getActiveDictionaryStorageScope() === deleteScopeKey;
       if (stillInDeleteScope) {
-        window.words = window.words.filter(w => !deleteSet.has(String(w.id)));
+        window.words = window.words
+          .filter(w => !deleteSet.has(String(w.id)))
+          .map((word) => hideSet.has(String(word.id))
+            ? { ...word, hiddenFromDictionary: true, hiddenFromDictionaryAt: new Date().toISOString() }
+            : word);
         persistDictionary();
       } else if (deleteCustomWorldId) {
         const stored = readCustomWorldWordsFromStorage(deleteCustomWorldId)
@@ -531,6 +773,17 @@ function confirmDeleteWords(ids, { fromBulk = false } = {}) {
       if (currentView === 'starred') renderStarredWords();
       else if (stillInDeleteScope) render();
       refreshFeatureUnlockUI();
+      if (!failed.length) {
+        if (successful.length === 1 && successful[0].action === 'hide') {
+          const word = wordsToDelete[0];
+          showToast(`أُخفيت كلمة ”${word.word || word.text}“ من قائمة قاموسك. ستظل تظهر في المراجعات والاختبارات.`, 'success', 5200);
+        } else if (successful.length === 1) {
+          const word = wordsToDelete[0];
+          showToast(`حُذفت كلمة ”${word.word || word.text}“ من قاموسك.`, 'success', 4200);
+        } else {
+          showToast(`تم إخفاء ${hideSet.size} وحذف ${deleteSet.size} من الكلمات.`, 'success', 4800);
+        }
+      }
     }, 300);
   };
 
@@ -849,7 +1102,8 @@ async function addAiMeaningCore({ word, ar, pos, ex, game }, btn) {
     pushNotification('بيانات ناقصة للإضافة', 'warning');
     return;
   }
-  if (activeDictionaryWordExists(word)) {
+  const existingWord = findActiveDictionaryWord(word);
+  if (existingWord && !isDictionaryWordHidden(existingWord)) {
     pushNotification('هذه الكلمة موجودة أصلاً في هذا القاموس', 'warning');
     if (btn) {
       btn.disabled = true;
@@ -868,9 +1122,28 @@ async function addAiMeaningCore({ word, ar, pos, ex, game }, btn) {
   let added = false;
 
   try {
-    if (window.auth?.currentUser) {
+    if (existingWord && isDictionaryWordHidden(existingWord) && !isCustomWorldView()) {
+      await restoreExistingDictionaryWord(existingWord, {
+        word,
+        meaning: ar,
+        example: ex || '',
+        category,
+      }, 'dictionary-search');
+      if (isEditableDictionaryView()) render();
+      pushNotification(`تمت استعادة كلمة ”${word}“. كانت مرتبطة برحلة تعليمية، وتقدمها السابق محفوظ.`, 'success');
+      added = true;
+    } else if (window.auth?.currentUser) {
       const tempWord = applyKnownSharedMastery({ id: Date.now().toString(), word, meaning: ar, example: ex || '', category, starred: false, forgetCount: 0, xpValue: xpGain });
-      const realId = await saveActiveWordToCloud(tempWord);
+      const realId = isCustomWorldView()
+        ? await saveActiveWordToCloud(tempWord)
+        : await window.saveWordToCloud?.(
+          tempWord.word,
+          tempWord.category,
+          tempWord.meaning,
+          tempWord.example,
+          tempWord.order ?? 0,
+          { ...tempWord, lifecycleSource: { type: 'dictionary-search' } }
+        );
       if (realId) {
         window.words.unshift(applyKnownSharedMastery({
           id: realId, word, meaning: ar, example: ex || '', category,
@@ -1423,7 +1696,9 @@ function showWordHunterPopover(anchor, data) {
   if (!popover || !anchor) return;
   const anchorRect = anchor.getBoundingClientRect();
   popover.hidden = false;
-  const disabled = data.local || data.empty || activeDictionaryWordExists(data.word);
+  const existingWord = findActiveDictionaryWord(data.word);
+  const restore = Boolean(existingWord && isDictionaryWordHidden(existingWord) && !isCustomWorldView());
+  const disabled = data.empty || Boolean(existingWord && !restore) || Boolean(data.local && !restore);
   popover.innerHTML = data.loading
     ? `<div class="word-hunter-popover-loading"><i class="fas fa-spinner fa-spin" aria-hidden="true"></i><strong>${escapeHtml(data.word)}</strong></div>`
     : `
@@ -1434,7 +1709,7 @@ function showWordHunterPopover(anchor, data) {
       <button type="button" ${disabled ? 'disabled' : ''} onclick="addWordHunterResult(event)"
         data-word="${sugAttr(data.word)}" data-ar="${sugAttr(data.meaning || '')}" data-pos="${sugAttr(data.category || 'عام')}" data-ex="${sugAttr(data.example || '')}">
         <i class="fa-solid fa-plus" aria-hidden="true"></i>
-        <span>${disabled ? 'مضافة مسبقاً' : 'إضافة للقاموس'}</span>
+        <span>${restore ? 'استعادة إلى القاموس' : (disabled ? 'مضافة مسبقاً' : 'إضافة للقاموس')}</span>
       </button>
       ${data.canAskGamer ? `<button type="button" class="word-hunter-gamer-btn" onclick="fetchWordHunterGamerMeaning(event)" data-word="${sugAttr(data.word)}">
         <i class="fa-solid fa-gamepad" aria-hidden="true"></i>
@@ -1672,13 +1947,12 @@ function handleLiClick(index, el) {
     syncSelectedIndicesFromBulkSelection();
     syncBulkSelectionInDom(key);
   } else {
-    // حفظ حالة الفتح في مصفوفة الكلمات الأصلية
     const word = window.words[index];
     if (word) {
       word.expanded = !word.expanded;
-      persistDictionary();
-      // تحديث الكلاس مباشرة لتوسيع/إغلاق البطاقة بدون إعادة رسم القائمة
+      // Expansion is transient UI state; preserve the virtual window and scroll position.
       el.classList.toggle('show-example', word.expanded);
+      el.setAttribute('aria-expanded', String(word.expanded));
     }
   }
 }

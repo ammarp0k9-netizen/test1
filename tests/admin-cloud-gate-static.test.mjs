@@ -11,6 +11,7 @@ for (const method of [
   'createGate',
   'updateGate',
   'setGateStatus',
+  'publishGateDraftWords',
   'duplicateGateAsDraft',
   'moveGate',
   'requestDeleteGate',
@@ -34,6 +35,25 @@ assert.match(source, /createdAt: existing\.createdAt/, 'Gate updates do not pres
 assert.match(source, /transaction\.update\(rankReference, \{[\s\S]*?gateCount: nextRankGateCount/, 'Gate creation does not update rank.gateCount.');
 assert.match(source, /transaction\.update\(worldReference, \{[\s\S]*?gateCount: nextWorldGateCount/, 'Gate creation does not update world.gateCount.');
 assert.match(source, /await runTransaction\(db/, 'Gate transactions are not awaited.');
+assert.match(
+  source,
+  /async function publishDraftWordsForGate\([\s\S]*?where\('status', '==', 'draft'\)[\s\S]*?limit\(BULK_WORD_LIMIT\)[\s\S]*?bulkSetWordStatus\([\s\S]*?'published'/,
+  'Gate publication does not publish every draft-word batch.'
+);
+assert.match(
+  source,
+  /async function publishGateDraftWords\([\s\S]*?gate\.status !== 'published'/,
+  'Existing-gate repair is not restricted to published gates.'
+);
+const publishStatusSection = source.match(
+  /async function setGateStatus\([\s\S]*?\n\}\n\nasync function publishDraftWordsForGate/
+);
+assert.ok(publishStatusSection, 'Gate status publication section is missing.');
+assert.ok(
+  publishStatusSection[0].indexOf('publishDraftWordsForGate') <
+    publishStatusSection[0].indexOf('updateGate('),
+  'A gate becomes public before its draft words are published.'
+);
 assert.match(source, /httpsCallable\(functions, 'duplicateContentGate'\)/);
 assert.match(source, /httpsCallable\(functions, 'moveContentGate'\)/);
 assert.match(source, /httpsCallable\(functions, 'deleteContentGate'\)/);

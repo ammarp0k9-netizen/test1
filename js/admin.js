@@ -11,7 +11,7 @@
     'category', 'difficulty', 'languageFrom', 'languageTo', 'order', 'isFeatured'
   ]);
   const EDITABLE_RANK_FIELDS = Object.freeze([
-    'title', 'subtitle', 'description', 'order', 'difficulty', 'unlockConfig'
+    'title', 'subtitle', 'description', 'order', 'difficulty', 'cefrLevel', 'unlockConfig'
   ]);
   const EDITABLE_GATE_FIELDS = Object.freeze([
     'title', 'subtitle', 'description', 'order', 'difficulty',
@@ -23,6 +23,8 @@
     'synonyms', 'pronunciation', 'audioUrl', 'imageUrl', 'notes', 'order'
   ]);
   const WORD_PAGE_SIZE = 25;
+  const ADMIN_PAGED_WORDS_V2 = root.LootLinguaFeatureFlags?.adminPagedWordsV2 !== false;
+  const ADMIN_WORD_PAGE_CACHE_LIMIT = 3;
   const MAX_BULK_WORDS = 100;
   const WORLD_DIRTY_WARNING = 'لديك تعديلات غير محفوظة في العالم. هل تريد مغادرة المحرر وفقدانها؟';
   const RANK_DIRTY_WARNING = 'لديك تعديلات غير محفوظة في الرتبة. هل تريد مغادرة المحرر وفقدانها؟';
@@ -52,12 +54,40 @@
     wordPageError: '',
     wordNextCursor: null,
     wordHasMore: false,
+    wordHasPrevious: false,
+    wordPageIndex: 0,
+    wordPager: null,
+    wordPagerSignature: '',
+    wordLoadingNext: false,
+    wordLoadingPrevious: false,
+    wordSort: 'newest',
+    wordFilterField: '',
+    wordFilterValue: '',
+    wordSearch: '',
+    wordSearchTimer: null,
     selectedWordIds: new Set(),
+    selectedWordMeta: new Map(),
+    stagingWords: [],
+    stagingLoading: false,
+    stagingPageError: '',
+    stagingPager: null,
+    stagingPageIndex: 0,
+    stagingHasNext: false,
+    stagingHasPrevious: false,
+    stagingSort: 'newest',
+    stagingFilterField: '',
+    stagingFilterValue: '',
+    stagingCount: null,
+    selectedStagingIds: new Set(),
+    selectedStagingMeta: new Map(),
+    wordImportPending: false,
     modal: null,
     actionKeys: new Set(),
     lastAdminState: null,
     entryBound: false,
-    accessCheckPending: false
+    accessCheckPending: false,
+    returnView: 'personal',
+    returnCustomWorldId: ''
   };
 
   function makeElement(tagName, className, textValue) {
@@ -89,6 +119,26 @@
     return button;
   }
 
+  function shortenTechnicalValue(value, maxLength) {
+    const text = String(value || '');
+    const limit = Math.max(16, Number(maxLength) || 30);
+    if (text.length <= limit) return text;
+    const tailLength = 8;
+    return `${text.slice(0, limit - tailLength - 1)}…${text.slice(-tailLength)}`;
+  }
+
+  function makeTechnicalCode(value, fallback, className) {
+    const fullValue = String(value || fallback || '');
+    const code = makeElement(
+      'code',
+      className || 'admin-world-id',
+      shortenTechnicalValue(fullValue, 32)
+    );
+    code.title = fullValue;
+    code.setAttribute('aria-label', fullValue);
+    return code;
+  }
+
   function getAdminRoot() {
     const container = document.getElementById('adminView');
     if (container) container.classList.add('admin-view');
@@ -110,14 +160,42 @@
       'listRanks', 'getRank', 'createRank', 'updateRank', 'setRankStatus',
       'duplicateRankAsDraft', 'requestDeleteRank',
       'listGates', 'getGate', 'createGate', 'updateGate', 'setGateStatus',
-      'duplicateGateAsDraft', 'moveGate', 'requestDeleteGate',
+      'publishGateDraftWords', 'duplicateGateAsDraft', 'moveGate', 'requestDeleteGate',
+      'importStagingWords', 'listStagingWords', 'countStagingWords',
+      'getStagingWord', 'deleteStagingWords', 'distributeStagingWords',
       'listWords', 'getWord', 'createWord', 'updateWord', 'setWordStatus',
+      'inspectWordDuplicates',
       'archiveWord', 'duplicateWord', 'moveWord', 'bulkPublishWords',
       'bulkArchiveWords', 'bulkMoveWords', 'requestDeleteWord'
     ];
     if (!api || required.some((method) => typeof api[method] !== 'function')) {
       const error = new Error('admin/cloud-unavailable');
       error.code = 'admin/cloud-unavailable';
+      throw error;
+    }
+    return api;
+  }
+
+  function getWordListDataApi() {
+    const api = root.LootLinguaWordListData;
+    if (!api || typeof api.createPagedWordSource !== 'function' ||
+        typeof api.createQuerySignature !== 'function') {
+      const error = new Error('admin/word-list-data-unavailable');
+      error.code = 'admin/word-list-data-unavailable';
+      throw error;
+    }
+    return api;
+  }
+
+  function getWordImportApi() {
+    const api = root.LootLinguaAdminWordImport;
+    const required = [
+      'assertFileSize', 'parseJsonText', 'preparePreview',
+      'inspectDuplicates', 'commit', 'commitToStaging'
+    ];
+    if (!api || required.some((method) => typeof api[method] !== 'function')) {
+      const error = new Error('admin/word-import-unavailable');
+      error.code = 'admin/word-import-unavailable';
       throw error;
     }
     return api;
@@ -165,7 +243,7 @@
     const normalized = {};
     [
       'schemaVersion', 'worldId', 'rankId', 'title', 'subtitle', 'description',
-      'order', 'difficulty', 'status', 'version', 'gateCount', 'wordCount',
+      'order', 'difficulty', 'cefrLevel', 'status', 'version', 'gateCount', 'wordCount',
       'unlockConfig', 'createdAt', 'updatedAt', 'createdBy', 'updatedBy'
     ].forEach((field) => {
       if (Object.prototype.hasOwnProperty.call(data, field)) normalized[field] = data[field];
@@ -222,6 +300,24 @@
     return normalized;
   }
 
+  function normalizeStagingWordRecord(record) {
+    if (!record || typeof record !== 'object') return null;
+    const normalized = {};
+    [
+      'stagingWordId', 'importBatchId', 'sourceFileName', 'sourceOrder',
+      'schemaVersion', 'normalizationVersion', 'word', 'normalizedWord',
+      'wordKey', 'translation', 'definition', 'definition_ar', 'example',
+      'exampleTranslation', 'category', 'partOfSpeech', 'level', 'tags',
+      'synonyms', 'pronunciation', 'audioUrl', 'imageUrl', 'notes', 'order',
+      'stagingStatus', 'distributionTarget', 'distributionOperationId',
+      'distributedContentWordId', 'distributedAt', 'importedAt',
+      'createdAt', 'updatedAt', 'createdBy', 'updatedBy'
+    ].forEach((field) => {
+      if (Object.prototype.hasOwnProperty.call(record, field)) normalized[field] = record[field];
+    });
+    return normalized.stagingWordId ? normalized : null;
+  }
+
   function entryAssessmentDefaultRatio() {
     const schema = root.LootLinguaContentSchema;
     const ratio = Number(schema && schema.ENTRY_ASSESSMENT_DEFAULTS && schema.ENTRY_ASSESSMENT_DEFAULTS.passRatio);
@@ -256,6 +352,240 @@
       throw error;
     }
     return version;
+  }
+
+  function clearWordSelection() {
+    ui.selectedWordIds.clear();
+    ui.selectedWordMeta.clear();
+  }
+
+  function setWordSelected(word, selected) {
+    const contentWordId = String(word && word.contentWordId || '');
+    if (!contentWordId) return;
+    if (!selected) {
+      ui.selectedWordIds.delete(contentWordId);
+      ui.selectedWordMeta.delete(contentWordId);
+      return;
+    }
+    ui.selectedWordIds.add(contentWordId);
+    ui.selectedWordMeta.set(contentWordId, {
+      contentWordId,
+      version: expectedVersion(word)
+    });
+  }
+
+  function syncSelectedWordMeta(words) {
+    (words || []).forEach((word) => {
+      const contentWordId = String(word && word.contentWordId || '');
+      if (contentWordId && ui.selectedWordIds.has(contentWordId)) {
+        ui.selectedWordMeta.set(contentWordId, {
+          contentWordId,
+          version: expectedVersion(word)
+        });
+      }
+    });
+  }
+
+  function selectedWordsOnCurrentPage() {
+    return ui.words.filter((word) => ui.selectedWordIds.has(String(word.contentWordId || '')));
+  }
+
+  function createAdminWordQuery(worldId, rankId, gateId) {
+    const filters = ui.wordFilterField && ui.wordFilterValue
+      ? { [ui.wordFilterField]: ui.wordFilterValue }
+      : {};
+    return getWordListDataApi().normalizeQuery({
+      sourceType: 'admin-content-words',
+      worldId: String(worldId || ''),
+      rankId: String(rankId || ''),
+      gateId: String(gateId || ''),
+      search: String(ui.wordSearch || ''),
+      filters,
+      sort: String(ui.wordSort || 'newest'),
+      pageSize: Number(WORD_PAGE_SIZE)
+    });
+  }
+
+  function createAdminWordPager(worldId, rankId, gateId) {
+    const query = createAdminWordQuery(worldId, rankId, gateId);
+    const data = getWordListDataApi();
+    const pager = data.createPagedWordSource({
+      query,
+      pageSize: WORD_PAGE_SIZE,
+      maxCachedPages: ADMIN_WORD_PAGE_CACHE_LIMIT,
+      getItemId: (word) => String(word && word.contentWordId || ''),
+      fetchPage: async (request) => getCloudApi().listWords(
+        query.worldId,
+        query.rankId,
+        query.gateId,
+        {
+          pageSize: request.pageSize,
+          cursor: request.cursor,
+          direction: request.direction,
+          sort: request.query.sort,
+          filters: request.query.filters,
+          search: request.query.search
+        }
+      )
+    });
+    ui.wordPagerSignature = data.createQuerySignature(query);
+    return pager;
+  }
+
+  function applyAdminWordPagerSnapshot(pager) {
+    const snapshot = pager.getSnapshot();
+    const page = snapshot.currentPage;
+    ui.words = page ? page.items.map((record) => normalizeWordRecord(
+      record,
+      ui.activeWorldId,
+      ui.activeRankId,
+      ui.activeGateId
+    )).filter((word) => word && word.contentWordId) : [];
+    syncSelectedWordMeta(ui.words);
+    ui.wordPageIndex = page ? page.pageIndex : 0;
+    ui.wordNextCursor = page ? page.endCursor : null;
+    ui.wordHasMore = Boolean(page && page.hasNext);
+    ui.wordHasPrevious = Boolean(page && page.hasPrevious);
+    ui.wordLoadingNext = Boolean(snapshot.loading.next);
+    ui.wordLoadingPrevious = Boolean(snapshot.loading.previous);
+    return snapshot;
+  }
+
+  function clearStagingSelection() {
+    ui.selectedStagingIds.clear();
+    ui.selectedStagingMeta.clear();
+  }
+
+  function setStagingSelected(word, selected) {
+    const stagingWordId = String(word && word.stagingWordId || '');
+    if (!stagingWordId) return;
+    if (!selected) {
+      ui.selectedStagingIds.delete(stagingWordId);
+      ui.selectedStagingMeta.delete(stagingWordId);
+      return;
+    }
+    ui.selectedStagingIds.add(stagingWordId);
+    ui.selectedStagingMeta.set(stagingWordId, {
+      stagingWordId,
+      word: String(word.word || ''),
+      sourceFileName: String(word.sourceFileName || '')
+    });
+  }
+
+  function createStagingQuery() {
+    return getWordListDataApi().normalizeQuery({
+      sourceType: 'admin-content-word-import-staging',
+      sort: String(ui.stagingSort || 'newest'),
+      filters: ui.stagingFilterField && ui.stagingFilterValue
+        ? { [ui.stagingFilterField]: ui.stagingFilterValue }
+        : {},
+      pageSize: Number(WORD_PAGE_SIZE)
+    });
+  }
+
+  function createStagingPager() {
+    const data = getWordListDataApi();
+    const query = createStagingQuery();
+    return data.createPagedWordSource({
+      query,
+      pageSize: Number(WORD_PAGE_SIZE),
+      maxCachedPages: ADMIN_WORD_PAGE_CACHE_LIMIT,
+      getItemId: (word) => String(word && word.stagingWordId || ''),
+      fetchPage: (request) => getCloudApi().listStagingWords({
+        pageSize: request.pageSize,
+        cursor: request.cursor,
+        direction: request.direction,
+        sort: request.query.sort,
+        filters: request.query.filters
+      })
+    });
+  }
+
+  function applyStagingPagerSnapshot(pager) {
+    const snapshot = pager.getSnapshot();
+    const page = snapshot.currentPage;
+    ui.stagingWords = page
+      ? page.items.map(normalizeStagingWordRecord).filter(Boolean)
+      : [];
+    ui.stagingWords.forEach((word) => {
+      if (ui.selectedStagingIds.has(word.stagingWordId)) {
+        setStagingSelected(word, true);
+      }
+    });
+    ui.stagingPageIndex = page ? page.pageIndex : 0;
+    ui.stagingHasNext = Boolean(page && page.hasNext);
+    ui.stagingHasPrevious = Boolean(page && page.hasPrevious);
+    return snapshot;
+  }
+
+  async function refreshStagingWords(options) {
+    const settings = options || {};
+    if (ui.view !== 'staging') return;
+    const initial = Boolean(settings.initial) || !ui.stagingPager;
+    const direction = settings.direction === 'previous'
+      ? 'previous'
+      : (settings.direction === 'next' ? 'next' : 'refresh');
+    const pager = initial ? createStagingPager() : ui.stagingPager;
+    if (initial) {
+      ui.stagingPager = pager;
+      ui.stagingWords = [];
+      ui.stagingPageIndex = 0;
+    }
+    ui.stagingLoading = true;
+    ui.stagingPageError = '';
+    renderStagingWords();
+    try {
+      if (initial) await pager.loadInitialPage();
+      else if (direction === 'previous') await pager.loadPreviousPage();
+      else if (direction === 'next') await pager.loadNextPage();
+      else await pager.refreshCurrentPage();
+      if (pager !== ui.stagingPager || ui.view !== 'staging') return;
+      applyStagingPagerSnapshot(pager);
+      try {
+        ui.stagingCount = await getCloudApi().countStagingWords();
+      } catch {
+        ui.stagingCount = null;
+      }
+    } catch (error) {
+      if (pager !== ui.stagingPager || ui.view !== 'staging') return;
+      ui.stagingPageError =
+        `تعذر تحميل الكلمات غير الموزعة. رمز الخطأ: ${getErrorCode(error, 'admin/staging-list-failed')}`;
+    } finally {
+      if (pager === ui.stagingPager && ui.view === 'staging') {
+        ui.stagingLoading = false;
+        applyStagingPagerSnapshot(pager);
+        renderStagingWords();
+      }
+    }
+  }
+
+  async function openStagingWords() {
+    if (!canLeaveAdminView()) return false;
+    ui.view = 'staging';
+    ui.stagingWords = [];
+    ui.stagingPager = null;
+    ui.stagingPageIndex = 0;
+    ui.stagingPageError = '';
+    clearStagingSelection();
+    await refreshStagingWords({ initial: true });
+    return true;
+  }
+
+  function reloadStagingQuery() {
+    if (ui.stagingPager) ui.stagingPager.invalidate(createStagingQuery());
+    ui.stagingPager = null;
+    ui.stagingPageIndex = 0;
+    clearStagingSelection();
+    refreshStagingWords({ initial: true });
+  }
+
+  function scrollAdminWordsToPageStart() {
+    root.requestAnimationFrame(() => {
+      const section = document.querySelector('#adminView .admin-words-section');
+      if (section && typeof section.scrollIntoView === 'function') {
+        section.scrollIntoView({ block: 'start', behavior: 'auto' });
+      }
+    });
   }
 
   function toDate(value) {
@@ -382,7 +712,7 @@
     appendChildren(identity, [
       titleLine,
       makeElement('p', 'admin-world-subtitle', world.subtitle || 'لا يوجد وصف مختصر.'),
-      makeElement('code', 'admin-world-id', id || 'معرّف مفقود'),
+      makeTechnicalCode(id, 'معرّف مفقود', 'admin-world-id'),
       makeElement('span', 'admin-world-meta', `الترتيب: ${cachedCount(world.order)} · آخر تعديل: ${formatDate(world.updatedAt || world.createdAt)}`)
     ]);
 
@@ -453,6 +783,16 @@
       makeButton(ui.loading ? 'جارٍ التحديث…' : 'تحديث', 'refresh-worlds', {
         className: 'admin-btn admin-btn-secondary', disabled: ui.loading
       }),
+      makeButton(
+        Number.isSafeInteger(ui.stagingCount)
+          ? `كلمات غير موزعة (${ui.stagingCount})`
+          : 'كلمات غير موزعة',
+        'open-staging',
+        {
+          className: 'admin-btn admin-btn-secondary',
+          disabled: ui.loading
+        }
+      ),
       makeButton('إنشاء عالم', 'create-world', {
         className: 'admin-btn admin-btn-primary', disabled: ui.loading
       })
@@ -685,12 +1025,19 @@
     const titleLine = makeElement('div', 'admin-world-title-line');
     appendChildren(titleLine, [
       makeElement('h3', 'admin-world-title', rank.title || 'رتبة بلا عنوان'),
-      makeStatusBadge(rank.status)
+      makeStatusBadge(rank.status),
+      makeElement(
+        'span',
+        'admin-count-chip admin-rank-level',
+        root.LootLinguaContentSchema?.CEFR_LEVEL_META?.[
+          root.LootLinguaContentSchema?.normalizeCefrLevel?.(rank.cefrLevel) || 'unclassified'
+        ]?.label || 'غير مصنف'
+      )
     ]);
     appendChildren(identity, [
       titleLine,
       makeElement('p', 'admin-world-subtitle', rank.subtitle || 'لا يوجد وصف مختصر.'),
-      makeElement('code', 'admin-world-id', rankId || 'معرّف مفقود'),
+      makeTechnicalCode(rankId, 'معرّف مفقود', 'admin-world-id'),
       makeElement('span', 'admin-world-meta', `الترتيب: ${cachedCount(rank.order)} · الإصدار: ${String(rank.version || 'غير صالح')} · آخر تعديل: ${formatDate(rank.updatedAt || rank.createdAt)}`)
     ]);
 
@@ -851,7 +1198,7 @@
     appendChildren(identity, [
       titleLine,
       makeElement('p', 'admin-world-subtitle', gate.subtitle || 'لا يوجد وصف مختصر.'),
-      makeElement('code', 'admin-world-id', gateId || 'معرّف مفقود'),
+      makeTechnicalCode(gateId, 'معرّف مفقود', 'admin-world-id'),
       makeElement('span', 'admin-world-meta', `الترتيب: ${cachedCount(gate.order)} · الإصدار: ${String(gate.version || 'غير صالح')} · آخر تعديل: ${formatDate(gate.updatedAt || gate.createdAt)}`)
     ]);
 
@@ -886,6 +1233,9 @@
         className: 'admin-btn admin-btn-warning', worldId, rankId, gateId, status: 'archived', disabled: isBusy
       }));
     } else if (gate.status === 'published') {
+      actions.append(makeButton('نشر الكلمات المتبقية', 'publish-gate-draft-words', {
+        className: 'admin-btn admin-btn-success', worldId, rankId, gateId, disabled: isBusy
+      }));
       actions.append(makeButton('أرشفة', 'set-gate-status', {
         className: 'admin-btn admin-btn-warning', worldId, rankId, gateId, status: 'archived', disabled: isBusy
       }));
@@ -958,7 +1308,7 @@
     assessmentNote.setAttribute('role', 'note');
     appendChildren(assessmentNote, [
       makeElement('strong', 'admin-assessment-note-title', 'عتبة اختبار الدخول فقط'),
-      makeElement('span', 'admin-assessment-note-copy', 'تحدد هذه العتبة نتيجة تقييم الدخول إلى البوابة، ولا تمنح XP أو إتقانًا. منطق فتح المحتوى بعد التعلّم لم يُحسم بعد.')
+      makeElement('span', 'admin-assessment-note-copy', 'تحدد هذه العتبة نتيجة تقييم الدخول إلى البوابة، ولا تمنح XP أو إتقانًا. تفتح البوابة التالية بعد إكمال تعلم الحالية.')
     ]);
     container.append(assessmentNote);
 
@@ -1072,7 +1422,11 @@
     appendChildren(identity, [
       titleLine,
       makeElement('p', 'admin-world-subtitle admin-word-translation', word.translation || 'لا توجد ترجمة.'),
-      makeElement('code', 'admin-world-id', word.normalizedWord || contentWordId || 'معرّف مفقود'),
+      makeTechnicalCode(
+        word.normalizedWord || contentWordId,
+        'معرّف مفقود',
+        'admin-world-id admin-word-technical-value'
+      ),
       makeElement('span', 'admin-world-meta', `الترتيب: ${cachedCount(word.order)} · الإصدار: ${String(word.version || 'غير صالح')} · النوع: ${String(word.partOfSpeech || 'غير محدد')} · آخر تعديل: ${formatDate(word.updatedAt || word.createdAt)}`)
     ]);
     const duplicateScopes = collectWordDuplicateScopes(word);
@@ -1086,10 +1440,20 @@
     }
 
     const details = makeElement('div', 'admin-world-counts admin-word-details');
+    const identifierNote = makeElement('small', 'admin-count-note admin-word-id-note');
+    appendChildren(identifierNote, [
+      document.createTextNode('المعرّف: '),
+      makeTechnicalCode(
+        contentWordId,
+        'مفقود',
+        'admin-technical-value admin-word-content-id'
+      ),
+      document.createTextNode(' · مفتاح الإتقان مشتق مركزيًا')
+    ]);
     appendChildren(details, [
       makeElement('span', 'admin-count-chip', String(word.category || 'بلا تصنيف')),
       makeElement('span', 'admin-count-chip', String(word.level || 'بلا مستوى')),
-      makeElement('small', 'admin-count-note', `المعرّف: ${contentWordId || 'مفقود'} · مفتاح الإتقان مشتق مركزيًا`)
+      identifierNote
     ]);
 
     const actions = makeElement('div', 'admin-world-actions admin-word-actions');
@@ -1098,10 +1462,12 @@
         className: 'admin-btn admin-btn-secondary', worldId, rankId, gateId, contentWordId, disabled: isBusy
       }),
       makeButton('نسخ إلى بوابة', 'duplicate-word', {
-        className: 'admin-btn admin-btn-secondary', worldId, rankId, gateId, contentWordId, disabled: isBusy
+        className: 'admin-btn admin-btn-secondary', worldId, rankId, gateId, contentWordId,
+        disabled: true, title: 'نسخ الكلمات لم يتم ربطه بعد.'
       }),
       makeButton('نقل', 'move-word', {
-        className: 'admin-btn admin-btn-secondary', worldId, rankId, gateId, contentWordId, disabled: isBusy
+        className: 'admin-btn admin-btn-secondary', worldId, rankId, gateId, contentWordId,
+        disabled: true, title: 'نقل الكلمات لم يتم ربطه بعد.'
       })
     ]);
     if (word.status === 'draft') {
@@ -1109,12 +1475,14 @@
         className: 'admin-btn admin-btn-success', worldId, rankId, gateId, contentWordId,
         status: 'published', disabled: isBusy
       }));
-      actions.append(makeButton('أرشفة', 'archive-word', {
-        className: 'admin-btn admin-btn-warning', worldId, rankId, gateId, contentWordId, disabled: isBusy
+      actions.append(makeButton('أرشفة', 'set-word-status', {
+        className: 'admin-btn admin-btn-warning', worldId, rankId, gateId, contentWordId,
+        status: 'archived', disabled: isBusy
       }));
     } else if (word.status === 'published') {
-      actions.append(makeButton('أرشفة', 'archive-word', {
-        className: 'admin-btn admin-btn-warning', worldId, rankId, gateId, contentWordId, disabled: isBusy
+      actions.append(makeButton('أرشفة', 'set-word-status', {
+        className: 'admin-btn admin-btn-warning', worldId, rankId, gateId, contentWordId,
+        status: 'archived', disabled: isBusy
       }));
     } else if (word.status === 'archived') {
       actions.append(makeButton('إعادة لمسودة', 'set-word-status', {
@@ -1122,7 +1490,8 @@
         status: 'draft', disabled: isBusy
       }));
       actions.append(makeButton('حذف نهائي', 'delete-word', {
-        className: 'admin-btn admin-btn-danger', worldId, rankId, gateId, contentWordId, disabled: isBusy
+        className: 'admin-btn admin-btn-danger', worldId, rankId, gateId, contentWordId,
+        disabled: true, title: 'حذف الكلمات لم يتم ربطه بعد.'
       }));
     }
 
@@ -1132,14 +1501,21 @@
 
   function renderWordBulkToolbar(world, rank, gate) {
     const selectedCount = ui.selectedWordIds.size;
+    const pageSelectedCount = selectedWordsOnCurrentPage().length;
     const toolbar = makeElement('section', 'admin-word-bulk-toolbar');
     toolbar.setAttribute('aria-label', 'عمليات الكلمات الجماعية');
     const summary = makeElement('div', 'admin-word-selection-summary');
     appendChildren(summary, [
-      makeElement('strong', '', `${selectedCount} محددة`),
-      makeElement('small', '', `الحد الأقصى للعملية الواحدة ${MAX_BULK_WORDS} كلمة مع إصدار كل كلمة.`)
+      makeElement('strong', '', `${selectedCount} كلمات محددة`),
+      makeElement(
+        'small',
+        '',
+        ADMIN_PAGED_WORDS_V2
+          ? `${pageSelectedCount} محددة في هذه الصفحة، ${selectedCount} إجمالًا.`
+          : `الحد الأقصى للعملية الواحدة ${MAX_BULK_WORDS} كلمة مع إصدار كل كلمة.`
+      )
     ]);
-    const actions = makeElement('div', 'admin-header-actions');
+    const actions = makeElement('div', 'admin-header-actions admin-word-bulk-actions');
     const common = {
       worldId: world.worldId,
       rankId: rank.rankId,
@@ -1147,17 +1523,173 @@
       disabled: ui.wordsLoading || selectedCount === 0 || selectedCount > MAX_BULK_WORDS
     };
     appendChildren(actions, [
-      makeButton(selectedCount && selectedCount === ui.words.length ? 'إلغاء تحديد الصفحة' : 'تحديد الصفحة المحملة', 'select-page-words', {
+      makeButton(pageSelectedCount && pageSelectedCount === ui.words.length ? 'إلغاء تحديد الكل' : 'تحديد الكل في الصفحة', 'select-page-words', {
         className: 'admin-btn admin-btn-secondary',
         worldId: world.worldId, rankId: rank.rankId, gateId: gate.gateId,
         disabled: ui.wordsLoading || ui.words.length === 0
       }),
       makeButton('نشر المحدد', 'bulk-publish-words', { ...common, className: 'admin-btn admin-btn-success' }),
       makeButton('أرشفة المحدد', 'bulk-archive-words', { ...common, className: 'admin-btn admin-btn-warning' }),
-      makeButton('نقل المحدد', 'bulk-move-words', { ...common, className: 'admin-btn admin-btn-primary' })
+      makeButton('نقل المحدد', 'bulk-move-words', {
+        ...common,
+        className: 'admin-btn admin-btn-primary',
+        disabled: true,
+        title: 'نقل الكلمات جماعيًا لم يتم ربطه بعد.'
+      })
     ]);
     appendChildren(toolbar, [summary, actions]);
     return toolbar;
+  }
+
+  function makeQuerySelect(label, value, options) {
+    const wrapper = makeElement('label', 'admin-word-query-field');
+    wrapper.append(makeElement('span', 'admin-field-label', label));
+    const select = makeElement('select', 'admin-input admin-select admin-word-query-select');
+    options.forEach((option) => {
+      const node = makeElement('option', '', option.label);
+      node.value = option.value;
+      node.selected = String(option.value) === String(value || '');
+      if (option.disabled) node.disabled = true;
+      select.append(node);
+    });
+    wrapper.append(select);
+    return { wrapper, select };
+  }
+
+  function uniqueCurrentWordValues(field, defaults) {
+    const values = new Set(defaults || []);
+    ui.words.forEach((word) => {
+      const value = String(word && word[field] || '').trim();
+      if (value) values.add(value);
+    });
+    return Array.from(values).sort((left, right) =>
+      left.localeCompare(right, undefined, { sensitivity: 'base', numeric: true })
+    );
+  }
+
+  function wordFilterValueOptions(field) {
+    let values = [];
+    if (field === 'status') values = ['draft', 'published', 'archived'];
+    else if (field === 'level') values = uniqueCurrentWordValues('level', ['A1', 'A2', 'B1', 'B2', 'C1', 'C2']);
+    else if (field === 'partOfSpeech') {
+      values = uniqueCurrentWordValues('partOfSpeech', ['noun', 'verb', 'adjective', 'adverb']);
+    } else if (field === 'category') {
+      values = uniqueCurrentWordValues('category', []);
+    }
+    return [
+      { value: '', label: 'اختر قيمة' },
+      ...values.map((value) => ({
+        value,
+        label: field === 'status' ? (STATUS_LABELS[value] || value) : value
+      }))
+    ];
+  }
+
+  function reloadAdminWordQuery() {
+    ui.wordLoadRevision += 1;
+    if (ui.wordPager) {
+      ui.wordPager.invalidate(createAdminWordQuery(
+        ui.activeWorldId,
+        ui.activeRankId,
+        ui.activeGateId
+      ));
+    }
+    ui.wordPager = null;
+    ui.wordPageIndex = 0;
+    ui.wordHasMore = false;
+    ui.wordHasPrevious = false;
+    clearWordSelection();
+    refreshWords({ initial: true });
+  }
+
+  function renderWordQueryControls() {
+    const controls = makeElement('section', 'admin-word-query-controls');
+    controls.setAttribute('aria-label', 'فرز وتصفية كلمات البوابة');
+
+    const searchLabel = makeElement('label', 'admin-word-query-field admin-word-search-field');
+    searchLabel.append(makeElement('span', 'admin-field-label', 'بحث بادئة الكلمة'));
+    const search = makeElement('input', 'admin-input admin-word-query-search');
+    search.type = 'search';
+    search.value = ui.wordSearch;
+    search.placeholder = 'يبدأ بـ…';
+    search.autocomplete = 'off';
+    searchLabel.append(search);
+
+    const sort = makeQuerySelect('الترتيب', ui.wordSort, [
+      { value: 'newest', label: 'الأحدث إضافة' },
+      { value: 'oldest', label: 'الأقدم إضافة' },
+      { value: 'order', label: 'ترتيب البوابة' },
+      { value: 'word-asc', label: 'الكلمة A-Z' },
+      { value: 'word-desc', label: 'الكلمة Z-A' },
+      { value: 'updated', label: 'الأحدث تعديلًا' }
+    ]);
+    const filterField = makeQuerySelect('التصفية', ui.wordFilterField, [
+      { value: '', label: 'بلا فلتر' },
+      { value: 'status', label: 'الحالة' },
+      { value: 'level', label: 'المستوى' },
+      { value: 'partOfSpeech', label: 'نوع الكلمة' },
+      { value: 'category', label: 'التصنيف' }
+    ]);
+    const filterValue = makeQuerySelect(
+      'القيمة',
+      ui.wordFilterValue,
+      wordFilterValueOptions(ui.wordFilterField)
+    );
+    filterValue.select.disabled = !ui.wordFilterField;
+    sort.select.disabled = Boolean(ui.wordSearch || ui.wordFilterValue);
+
+    const reset = makeButton('إعادة الضبط', 'reset-word-query', {
+      className: 'admin-btn admin-btn-secondary',
+      disabled: !ui.wordSearch && !ui.wordFilterField && ui.wordSort === 'newest'
+    });
+    const note = makeElement(
+      'small',
+      'admin-count-note admin-word-query-note',
+      ui.wordSearch
+        ? 'البحث يطابق بداية normalizedWord على كامل البوابة، وليس جزءًا من منتصف الكلمة.'
+        : 'يسمح النظام بفلتر Firestore واحد في كل مرة لتجنب تضخم الفهارس.'
+    );
+    appendChildren(controls, [
+      searchLabel,
+      sort.wrapper,
+      filterField.wrapper,
+      filterValue.wrapper,
+      reset,
+      note
+    ]);
+
+    search.addEventListener('input', () => {
+      if (ui.wordSearchTimer) root.clearTimeout(ui.wordSearchTimer);
+      const value = search.value.trim();
+      ui.wordSearchTimer = root.setTimeout(() => {
+        ui.wordSearchTimer = null;
+        if (value === ui.wordSearch) return;
+        ui.wordSearch = value;
+        ui.wordFilterField = '';
+        ui.wordFilterValue = '';
+        ui.wordSort = value ? 'word-asc' : 'newest';
+        reloadAdminWordQuery();
+      }, 350);
+    });
+    sort.select.addEventListener('change', () => {
+      if (sort.select.value === ui.wordSort) return;
+      ui.wordSort = sort.select.value;
+      reloadAdminWordQuery();
+    });
+    filterField.select.addEventListener('change', () => {
+      ui.wordFilterField = filterField.select.value;
+      ui.wordFilterValue = '';
+      ui.wordSearch = '';
+      ui.wordSort = 'newest';
+      renderWords();
+    });
+    filterValue.select.addEventListener('change', () => {
+      ui.wordFilterValue = filterValue.select.value;
+      ui.wordSearch = '';
+      ui.wordSort = 'newest';
+      reloadAdminWordQuery();
+    });
+    return controls;
   }
 
   function renderWords() {
@@ -1175,7 +1707,8 @@
       ui.wordLoadRevision += 1;
       ui.wordsLoading = false;
       ui.words = [];
-      ui.selectedWordIds.clear();
+      ui.wordPager = null;
+      clearWordSelection();
       ui.activeGateId = '';
       if (world && rank) {
         ui.view = 'gates';
@@ -1187,6 +1720,14 @@
       }
       return;
     }
+
+    const loadedWordIds = new Set(ui.words.map((word) => String(word.contentWordId || '')));
+    Array.from(ui.selectedWordIds).forEach((contentWordId) => {
+      if (!ADMIN_PAGED_WORDS_V2 && !loadedWordIds.has(contentWordId)) {
+        ui.selectedWordIds.delete(contentWordId);
+        ui.selectedWordMeta.delete(contentWordId);
+      }
+    });
 
     container.replaceChildren();
     container.append(makeWordBreadcrumb(world, rank, gate));
@@ -1205,15 +1746,20 @@
       }),
       makeButton(ui.wordsLoading ? 'جارٍ التحديث…' : 'تحديث الكلمات', 'refresh-words', {
         className: 'admin-btn admin-btn-secondary', worldId: world.worldId, rankId: rank.rankId,
-        gateId: gate.gateId, disabled: ui.wordsLoading
+        gateId: gate.gateId, disabled: ui.wordsLoading || ui.wordImportPending
+      }),
+      makeButton('استيراد JSON', 'import-words-json', {
+        className: 'admin-btn admin-btn-secondary', worldId: world.worldId, rankId: rank.rankId,
+        gateId: gate.gateId, disabled: ui.wordsLoading || ui.wordImportPending
       }),
       makeButton('إنشاء كلمة', 'create-word', {
         className: 'admin-btn admin-btn-primary', worldId: world.worldId, rankId: rank.rankId,
-        gateId: gate.gateId, disabled: ui.wordsLoading
+        gateId: gate.gateId, disabled: ui.wordsLoading || ui.wordImportPending
       })
     ]);
     appendChildren(header, [heading, headerActions]);
     container.append(header);
+    container.append(renderWordQueryControls());
     container.append(renderWordBulkToolbar(world, rank, gate));
 
     if (ui.wordPageError) {
@@ -1236,7 +1782,13 @@
     const sectionHeading = makeElement('div', 'admin-section-heading');
     appendChildren(sectionHeading, [
       makeElement('h3', 'admin-section-title', 'الكلمات المحملة'),
-      makeElement('span', 'admin-list-count', `${ui.words.length} / ${cachedCount(gate.wordCount)}`)
+      makeElement(
+        'span',
+        'admin-list-count',
+        ADMIN_PAGED_WORDS_V2
+          ? `الصفحة ${ui.wordPageIndex + 1} · ${ui.words.length} / ${cachedCount(gate.wordCount)}`
+          : `${ui.words.length} / ${cachedCount(gate.wordCount)}`
+      )
     ]);
     section.append(sectionHeading);
     const list = makeElement('div', 'admin-worlds-list admin-words-list');
@@ -1253,20 +1805,268 @@
     }
     section.append(list);
     const pagination = makeElement('div', 'admin-word-pagination');
-    appendChildren(pagination, [
-      makeElement('small', 'admin-count-note', `المعروض ${ui.words.length} من العدد المخزن ${cachedCount(gate.wordCount)}؛ لا تُحمّل البوابة كاملة.`),
-      makeButton(ui.wordsLoading ? 'جارٍ تحميل الصفحة…' : 'تحميل المزيد', 'load-more-words', {
-        className: 'admin-btn admin-btn-secondary', worldId: world.worldId, rankId: rank.rankId,
-        gateId: gate.gateId, disabled: ui.wordsLoading || !ui.wordHasMore
+    if (ADMIN_PAGED_WORDS_V2) {
+      appendChildren(pagination, [
+        makeElement('small', 'admin-count-note', `الصفحة ${ui.wordPageIndex + 1} · المحمّل في الذاكرة ${ui.wordPager ? ui.wordPager.getSnapshot().cache.itemCount : 0} كلمة.`),
+        makeButton(ui.wordLoadingPrevious ? 'جارٍ الرجوع…' : 'السابق', 'previous-words', {
+          className: 'admin-btn admin-btn-secondary', worldId: world.worldId, rankId: rank.rankId,
+          gateId: gate.gateId, disabled: !ui.wordHasPrevious || ui.wordLoadingPrevious
+        }),
+        makeElement('span', 'admin-count-chip', `صفحة ${ui.wordPageIndex + 1}`),
+        makeButton(ui.wordLoadingNext ? 'جارٍ الانتقال…' : 'التالي', 'next-words', {
+          className: 'admin-btn admin-btn-secondary', worldId: world.worldId, rankId: rank.rankId,
+          gateId: gate.gateId, disabled: !ui.wordHasMore || ui.wordLoadingNext
+        })
+      ]);
+      if (ui.wordPageError) {
+        pagination.append(makeButton('إعادة المحاولة', 'retry-word-page', {
+          className: 'admin-btn admin-btn-secondary', worldId: world.worldId, rankId: rank.rankId,
+          gateId: gate.gateId, disabled: ui.wordsLoading
+        }));
+      }
+    } else {
+      appendChildren(pagination, [
+        makeElement('small', 'admin-count-note', `المعروض ${ui.words.length} من العدد المخزن ${cachedCount(gate.wordCount)}؛ لا تُحمّل البوابة كاملة.`),
+        makeButton(ui.wordsLoading ? 'جارٍ تحميل الصفحة…' : 'تحميل المزيد', 'load-more-words', {
+          className: 'admin-btn admin-btn-secondary', worldId: world.worldId, rankId: rank.rankId,
+          gateId: gate.gateId, disabled: ui.wordsLoading || !ui.wordHasMore
+        })
+      ]);
+      if (!ui.wordHasMore) pagination.querySelector('[data-admin-action="load-more-words"]').hidden = true;
+    }
+    section.append(pagination);
+    container.append(section);
+  }
+
+  function stagingFilterOptions(field) {
+    let values = [];
+    if (field === 'level') {
+      values = ['A1', 'A2', 'B1', 'B2', 'C1', 'C2'];
+    } else {
+      values = ui.stagingWords.map((word) => String(word && word[field] || '').trim()).filter(Boolean);
+    }
+    values = Array.from(new Set(values)).sort((left, right) =>
+      left.localeCompare(right, undefined, { sensitivity: 'base', numeric: true })
+    );
+    return [
+      { value: '', label: 'اختر قيمة' },
+      ...values.map((value) => ({ value, label: value }))
+    ];
+  }
+
+  function renderStagingQueryControls() {
+    const controls = makeElement('section', 'admin-word-query-controls');
+    const sort = makeQuerySelect('الترتيب', ui.stagingSort, [
+      { value: 'newest', label: 'أحدث استيراد' },
+      { value: 'oldest', label: 'أقدم استيراد' },
+      { value: 'file-order', label: 'ترتيب الملف' },
+      { value: 'word-asc', label: 'الكلمة A-Z' },
+      { value: 'word-desc', label: 'الكلمة Z-A' }
+    ]);
+    const filterField = makeQuerySelect('التصفية', ui.stagingFilterField, [
+      { value: '', label: 'بلا فلتر' },
+      { value: 'level', label: 'المستوى' },
+      { value: 'partOfSpeech', label: 'نوع الكلمة' },
+      { value: 'sourceFileName', label: 'اسم الملف' },
+      { value: 'importBatchId', label: 'دفعة الاستيراد' }
+    ]);
+    const filterValue = makeQuerySelect(
+      'القيمة',
+      ui.stagingFilterValue,
+      stagingFilterOptions(ui.stagingFilterField)
+    );
+    filterValue.select.disabled = !ui.stagingFilterField;
+    sort.select.disabled = Boolean(ui.stagingFilterValue);
+    const reset = makeButton('إعادة الضبط', 'reset-staging-query', {
+      className: 'admin-btn admin-btn-secondary',
+      disabled: !ui.stagingFilterField && ui.stagingSort === 'newest'
+    });
+    appendChildren(controls, [
+      sort.wrapper,
+      filterField.wrapper,
+      filterValue.wrapper,
+      reset,
+      makeElement('small', 'admin-count-note admin-word-query-note', 'تعمل التصفية على كامل مجموعة staging. يسمح بفلتر واحد في كل مرة.')
+    ]);
+    sort.select.addEventListener('change', () => {
+      ui.stagingSort = sort.select.value;
+      reloadStagingQuery();
+    });
+    filterField.select.addEventListener('change', () => {
+      ui.stagingFilterField = filterField.select.value;
+      ui.stagingFilterValue = '';
+      ui.stagingSort = 'newest';
+      renderStagingWords();
+    });
+    filterValue.select.addEventListener('change', () => {
+      ui.stagingFilterValue = filterValue.select.value;
+      ui.stagingSort = 'newest';
+      reloadStagingQuery();
+    });
+    return controls;
+  }
+
+  function renderStagingRow(word) {
+    const stagingWordId = String(word.stagingWordId || '');
+    const row = makeElement('article', 'admin-world-row admin-word-row admin-staging-word-row');
+    row.dataset.stagingWordId = stagingWordId;
+    const selection = makeElement('label', 'admin-word-selection');
+    const checkbox = makeElement('input', 'admin-checkbox admin-staging-word-checkbox');
+    checkbox.type = 'checkbox';
+    checkbox.checked = ui.selectedStagingIds.has(stagingWordId);
+    checkbox.disabled = ui.stagingLoading;
+    checkbox.dataset.adminAction = 'toggle-staging-selection';
+    checkbox.dataset.stagingWordId = stagingWordId;
+    checkbox.setAttribute('aria-label', `تحديد الكلمة ${String(word.word || '')}`);
+    selection.append(checkbox);
+
+    const identity = makeElement('div', 'admin-world-identity admin-word-identity');
+    appendChildren(identity, [
+      makeElement('h3', 'admin-world-title admin-word-title', word.word || 'كلمة بلا نص'),
+      makeElement('p', 'admin-world-subtitle admin-word-translation', word.translation || 'لا توجد ترجمة.'),
+      makeTechnicalCode(word.normalizedWord, stagingWordId, 'admin-world-id admin-word-technical-value'),
+      makeElement(
+        'span',
+        'admin-world-meta',
+        `${String(word.sourceFileName || 'ملف غير معروف')} · #${cachedCount(word.sourceOrder) + 1} · ${formatDate(word.importedAt || word.createdAt)}`
+      )
+    ]);
+    const details = makeElement('div', 'admin-world-counts admin-word-details');
+    appendChildren(details, [
+      makeElement('span', 'admin-count-chip', String(word.level || 'بلا مستوى')),
+      makeElement('span', 'admin-count-chip', String(word.partOfSpeech || 'نوع غير محدد')),
+      makeElement('span', 'admin-count-chip', String(word.category || 'بلا تصنيف'))
+    ]);
+    const actions = makeElement('div', 'admin-world-actions admin-word-actions');
+    actions.append(makeButton('التفاصيل', 'show-staging-details', {
+      className: 'admin-btn admin-btn-secondary'
+    }));
+    actions.lastElementChild.dataset.stagingWordId = stagingWordId;
+    appendChildren(row, [selection, identity, details, actions]);
+    return row;
+  }
+
+  function renderStagingWords() {
+    const container = getAdminRoot();
+    if (!container) return;
+    const state = getAdminState();
+    if (!state.resolved || !state.isAdmin) {
+      renderAccessMessage(container, state);
+      return;
+    }
+    container.replaceChildren();
+    const header = makeElement('header', 'admin-dashboard-header');
+    const heading = makeElement('div', 'admin-dashboard-heading');
+    appendChildren(heading, [
+      makeElement('span', 'admin-kicker', 'منطقة انتظار إدارية'),
+      makeElement('h2', 'admin-dashboard-title', 'كلمات غير موزعة'),
+      makeElement('p', 'admin-dashboard-copy', 'احفظ الكلمات مؤقتًا ثم وزّعها بين البوابات لاحقًا.')
+    ]);
+    const actions = makeElement('div', 'admin-header-actions');
+    appendChildren(actions, [
+      makeButton('العودة للعوالم', 'show-dashboard', {
+        className: 'admin-btn admin-btn-secondary',
+        disabled: ui.stagingLoading
+      }),
+      makeButton('استيراد JSON', 'import-staging-json', {
+        className: 'admin-btn admin-btn-primary',
+        disabled: ui.stagingLoading || ui.wordImportPending
+      }),
+      makeButton('تحديث', 'refresh-staging', {
+        className: 'admin-btn admin-btn-secondary',
+        disabled: ui.stagingLoading
       })
     ]);
-    if (!ui.wordHasMore) pagination.querySelector('[data-admin-action="load-more-words"]').hidden = true;
+    appendChildren(header, [heading, actions]);
+    container.append(header);
+    container.append(renderStagingQueryControls());
+
+    const selectedOnPage = ui.stagingWords.filter((word) =>
+      ui.selectedStagingIds.has(String(word.stagingWordId || ''))
+    ).length;
+    const toolbar = makeElement('section', 'admin-word-bulk-toolbar');
+    const summary = makeElement('div', 'admin-word-selection-summary');
+    appendChildren(summary, [
+      makeElement('strong', '', `${ui.selectedStagingIds.size} كلمات محددة`),
+      makeElement('small', '', `${selectedOnPage} في الصفحة الحالية، ${ui.selectedStagingIds.size} إجمالًا.`)
+    ]);
+    const bulkActions = makeElement('div', 'admin-header-actions admin-word-bulk-actions');
+    appendChildren(bulkActions, [
+      makeButton(
+        selectedOnPage === ui.stagingWords.length && ui.stagingWords.length
+          ? 'إلغاء تحديد الصفحة'
+          : 'تحديد الصفحة',
+        'select-staging-page',
+        {
+          className: 'admin-btn admin-btn-secondary',
+          disabled: ui.stagingLoading || ui.stagingWords.length === 0
+        }
+      ),
+      makeButton('توزيع المحدد', 'distribute-staging', {
+        className: 'admin-btn admin-btn-success',
+        disabled: ui.stagingLoading ||
+          ui.selectedStagingIds.size === 0 ||
+          ui.selectedStagingIds.size > MAX_BULK_WORDS
+      }),
+      makeButton('حذف المحدد', 'delete-staging', {
+        className: 'admin-btn admin-btn-danger',
+        disabled: ui.stagingLoading ||
+          ui.selectedStagingIds.size === 0 ||
+          ui.selectedStagingIds.size > MAX_BULK_WORDS
+      })
+    ]);
+    appendChildren(toolbar, [summary, bulkActions]);
+    container.append(toolbar);
+
+    if (ui.stagingPageError) {
+      const error = makeElement('div', 'admin-page-error', ui.stagingPageError);
+      error.setAttribute('role', 'alert');
+      container.append(error);
+    }
+    const section = makeElement('section', 'admin-worlds-section admin-words-section');
+    const sectionHeading = makeElement('div', 'admin-section-heading');
+    appendChildren(sectionHeading, [
+      makeElement('h3', 'admin-section-title', 'الكلمات المحفوظة مؤقتًا'),
+      makeElement(
+        'span',
+        'admin-list-count',
+        `الصفحة ${ui.stagingPageIndex + 1} · ${ui.stagingWords.length}${Number.isSafeInteger(ui.stagingCount) ? ` / ${ui.stagingCount}` : ''}`
+      )
+    ]);
+    section.append(sectionHeading);
+    const list = makeElement('div', 'admin-worlds-list admin-words-list');
+    if (ui.stagingLoading && ui.stagingWords.length === 0) {
+      list.append(makeElement('div', 'admin-loading-card', 'جارٍ تحميل الكلمات غير الموزعة…'));
+    } else if (ui.stagingWords.length === 0) {
+      list.append(makeElement('div', 'admin-empty-state', 'لا توجد كلمات غير موزعة ضمن هذا الاستعلام.'));
+    } else {
+      ui.stagingWords.forEach((word) => list.append(renderStagingRow(word)));
+    }
+    section.append(list);
+    const pagination = makeElement('div', 'admin-word-pagination');
+    appendChildren(pagination, [
+      makeElement(
+        'small',
+        'admin-count-note',
+        `المحمّل في الذاكرة ${ui.stagingPager ? ui.stagingPager.getSnapshot().cache.itemCount : 0} كلمة.`
+      ),
+      makeButton('السابق', 'previous-staging', {
+        className: 'admin-btn admin-btn-secondary',
+        disabled: ui.stagingLoading || !ui.stagingHasPrevious
+      }),
+      makeElement('span', 'admin-count-chip', `صفحة ${ui.stagingPageIndex + 1}`),
+      makeButton('التالي', 'next-staging', {
+        className: 'admin-btn admin-btn-secondary',
+        disabled: ui.stagingLoading || !ui.stagingHasNext
+      })
+    ]);
     section.append(pagination);
     container.append(section);
   }
 
   function renderCurrentView() {
-    if (ui.view === 'words') renderWords();
+    if (ui.view === 'staging') renderStagingWords();
+    else if (ui.view === 'words') renderWords();
     else if (ui.view === 'gates') renderGates();
     else if (ui.view === 'ranks') renderRanks();
     else renderDashboard();
@@ -1317,7 +2117,11 @@
     ui.ranks = [];
     ui.gates = [];
     ui.words = [];
-    ui.selectedWordIds.clear();
+    ui.wordPager = null;
+    ui.stagingWords = [];
+    ui.stagingPager = null;
+    clearStagingSelection();
+    clearWordSelection();
     ui.rankPageError = '';
     ui.gatePageError = '';
     await refreshRanks({ clear: true });
@@ -1368,13 +2172,83 @@
     ui.activeGateId = '';
     ui.gates = [];
     ui.words = [];
-    ui.selectedWordIds.clear();
+    ui.wordPager = null;
+    ui.stagingWords = [];
+    ui.stagingPager = null;
+    clearStagingSelection();
+    clearWordSelection();
     ui.gatePageError = '';
     await refreshGates({ clear: true });
     return true;
   }
 
   async function refreshWords(options) {
+    if (ADMIN_PAGED_WORDS_V2) return refreshPagedWords(options);
+    return refreshLegacyWords(options);
+  }
+
+  async function refreshPagedWords(options) {
+    const settings = options || {};
+    const worldId = String(ui.activeWorldId || '');
+    const rankId = String(ui.activeRankId || '');
+    const gateId = String(ui.activeGateId || '');
+    if (!worldId || !rankId || !gateId || ui.view !== 'words') return;
+    const initial = Boolean(settings.initial) || !ui.wordPager;
+    const direction = settings.direction === 'previous'
+      ? 'previous'
+      : ((settings.append || settings.direction === 'next') ? 'next' : 'refresh');
+    const pager = initial ? createAdminWordPager(worldId, rankId, gateId) : ui.wordPager;
+    if (!pager) return;
+    if (initial) {
+      ui.wordPager = pager;
+      ui.words = [];
+      ui.wordNextCursor = null;
+      ui.wordHasMore = false;
+      ui.wordHasPrevious = false;
+      ui.wordPageIndex = 0;
+    }
+    const revision = ++ui.wordLoadRevision;
+    ui.wordsLoading = true;
+    ui.wordPageError = '';
+    let request;
+    if (initial) request = pager.loadInitialPage();
+    else if (direction === 'previous') request = pager.loadPreviousPage();
+    else if (direction === 'next') request = pager.loadNextPage();
+    else request = pager.refreshCurrentPage();
+    applyAdminWordPagerSnapshot(pager);
+    renderWords();
+    try {
+      await request;
+      if (
+        revision !== ui.wordLoadRevision || pager !== ui.wordPager ||
+        worldId !== ui.activeWorldId || rankId !== ui.activeRankId ||
+        gateId !== ui.activeGateId || ui.view !== 'words'
+      ) return;
+      applyAdminWordPagerSnapshot(pager);
+      if (!initial && (direction === 'previous' || direction === 'next')) {
+        scrollAdminWordsToPageStart();
+      }
+    } catch (error) {
+      if (
+        revision !== ui.wordLoadRevision || pager !== ui.wordPager ||
+        worldId !== ui.activeWorldId || rankId !== ui.activeRankId ||
+        gateId !== ui.activeGateId || ui.view !== 'words'
+      ) return;
+      ui.wordPageError = `تعذر تحميل الصفحة المطلوبة. رمز الخطأ: ${getErrorCode(error, 'admin/word-list-failed')}`;
+    } finally {
+      if (
+        revision === ui.wordLoadRevision && pager === ui.wordPager &&
+        worldId === ui.activeWorldId && rankId === ui.activeRankId &&
+        gateId === ui.activeGateId && ui.view === 'words'
+      ) {
+        ui.wordsLoading = false;
+        applyAdminWordPagerSnapshot(pager);
+        renderWords();
+      }
+    }
+  }
+
+  async function refreshLegacyWords(options) {
     const settings = options || {};
     const append = Boolean(settings.append);
     const worldId = String(ui.activeWorldId || '');
@@ -1388,7 +2262,7 @@
       ui.words = [];
       ui.wordNextCursor = null;
       ui.wordHasMore = false;
-      ui.selectedWordIds.clear();
+      clearWordSelection();
     }
     ui.wordPageError = '';
     renderWords();
@@ -1456,8 +2330,16 @@
     ui.wordPageError = '';
     ui.wordNextCursor = null;
     ui.wordHasMore = false;
-    ui.selectedWordIds.clear();
-    await refreshWords({ append: false });
+    ui.wordHasPrevious = false;
+    ui.wordPageIndex = 0;
+    ui.wordPager = null;
+    ui.wordPagerSignature = '';
+    ui.wordSearch = '';
+    ui.wordFilterField = '';
+    ui.wordFilterValue = '';
+    ui.wordSort = 'newest';
+    clearWordSelection();
+    await refreshWords({ initial: true });
     return true;
   }
 
@@ -1475,7 +2357,11 @@
     ui.activeGateId = '';
     ui.gates = [];
     ui.words = [];
-    ui.selectedWordIds.clear();
+    ui.wordPager = null;
+    ui.stagingWords = [];
+    ui.stagingPager = null;
+    clearStagingSelection();
+    clearWordSelection();
     renderDashboard();
     return true;
   }
@@ -1496,6 +2382,11 @@
         throw error;
       }
       ui.worlds = records.map(normalizeWorldRecord).filter(Boolean);
+      try {
+        ui.stagingCount = await getCloudApi().countStagingWords();
+      } catch {
+        ui.stagingCount = null;
+      }
     } catch (error) {
       if (revision !== ui.loadRevision) return;
       ui.pageError = `تعذر تحميل العوالم. رمز الخطأ: ${getErrorCode(error, 'admin/list-failed')}`;
@@ -1689,6 +2580,515 @@
     modalState.saveButton.textContent = pending ? 'جارٍ الحفظ…' : 'حفظ العالم';
   }
 
+  function wordImportResultLabel(entry) {
+    const visualState = wordImportVisualState(entry);
+    const labels = {
+      valid: 'صالح',
+      warning: 'تحذير',
+      duplicate: 'مكرر',
+      invalid: 'غير صالح'
+    };
+    if (entry.state === 'imported') return 'تم الاستيراد';
+    if (entry.state === 'staged') return 'تم الحفظ المؤقت';
+    if (entry.state === 'failed') return 'فشل الحفظ';
+    return labels[visualState] || 'غير صالح';
+  }
+
+  function wordImportVisualState(entry) {
+    if (
+      entry.state === 'duplicate-file' ||
+      entry.state === 'duplicate-gate' ||
+      entry.state === 'duplicate-staging'
+    ) return 'duplicate';
+    if (entry.state === 'invalid' || entry.state === 'failed') return 'invalid';
+    if (entry.state === 'valid' && entry.warnings.length) return 'warning';
+    return 'valid';
+  }
+
+  function wordImportIssueText(entry) {
+    const issues = entry.errors.concat(entry.warnings);
+    return Array.from(new Set(issues.map((item) =>
+      String(item && item.message || '').trim()
+    ).filter(Boolean))).join('، ');
+  }
+
+  function renderWordImportEntries(container, entries) {
+    const table = makeElement('table', 'admin-import-table');
+    const head = makeElement('thead');
+    const headingRow = makeElement('tr');
+    ['#', 'الكلمة', 'الترجمة', 'المستوى', 'النتيجة'].forEach((label) => {
+      headingRow.append(makeElement('th', '', label));
+    });
+    head.append(headingRow);
+    const body = makeElement('tbody');
+    entries.forEach((entry) => {
+      const visualState = wordImportVisualState(entry);
+      const row = makeElement('tr', `admin-import-row admin-import-row-${visualState}`);
+      row.dataset.importState = String(entry.state || '');
+      const resultCell = makeElement('td');
+      resultCell.append(makeElement(
+        'strong',
+        `admin-import-result admin-import-result-${visualState}`,
+        wordImportResultLabel(entry)
+      ));
+      const issueText = wordImportIssueText(entry);
+      if (issueText) resultCell.append(makeElement('small', 'admin-import-issue', issueText));
+      [
+        String(entry.index + 1),
+        String(entry.word || '—'),
+        String(entry.translation || '—'),
+        String(entry.level || '—')
+      ].forEach((value) => row.append(makeElement('td', '', value)));
+      row.append(resultCell);
+      body.append(row);
+    });
+    appendChildren(table, [head, body]);
+    container.replaceChildren(table);
+  }
+
+  function renderWordImportStats(container, preview, result) {
+    const stats = preview.stats;
+    const values = result ? [
+      ['الإجمالي', result.summary.total],
+      ['تم الاستيراد', result.summary.succeeded],
+      ['فشل', result.summary.failed],
+      ['تخطي مكرر', result.summary.skippedDuplicates],
+      ['غير صالح', result.summary.skippedInvalid]
+    ] : [
+      ['الإجمالي', stats.total],
+      ['صالح', stats.valid],
+      ['غير صالح', stats.invalid],
+      ['مكرر في الملف', stats.duplicateInFile],
+      ['موجود في البوابة', stats.duplicateInGate]
+    ];
+    container.replaceChildren();
+    values.forEach(([label, value]) => {
+      const item = makeElement('div', 'admin-import-stat');
+      appendChildren(item, [
+        makeElement('strong', 'admin-import-stat-value', value),
+        makeElement('span', 'admin-import-stat-label', label)
+      ]);
+      container.append(item);
+    });
+  }
+
+  function renderWordImportInspectionNotice(container, preview) {
+    const warnings = Array.isArray(preview.generalWarnings) ? preview.generalWarnings : [];
+    container.replaceChildren();
+    if (!preview.blockingIssue && warnings.length === 0) {
+      container.hidden = true;
+      return;
+    }
+    if (preview.blockingIssue) {
+      const blocking = makeElement(
+        'p',
+        'admin-import-inspection-copy',
+        'تعذر فحص تكرار الكلمات داخل البوابة الحالية. لا يمكن متابعة الاستيراد قبل اكتمال هذا الفحص.'
+      );
+      container.append(blocking);
+    }
+    if (warnings.length) {
+      const warning = makeElement(
+        'p',
+        'admin-import-inspection-copy',
+        'تعذر فحص وجود الكلمة خارج البوابة الحالية، ويمكن متابعة الاستيراد.'
+      );
+      container.append(warning);
+    }
+    container.hidden = false;
+  }
+
+  function openWordImportPreview(
+    world,
+    rank,
+    gate,
+    preview,
+    returnFocus,
+    destination,
+    sourceFileName
+  ) {
+    const importDestination = destination === 'gate' ? 'gate' : 'staging';
+    closeAdminModal(true);
+    ui.wordImportPending = true;
+    const overlay = makeElement('div', 'admin-modal-overlay');
+    const backdrop = makeElement('div', 'admin-modal-backdrop');
+    backdrop.setAttribute('aria-hidden', 'true');
+    const dialog = makeElement('section', 'admin-modal admin-word-import-dialog');
+    dialog.setAttribute('role', 'dialog');
+    dialog.setAttribute('aria-modal', 'true');
+    dialog.setAttribute('aria-labelledby', 'adminWordImportTitle');
+
+    const header = makeElement('header', 'admin-modal-header');
+    const heading = makeElement('div', 'admin-modal-heading');
+    const title = makeElement('h2', 'admin-modal-title', 'مراجعة الكلمات قبل الاستيراد');
+    title.id = 'adminWordImportTitle';
+    appendChildren(heading, [
+      title,
+      makeElement(
+        'p',
+        'admin-modal-copy',
+        importDestination === 'gate'
+          ? 'سيتم إنشاء كل الكلمات المقبولة كمسودات في البوابة الحالية. الحقول التقنية الواردة في الملف لا يتم الوثوق بها.'
+          : 'ستُحفظ الكلمات المقبولة مؤقتًا دون عالم أو رتبة أو بوابة، ثم يمكن توزيعها لاحقًا.'
+      )
+    ]);
+    const closeButton = makeButton('×', 'close-modal', {
+      className: 'admin-modal-close',
+      title: 'إغلاق معاينة الاستيراد'
+    });
+    closeButton.setAttribute('aria-label', 'إغلاق معاينة الاستيراد');
+    appendChildren(header, [heading, closeButton]);
+    dialog.append(header);
+
+    const context = makeElement('div', 'admin-import-context');
+    const contextValues = importDestination === 'gate'
+      ? [
+          ['العالم', world.title || world.worldId],
+          ['الرتبة', rank.title || rank.rankId],
+          ['البوابة', gate.title || gate.gateId]
+        ]
+      : [
+          ['الوجهة', 'كلمات غير موزعة'],
+          ['الملف', sourceFileName]
+        ];
+    contextValues.forEach(([label, value]) => {
+      const item = makeElement('span', 'admin-import-context-item');
+      appendChildren(item, [
+        makeElement('strong', '', `${label}: `),
+        document.createTextNode(String(value))
+      ]);
+      context.append(item);
+    });
+    dialog.append(context);
+
+    const stats = makeElement('div', 'admin-import-stats');
+    renderWordImportStats(stats, preview, null);
+    dialog.append(stats);
+    const progress = makeElement('div', 'admin-import-progress', 'المعاينة جاهزة.');
+    progress.setAttribute('role', 'status');
+    progress.setAttribute('aria-live', 'polite');
+    dialog.append(progress);
+    const inspectionNotice = makeElement('div', 'admin-import-inspection-notice');
+    renderWordImportInspectionNotice(inspectionNotice, preview);
+    dialog.append(inspectionNotice);
+    const tableWrap = makeElement('div', 'admin-import-table-wrap');
+    renderWordImportEntries(tableWrap, preview.entries);
+    dialog.append(tableWrap);
+    const errorBox = makeElement('div', 'admin-form-error');
+    errorBox.hidden = true;
+    dialog.append(errorBox);
+
+    const form = makeElement('form', 'admin-import-form');
+    const footer = makeElement('footer', 'admin-modal-footer');
+    const backButton = makeButton('رجوع', 'choose-word-import-file', {
+      className: 'admin-btn admin-btn-secondary'
+    });
+    const cancelButton = makeButton('إلغاء', 'close-modal', {
+      className: 'admin-btn admin-btn-secondary'
+    });
+    const importButton = makeButton(`استيراد ${preview.stats.valid} كلمة`, null, {
+      className: 'admin-btn admin-btn-primary',
+      type: 'submit',
+      disabled: preview.stats.valid === 0 || Boolean(preview.blockingIssue)
+    });
+    appendChildren(footer, [backButton, cancelButton, importButton]);
+    form.append(footer);
+    dialog.append(form);
+    appendChildren(overlay, [backdrop, dialog]);
+    getAdminRoot().append(overlay);
+    if (typeof lockBackgroundScroll === 'function') {
+      lockBackgroundScroll('adminWordImport');
+    }
+
+    const modalState = {
+      kind: 'word-import',
+      overlay,
+      form,
+      errorBox,
+      closeButton,
+      backButton,
+      cancelButton,
+      importButton,
+      progress,
+      inspectionNotice,
+      stats,
+      tableWrap,
+      preview,
+      world,
+      rank,
+      gate,
+      destination: importDestination,
+      sourceFileName,
+      pending: false,
+      completed: false,
+      returnFocus
+    };
+    ui.modal = modalState;
+    if (importDestination === 'gate' && preview.blockingIssue) {
+      progress.textContent = 'فشل فحص التكرار داخل البوابة. لا يمكن متابعة الاستيراد.';
+    }
+    form.addEventListener('submit', (event) => commitWordImport(event, modalState));
+    importButton.focus();
+  }
+
+  async function commitWordImport(event, modalState) {
+    event.preventDefault();
+    if (ui.modal !== modalState || modalState.pending || modalState.completed) return;
+    modalState.pending = true;
+    modalState.form.setAttribute('aria-busy', 'true');
+    modalState.importButton.disabled = true;
+    modalState.closeButton.disabled = true;
+    modalState.backButton.disabled = true;
+    modalState.cancelButton.disabled = true;
+    modalState.importButton.textContent = 'جارٍ الاستيراد…';
+    modalState.errorBox.hidden = true;
+    try {
+      const cloud = getCloudApi();
+      const importer = getWordImportApi();
+      const result = modalState.destination === 'staging'
+        ? await importer.commitToStaging(modalState.preview, {
+            importWords: cloud.importStagingWords.bind(cloud),
+            sourceFileName: modalState.sourceFileName
+          })
+        : await importer.commit(modalState.preview, {
+            createWord: cloud.createWord.bind(cloud),
+            onProgress(progress) {
+              if (ui.modal !== modalState) return;
+              modalState.progress.textContent =
+                `تمت معالجة ${progress.completed} من ${progress.total} · نجح ${progress.succeeded} · فشل ${progress.failed}`;
+            }
+          });
+      if (ui.modal !== modalState) return;
+      modalState.completed = true;
+      modalState.pending = false;
+      ui.wordImportPending = false;
+      modalState.form.setAttribute('aria-busy', 'false');
+      modalState.closeButton.disabled = false;
+      modalState.backButton.disabled = false;
+      modalState.cancelButton.disabled = false;
+      modalState.cancelButton.textContent = 'إغلاق';
+      modalState.importButton.disabled = true;
+      modalState.importButton.textContent = 'اكتمل الاستيراد';
+      renderWordImportStats(modalState.stats, modalState.preview, result);
+      renderWordImportEntries(modalState.tableWrap, result.entries);
+      modalState.progress.textContent =
+        `اكتمل: نجح ${result.summary.succeeded}، فشل ${result.summary.failed}، وتُخطّي ${result.summary.skippedDuplicates} مكرر.`;
+      if (result.summary.succeeded > 0) {
+        modalState.refreshAfterClose = true;
+        if (modalState.destination === 'staging') {
+          ui.stagingCount = Number.isSafeInteger(ui.stagingCount)
+            ? ui.stagingCount + result.summary.succeeded
+            : null;
+          notify(`تم حفظ ${result.summary.succeeded} كلمة ضمن الكلمات غير الموزعة.`, 'success');
+        } else {
+          notify(`تم استيراد ${result.summary.succeeded} كلمة كمسودات.`, 'success');
+        }
+      } else {
+        renderFormIssues(modalState.errorBox, [
+          { path: 'import', code: 'admin/no-words-imported' }
+        ], 'لم يتم حفظ أي كلمة. راجع النتائج التفصيلية:');
+      }
+    } catch (error) {
+      if (ui.modal !== modalState) return;
+      modalState.pending = false;
+      ui.wordImportPending = false;
+      modalState.form.setAttribute('aria-busy', 'false');
+      modalState.closeButton.disabled = false;
+      modalState.backButton.disabled = false;
+      modalState.cancelButton.disabled = false;
+      modalState.importButton.disabled = false;
+      modalState.importButton.textContent = `استيراد ${modalState.preview.stats.valid} كلمة`;
+      renderFormIssues(modalState.errorBox, [
+        { path: 'cloud', code: getErrorCode(error, 'admin/word-import-failed') }
+      ], 'تعذر إكمال الاستيراد. بقيت المعاينة والنتائج مفتوحة:');
+    }
+  }
+
+  function openWordImportDestinationDialog(world, rank, gate, returnFocus) {
+    closeAdminModal(true);
+    const overlay = makeElement('div', 'admin-modal-overlay');
+    const backdrop = makeElement('div', 'admin-modal-backdrop');
+    backdrop.setAttribute('aria-hidden', 'true');
+    const dialog = makeElement('section', 'admin-modal admin-delete-dialog');
+    dialog.setAttribute('role', 'dialog');
+    dialog.setAttribute('aria-modal', 'true');
+    dialog.setAttribute('aria-labelledby', 'adminImportDestinationTitle');
+    const header = makeElement('header', 'admin-modal-header');
+    const heading = makeElement('div', 'admin-modal-heading');
+    const title = makeElement('h2', 'admin-modal-title', 'وجهة استيراد JSON');
+    title.id = 'adminImportDestinationTitle';
+    appendChildren(heading, [
+      title,
+      makeElement('p', 'admin-modal-copy', 'اختر مكان حفظ الكلمات المقبولة بعد المعاينة.')
+    ]);
+    const closeButton = makeButton('×', 'close-modal', {
+      className: 'admin-modal-close',
+      title: 'إغلاق'
+    });
+    appendChildren(header, [heading, closeButton]);
+    dialog.append(header);
+    const form = makeElement('form', 'admin-world-form');
+    const destination = makeSelectField({
+      name: 'destination',
+      label: 'الوجهة',
+      value: 'staging',
+      options: [
+        { value: 'staging', label: 'كلمات غير موزعة' },
+        { value: 'gate', label: 'البوابة الحالية' }
+      ],
+      help: 'احفظ الكلمات مؤقتًا ثم وزّعها بين البوابات لاحقًا.',
+      wide: true
+    });
+    if (!world || !rank || !gate) {
+      const gateOption = destination.input.querySelector('option[value="gate"]');
+      if (gateOption) gateOption.disabled = true;
+    }
+    form.append(destination.wrapper);
+    if (world && rank && gate) {
+      form.append(makeElement(
+        'p',
+        'admin-import-inspection-notice',
+        `البوابة الحالية: ${world.title || world.worldId} ← ${rank.title || rank.rankId} ← ${gate.title || gate.gateId}`
+      ));
+    }
+    const footer = makeElement('footer', 'admin-modal-footer');
+    appendChildren(footer, [
+      makeButton('إلغاء', 'close-modal', { className: 'admin-btn admin-btn-secondary' }),
+      makeButton('اختيار ملف JSON', null, {
+        className: 'admin-btn admin-btn-primary',
+        type: 'submit'
+      })
+    ]);
+    form.append(footer);
+    dialog.append(form);
+    appendChildren(overlay, [backdrop, dialog]);
+    getAdminRoot().append(overlay);
+    const modalState = {
+      kind: 'word-import-destination',
+      overlay,
+      form,
+      closeButton,
+      world,
+      rank,
+      gate,
+      returnFocus,
+      pending: false
+    };
+    ui.modal = modalState;
+    form.addEventListener('submit', (event) => {
+      event.preventDefault();
+      const selected = String(new FormData(form).get('destination') || 'staging');
+      closeAdminModal(true);
+      chooseWordImportFile(world, rank, gate, returnFocus, selected);
+    });
+    destination.input.focus();
+  }
+
+  async function prepareWordImport(
+    file,
+    world,
+    rank,
+    gate,
+    returnFocus,
+    destination
+  ) {
+    const importDestination = destination === 'gate' ? 'gate' : 'staging';
+    try {
+      const importer = getWordImportApi();
+      importer.assertFileSize(file.size);
+      if (!String(file.name || '').toLowerCase().endsWith('.json')) {
+        const error = new Error('admin/json-file-required');
+        error.code = 'admin/json-file-required';
+        throw error;
+      }
+      const parsed = importer.parseJsonText(await file.text());
+      let preview = importer.preparePreview(parsed, {
+        schema: root.LootLinguaContentSchema,
+        destination: importDestination,
+        worldId: world && world.worldId,
+        rankId: rank && rank.rankId,
+        gateId: gate && gate.gateId,
+        existingWords: importDestination === 'gate' ? ui.words : []
+      });
+      if (importDestination === 'gate') {
+        const cloud = getCloudApi();
+        preview = await importer.inspectDuplicates(preview, {
+          inspectGate: cloud.inspectWordDuplicates.bind(cloud),
+          concurrency: 3
+        });
+        if (
+          String(ui.activeWorldId) !== String(world.worldId) ||
+          String(ui.activeRankId) !== String(rank.rankId) ||
+          String(ui.activeGateId) !== String(gate.gateId) ||
+          ui.view !== 'words'
+        ) {
+          throw Object.assign(new Error('admin/import-context-changed'), {
+            code: 'admin/import-context-changed'
+          });
+        }
+      } else if (ui.view !== 'words' && ui.view !== 'staging') {
+        throw Object.assign(new Error('admin/import-context-changed'), {
+          code: 'admin/import-context-changed'
+        });
+      }
+      openWordImportPreview(
+        world,
+        rank,
+        gate,
+        preview,
+        returnFocus,
+        importDestination,
+        String(file.name || 'import.json')
+      );
+    } catch (error) {
+      ui.wordImportPending = false;
+      const message =
+        `تعذر تجهيز ملف الاستيراد. رمز الخطأ: ${getErrorCode(error, 'admin/word-import-preview-failed')}`;
+      if (ui.view === 'staging') {
+        ui.stagingPageError = message;
+        renderStagingWords();
+      } else {
+        ui.wordPageError = message;
+        renderWords();
+      }
+    }
+  }
+
+  function chooseWordImportFile(world, rank, gate, returnFocus, destination) {
+    if (ui.wordImportPending) return;
+    ui.wordImportPending = true;
+    renderWords();
+    const input = makeElement('input');
+    input.type = 'file';
+    input.accept = '.json,application/json';
+    input.hidden = true;
+    let handled = false;
+    function cancelSelection() {
+      if (handled) return;
+      handled = true;
+      input.remove();
+      ui.wordImportPending = false;
+      if (ui.view === 'words') renderWords();
+      else if (ui.view === 'staging') renderStagingWords();
+    }
+    input.addEventListener('cancel', cancelSelection, { once: true });
+    input.addEventListener('change', () => {
+      if (handled) return;
+      handled = true;
+      const file = input.files && input.files[0];
+      input.remove();
+      if (!file) {
+        ui.wordImportPending = false;
+        if (ui.view === 'staging') renderStagingWords();
+        else renderWords();
+        return;
+      }
+      prepareWordImport(file, world, rank, gate, returnFocus, destination);
+    }, { once: true });
+    document.body.append(input);
+    input.click();
+  }
+
   function modalIsDirty() {
     return Boolean(ui.modal && (
       ui.modal.kind === 'world-editor' || ui.modal.kind === 'rank-editor' ||
@@ -1712,6 +3112,25 @@
     modalState.dirty = false;
     modalState.overlay.remove();
     ui.modal = null;
+    if (modalState.kind === 'word-import') {
+      if (typeof unlockBackgroundScroll === 'function') {
+        unlockBackgroundScroll('adminWordImport');
+      }
+      ui.wordImportPending = false;
+      if (modalState.refreshAfterClose && ui.view === 'words' && modalState.destination === 'gate') {
+        refreshWords({ initial: true });
+      } else if (
+        modalState.refreshAfterClose &&
+        ui.view === 'staging' &&
+        modalState.destination === 'staging'
+      ) {
+        refreshStagingWords({ initial: true });
+      } else if (ui.view === 'words') {
+        renderWords();
+      } else if (ui.view === 'staging') {
+        renderStagingWords();
+      }
+    }
     if (modalState.returnFocus && typeof modalState.returnFocus.focus === 'function') {
       modalState.returnFocus.focus();
     }
@@ -1912,6 +3331,7 @@
       description: String(source.description || ''),
       order: cachedCount(source.order),
       difficulty: String(source.difficulty || ''),
+      cefrLevel: root.LootLinguaContentSchema?.normalizeCefrLevel?.(source.cefrLevel) || 'unclassified',
       initialStatus: unlockConfig.initialStatus === 'available' ? 'available' : 'locked'
     };
   }
@@ -1924,6 +3344,7 @@
       description: String(data.get('description') || '').trim(),
       order: Number(data.get('order')),
       difficulty: String(data.get('difficulty') || '').trim(),
+      cefrLevel: String(data.get('cefrLevel') || 'unclassified'),
       unlockConfig: {
         mode: 'manual_placeholder',
         initialStatus: data.get('initialStatus') === 'available' ? 'available' : 'locked',
@@ -1936,6 +3357,26 @@
 
   function rankFormSignature(form) {
     return JSON.stringify(collectRankForm(form));
+  }
+
+  function rankCandidateHasPrevious(form, modalState) {
+    const values = collectRankForm(form);
+    const candidateId = String(modalState.rank?.rankId || 'pending-rank');
+    const candidate = { ...values, rankId: candidateId };
+    const compare = root.LootLinguaContentSchema?.comparePublishedRanks;
+    return ui.ranks.some((rank) => {
+      const rankId = String(rank.rankId || '');
+      if (modalState.rank && rankId === String(modalState.rank.rankId)) return false;
+      return typeof compare === 'function'
+        ? compare(rank, candidate) < 0
+        : Number(rank.order) < Number(values.order);
+    });
+  }
+
+  function syncFirstRankLockWarning(form, modalState, warning) {
+    const values = collectRankForm(form);
+    const locked = values.unlockConfig.initialStatus === 'locked';
+    warning.hidden = !locked || rankCandidateHasPrevious(form, modalState);
   }
 
   function validateRankPayload(form, modalState) {
@@ -2031,6 +3472,22 @@
       { name: 'difficulty', label: 'الصعوبة', value: seed.difficulty, maxLength: 80 }
     ].forEach((definition) => grid.append(makeField(definition).wrapper));
     grid.append(makeSelectField({
+      name: 'cefrLevel',
+      label: 'المستوى اللغوي',
+      value: seed.cefrLevel,
+      required: true,
+      options: [
+        { value: 'A1', label: 'A1 — مبتدئ' },
+        { value: 'A2', label: 'A2 — مبتدئ أعلى' },
+        { value: 'B1', label: 'B1 — متوسط' },
+        { value: 'B2', label: 'B2 — متوسط أعلى' },
+        { value: 'C1', label: 'C1 — متقدم' },
+        { value: 'C2', label: 'C2 — إتقان' },
+        { value: 'unclassified', label: 'غير مصنف' }
+      ],
+      help: 'يحدد قسم الرتبة وترتيبها داخل العالم واختبار المستوى المتاح لها.'
+    }).wrapper);
+    grid.append(makeSelectField({
       name: 'initialStatus',
       label: 'الإتاحة الأولية',
       value: seed.initialStatus,
@@ -2039,9 +3496,16 @@
         { value: 'locked', label: 'مقفلة' },
         { value: 'available', label: 'متاحة' }
       ],
-      help: 'هذا إعداد أولي فقط؛ منطق الفتح اللاحق لم يُحسم.'
+      help: 'هذا إعداد بداية الرحلة؛ تفتح الرتب اللاحقة بعد إكمال الرتبة السابقة.'
     }).wrapper);
     form.append(grid);
+    const lockWarning = makeElement(
+      'div',
+      'admin-rank-lock-warning',
+      'تنبيه: هذه أول رتبة حسب الترتيب وهي مقفلة، لذلك لن توجد نقطة بداية متاحة للرحلة.'
+    );
+    lockWarning.hidden = true;
+    form.append(lockWarning);
     const errorBox = makeElement('div', 'admin-form-error');
     errorBox.hidden = true;
     form.append(errorBox);
@@ -2069,10 +3533,12 @@
       initialSignature: '',
       returnFocus
     };
+    syncFirstRankLockWarning(form, modalState, lockWarning);
     modalState.initialSignature = rankFormSignature(form);
     ui.modal = modalState;
     const syncDirty = () => {
       modalState.dirty = rankFormSignature(form) !== modalState.initialSignature;
+      syncFirstRankLockWarning(form, modalState, lockWarning);
     };
     form.addEventListener('input', syncDirty);
     form.addEventListener('change', syncDirty);
@@ -2156,12 +3622,16 @@
   function gateEditorSeed(gate) {
     const source = gate || {};
     const storedRatio = source.entryAssessmentPassRatio;
+    const unlockConfig = source.unlockConfig && typeof source.unlockConfig === 'object'
+      ? source.unlockConfig
+      : {};
     return {
       title: String(source.title || ''),
       subtitle: String(source.subtitle || ''),
       description: String(source.description || ''),
       order: cachedCount(source.order),
       difficulty: String(source.difficulty || ''),
+      initialStatus: unlockConfig.initialStatus === 'available' ? 'available' : 'locked',
       entryAssessmentPassPercent: storedRatio === null || storedRatio === undefined
         ? ''
         : String(Number(storedRatio) * 100)
@@ -2177,25 +3647,19 @@
       description: String(data.get('description') || '').trim(),
       order: Number(data.get('order')),
       difficulty: String(data.get('difficulty') || '').trim(),
-      entryAssessmentPassRatio: rawThreshold === '' ? null : Number(rawThreshold) / 100
+      entryAssessmentPassRatio: rawThreshold === '' ? null : Number(rawThreshold) / 100,
+      unlockConfig: {
+        mode: 'manual_placeholder',
+        initialStatus: form.dataset.initialStatus === 'available' ? 'available' : 'locked',
+        requiredMasteredRatio: null,
+        requiredReviewingRatio: null,
+        requiredGateCount: null
+      }
     };
   }
 
   function gateFormSignature(form) {
     return JSON.stringify(collectGateForm(form));
-  }
-
-  function gateUnlockPlaceholder(source) {
-    if (source && source.unlockConfig && typeof source.unlockConfig === 'object') {
-      return { ...source.unlockConfig };
-    }
-    return {
-      mode: 'manual_placeholder',
-      initialStatus: 'locked',
-      requiredMasteredRatio: null,
-      requiredReviewingRatio: null,
-      requiredGateCount: null
-    };
   }
 
   function validateGatePayload(form, modalState) {
@@ -2209,8 +3673,7 @@
       ...values,
       status: modalState.mode === 'edit' ? source.status : 'draft',
       version: modalState.mode === 'edit' ? Number(source.version) : 1,
-      wordCount: modalState.mode === 'edit' ? cachedCount(source.wordCount) : 0,
-      unlockConfig: gateUnlockPlaceholder(source)
+      wordCount: modalState.mode === 'edit' ? cachedCount(source.wordCount) : 0
     };
     const schema = root.LootLinguaContentSchema;
     if (!schema || typeof schema.validateGate !== 'function') {
@@ -2284,6 +3747,7 @@
     }
 
     const form = makeElement('form', 'admin-world-form admin-gate-form');
+    form.dataset.initialStatus = seed.initialStatus;
     const grid = makeElement('div', 'admin-form-grid');
     [
       { name: 'title', label: 'عنوان البوابة', value: seed.title, required: true, maxLength: 120, placeholder: 'مثال: بوابة المفردات الأساسية' },
@@ -2300,7 +3764,7 @@
         max: 100,
         step: 0.01,
         placeholder: formatAssessmentPercent(defaultRatio),
-        help: `اختياري؛ اتركه فارغًا لاستخدام الافتراضي المركزي ${formatAssessmentPercent(defaultRatio)}. هذه العتبة لاختبار الدخول فقط؛ منطق الفتح بعد التعلّم لم يُحسم.`
+        help: `اختياري؛ اتركه فارغًا لاستخدام الافتراضي المركزي ${formatAssessmentPercent(defaultRatio)}. هذه العتبة لاختبار الدخول فقط؛ فتح البوابات يعتمد على إكمال تعلم البوابة السابقة.`
       }
     ].forEach((definition) => grid.append(makeField(definition).wrapper));
     form.append(grid);
@@ -2812,8 +4276,16 @@
       setRankActionError('هذا الانتقال غير مسموح.', { code: 'content/invalid-status-transition' });
       return;
     }
+    const isMixedUnclassifiedPublish = nextStatus === 'published' &&
+      (root.LootLinguaContentSchema?.normalizeCefrLevel?.(rank.cefrLevel) || 'unclassified') === 'unclassified' &&
+      ui.ranks.some((item) => (
+        String(item.rankId || '') !== String(rank.rankId || '') &&
+        (root.LootLinguaContentSchema?.normalizeCefrLevel?.(item.cefrLevel) || 'unclassified') !== 'unclassified'
+      ));
     const question = nextStatus === 'published'
-      ? `نشر الرتبة «${String(rank.title || '')}»؟`
+      ? (isMixedUnclassifiedPublish
+        ? `هذه الرتبة غير مصنفة بينما يحتوي العالم رتبًا بمستويات لغوية. نشر الرتبة «${String(rank.title || '')}» رغم ذلك؟`
+        : `نشر الرتبة «${String(rank.title || '')}»؟`)
       : (nextStatus === 'archived'
         ? `أرشفة الرتبة «${String(rank.title || '')}»؟`
         : `إعادة الرتبة «${String(rank.title || '')}» إلى مسودة؟`);
@@ -2873,7 +4345,7 @@
       return;
     }
     const question = nextStatus === 'published'
-      ? `نشر البوابة «${String(gate.title || '')}»؟`
+      ? `نشر البوابة «${String(gate.title || '')}» وكل كلماتها المسودة؟ الكلمات المؤرشفة ستبقى مؤرشفة.`
       : (nextStatus === 'archived'
         ? `أرشفة البوابة «${String(gate.title || '')}»؟`
         : `إعادة البوابة «${String(gate.title || '')}» إلى مسودة؟`);
@@ -2883,7 +4355,7 @@
     const adminUid = String(getAdminState().uid || '');
     setActionPending(key, true);
     try {
-      await getCloudApi().setGateStatus(
+      const result = await getCloudApi().setGateStatus(
         String(world.worldId),
         String(rank.rankId),
         String(gate.gateId),
@@ -2891,10 +4363,48 @@
         expectedVersion(gate)
       );
       if (!adminContextMatches(adminUid)) return;
-      notify(`تم تحديث حالة البوابة إلى: ${statusLabel(nextStatus)}.`, 'success');
+      const publishedCount = Number(result?.publishedDraftWordCount) || 0;
+      notify(
+        nextStatus === 'published' && publishedCount > 0
+          ? `تم نشر البوابة و${publishedCount} كلمة مسودة.`
+          : `تم تحديث حالة البوابة إلى: ${statusLabel(nextStatus)}.`,
+        'success'
+      );
       await refreshGates({ clear: false });
     } catch (error) {
       if (adminContextMatches(adminUid)) setGateActionError('تعذر تحديث حالة البوابة.', error);
+    } finally {
+      ui.actionKeys.delete(key);
+      if (ui.view === 'gates') renderGates();
+    }
+  }
+
+  async function publishRemainingGateDraftWords(world, rank, gate) {
+    if (!world || !rank || !gate || gate.status !== 'published') return;
+    const question = `نشر كل كلمات المسودة المتبقية في البوابة «${String(gate.title || '')}»؟ الكلمات المؤرشفة ستبقى مؤرشفة.`;
+    if (!root.confirm(question)) return;
+    const key = `gate:${world.worldId}:${rank.rankId}:${gate.gateId}:publish-drafts`;
+    if (ui.actionKeys.has(key)) return;
+    const adminUid = String(getAdminState().uid || '');
+    setActionPending(key, true);
+    try {
+      const result = await getCloudApi().publishGateDraftWords(
+        String(world.worldId),
+        String(rank.rankId),
+        String(gate.gateId)
+      );
+      if (!adminContextMatches(adminUid)) return;
+      const publishedCount = Number(result?.publishedDraftWordCount) || 0;
+      notify(
+        publishedCount > 0
+          ? `تم نشر ${publishedCount} كلمة مسودة متبقية.`
+          : 'لا توجد كلمات مسودة متبقية في هذه البوابة.',
+        publishedCount > 0 ? 'success' : 'info'
+      );
+    } catch (error) {
+      if (adminContextMatches(adminUid)) {
+        setGateActionError('تعذر نشر كلمات البوابة المتبقية.', error);
+      }
     } finally {
       ui.actionKeys.delete(key);
       if (ui.view === 'gates') renderGates();
@@ -2928,13 +4438,25 @@
   }
 
   function wordSelectionPayload() {
-    return ui.words
-      .filter((word) => ui.selectedWordIds.has(String(word.contentWordId || '')))
-      .slice(0, MAX_BULK_WORDS)
-      .map((word) => ({
-        contentWordId: String(word.contentWordId),
-        expectedVersion: expectedVersion(word)
-      }));
+    const selected = Array.from(ui.selectedWordIds).map((contentWordId) => {
+      const current = findWord(contentWordId);
+      const meta = current || ui.selectedWordMeta.get(contentWordId);
+      if (!meta) {
+        const error = new Error('content/selected-word-unavailable');
+        error.code = 'content/selected-word-unavailable';
+        throw error;
+      }
+      return {
+        contentWordId: String(contentWordId),
+        expectedVersion: expectedVersion(meta)
+      };
+    });
+    if (selected.length > MAX_BULK_WORDS) {
+      const error = new Error('content/invalid-bulk-size');
+      error.code = 'content/invalid-bulk-size';
+      throw error;
+    }
+    return selected;
   }
 
   async function changeWordStatus(world, rank, gate, word, nextStatus) {
@@ -2948,9 +4470,12 @@
       setWordActionError('هذا الانتقال غير مسموح.', { code: 'content/invalid-status-transition' });
       return;
     }
-    if (!root.confirm(nextStatus === 'published'
+    const question = nextStatus === 'published'
       ? `نشر الكلمة «${String(word.word || '')}»؟`
-      : `إعادة الكلمة «${String(word.word || '')}» إلى مسودة؟`)) return;
+      : (nextStatus === 'archived'
+        ? `أرشفة الكلمة «${String(word.word || '')}»؟`
+        : `إعادة الكلمة «${String(word.word || '')}» إلى مسودة؟`);
+    if (!root.confirm(question)) return;
     const key = `word:${world.worldId}:${rank.rankId}:${gate.gateId}:${word.contentWordId}:status`;
     if (ui.actionKeys.has(key)) return;
     const adminUid = String(getAdminState().uid || '');
@@ -3021,7 +4546,7 @@
         await api.bulkArchiveWords(String(world.worldId), String(rank.rankId), String(gate.gateId), items);
       }
       if (!adminContextMatches(adminUid)) return;
-      ui.selectedWordIds.clear();
+      clearWordSelection();
       notify(`تم ${verb} الكلمات المحددة.`, 'success');
       await refreshWords({ append: false });
     } catch (error) {
@@ -3676,6 +5201,267 @@
     }
   }
 
+  function openStagingDetails(stagingWordId, returnFocus) {
+    const word = ui.stagingWords.find((item) =>
+      String(item.stagingWordId || '') === String(stagingWordId || '')
+    );
+    if (!word) return;
+    closeAdminModal(true);
+    const overlay = makeElement('div', 'admin-modal-overlay');
+    const backdrop = makeElement('div', 'admin-modal-backdrop');
+    const dialog = makeElement('section', 'admin-modal admin-delete-dialog');
+    dialog.setAttribute('role', 'dialog');
+    dialog.setAttribute('aria-modal', 'true');
+    const header = makeElement('header', 'admin-modal-header');
+    const heading = makeElement('div', 'admin-modal-heading');
+    appendChildren(heading, [
+      makeElement('h2', 'admin-modal-title', String(word.word || 'تفاصيل الكلمة')),
+      makeElement('p', 'admin-modal-copy', String(word.translation || 'لا توجد ترجمة.'))
+    ]);
+    const closeButton = makeButton('×', 'close-modal', {
+      className: 'admin-modal-close',
+      title: 'إغلاق'
+    });
+    appendChildren(header, [heading, closeButton]);
+    dialog.append(header);
+    const body = makeElement('div', 'admin-world-form admin-staging-details');
+    [
+      ['التعريف', word.definition || word.definition_ar],
+      ['المثال', word.example],
+      ['ترجمة المثال', word.exampleTranslation],
+      ['ملاحظات', word.notes],
+      ['الملف', word.sourceFileName],
+      ['دفعة الاستيراد', word.importBatchId],
+      ['المعرّف المؤقت', word.stagingWordId]
+    ].forEach(([label, value]) => {
+      if (!String(value || '').trim()) return;
+      const item = makeElement('div', 'admin-staging-detail');
+      appendChildren(item, [
+        makeElement('strong', 'admin-field-label', label),
+        makeElement('p', 'admin-modal-copy', String(value))
+      ]);
+      body.append(item);
+    });
+    dialog.append(body);
+    appendChildren(overlay, [backdrop, dialog]);
+    getAdminRoot().append(overlay);
+    ui.modal = {
+      kind: 'staging-details',
+      overlay,
+      closeButton,
+      pending: false,
+      returnFocus
+    };
+    closeButton.focus();
+  }
+
+  async function deleteSelectedStagingWords() {
+    if (ui.stagingLoading || ui.selectedStagingIds.size === 0) return;
+    const ids = Array.from(ui.selectedStagingIds);
+    if (!root.confirm(`سيتم حذف ${ids.length} كلمة غير موزعة نهائيًا. هل تريد المتابعة؟`)) return;
+    ui.stagingLoading = true;
+    renderStagingWords();
+    try {
+      const result = await getCloudApi().deleteStagingWords(ids);
+      clearStagingSelection();
+      notify(`تم حذف ${result.deleted} كلمة غير موزعة.`, 'success');
+      await refreshStagingWords({ initial: true });
+    } catch (error) {
+      ui.stagingPageError =
+        `تعذر حذف الكلمات المحددة. رمز الخطأ: ${getErrorCode(error, 'admin/staging-delete-failed')}`;
+    } finally {
+      ui.stagingLoading = false;
+      if (ui.view === 'staging') renderStagingWords();
+    }
+  }
+
+  function replaceSelectOptions(select, records, idField, labelField, placeholder) {
+    select.replaceChildren();
+    const empty = makeElement('option', '', placeholder);
+    empty.value = '';
+    select.append(empty);
+    records.forEach((record) => {
+      const option = makeElement('option', '', String(record[labelField] || record[idField] || ''));
+      option.value = String(record[idField] || '');
+      select.append(option);
+    });
+  }
+
+  function openStagingDistributionDialog(returnFocus) {
+    if (ui.selectedStagingIds.size === 0) return;
+    closeAdminModal(true);
+    const overlay = makeElement('div', 'admin-modal-overlay');
+    const backdrop = makeElement('div', 'admin-modal-backdrop');
+    const dialog = makeElement('section', 'admin-modal admin-move-gate-dialog');
+    dialog.setAttribute('role', 'dialog');
+    dialog.setAttribute('aria-modal', 'true');
+    const header = makeElement('header', 'admin-modal-header');
+    const heading = makeElement('div', 'admin-modal-heading');
+    appendChildren(heading, [
+      makeElement('h2', 'admin-modal-title', 'توزيع الكلمات المحددة'),
+      makeElement('p', 'admin-modal-copy', `سيتم توزيع ${ui.selectedStagingIds.size} كلمة كمسودات إلى بوابة موجودة.`)
+    ]);
+    const closeButton = makeButton('×', 'close-modal', {
+      className: 'admin-modal-close',
+      title: 'إغلاق'
+    });
+    appendChildren(header, [heading, closeButton]);
+    dialog.append(header);
+    const form = makeElement('form', 'admin-world-form');
+    const worldField = makeSelectField({
+      name: 'worldId',
+      label: 'العالم',
+      value: '',
+      options: [{ value: '', label: 'اختر العالم' }, ...ui.worlds.map((world) => ({
+        value: world.worldId,
+        label: world.title || world.worldId
+      }))],
+      required: true,
+      wide: true
+    });
+    const rankField = makeSelectField({
+      name: 'rankId',
+      label: 'الرتبة',
+      value: '',
+      options: [{ value: '', label: 'اختر الرتبة' }],
+      required: true,
+      wide: true
+    });
+    const gateField = makeSelectField({
+      name: 'gateId',
+      label: 'البوابة',
+      value: '',
+      options: [{ value: '', label: 'اختر البوابة' }],
+      required: true,
+      wide: true
+    });
+    rankField.input.disabled = true;
+    gateField.input.disabled = true;
+    const progress = makeElement('div', 'admin-import-progress', 'اختر وجهة التوزيع.');
+    progress.setAttribute('role', 'status');
+    const errorBox = makeElement('div', 'admin-form-error');
+    errorBox.hidden = true;
+    appendChildren(form, [
+      worldField.wrapper,
+      rankField.wrapper,
+      gateField.wrapper,
+      progress,
+      errorBox
+    ]);
+    const footer = makeElement('footer', 'admin-modal-footer');
+    const cancel = makeButton('إلغاء', 'close-modal', {
+      className: 'admin-btn admin-btn-secondary'
+    });
+    const submit = makeButton('بدء التوزيع', null, {
+      className: 'admin-btn admin-btn-success',
+      type: 'submit'
+    });
+    appendChildren(footer, [cancel, submit]);
+    form.append(footer);
+    dialog.append(form);
+    appendChildren(overlay, [backdrop, dialog]);
+    getAdminRoot().append(overlay);
+    const modalState = {
+      kind: 'staging-distribution',
+      overlay,
+      form,
+      closeButton,
+      submit,
+      cancel,
+      progress,
+      errorBox,
+      worldField,
+      rankField,
+      gateField,
+      pending: false,
+      returnFocus
+    };
+    ui.modal = modalState;
+    worldField.input.addEventListener('change', async () => {
+      const worldId = worldField.input.value;
+      rankField.input.disabled = true;
+      gateField.input.disabled = true;
+      replaceSelectOptions(rankField.input, [], 'rankId', 'title', 'جارٍ تحميل الرتب…');
+      replaceSelectOptions(gateField.input, [], 'gateId', 'title', 'اختر البوابة');
+      if (!worldId) return;
+      try {
+        const ranks = await getCloudApi().listRanks(worldId);
+        if (ui.modal !== modalState || worldField.input.value !== worldId) return;
+        replaceSelectOptions(rankField.input, ranks, 'rankId', 'title', 'اختر الرتبة');
+        rankField.input.disabled = false;
+      } catch (error) {
+        renderFormIssues(errorBox, [
+          { path: 'worldId', code: getErrorCode(error, 'admin/rank-list-failed') }
+        ], 'تعذر تحميل الرتب:');
+      }
+    });
+    rankField.input.addEventListener('change', async () => {
+      const worldId = worldField.input.value;
+      const rankId = rankField.input.value;
+      gateField.input.disabled = true;
+      replaceSelectOptions(gateField.input, [], 'gateId', 'title', 'جارٍ تحميل البوابات…');
+      if (!worldId || !rankId) return;
+      try {
+        const gates = await getCloudApi().listGates(worldId, rankId);
+        if (ui.modal !== modalState || rankField.input.value !== rankId) return;
+        replaceSelectOptions(gateField.input, gates, 'gateId', 'title', 'اختر البوابة');
+        gateField.input.disabled = false;
+      } catch (error) {
+        renderFormIssues(errorBox, [
+          { path: 'rankId', code: getErrorCode(error, 'admin/gate-list-failed') }
+        ], 'تعذر تحميل البوابات:');
+      }
+    });
+    form.addEventListener('submit', async (event) => {
+      event.preventDefault();
+      if (ui.modal !== modalState || modalState.pending) return;
+      const target = {
+        worldId: worldField.input.value,
+        rankId: rankField.input.value,
+        gateId: gateField.input.value
+      };
+      if (!target.worldId || !target.rankId || !target.gateId) return;
+      modalState.pending = true;
+      closeButton.disabled = true;
+      cancel.disabled = true;
+      submit.disabled = true;
+      submit.textContent = 'جارٍ التوزيع…';
+      try {
+        const result = await getCloudApi().distributeStagingWords(
+          Array.from(ui.selectedStagingIds),
+          target,
+          {
+            onProgress(value) {
+              if (ui.modal !== modalState) return;
+              progress.textContent =
+                `عولج ${value.completed}/${value.total} · وُزّع ${value.distributed} · مكرر ${value.duplicates} · فشل ${value.failed}`;
+            }
+          }
+        );
+        if (ui.modal !== modalState) return;
+        clearStagingSelection();
+        modalState.pending = false;
+        closeAdminModal(true);
+        notify(
+          `وُزّع ${result.summary.distributed}، مكرر ${result.summary.duplicates}، فشل ${result.summary.failed}، وبقي ${result.summary.remaining}.`,
+          result.summary.failed ? 'warning' : 'success'
+        );
+        await refreshStagingWords({ initial: true });
+      } catch (error) {
+        if (ui.modal !== modalState) return;
+        modalState.pending = false;
+        closeButton.disabled = false;
+        cancel.disabled = false;
+        submit.disabled = false;
+        submit.textContent = 'إعادة المحاولة';
+        renderFormIssues(errorBox, [
+          { path: 'distribution', code: getErrorCode(error, 'admin/staging-distribution-failed') }
+        ], 'تعذر إكمال التوزيع:');
+      }
+    });
+    worldField.input.focus();
+  }
+
   function handleAdminClick(event) {
     const actionButton = event.target.closest('[data-admin-action]');
     if (!actionButton || actionButton.disabled) return;
@@ -3684,12 +5470,84 @@
       closeAdminModal(false);
       return;
     }
+    if (action === 'choose-word-import-file') {
+      const modalState = ui.modal;
+      if (!modalState || modalState.kind !== 'word-import' || modalState.pending) return;
+      const { world, rank, gate, returnFocus, destination } = modalState;
+      closeAdminModal(true);
+      chooseWordImportFile(world, rank, gate, returnFocus, destination);
+      return;
+    }
     if (action === 'refresh-worlds') {
       refreshWorlds({ clear: false });
       return;
     }
     if (action === 'show-dashboard') {
       showAdminDashboard();
+      return;
+    }
+    if (action === 'reset-word-query') {
+      ui.wordSearch = '';
+      ui.wordFilterField = '';
+      ui.wordFilterValue = '';
+      ui.wordSort = 'newest';
+      reloadAdminWordQuery();
+      return;
+    }
+    if (action === 'open-staging') {
+      openStagingWords();
+      return;
+    }
+    if (action === 'refresh-staging') {
+      refreshStagingWords({ initial: true });
+      return;
+    }
+    if (action === 'previous-staging') {
+      if (ui.stagingHasPrevious) refreshStagingWords({ direction: 'previous' });
+      return;
+    }
+    if (action === 'next-staging') {
+      if (ui.stagingHasNext) refreshStagingWords({ direction: 'next' });
+      return;
+    }
+    if (action === 'reset-staging-query') {
+      ui.stagingSort = 'newest';
+      ui.stagingFilterField = '';
+      ui.stagingFilterValue = '';
+      reloadStagingQuery();
+      return;
+    }
+    if (action === 'import-staging-json') {
+      openWordImportDestinationDialog(null, null, null, actionButton);
+      return;
+    }
+    if (action === 'toggle-staging-selection') {
+      const stagingWordId = String(actionButton.dataset.stagingWordId || '');
+      const word = ui.stagingWords.find((item) => item.stagingWordId === stagingWordId);
+      if (word) {
+        setStagingSelected(word, actionButton.checked);
+        renderStagingWords();
+      }
+      return;
+    }
+    if (action === 'select-staging-page') {
+      const allSelected = ui.stagingWords.length > 0 && ui.stagingWords.every((word) =>
+        ui.selectedStagingIds.has(String(word.stagingWordId || ''))
+      );
+      ui.stagingWords.forEach((word) => setStagingSelected(word, !allSelected));
+      renderStagingWords();
+      return;
+    }
+    if (action === 'delete-staging') {
+      deleteSelectedStagingWords();
+      return;
+    }
+    if (action === 'distribute-staging') {
+      openStagingDistributionDialog(actionButton);
+      return;
+    }
+    if (action === 'show-staging-details') {
+      openStagingDetails(actionButton.dataset.stagingWordId, actionButton);
       return;
     }
     if (action === 'open-ranks') {
@@ -3733,12 +5591,124 @@
       return;
     }
     const gate = findGate(actionButton.dataset.gateId);
+    if (action === 'open-words') {
+      if (rank && gate) openWordsForGate(world.worldId, rank.rankId, gate.gateId);
+      return;
+    }
+    if (action === 'refresh-words') {
+      if (
+        rank && gate &&
+        String(actionButton.dataset.worldId || '') === String(ui.activeWorldId || '') &&
+        String(actionButton.dataset.rankId || '') === String(ui.activeRankId || '') &&
+        String(actionButton.dataset.gateId || '') === String(ui.activeGateId || '')
+      ) {
+        refreshWords({ append: false });
+      }
+      return;
+    }
+    if (action === 'load-more-words') {
+      if (
+        rank && gate && ui.wordHasMore &&
+        String(actionButton.dataset.worldId || '') === String(ui.activeWorldId || '') &&
+        String(actionButton.dataset.rankId || '') === String(ui.activeRankId || '') &&
+        String(actionButton.dataset.gateId || '') === String(ui.activeGateId || '')
+      ) {
+        refreshWords({ append: true });
+      }
+      return;
+    }
+    if (action === 'previous-words') {
+      if (
+        rank && gate && ui.wordHasPrevious &&
+        String(actionButton.dataset.worldId || '') === String(ui.activeWorldId || '') &&
+        String(actionButton.dataset.rankId || '') === String(ui.activeRankId || '') &&
+        String(actionButton.dataset.gateId || '') === String(ui.activeGateId || '')
+      ) {
+        refreshWords({ direction: 'previous' });
+      }
+      return;
+    }
+    if (action === 'next-words') {
+      if (
+        rank && gate && ui.wordHasMore &&
+        String(actionButton.dataset.worldId || '') === String(ui.activeWorldId || '') &&
+        String(actionButton.dataset.rankId || '') === String(ui.activeRankId || '') &&
+        String(actionButton.dataset.gateId || '') === String(ui.activeGateId || '')
+      ) {
+        refreshWords({ direction: 'next' });
+      }
+      return;
+    }
+    if (action === 'retry-word-page') {
+      if (
+        rank && gate &&
+        String(actionButton.dataset.worldId || '') === String(ui.activeWorldId || '') &&
+        String(actionButton.dataset.rankId || '') === String(ui.activeRankId || '') &&
+        String(actionButton.dataset.gateId || '') === String(ui.activeGateId || '')
+      ) {
+        refreshWords({ append: false });
+      }
+      return;
+    }
+    if (action === 'toggle-word-selection') {
+      const contentWordId = String(actionButton.dataset.contentWordId || '');
+      const word = findWord(contentWordId);
+      if (rank && gate && word) {
+        setWordSelected(word, actionButton.checked);
+        renderWords();
+      }
+      return;
+    }
+    if (action === 'select-page-words') {
+      if (!rank || !gate || ui.wordsLoading || ui.words.length === 0) return;
+      const pageIsSelected = ui.words.every((word) =>
+        ui.selectedWordIds.has(String(word.contentWordId || ''))
+      );
+      ui.words.forEach((word) => {
+        setWordSelected(word, !pageIsSelected);
+      });
+      renderWords();
+      return;
+    }
+    if (action === 'create-word') {
+      if (rank && gate && canLeaveAdminView()) openWordEditor(world, rank, gate, null, 'create', actionButton);
+      return;
+    }
+    if (action === 'import-words-json') {
+      if (rank && gate && canLeaveAdminView()) {
+        openWordImportDestinationDialog(world, rank, gate, actionButton);
+      }
+      return;
+    }
+    const word = findWord(actionButton.dataset.contentWordId);
+    if (action === 'edit-word') {
+      if (rank && gate && word && canLeaveAdminView()) {
+        loadFreshWordForEditor(world, rank, gate, word.contentWordId, actionButton);
+      }
+      return;
+    }
+    if (action === 'set-word-status') {
+      if (rank && gate && word) changeWordStatus(world, rank, gate, word, actionButton.dataset.status);
+      return;
+    }
+    if (action === 'bulk-publish-words') {
+      if (rank && gate) runBulkWordStatus(world, rank, gate, 'publish');
+      return;
+    }
+    if (action === 'bulk-archive-words') {
+      if (rank && gate) runBulkWordStatus(world, rank, gate, 'archive');
+      return;
+    }
     if (action === 'edit-gate') {
       if (rank && gate && canLeaveAdminView()) loadFreshGateForEditor(world, rank, gate.gateId, actionButton);
       return;
     }
     if (action === 'set-gate-status') {
       if (rank && gate) changeGateStatus(world, rank, gate, actionButton.dataset.status);
+      return;
+    }
+    if (action === 'publish-gate-draft-words') {
+      if (rank && gate) publishRemainingGateDraftWords(world, rank, gate);
       return;
     }
     if (action === 'duplicate-gate') {
@@ -3781,14 +5751,32 @@
   }
 
   function switchToAdminShell() {
+    const originView = typeof currentView !== 'undefined' ? String(currentView || '') : '';
+    if (originView && originView !== 'admin') {
+      ui.returnView = originView;
+      ui.returnCustomWorldId = originView === 'customWorld' &&
+        typeof activeCustomWorldId !== 'undefined'
+        ? String(activeCustomWorldId || '')
+        : '';
+    }
     if (typeof beginViewSwitch === 'function') beginViewSwitch();
     if (typeof saveCurrentViewScroll === 'function') saveCurrentViewScroll();
     if (typeof closeSidebarIfOpen === 'function') closeSidebarIfOpen();
     if (typeof root.stopCustomWorldWordsCloudListener === 'function') root.stopCustomWorldWordsCloudListener();
+    if (typeof setTreasureMode === 'function') setTreasureMode(false);
+    document.body.classList.remove(
+      'treasure-mode',
+      'game-bg-active',
+      'treasure-route-next',
+      'treasure-route-back',
+      'worlds-route-next',
+      'worlds-route-back'
+    );
+    document.body.removeAttribute('data-game');
     if (typeof hideAllViewElements === 'function') hideAllViewElements();
     if (typeof currentView !== 'undefined') currentView = 'admin';
-    if (typeof viewBackTarget !== 'undefined') viewBackTarget = 'personal';
-    if (typeof setViewBackBar === 'function') setViewBackBar(true, 'العودة إلى قاموسك');
+    if (typeof viewBackTarget !== 'undefined') viewBackTarget = 'admin-origin';
+    if (typeof setViewBackBar === 'function') setViewBackBar(true, 'العودة إلى الصفحة السابقة');
     document.body.classList.add('admin-mode');
     const container = getAdminRoot();
     if (container) {
@@ -3802,6 +5790,32 @@
       pageTitle.replaceChildren(icon, document.createTextNode(' إدارة المحتوى الجاهز'));
     }
     if (typeof setAppViewRoute === 'function') setAppViewRoute('admin');
+  }
+
+  function returnFromAdminView() {
+    if (!canLeaveAdminView()) return false;
+    const returnView = String(ui.returnView || 'personal');
+    const customWorldId = String(ui.returnCustomWorldId || '');
+    document.body.classList.remove('admin-mode');
+    if (returnView === 'customWorld' && customWorldId && typeof root.loadCustomWorld === 'function') {
+      root.loadCustomWorld(customWorldId);
+      return true;
+    }
+    if ((returnView === 'minecraft' || returnView === 'pubg') &&
+        typeof root.loadGameDictionary === 'function') {
+      root.loadGameDictionary(returnView);
+      return true;
+    }
+    const loaders = {
+      treasure: root.loadTreasureView,
+      worlds: root.loadWorldsView,
+      starred: root.loadStarredView,
+      quiz: root.loadQuizView,
+      personal: root.loadPersonalDictionary
+    };
+    const loader = loaders[returnView] || root.loadPersonalDictionary;
+    if (typeof loader === 'function') loader();
+    return true;
   }
 
   async function loadAdminView() {
@@ -3857,6 +5871,8 @@
     if (!entry) return;
     const visible = Boolean(state && state.resolved && state.isAdmin);
     entry.hidden = !visible;
+    entry.disabled = !visible;
+    entry.style.display = visible ? 'flex' : 'none';
     entry.setAttribute('aria-hidden', visible ? 'false' : 'true');
     entry.tabIndex = visible ? 0 : -1;
     if (!ui.entryBound) {
@@ -3954,6 +5970,7 @@
 
   root.loadAdminView = loadAdminView;
   root.openAdminDashboard = loadAdminView;
+  root.returnFromAdminView = returnFromAdminView;
   root.canLeaveAdminView = canLeaveAdminView;
 
   root.addEventListener('lootlingua:admin-state', handleAdminState);

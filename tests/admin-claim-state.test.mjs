@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs';
 import vm from 'node:vm';
 
 const rawSource = readFileSync(new URL('../js/admin-cloud.js', import.meta.url), 'utf8');
+const adminUiSource = readFileSync(new URL('../js/admin.js', import.meta.url), 'utf8');
 const source = rawSource.replace(
   /import\s*\{[\s\S]*?\}\s*from\s*["'][^"']+["'];\s*/g,
   ''
@@ -103,6 +104,14 @@ function firebaseUser(uid, claimOrPromise) {
   };
 }
 
+function sourceSection(sourceText, start, end) {
+  const startIndex = sourceText.indexOf(start);
+  const endIndex = sourceText.indexOf(end, startIndex + start.length);
+  assert.notEqual(startIndex, -1, `Missing source marker: ${start}`);
+  assert.notEqual(endIndex, -1, `Missing source marker: ${end}`);
+  return sourceText.slice(startIndex, endIndex);
+}
+
 auth.currentUser = firebaseUser('ordinary-user', false);
 await windowObject.refreshLootLinguaAdminAccess({ forceRefresh: true });
 assert.equal(windowObject.getLootLinguaAdminState().isAdmin, false);
@@ -136,6 +145,80 @@ await Promise.resolve();
 await Promise.resolve();
 assert.equal(windowObject.getLootLinguaAdminState().uid, 'new-user');
 assert.equal(windowObject.getLootLinguaAdminState().isAdmin, false);
+
+const adminEntry = {
+  hidden: false,
+  disabled: false,
+  style: {},
+  attributes: new Map(),
+  listeners: new Map(),
+  setAttribute(name, value) {
+    this.attributes.set(name, String(value));
+  },
+  addEventListener(type, handler) {
+    this.listeners.set(type, handler);
+  },
+  click() {
+    if (!this.disabled) this.listeners.get('click')?.();
+  },
+};
+const adminEntryState = {
+  value: { resolved: false, isAdmin: false, uid: null, errorCode: '' },
+};
+const adminUi = { entryBound: false };
+let adminOpenCount = 0;
+const adminUiRoot = {
+  closeProfileModal() {},
+  openAdminDashboard() {
+    adminOpenCount += 1;
+  },
+};
+const adminEntryContext = vm.createContext({
+  __entry: adminEntry,
+  __state: adminEntryState,
+  __ui: adminUi,
+  __root: adminUiRoot,
+});
+const syncAdminEntrySource = sourceSection(
+  adminUiSource,
+  'function syncAdminEntry',
+  'function adminViewIsVisible'
+);
+new vm.Script(`
+  const document = { getElementById: (id) => id === 'adminEntryBtn' ? __entry : null };
+  const ui = __ui;
+  const root = __root;
+  const getAdminState = () => __state.value;
+  ${syncAdminEntrySource}
+  this.syncAdminEntry = syncAdminEntry;
+`, { filename: 'admin-entry-claim.behavior.js' }).runInContext(adminEntryContext);
+
+adminEntryContext.syncAdminEntry(adminEntryState.value);
+assert.equal(adminEntry.hidden, true);
+assert.equal(adminEntry.disabled, true);
+assert.equal(adminEntry.style.display, 'none');
+
+adminEntryState.value = { resolved: true, isAdmin: false, uid: 'ordinary-user', errorCode: '' };
+adminEntryContext.syncAdminEntry(adminEntryState.value);
+adminEntry.click();
+assert.equal(adminEntry.hidden, true);
+assert.equal(adminOpenCount, 0);
+
+adminEntryState.value = { resolved: true, isAdmin: true, uid: 'real-admin', errorCode: '' };
+adminEntryContext.syncAdminEntry(adminEntryState.value);
+assert.equal(adminEntry.hidden, false);
+assert.equal(adminEntry.disabled, false);
+assert.equal(adminEntry.style.display, 'flex');
+adminEntry.click();
+assert.equal(adminOpenCount, 1);
+
+adminEntryState.value = { resolved: true, isAdmin: false, uid: null, errorCode: '' };
+adminEntryContext.syncAdminEntry(adminEntryState.value);
+adminEntry.click();
+assert.equal(adminEntry.hidden, true);
+assert.equal(adminEntry.disabled, true);
+assert.equal(adminEntry.style.display, 'none');
+assert.equal(adminOpenCount, 1);
 
 assert.equal(microtasks.length, 1, 'The module should schedule one initial Auth-derived refresh.');
 

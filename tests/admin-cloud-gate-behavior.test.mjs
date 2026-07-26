@@ -67,12 +67,35 @@ async function runTransaction(_db, callback) {
 
 function getDocs(reference) {
   const prefix = `${reference.path}/`;
-  const docs = [];
+  let docs = [];
   for (const path of store.keys()) {
     if (!path.startsWith(prefix) || path.slice(prefix.length).includes('/')) continue;
     docs.push(snapshotFor({ id: path.slice(prefix.length), path }));
   }
+  for (const constraint of reference.constraints || []) {
+    if (constraint.type === 'where' && constraint.operator === '==') {
+      docs = docs.filter((snapshot) =>
+        snapshot.data()?.[constraint.field] === constraint.value
+      );
+    }
+  }
+  const pageLimit = [...(reference.constraints || [])]
+    .reverse()
+    .find((constraint) => constraint.type === 'limit');
+  if (pageLimit) docs = docs.slice(0, pageLimit.value);
   return Promise.resolve({ docs });
+}
+
+function query(reference, ...constraints) {
+  return { ...reference, constraints };
+}
+
+function where(field, operator, value) {
+  return { type: 'where', field, operator, value };
+}
+
+function limit(value) {
+  return { type: 'limit', value };
 }
 
 function httpsCallable(_functions, name) {
@@ -169,10 +192,12 @@ const dependencies = {
   getDoc: async (reference) => snapshotFor(reference),
   getDocs,
   getFirestore: () => db,
+  limit,
   orderBy: () => ({}),
-  query: (reference) => reference,
+  query,
   runTransaction,
   serverTimestamp: () => serverTime,
+  where,
   getFunctions: () => ({}),
   httpsCallable,
 };
@@ -550,6 +575,67 @@ for (const invalidId of ['', '../gate', 'gate/child', ' gate', 'gate ']) {
     (error) => error?.code === 'admin/invalid-argument'
   );
 }
+
+const publishGateId = 'gate-publish';
+const publishGatePath = `${rankPath}/gates/${publishGateId}`;
+store.set(publishGatePath, {
+  ...store.get(createdPath),
+  gateId: publishGateId,
+  title: 'Gate To Publish',
+  status: 'draft',
+  version: 1,
+  wordCount: 3,
+});
+function storedWord(contentWordId, word, status, order) {
+  const identity = windowObject.LootLinguaContentSchema.normalizeWordIdentity(word);
+  return {
+    schemaVersion: 1,
+    normalizationVersion: identity.normalizationVersion,
+    worldId: 'world_1',
+    rankId: 'rank_1',
+    gateId: publishGateId,
+    contentWordId,
+    word,
+    normalizedWord: identity.normalizedWord,
+    wordKey: identity.wordKey,
+    translation: `${word} translation`,
+    status,
+    version: 1,
+    order,
+    createdAt: serverTime,
+    updatedAt: serverTime,
+    createdBy: 'gate-admin',
+    updatedBy: 'gate-admin',
+  };
+}
+const draftWordOnePath = `${publishGatePath}/words/draft-one`;
+const draftWordTwoPath = `${publishGatePath}/words/draft-two`;
+const archivedWordPath = `${publishGatePath}/words/archived-one`;
+store.set(draftWordOnePath, storedWord('draft-one', 'Alpha', 'draft', 1));
+store.set(draftWordTwoPath, storedWord('draft-two', 'Beta', 'draft', 2));
+store.set(archivedWordPath, storedWord('archived-one', 'Gamma', 'archived', 3));
+
+const publication = await api.setGateStatus(
+  'world_1',
+  'rank_1',
+  publishGateId,
+  'published',
+  1
+);
+assert.equal(publication.status, 'published');
+assert.equal(publication.version, 2);
+assert.equal(publication.publishedDraftWordCount, 2);
+assert.equal(store.get(draftWordOnePath).status, 'published');
+assert.equal(store.get(draftWordTwoPath).status, 'published');
+assert.equal(store.get(draftWordOnePath).version, 2);
+assert.equal(store.get(draftWordTwoPath).version, 2);
+assert.equal(store.get(archivedWordPath).status, 'archived');
+assert.equal(store.get(archivedWordPath).version, 1);
+assert.deepEqual(
+  plain(await api.publishGateDraftWords('world_1', 'rank_1', publishGateId)),
+  { publishedDraftWordCount: 0 },
+  'Repairing an already-consistent published gate must be a no-op.'
+);
 
 for (const request of callableRequests) assertNoUndefined(request);
 auth.currentUser = firebaseUser('ordinary-user', false);
