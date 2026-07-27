@@ -762,7 +762,7 @@ try {
     assert.equal(progress.data().status, 'available');
   });
 
-  await test('accepts the exact full new-ranks Level Placement start batch', async () => {
+  await test('accepts the full new-ranks Level Placement start batch with required rankVersions', async () => {
     const uid = '2YWSZ8MdhPZBsqRqTozZvtTbzt83';
     const worldId = 'GyQfaD75uZFFpgB9Me9V';
     const assessmentId =
@@ -873,6 +873,10 @@ try {
     assert.equal(session.selectedWords.length, 12);
     assert.equal(session.selectedContentWordIds.length, 12);
     assert.equal(Object.values(session.adaptiveReserveIdsByRank).flat().length, 4);
+    assert.deepEqual(session.rankVersions, {
+      [newRankIds[0]]: 5,
+      [newRankIds[1]]: 6
+    });
     const parent = {
       worldId,
       activeRankId,
@@ -973,8 +977,8 @@ try {
     const savedParent = await getDoc(doc(exactDb, paths.parentPath));
     assert.equal(savedParent.data().activeLevelPlacementAssessmentId, assessmentId);
     console.log(
-      '# full new-ranks start diagnosis: session-create=pass, parent-update=pass, ' +
-      'combined-batch=pass; no local Rules predicate rejects this payload'
+      '# full new-ranks start: required rankVersions present; ' +
+      'session-create=pass, parent-update=pass, combined-batch=pass'
     );
   });
 

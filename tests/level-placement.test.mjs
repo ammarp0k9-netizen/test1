@@ -137,6 +137,13 @@ test('the sample is deterministic, bounded, and represents every rank when possi
   assert.equal(represented.size, 6);
 });
 
+test('the v2 session preserves sampled rank versions required by Firestore Rules', () => {
+  const value = sample(2);
+  const session = sessionFromSample(value);
+  assert.deepEqual({ ...session.rankVersions }, { ...value.rankVersions });
+  assert.deepEqual(Object.keys(session.rankVersions).sort(), ['rank-1', 'rank-2']);
+});
+
 test('sampling distributes a rank across gates and never repeats wordKey', () => {
   const result = sample(2);
   const primary = result.selectedWords.filter((item) => result.orderedQuestionIds.includes(item.questionId));

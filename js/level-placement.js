@@ -502,6 +502,7 @@
       assessedRankIds,
       assessedRankVersions,
       publishedRankSetHash: String(input?.publishedRankSetHash || sample.publishedRankSetHash || ''),
+      rankVersions: { ...(sample.rankVersions || {}) },
       perRankStats: {},
       ambiguousRankIds: [],
       recommendedStartRankId: '',

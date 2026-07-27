@@ -83,6 +83,50 @@ test('testing new ranks merges them into history without dropping older coverage
   assert.ok(merged.publishedRankSetHash);
 });
 
+test('new-ranks session carries tested rank versions while preserving legacy assessed IDs', () => {
+  const newRankIds = ['rank-new-a', 'rank-new-b'];
+  const selectedWords = newRankIds.map((rankId, index) => ({
+    questionId: `question-${index}`,
+    rankId,
+    gateId: `gate-${index}`,
+    contentWordId: `word-${index}`,
+    wordKey: `key-${index}`,
+    word: `Word ${index}`,
+    translation: `Meaning ${index}`,
+  }));
+  const sample = {
+    cefrLevel: 'A1',
+    assessmentSeed: 'new-ranks-seed',
+    orderedRankIds: newRankIds,
+    rankVersions: { 'rank-new-a': 5, 'rank-new-b': 6 },
+    publishedRankSetHash: 'new-ranks-hash',
+    rankTitles: { 'rank-new-a': 'New A', 'rank-new-b': 'New B' },
+    rankFirstGateIds: { 'rank-new-a': 'gate-0', 'rank-new-b': 'gate-1' },
+    rankCoverage: {},
+    selectedWords,
+    selectedContentWordIds: selectedWords.map((item) => item.contentWordId),
+    orderedQuestionIds: selectedWords.map((item) => item.questionId),
+    adaptiveReserveIdsByRank: {},
+  };
+  const session = placement.createSessionSeed({
+    assessmentId: 'assessment-new-ranks',
+    worldId: 'world-a',
+    sample,
+    assessmentMode: 'new-ranks',
+    previousHistory: {
+      assessmentId: 'assessment-legacy',
+      assessedRankIds: ['rank-old-a', 'rank-old-b'],
+    },
+  });
+
+  assert.deepEqual({ ...session.rankVersions }, sample.rankVersions);
+  assert.deepEqual(Array.from(session.testedRankIds), newRankIds);
+  assert.deepEqual(
+    new Set(session.assessedRankIds),
+    new Set([...newRankIds, 'rank-old-a', 'rank-old-b'])
+  );
+});
+
 test('new-ranks mode fetches and samples only the unassessed rank IDs', () => {
   const startBlock = cloudSource.slice(
     cloudSource.indexOf('async function startLevelPlacement'),
