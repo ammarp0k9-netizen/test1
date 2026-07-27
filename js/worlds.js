@@ -1675,9 +1675,11 @@ function publishedJourneyErrorText(error) {
   if ([
     'journey-reconciliation',
     'progression-unlock',
-    'apply-level-placement-result',
   ].includes(operation)) {
     return 'تعذر تحديث تقدم العالم. لم يتم تغيير تقدمك.';
+  }
+  if (operation === 'apply-level-placement-result') {
+    return 'تم حفظ إجاباتك، لكن تعذر تثبيت نتيجة الاختبار. أعد المحاولة.';
   }
   if (
     (code === 'permission-denied' || code === 'firestore/permission-denied') &&
@@ -2050,7 +2052,8 @@ async function continuePublishedLevelPlacement(bundle) {
     publishedContentState.levelPlacementBundle = next;
     publishedContentState.journey = next.journey;
     publishedContentState.activeJourney = next.journey;
-    renderPublishedLevelPlacementAssessment(next);
+    if (next.session.status === 'active') renderPublishedLevelPlacementAssessment(next);
+    else renderPublishedLevelPlacementResult(next);
     return next;
   } catch (error) {
     showToast(publishedJourneyErrorText(error), 'danger', 5200);
@@ -2389,7 +2392,7 @@ function renderPublishedLevelPlacementResult(bundle) {
     publishedButton(
       'التوقف هنا',
       'published-action-btn published-placement-secondary',
-      () => pausePublishedLevelPlacement(bundle),
+      () => stopPublishedLevelPlacement(bundle),
       'fa-regular fa-clock'
     )
   );
@@ -2472,6 +2475,22 @@ async function pausePublishedLevelPlacement(bundle) {
   publishedContentState.activeJourney = journey;
   setPublishedPlacementMode(false);
   return journey;
+}
+
+async function stopPublishedLevelPlacement(bundle) {
+  if (publishedContentState.levelPlacementPending) return null;
+  publishedContentState.levelPlacementPending = true;
+  try {
+    const journey = await pausePublishedLevelPlacement(bundle);
+    window.openPublishedWorld(bundle.journey.worldId);
+    return journey;
+  } catch (error) {
+    showToast(publishedJourneyErrorText(error), 'danger', 5200);
+    renderPublishedLevelPlacementResult(bundle);
+    return null;
+  } finally {
+    publishedContentState.levelPlacementPending = false;
+  }
 }
 
 function renderPublishedLevelPlacementExit(bundle) {

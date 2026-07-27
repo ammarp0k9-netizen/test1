@@ -341,6 +341,53 @@ test('word-save retry keeps the original choice and retries pending IDs only', (
   );
 });
 
+test('completed paused results resume into result application and keep save choices usable', () => {
+  const continueBlock = cloudSource.slice(
+    cloudSource.indexOf('async function continueLevelPlacement'),
+    cloudSource.indexOf('async function levelPlacementUnlockedIds')
+  );
+  const finishBlock = cloudSource.slice(
+    cloudSource.indexOf('async function finishLevelPlacement'),
+    cloudSource.indexOf('async function abandonLevelPlacement')
+  );
+  const uiContinueBlock = worldsSource.slice(
+    worldsSource.indexOf('async function continuePublishedLevelPlacement'),
+    worldsSource.indexOf('function renderPublishedLevelPlacementResumePrompt')
+  );
+  assert.match(continueBlock, /pausedSession\?\.status === 'paused' && answersComplete/);
+  assert.match(continueBlock, /return applyLevelPlacementResult\(world, assessment\)/);
+  assert.match(uiContinueBlock, /next\.session\.status === 'active'/);
+  assert.match(uiContinueBlock, /renderPublishedLevelPlacementResult\(next\)/);
+  assert.match(finishBlock, /session\.status === 'paused'/);
+  assert.match(finishBlock, /journey\.levelPlacementStatus === 'paused'/);
+  assert.match(finishBlock, /return;/);
+  assert.match(cloudSource, /\['awaiting-decision', 'paused', 'completed'\]\.includes\(session\.status\)/);
+});
+
+test('result application stores a small receipt before reconciling gates independently', () => {
+  const applyBlock = cloudSource.slice(
+    cloudSource.indexOf('async function applyLevelPlacementResult'),
+    cloudSource.indexOf('async function answerLevelPlacementQuestion')
+  );
+  assert.match(cloudSource, /async function reconcileLevelPlacementClearedGates/);
+  assert.match(cloudSource, /Promise\.all\(gateTargets\.map/);
+  assert.match(applyBlock, /resultClearedGateIds/);
+  assert.match(applyBlock, /reconcileLevelPlacementClearedGates/);
+  assert.match(applyBlock, /ensureLevelPlacementTargetGate/);
+  assert.doesNotMatch(applyBlock, /passedProgressRefs|targetSnapshotIndex/);
+});
+
+test('the result stop action is single-flight and navigates after the pause succeeds', () => {
+  const stopBlock = worldsSource.slice(
+    worldsSource.indexOf('async function stopPublishedLevelPlacement'),
+    worldsSource.indexOf('function renderPublishedLevelPlacementExit')
+  );
+  assert.match(stopBlock, /if \(publishedContentState\.levelPlacementPending\) return null/);
+  assert.match(stopBlock, /await pausePublishedLevelPlacement\(bundle\)/);
+  assert.match(stopBlock, /window\.openPublishedWorld\(bundle\.journey\.worldId\)/);
+  assert.match(stopBlock, /finally/);
+});
+
 test('save feedback covers every aggregate result and custom-world creation only passes context', () => {
   assert.match(worldsSource, /summary\?\.created/);
   assert.match(worldsSource, /summary\?\.sourceLinked/);

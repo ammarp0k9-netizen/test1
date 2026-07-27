@@ -1980,16 +1980,22 @@ service cloud.firestore {
     }
 
     function validLevelPlacementResultApply(before, after, uid, worldId, assessmentId) {
-      return before.status == 'awaiting-decision' &&
+      let resumesCompletedResult = before.status == 'paused' &&
+        before.currentQuestionIndex == before.orderedQuestionIds.size() &&
+        before.answers.size() == before.orderedQuestionIds.size() &&
+        before.answersCompletedAt is timestamp;
+      return (before.status == 'awaiting-decision' || resumesCompletedResult) &&
         after.status == 'awaiting-decision' &&
         before.get('resultApplied', false) == false &&
         after.diff(before).affectedKeys().hasOnly([
+          'status', 'resumedAt',
           'resultApplied', 'nextCefrLevel', 'resultStartRankId',
           'resultStartGateId', 'resultUnlockedRankIds',
           'resultUnlockedGateIds', 'resultClearedGateIds',
           'completedCurrentContent', 'assessedAt', 'updatedAt'
         ]) &&
         after.resultApplied == true &&
+        (!resumesCompletedResult || after.resumedAt == request.time) &&
         (after.nextCefrLevel == '' || validClassifiedCefrLevel(after.nextCefrLevel)) &&
         after.resultUnlockedRankIds is list &&
         after.resultUnlockedRankIds.toSet().size() == after.resultUnlockedRankIds.size() &&
@@ -3466,22 +3472,26 @@ service cloud.firestore {
                 gateId
               );
             allow create: if isOwner(uid) &&
+              request.resource.data.status == 'cleared' &&
+              request.resource.data.get('clearedBy', '') == 'level-placement' &&
+              validLevelPlacementClearedProgress(
+                request.resource.data,
+                uid,
+                worldId,
+                rankId,
+                gateId
+              );
+            allow create: if isOwner(uid) &&
               request.resource.data.status != 'available' &&
+              !(
+                request.resource.data.status == 'cleared' &&
+                request.resource.data.get('clearedBy', '') == 'level-placement'
+              ) &&
               journeyAllowsGate(uid, worldId, rankId, gateId) &&
               (
                 (
                   request.resource.data.status != 'cleared' &&
                   validGateProgress(request.resource.data, worldId, rankId, gateId)
-                ) ||
-                (
-                  request.resource.data.status == 'cleared' &&
-                  validLevelPlacementClearedProgress(
-                    request.resource.data,
-                    uid,
-                    worldId,
-                    rankId,
-                    gateId
-                  )
                 )
               );
             allow update: if isOwner(uid) &&

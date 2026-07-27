@@ -330,6 +330,9 @@ test('applying new-rank results does not load words, start a quiz, or award XP',
     cloudSource.indexOf('async function answerLevelPlacementQuestion')
   );
   assert.match(applyBlock, /resolveLevelPlacementResultDestination/);
-  assert.match(applyBlock, /clearedBy: 'level-placement'/);
+  assert.match(cloudSource, /clearedBy: 'level-placement'/);
+  assert.match(cloudSource, /async function reconcileLevelPlacementClearedGates/);
+  assert.match(applyBlock, /resultClearedGateIds/);
+  assert.doesNotMatch(applyBlock, /passedProgressRefs|targetSnapshotIndex/);
   assert.doesNotMatch(applyBlock, /loadGate|linkPublishedWord|startQuiz|awardXP|markDailyQuest/);
 });
