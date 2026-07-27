@@ -49,7 +49,7 @@ test('rank coverage snapshot records stable IDs, versions, and a deterministic h
   assert.equal(first.publishedRankSetHash, second.publishedRankSetHash);
 });
 
-test('a new rank and a changed assessed rank version are both unassessed', () => {
+test('only genuinely new rank IDs are unassessed', () => {
   const history = placement.rankSetSnapshot([
     rank('rank-a', 1, 1),
     rank('rank-b', 2, 1),
@@ -59,7 +59,7 @@ test('a new rank and a changed assessed rank version are both unassessed', () =>
     rank('rank-b', 2, 1),
     rank('rank-c', 3, 1),
   ], history);
-  assert.deepEqual(unassessed.map((item) => item.rankId), ['rank-a', 'rank-c']);
+  assert.deepEqual(unassessed.map((item) => item.rankId), ['rank-c']);
 });
 
 test('legacy assessed rank IDs remain covered without inventing old version history', () => {
@@ -93,15 +93,120 @@ test('new-ranks mode fetches and samples only the unassessed rank IDs', () => {
   assert.match(startBlock, /previousHistory: overview\.history/);
 });
 
-test('new published ranks become naturally available and clear completed-current-content', () => {
+test('opening a published page derives new ranks without writing progression', () => {
   const reconcileBlock = cloudSource.slice(
     cloudSource.indexOf('async function reconcileLevelPlacementJourney'),
     cloudSource.indexOf('async function resolveActiveJourneyDestination')
   );
-  assert.match(reconcileBlock, /unlockedRankIds:[\s\S]*rankId/);
-  assert.match(reconcileBlock, /unlockedGateIds:[\s\S]*gateId/);
-  assert.match(reconcileBlock, /contentJourneyStatus: 'in-progress'/);
-  assert.match(reconcileBlock, /status: 'available'/);
+  assert.match(reconcileBlock, /buildLevelPlacementOverviews/);
+  assert.doesNotMatch(reconcileBlock, /runTransaction|transaction\.(?:set|update)|serverTimestamp/);
+  assert.doesNotMatch(reconcileBlock, /status: 'available'|unlockedRankIds:|unlockedGateIds:/);
+});
+
+test('legacy A1 coverage keeps four old ranks assessed and marks only two real additions', () => {
+  const oldRankIds = [
+    'R4NDhUw0L0gXgSwkbE1O',
+    'zH10H8d3GZcdMyy9HRx2',
+    'VsRcZlJP3hV2hNL6Thl1',
+    'VVSBrZ9o2F4eQUfaCqnf',
+  ];
+  const newRankIds = ['gw7HL4JwTwKDUpCs2JcF', 'MSvvFKsy1uZYpQ1g2mV8'];
+  const ranks = [...oldRankIds, ...newRankIds].map((rankId, index) => rank(rankId, index));
+  const gateIds = [
+    'fP49BRVyujuU4UqzUoey',
+    'gate-old-2',
+    'gate-old-3',
+    'gate-old-4',
+    'RaXFlTd649dE8rd1z7NJ',
+    'gate-new-2',
+  ];
+  const gatesByRank = new Map(ranks.map((item, index) => [
+    item.rankId,
+    [{ gateId: gateIds[index] }],
+  ]));
+  const progressByRank = new Map([
+    [oldRankIds[0], new Map([
+      [gateIds[0], { status: 'learning', placementScore: 0.4 }],
+    ])],
+  ]);
+  const journey = {
+    passedCefrLevels: ['A1'],
+    activeRankId: oldRankIds[0],
+    activeGateId: gateIds[0],
+    unlockedRankIds: oldRankIds.slice(),
+    unlockedGateIds: gateIds.slice(0, oldRankIds.length),
+  };
+  const sessions = [{
+    assessmentId: 'legacy-a1',
+    cefrLevel: 'A1',
+    status: 'completed',
+    resultApplied: true,
+    orderedRankIds: oldRankIds.slice(),
+    passedRankIds: oldRankIds.slice(),
+    resultUnlockedRankIds: oldRankIds.slice(),
+  }];
+  const coverage = placement.deriveLegacyRankCoverage({
+    cefrLevel: 'A1', journey, sessions, ranks, gatesByRank, progressByRank,
+  });
+  assert.deepEqual(Array.from(coverage.assessedRankIds), oldRankIds);
+  assert.deepEqual(Array.from(coverage.testedRankIds), oldRankIds);
+  assert.equal(journey.activeRankId, 'R4NDhUw0L0gXgSwkbE1O');
+  assert.equal(journey.activeGateId, 'fP49BRVyujuU4UqzUoey');
+  assert.deepEqual(
+    placement.getUnassessedPublishedRanks('A1', ranks, coverage).map((item) => item.rankId),
+    newRankIds
+  );
+
+  const repeated = placement.deriveLegacyRankCoverage({
+    cefrLevel: 'A1',
+    journey: { ...journey, assessedRankIds: coverage.assessedRankIds },
+    sessions,
+    ranks,
+    gatesByRank,
+    progressByRank,
+  });
+  assert.deepEqual(Array.from(repeated.assessedRankIds), oldRankIds);
+  assert.deepEqual(Array.from(repeated.testedRankIds), oldRankIds);
+});
+
+test('Published route preserves last-known-good journey and retries reconciliation only', () => {
+  const clearBlock = worldsSource.slice(
+    worldsSource.indexOf('function clearPublishedJourneyViewState'),
+    worldsSource.indexOf('async function readPublishedJourneyContext')
+  );
+  const readBlock = worldsSource.slice(
+    worldsSource.indexOf('async function readPublishedJourneyContext'),
+    worldsSource.indexOf('async function readPublishedLevelPlacementOverviews')
+  );
+  const retryBlock = worldsSource.slice(
+    worldsSource.indexOf('async function retryPublishedJourneyReconciliation'),
+    worldsSource.indexOf('async function readPublishedLevelPlacementOverviews')
+  );
+  const routeBlock = worldsSource.slice(
+    worldsSource.indexOf('async function loadPublishedRouteData'),
+    worldsSource.indexOf('window.loadPublishedContentRoute')
+  );
+  assert.match(clearBlock, /if \(!options\?\.preserveJourney\)/);
+  assert.match(readBlock, /fallbackJourney/);
+  assert.match(readBlock, /journey: fallbackJourney/);
+  assert.match(routeBlock, /clearPublishedJourneyViewState\(\{ preserveJourney \}\)/);
+  assert.match(retryBlock, /reconcileLevelPlacementJourney/);
+  assert.doesNotMatch(retryBlock, /loadPublishedRouteData|openPublishedWorld/);
+  assert.match(worldsSource, /تعذر تحديث تقدم العالم\. لم يتم تغيير تقدمك\./);
+});
+
+test('failed explicit progression is classified without mutating cached Journey first', () => {
+  const applyBlock = cloudSource.slice(
+    cloudSource.indexOf('async function applyLevelPlacementResult'),
+    cloudSource.indexOf('async function answerLevelPlacementQuestion')
+  );
+  const transactionIndex = applyBlock.indexOf('await runTransaction');
+  const resetIndex = applyBlock.indexOf('resetCache');
+  assert.ok(transactionIndex >= 0 && resetIndex > transactionIndex);
+  assert.doesNotMatch(applyBlock.slice(0, transactionIndex), /cache\.journeys\.set|cache\.active\s*=/);
+  assert.match(applyBlock, /journeyOperationError\(error, 'apply-level-placement-result'/);
+  assert.match(applyBlock, /logJourneyProgressionCommit/);
+  assert.match(cloudSource, /__LOOTLINGUA_JOURNEY_DIAGNOSTICS__/);
 });
 
 test('Published UI labels and counts only the new ranks', () => {

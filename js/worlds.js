@@ -1455,10 +1455,12 @@ function setPublishedPlacementMode(active) {
 function clearPublishedJourneyViewState(options) {
   clearTimeout(publishedContentState.readinessTimer);
   publishedContentState.readinessTimer = null;
-  publishedContentState.journey = null;
-  publishedContentState.activeJourney = null;
+  if (!options?.preserveJourney) {
+    publishedContentState.journey = null;
+    publishedContentState.activeJourney = null;
+    publishedContentState.levelPlacementOverviews = new Map();
+  }
   publishedContentState.activeJourneyDestination = null;
-  publishedContentState.levelPlacementOverviews = new Map();
   publishedContentState.gateProgress = null;
   publishedContentState.gateProgressById = new Map();
   publishedContentState.newGateWords = [];
@@ -1482,6 +1484,9 @@ async function readPublishedJourneyContext(worldId, options) {
   if (!window.auth?.currentUser) {
     return { journey: null, activeJourney: null };
   }
+  const fallbackJourney = String(publishedContentState.journey?.worldId || '') ===
+    String(worldId || '') ? publishedContentState.journey : null;
+  const fallbackActiveJourney = publishedContentState.activeJourney;
   try {
     const api = getJourneyCloudApi();
     const reconciliation = options?.reconcile
@@ -1491,10 +1496,50 @@ async function readPublishedJourneyContext(worldId, options) {
       reconciliation ? Promise.resolve(reconciliation.journey) : api.getJourney(worldId, options),
       api.getActiveJourney(options),
     ]);
-    return { journey, activeJourney };
+    return {
+      journey,
+      activeJourney,
+      levelPlacementOverviews: reconciliation?.levelPlacementOverviews || null,
+      preserved: false,
+    };
   } catch (error) {
     logPublishedContentError('journey-read', error);
-    return { journey: null, activeJourney: null };
+    const retry = () => retryPublishedJourneyReconciliation(worldId);
+    setPublishedJourneyError(error, 'journey-reconciliation', retry, worldId);
+    return {
+      journey: fallbackJourney,
+      activeJourney: fallbackActiveJourney,
+      levelPlacementOverviews: publishedContentState.levelPlacementOverviews,
+      preserved: true,
+      error,
+    };
+  }
+}
+
+async function retryPublishedJourneyReconciliation(worldId) {
+  try {
+    const api = getJourneyCloudApi();
+    const [reconciliation, activeJourney] = await Promise.all([
+      api.reconcileLevelPlacementJourney(worldId, { force: true }),
+      api.getActiveJourney({ force: true }),
+    ]);
+    publishedContentState.journey = reconciliation.journey;
+    publishedContentState.activeJourney = activeJourney;
+    publishedContentState.levelPlacementOverviews =
+      reconciliation.levelPlacementOverviews || new Map();
+    clearPublishedJourneyError();
+    rerenderPublishedRoute();
+    return reconciliation;
+  } catch (error) {
+    const journeyError = setPublishedJourneyError(
+      error,
+      'journey-reconciliation',
+      () => retryPublishedJourneyReconciliation(worldId),
+      worldId
+    );
+    rerenderPublishedRoute();
+    showToast(journeyError.text, 'danger', 4800);
+    return null;
   }
 }
 
@@ -1624,6 +1669,13 @@ function requestJourneySignIn() {
 function publishedJourneyErrorText(error) {
   const code = String(error?.code || '');
   const operation = String(error?.operation || '');
+  if ([
+    'journey-reconciliation',
+    'progression-unlock',
+    'apply-level-placement-result',
+  ].includes(operation)) {
+    return 'تعذر تحديث تقدم العالم. لم يتم تغيير تقدمك.';
+  }
   if (
     (code === 'permission-denied' || code === 'firestore/permission-denied') &&
     (
@@ -1653,25 +1705,33 @@ function publishedJourneyErrorText(error) {
     'level-placement/no-words': 'لا توجد كلمات كافية لبناء اختبار هذا المستوى.',
     'level-placement/session-active': 'لديك اختبار مستوى نشط بالفعل.',
     'journey/no-published-words': 'لا توجد كلمات منشورة في هذه البوابة لتحميلها.',
-    'permission-denied': 'تعذر حفظ كلمات الرحلة في حسابك. أعد المحاولة.',
-    'firestore/permission-denied': 'تعذر حفظ كلمات الرحلة في حسابك. أعد المحاولة.',
   };
+  if (
+    (code === 'permission-denied' || code === 'firestore/permission-denied') &&
+    ['load-gate-words', 'sync-gate-words', 'link-published-word'].includes(operation)
+  ) {
+    return 'تعذر حفظ كلمات الرحلة في حسابك. أعد المحاولة.';
+  }
   return messages[error?.code] || 'تعذر إكمال العملية الآن. أعد المحاولة.';
 }
 
 function setPublishedJourneyError(error, operation, retry, worldId) {
+  const resolvedOperation = String(error?.operation || operation || 'journey');
   const journeyError = {
     code: String(error?.code || 'journey/operation-failed'),
     message: String(error?.message || 'Journey operation failed.'),
     stack: String(error?.stack || ''),
-    operation: String(error?.operation || operation || 'journey'),
+    operation: resolvedOperation,
     worldId: String(
       worldId ||
       publishedContentState.world?.worldId ||
       publishedContentState.journey?.worldId ||
       ''
     ),
-    text: publishedJourneyErrorText(error),
+    text: publishedJourneyErrorText({
+      code: error?.code,
+      operation: resolvedOperation,
+    }),
     retry: typeof retry === 'function' ? retry : null,
   };
   publishedContentState.journeyError = journeyError;
@@ -4779,6 +4839,8 @@ async function loadPublishedRouteData(route, options) {
   const params = route?.params || {};
   const journeyOptions = { ...(options || {}), reconcile: true };
   const generation = ++publishedContentState.generation;
+  const preserveJourney = String(publishedContentState.journey?.worldId || '') ===
+    String(params.worldId || '');
   publishedContentState.route = { key, params: { ...params } };
   publishedContentState.wordPager?.invalidate();
   publishedContentState.wordPager = null;
@@ -4786,7 +4848,7 @@ async function loadPublishedRouteData(route, options) {
   publishedContentState.wordPageRequest = null;
   publishedContentState.ranks = [];
   publishedContentState.gates = [];
-  clearPublishedJourneyViewState();
+  clearPublishedJourneyViewState({ preserveJourney });
   publishedContentState.loading = true;
   const level = key === 'world' ? 'ranks' : key === 'rank' ? 'gates' : 'words';
   renderPublishedLoading(
@@ -4812,11 +4874,8 @@ async function loadPublishedRouteData(route, options) {
         readPublishedJourneyContext(params.worldId, journeyOptions),
       ]);
       if (generation !== publishedContentState.generation) return;
-      const levelPlacementOverviews = await readPublishedLevelPlacementOverviews(
-        params.worldId,
-        ranks,
-        options
-      );
+      const levelPlacementOverviews = journeyContext.levelPlacementOverviews ||
+        await readPublishedLevelPlacementOverviews(params.worldId, ranks, options);
       if (generation !== publishedContentState.generation) return;
       publishedContentState.ranks = ranks;
       publishedContentState.levelPlacementOverviews = levelPlacementOverviews;

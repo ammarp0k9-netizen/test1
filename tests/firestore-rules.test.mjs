@@ -644,6 +644,124 @@ try {
     assert.deepEqual(saved.data().unlockedGateIds, ['journey-gate']);
   });
 
+  await test('the exact legacy auto-reconcile batch reproduces the Rules expression-budget rejection', async () => {
+    const uid = '2YWSZ8MdhPZBsqRqTozZvtTbzt83';
+    const worldId = 'GyQfaD75uZFFpgB9Me9V';
+    const activeRankId = 'R4NDhUw0L0gXgSwkbE1O';
+    const activeGateId = 'fP49BRVyujuU4UqzUoey';
+    const rankId = 'gw7HL4JwTwKDUpCs2JcF';
+    const gateId = 'RaXFlTd649dE8rd1z7NJ';
+    const oldRankIds = [
+      activeRankId,
+      'zH10H8d3GZcdMyy9HRx2',
+      'VsRcZlJP3hV2hNL6Thl1',
+      'VVSBrZ9o2F4eQUfaCqnf'
+    ];
+    const oldGateIds = [
+      'PfMYVlBAQbLLBfwNLjxK', 'oo6iPLccdQVpCXVaDKTn',
+      '9o3feiTttxfgwV3GoLgJ', activeGateId,
+      'UiHVqnI0ZxLIGpci7HHQ', 'Oy4uz4EuFZWzGoKfzEGs',
+      'kfolf55CkWaygyhF9hFr', '5Cj1ym8uBqKxBpejBEZD',
+      '2MMu6H8lyTQFKpNFqOTE', '7Fus2JsckzAaXCaYoKCt',
+      'n50we3pVJ7f4zfOnhUhr', '6FYCntPzwjY00TlP8ZIU',
+      'AuMcDxTIJoVvTtrL3rnd', 'qH3NaXWyrUV6PNtpncSH',
+      'UVnHgqemvxfBN2CQXqBd', 'Dkr1iUxgUGMCMvs6niQy',
+      'qrmQ8QMpCs9DWtgZwrXu', 'UY2dbtZZfEO0vx1zROwY',
+      'mLh27X6CxxqAAnfjjOaM'
+    ];
+    const parentPath = `users/${uid}/contentProgress/${worldId}`;
+    const pointerPath = `users/${uid}/meta/active_content_journey`;
+    const progressPath = `${parentPath}/ranks/${rankId}/gates/${gateId}`;
+    await environment.withSecurityRulesDisabled(async (context) => {
+      const db = context.firestore();
+      await Promise.all([
+        setDoc(doc(db, `content_worlds/${worldId}`), world(worldId, 'published')),
+        setDoc(doc(db, `content_worlds/${worldId}/ranks/${activeRankId}`), {
+          ...rank(worldId, activeRankId, 'published'),
+          cefrLevel: 'A1'
+        }),
+        setDoc(doc(db, `content_worlds/${worldId}/ranks/${activeRankId}/gates/${activeGateId}`),
+          gate(worldId, activeRankId, activeGateId, 'published')),
+        setDoc(doc(db, `content_worlds/${worldId}/ranks/${rankId}`), {
+          ...rank(worldId, rankId, 'published'),
+          cefrLevel: 'A1',
+          unlockConfig: { ...unlockConfig, initialStatus: 'locked' }
+        }),
+        setDoc(doc(db, `content_worlds/${worldId}/ranks/${rankId}/gates/${gateId}`),
+          gate(worldId, rankId, gateId, 'published')),
+        setDoc(doc(db, parentPath), {
+          worldId,
+          activeRankId,
+          activeGateId,
+          status: 'active',
+          startedAt: timestamp,
+          updatedAt: timestamp,
+          journeyVersion: 1,
+          placementStatus: 'completed',
+          activePlacementAssessmentId: '',
+          unlockedRankIds: oldRankIds,
+          unlockedGateIds: oldGateIds,
+          activeLevelPlacementAssessmentId: '',
+          activeLevelPlacementCefrLevel: '',
+          levelPlacementStatus: 'abandoned',
+          levelPlacementVersion: 1,
+          passedCefrLevels: ['A1'],
+          partialCefrLevels: []
+        }),
+        setDoc(doc(db, pointerPath), {
+          worldId,
+          journeyVersion: 1,
+          updatedAt: timestamp
+        })
+      ]);
+    });
+
+    const exactUser = environment.authenticatedContext(uid).firestore();
+    const batch = writeBatch(exactUser);
+    batch.update(doc(exactUser, parentPath), {
+      unlockedRankIds: [...oldRankIds, rankId],
+      unlockedGateIds: [...oldGateIds, gateId],
+      contentJourneyStatus: 'in-progress',
+      updatedAt: serverTimestamp()
+    });
+    batch.set(
+      doc(exactUser, progressPath),
+      availableGateProgress(worldId, rankId, gateId)
+    );
+    await assertFails(batch.commit());
+    await assertFails(updateDoc(doc(exactUser, parentPath), {
+      unlockedRankIds: [...oldRankIds, rankId],
+      unlockedGateIds: [...oldGateIds, gateId],
+      contentJourneyStatus: 'in-progress',
+      updatedAt: serverTimestamp()
+    }));
+    console.log(
+      '# exact failing predicate: contentProgress update -> validJourneyUpdate -> ' +
+      'validJourneyNewRankReconcile exceeds the 1000-expression Rules budget'
+    );
+    await environment.withSecurityRulesDisabled(async (context) => {
+      await setDoc(doc(context.firestore(), parentPath), {
+        unlockedRankIds: [...oldRankIds, rankId],
+        unlockedGateIds: [...oldGateIds, gateId],
+        contentJourneyStatus: 'in-progress',
+        updatedAt: timestamp
+      }, { merge: true });
+    });
+    await assertSucceeds(setDoc(
+      doc(exactUser, progressPath),
+      availableGateProgress(worldId, rankId, gateId)
+    ));
+    const [parent, progress] = await Promise.all([
+      getDoc(doc(exactUser, parentPath)),
+      getDoc(doc(exactUser, progressPath))
+    ]);
+    assert.equal(parent.data().activeRankId, activeRankId);
+    assert.equal(parent.data().activeGateId, activeGateId);
+    assert.equal(parent.data().unlockedRankIds.includes(rankId), true);
+    assert.equal(parent.data().unlockedGateIds.includes(gateId), true);
+    assert.equal(progress.data().status, 'available');
+  });
+
   await test('a locked initial rank cannot be used to create a journey', async () => {
     const batch = writeBatch(userA);
     batch.update(doc(userA, 'users/user-a/contentProgress/journey-world'), {
@@ -2821,7 +2939,7 @@ try {
     ));
   });
 
-  assert.equal(passed, 59);
+  assert.equal(passed, 60);
   console.log(`# ${passed} Firestore Rules emulator tests passed`);
 } finally {
   await environment.cleanup();

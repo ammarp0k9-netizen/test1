@@ -104,18 +104,104 @@
 
   function getUnassessedPublishedRanks(cefrLevel, ranks, placementHistory) {
     const level = assertClassifiedLevel(cefrLevel);
-    const historyIds = new Set((placementHistory?.assessedRankIds ||
-      placementHistory?.orderedRankIds || []).map(String));
-    const historyVersions = placementHistory?.assessedRankVersions || {};
+    const historyIds = new Set([
+      ...(placementHistory?.assessedRankIds || []),
+      ...(placementHistory?.testedRankIds || []),
+      ...(placementHistory?.orderedRankIds || []),
+    ].map(String));
     return (Array.isArray(ranks) ? ranks : [])
       .filter((rank) => rank?.status === 'published' && normalizeLevel(rank.cefrLevel) === level)
-      .filter((rank) => {
-        const rankId = String(rank.rankId || '');
-        if (!historyIds.has(rankId)) return true;
-        if (!Object.prototype.hasOwnProperty.call(historyVersions, rankId)) return false;
-        return rankVersion(rank) !== Number(historyVersions[rankId]);
-      })
+      .filter((rank) => !historyIds.has(String(rank.rankId || '')))
       .sort((left, right) => schemaApi().comparePublishedRanks(left, right));
+  }
+
+  function deriveLegacyRankCoverage(input = {}) {
+    const ranks = (Array.isArray(input.ranks) ? input.ranks : [])
+      .filter((rank) => rank?.status === 'published' && String(rank.rankId || '').trim())
+      .slice()
+      .sort((left, right) => schemaApi().comparePublishedRanks(left, right));
+    const rankIds = new Set(ranks.map((rank) => String(rank.rankId)));
+    const assessed = new Set();
+    const tested = new Set();
+    const versions = {};
+    const add = (target, values) => {
+      (Array.isArray(values) ? values : []).forEach((value) => {
+        const rankId = String(value || '');
+        if (rankId && rankIds.has(rankId)) target.add(rankId);
+      });
+    };
+    const addBoth = (values) => {
+      add(assessed, values);
+      add(tested, values);
+    };
+    const journey = input.journey || {};
+    const sessions = (Array.isArray(input.sessions) ? input.sessions : []).filter((session) => {
+      const completed = session?.resultApplied === true || session?.status === 'completed';
+      if (!completed) return false;
+      const level = normalizeLevel(input.cefrLevel);
+      return !level || level === 'unclassified' || normalizeLevel(session?.cefrLevel) === level;
+    });
+
+    addBoth(journey.assessedRankIds);
+    addBoth(journey.testedRankIds);
+    addBoth(journey.levelPlacementPassedRankIds);
+    addBoth(journey.unlockedRankIds);
+    addBoth([journey.activeRankId]);
+
+    sessions.forEach((session) => {
+      addBoth(session.assessedRankIds);
+      addBoth(session.testedRankIds);
+      addBoth(session.orderedRankIds);
+      addBoth(session.passedRankIds);
+      addBoth(session.resultUnlockedRankIds);
+      Object.entries(session.assessedRankVersions || {}).forEach(([rankId, version]) => {
+        if (rankIds.has(String(rankId))) versions[String(rankId)] = Number(version) || 1;
+      });
+    });
+
+    const gatesByRank = input.gatesByRank instanceof Map ? input.gatesByRank : new Map();
+    const gateOwners = new Map();
+    gatesByRank.forEach((gates, rankId) => {
+      (Array.isArray(gates) ? gates : []).forEach((gate) => {
+        const gateId = String(gate?.gateId || '');
+        if (gateId) gateOwners.set(gateId, String(rankId));
+      });
+    });
+    [...(journey.unlockedGateIds || []), journey.activeGateId].forEach((gateId) => {
+      const rankId = gateOwners.get(String(gateId || ''));
+      if (rankId) addBoth([rankId]);
+    });
+
+    const progressByRank = input.progressByRank instanceof Map
+      ? input.progressByRank
+      : new Map();
+    progressByRank.forEach((progress, rankId) => {
+      const values = progress instanceof Map
+        ? [...progress.values()]
+        : (Array.isArray(progress) ? progress : []);
+      if (values.length) addBoth([rankId]);
+    });
+
+    const stableIds = (values) => {
+      const ordered = ranks
+        .map((rank) => String(rank.rankId))
+        .filter((rankId) => values.has(rankId));
+      return [...ordered, ...[...values].filter((rankId) => !ordered.includes(rankId)).sort()];
+    };
+    const assessedRankIds = stableIds(assessed);
+    const testedRankIds = stableIds(tested);
+    const publishedRankSetHash = String(
+      sessions.find((session) => session?.publishedRankSetHash)?.publishedRankSetHash ||
+      journey.publishedRankSetHash ||
+      hashText(assessedRankIds.map((rankId) => `${rankId}:${versions[rankId] || 1}`).join('|'))
+        .toString(36)
+    );
+    return {
+      assessedRankIds,
+      testedRankIds,
+      assessedRankVersions: versions,
+      publishedRankSetHash,
+    };
   }
 
   function mergeRankCoverage(previousHistory, testedRanks, allPublishedRanks) {
@@ -703,6 +789,7 @@
     rankVersion,
     rankSetSnapshot,
     getUnassessedPublishedRanks,
+    deriveLegacyRankCoverage,
     mergeRankCoverage,
     createAssessmentSeed,
     assessmentId,

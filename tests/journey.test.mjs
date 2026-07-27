@@ -161,6 +161,15 @@ test('saved unlock IDs permit access and saved progress wins over presentation d
     ),
     'learning'
   );
+  assert.equal(
+    journey.getJourneyGateState(
+      savedJourney,
+      { status: 'cleared' },
+      savedGate,
+      { rank: openRank }
+    ),
+    'cleared'
+  );
 });
 
 test('journey seed stores IDs and placeholders without content or reward data', () => {
