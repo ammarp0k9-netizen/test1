@@ -32,6 +32,7 @@ const cache = {
   levelPlacementSessions: new Map(),
   gateClearAttempts: new Map(),
 };
+const levelPlacementStartRequests = new Map();
 
 function core() {
   const api = window.LootLinguaJourney;
@@ -2755,11 +2756,18 @@ async function resolveNextPublishedLevelTarget(worldId, cefrLevel) {
   return null;
 }
 
-async function startLevelPlacement(worldId, cefrLevel, options) {
-  const user = requireUser();
-  const world = core().cleanId(worldId, 'World');
-  const level = levelPlacementCore().assertClassifiedLevel(cefrLevel);
-  let journey = await startJourney(world);
+async function startLevelPlacementOnce(user, world, level, options) {
+  let [journey, activeJourney] = await Promise.all([
+    getJourney(world, { force: true }),
+    getActiveJourney({ force: true }),
+  ]);
+  if (
+    !journey ||
+    journey.status !== 'active' ||
+    String(activeJourney?.worldId || '') !== world
+  ) {
+    journey = await startJourney(world);
+  }
   if (journey.placementStatus === 'active') {
     throw journeyCloudError(
       'level-placement/legacy-active',
@@ -2846,12 +2854,12 @@ async function startLevelPlacement(worldId, cefrLevel, options) {
       if (sessionSnapshot.exists()) {
         throw journeyCloudError('level-placement/session-exists', 'Level Placement session already exists.');
       }
-      transaction.set(sessionRef, {
+      const sessionCreate = {
         ...seedData,
         startedAt: serverTimestamp(),
         updatedAt: serverTimestamp(),
-      });
-      transaction.update(targetJourneyRef, {
+      };
+      const parentUpdate = {
         placementStatus: current.placementStatus === 'not-started'
           ? 'declined'
           : current.placementStatus,
@@ -2861,21 +2869,63 @@ async function startLevelPlacement(worldId, cefrLevel, options) {
         levelPlacementVersion: levelPlacementCore().LEVEL_PLACEMENT_VERSION,
         passedCefrLevels: Array.from(new Set(current.passedCefrLevels || [])),
         updatedAt: serverTimestamp(),
+      };
+      logJourneyProgressionCommit({
+        authUid: user.uid,
+        operations: [
+          { type: 'create', path: sessionRef.path, fields: sessionCreate },
+          { type: 'update', path: targetJourneyRef.path, fields: parentUpdate },
+        ],
+        activePointer: {
+          activeRankId: current.activeRankId || '',
+          activeGateId: current.activeGateId || '',
+          activeLevelPlacementAssessmentId: current.activeLevelPlacementAssessmentId || '',
+        },
+        parentBefore: current,
+        parentProposed: { ...current, ...parentUpdate },
       });
+      transaction.set(sessionRef, sessionCreate);
+      transaction.update(targetJourneyRef, parentUpdate);
     });
   } catch (error) {
-    throw journeyOperationError(error, 'start-level-placement', {
-      uid: user.uid,
-      worldId: world,
-      cefrLevel: level,
-      assessmentId: assessment,
-    });
+    throw journeyOperationError(
+      error,
+      assessmentMode === 'new-ranks'
+        ? 'start-new-ranks-placement'
+        : 'start-level-placement',
+      {
+        uid: user.uid,
+        worldId: world,
+        cefrLevel: level,
+        assessmentId: assessment,
+        assessmentMode,
+      }
+    );
   }
   resetCache(user.uid);
   journey = await getJourney(world, { force: true });
   cache.active = journey;
   const session = await getLevelPlacementSession(world, assessment, { force: true });
   return makeLevelPlacementBundle(journey, session);
+}
+
+async function startLevelPlacement(worldId, cefrLevel, options) {
+  const user = requireUser();
+  const world = core().cleanId(worldId, 'World');
+  const level = levelPlacementCore().assertClassifiedLevel(cefrLevel);
+  const requestKey = `${user.uid}/${world}/${level}`;
+  const activeRequest = levelPlacementStartRequests.get(requestKey);
+  if (activeRequest) return activeRequest;
+
+  const request = startLevelPlacementOnce(user, world, level, options);
+  levelPlacementStartRequests.set(requestKey, request);
+  try {
+    return await request;
+  } finally {
+    if (levelPlacementStartRequests.get(requestKey) === request) {
+      levelPlacementStartRequests.delete(requestKey);
+    }
+  }
 }
 
 async function resumeLevelPlacement(worldId) {

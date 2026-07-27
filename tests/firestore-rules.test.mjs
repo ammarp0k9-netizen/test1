@@ -762,6 +762,222 @@ try {
     assert.equal(progress.data().status, 'available');
   });
 
+  await test('accepts the exact full new-ranks Level Placement start batch', async () => {
+    const uid = '2YWSZ8MdhPZBsqRqTozZvtTbzt83';
+    const worldId = 'GyQfaD75uZFFpgB9Me9V';
+    const assessmentId =
+      'level_placement_v2_A1_GyQfaD75uZFFpgB9Me9V_A1__y7yd65';
+    const activeRankId = 'R4NDhUw0L0gXgSwkbE1O';
+    const activeGateId = 'fP49BRVyujuU4UqzUoey';
+    const oldRankIds = [
+      activeRankId,
+      'zH10H8d3GZcdMyy9HRx2',
+      'VsRcZlJP3hV2hNL6Thl1',
+      'VVSBrZ9o2F4eQUfaCqnf'
+    ];
+    const newRankIds = ['gw7HL4JwTwKDUpCs2JcF', 'MSvvFKsy1uZYpQ1g2mV8'];
+    const firstGateIds = {
+      gw7HL4JwTwKDUpCs2JcF: 'RaXFlTd649dE8rd1z7NJ',
+      MSvvFKsy1uZYpQ1g2mV8: 'K7DipPCJItok3sJtmzOc'
+    };
+    const oldGateIds = [
+      'PfMYVlBAQbLLBfwNLjxK', 'oo6iPLccdQVpCXVaDKTn',
+      '9o3feiTttxfgwV3GoLgJ', activeGateId,
+      'UiHVqnI0ZxLIGpci7HHQ', 'Oy4uz4EuFZWzGoKfzEGs',
+      'kfolf55CkWaygyhF9hFr', '5Cj1ym8uBqKxBpejBEZD',
+      '2MMu6H8lyTQFKpNFqOTE', '7Fus2JsckzAaXCaYoKCt',
+      'n50we3pVJ7f4zfOnhUhr', '6FYCntPzwjY00TlP8ZIU',
+      'AuMcDxTIJoVvTtrL3rnd', 'qH3NaXWyrUV6PNtpncSH',
+      'UVnHgqemvxfBN2CQXqBd', 'Dkr1iUxgUGMCMvs6niQy',
+      'qrmQ8QMpCs9DWtgZwrXu', 'UY2dbtZZfEO0vx1zROwY',
+      'mLh27X6CxxqAAnfjjOaM'
+    ];
+    const selected = [
+      ['gw7HL4JwTwKDUpCs2JcF', 'RaXFlTd649dE8rd1z7NJ', 'word_61d9432cf2fd4c49850fc9e125460ce0a2550b6a716da1092277acd6b0409695', 'school', 2, 'مدرسة'],
+      ['gw7HL4JwTwKDUpCs2JcF', 'RaXFlTd649dE8rd1z7NJ', 'word_28e90243e862bca1f3ee7a7d9143b1fbc66935dbaa1e7a437d3d87aacaa6e463', 'shop', 3, 'متجر'],
+      ['gw7HL4JwTwKDUpCs2JcF', 'YFc34mAfG6SkydCdrlJu', 'word_2f68dbaa206ab719f036064e609a275cc2c7df3ddb9e6d261047baf8f550f544', 'place', 1, 'مكان'],
+      ['gw7HL4JwTwKDUpCs2JcF', 'YFc34mAfG6SkydCdrlJu', 'word_33aec5a3db8ae13631db1bfdf5aaeb6a020fe18208d37246b6eba62848b0f15f', 'street', 4, 'شارع'],
+      ['gw7HL4JwTwKDUpCs2JcF', '50noBdFPkjb67n6gs9iH', 'word_b96a6824f60b5718beb8135b6040f23001d5228673e3357a737a085e7d18a561', 'park', 6, 'منتزه'],
+      ['gw7HL4JwTwKDUpCs2JcF', '50noBdFPkjb67n6gs9iH', 'word_c666e17e5f3fceea1d0aebb24de68238da5a772da15bd718235c3757b240f218', 'farm', 18, 'مزرعة'],
+      ['MSvvFKsy1uZYpQ1g2mV8', 'K7DipPCJItok3sJtmzOc', 'word_773eb1d60b6c6673ae6dc207efcb32e4328f9c3b829b34497d1d07e14a305445', 'wake', 1, 'يستيقظ'],
+      ['MSvvFKsy1uZYpQ1g2mV8', 'K7DipPCJItok3sJtmzOc', 'word_fa443ce151dcc24e65e518dff8d561d23920fa84e46874b9ec1b1793c76dbd73', 'sleep', 2, 'ينام'],
+      ['MSvvFKsy1uZYpQ1g2mV8', 'TPHgACcOd1Fxd2XPGqdW', 'word_b7636564b25ffbee3ecaf02aea91eb114f44dc66087b630d6a7442bf521c892f', 'make', 8, 'يصنع'],
+      ['MSvvFKsy1uZYpQ1g2mV8', 'TPHgACcOd1Fxd2XPGqdW', 'word_be0f9b4f1f8675c2d3578509eef669616e0e517b3e43b4350afe234868f45db7', 'use', 10, 'يستخدم'],
+      ['MSvvFKsy1uZYpQ1g2mV8', 'xTvzdmrsu8M8Gpm4qnHs', 'word_eebcd534482c27c4aa6d34c43da4f87a52eb114bc21da8883fdb33279e3cea01', 'walk', 17, 'يمشي'],
+      ['MSvvFKsy1uZYpQ1g2mV8', 'xTvzdmrsu8M8Gpm4qnHs', 'word_f90633fd63523fb47cd9c04870f0aaf5d2259fa57f8fc04ce29bd904d062bba1', 'run', 18, 'يركض']
+    ].map(([rankId, gateId, contentWordId, wordKey, order, translation], index) => ({
+      questionId: `new-rank-question-${index + 1}`,
+      rankId,
+      gateId,
+      contentWordId,
+      wordKey,
+      order,
+      word: wordKey,
+      translation,
+      passThreshold: 0.75,
+      category: '',
+      partOfSpeech: '',
+      definition: '',
+      definition_ar: '',
+      example: '',
+      exampleTranslation: '',
+      level: 'A1',
+      tags: [],
+      synonyms: [],
+      pronunciation: '',
+      notes: ''
+    }));
+    const primary = [selected[0], selected[1], selected[2], selected[3],
+      selected[6], selected[7], selected[8], selected[9]];
+    const reserveByRank = {
+      [newRankIds[0]]: [selected[4].questionId, selected[5].questionId],
+      [newRankIds[1]]: [selected[10].questionId, selected[11].questionId]
+    };
+    const session = levelPlacementSession(assessmentId, {
+      worldId,
+      cefrLevel: 'A1',
+      assessmentSeed: `${worldId}:A1:production-shaped-emulator-payload`,
+      orderedQuestionIds: primary.map((item) => item.questionId),
+      selectedContentWordIds: selected.map((item) => item.contentWordId),
+      selectedWords: selected,
+      placementVersion: 2,
+      assessmentMode: 'new-ranks',
+      previousAssessmentId: 'level_placement_v2_A1_legacy',
+      testedRankIds: newRankIds,
+      assessedRankIds: [...oldRankIds, ...newRankIds],
+      assessedRankVersions: {
+        [newRankIds[0]]: 5,
+        [newRankIds[1]]: 6
+      },
+      publishedRankSetHash: 'exact-six-rank-snapshot',
+      rankVersions: {
+        [newRankIds[0]]: 5,
+        [newRankIds[1]]: 6
+      },
+      orderedRankIds: newRankIds,
+      rankTitles: {
+        [newRankIds[0]]: 'الأماكن والاتجاهات',
+        [newRankIds[1]]: 'الأفعال اليومية والحركة'
+      },
+      rankFirstGateIds: firstGateIds,
+      rankCoverage: {
+        [newRankIds[0]]: { requested: 4, selected: 4, reserve: 2, weak: false },
+        [newRankIds[1]]: { requested: 4, selected: 4, reserve: 2, weak: false }
+      },
+      adaptiveReserveIdsByRank: reserveByRank
+    });
+    assert.equal(session.assessedRankIds.length, 6);
+    assert.equal(Object.keys(session.assessedRankVersions).length, 2);
+    assert.equal(session.testedRankIds.length, 2);
+    assert.equal(session.orderedQuestionIds.length, 8);
+    assert.equal(session.selectedWords.length, 12);
+    assert.equal(session.selectedContentWordIds.length, 12);
+    assert.equal(Object.values(session.adaptiveReserveIdsByRank).flat().length, 4);
+    const parent = {
+      worldId,
+      activeRankId,
+      activeGateId,
+      status: 'active',
+      startedAt: timestamp,
+      updatedAt: timestamp,
+      journeyVersion: 1,
+      placementStatus: 'completed',
+      activePlacementAssessmentId: '',
+      unlockedRankIds: oldRankIds,
+      unlockedGateIds: oldGateIds,
+      activeLevelPlacementAssessmentId: '',
+      activeLevelPlacementCefrLevel: '',
+      levelPlacementStatus: 'abandoned',
+      levelPlacementVersion: 1,
+      passedCefrLevels: ['A1'],
+      partialCefrLevels: [],
+      contentJourneyStatus: 'in-progress',
+      levelPlacementAssessmentIds: {
+        A1: 'level_placement_v2_A1_legacy'
+      },
+      levelPlacementPassedRankIds: oldRankIds
+    };
+    const seedCase = async (caseUid, options = {}) => {
+      const parentPath = `users/${caseUid}/contentProgress/${worldId}`;
+      const sessionPath = `${parentPath}/levelPlacementSessions/${assessmentId}`;
+      await environment.withSecurityRulesDisabled(async (context) => {
+        const db = context.firestore();
+        await Promise.all([
+          setDoc(doc(db, `content_worlds/${worldId}`), world(worldId, 'published')),
+          setDoc(doc(db, `content_worlds/${worldId}/ranks/${activeRankId}`), {
+            ...rank(worldId, activeRankId, 'published'), cefrLevel: 'A1'
+          }),
+          setDoc(doc(db, `content_worlds/${worldId}/ranks/${activeRankId}/gates/${activeGateId}`),
+            gate(worldId, activeRankId, activeGateId, 'published')),
+          setDoc(doc(db, parentPath), {
+            ...parent,
+            ...(options.parentActive ? {
+              activeLevelPlacementAssessmentId: assessmentId,
+              activeLevelPlacementCefrLevel: 'A1',
+              levelPlacementStatus: 'active',
+              levelPlacementVersion: 2
+            } : {})
+          }),
+          setDoc(doc(db, `users/${caseUid}/meta/active_content_journey`), {
+            worldId,
+            journeyVersion: 1,
+            updatedAt: timestamp
+          }),
+          ...(options.seedSession ? [setDoc(doc(db, sessionPath), {
+            ...session,
+            startedAt: timestamp,
+            updatedAt: timestamp
+          })] : [])
+        ]);
+      });
+      return { parentPath, sessionPath };
+    };
+
+    const sessionOnlyUid = `${uid}-session-only`;
+    const sessionOnlyPaths = await seedCase(sessionOnlyUid, { parentActive: true });
+    const sessionOnlyDb = environment.authenticatedContext(sessionOnlyUid).firestore();
+    await assertSucceeds(setDoc(doc(sessionOnlyDb, sessionOnlyPaths.sessionPath), session));
+
+    const parentOnlyUid = `${uid}-parent-only`;
+    const parentOnlyPaths = await seedCase(parentOnlyUid, { seedSession: true });
+    const parentOnlyDb = environment.authenticatedContext(parentOnlyUid).firestore();
+    await assertSucceeds(updateDoc(doc(parentOnlyDb, parentOnlyPaths.parentPath), {
+      activeLevelPlacementAssessmentId: assessmentId,
+      activeLevelPlacementCefrLevel: 'A1',
+      levelPlacementStatus: 'active',
+      levelPlacementVersion: 2,
+      placementStatus: 'completed',
+      passedCefrLevels: ['A1'],
+      updatedAt: serverTimestamp()
+    }));
+
+    const paths = await seedCase(uid);
+    const exactDb = environment.authenticatedContext(uid).firestore();
+    const batch = writeBatch(exactDb);
+    batch.set(doc(exactDb, paths.sessionPath), session);
+    batch.update(doc(exactDb, paths.parentPath), {
+      activeLevelPlacementAssessmentId: assessmentId,
+      activeLevelPlacementCefrLevel: 'A1',
+      levelPlacementStatus: 'active',
+      levelPlacementVersion: 2,
+      placementStatus: 'completed',
+      passedCefrLevels: ['A1'],
+      updatedAt: serverTimestamp()
+    });
+    await assertSucceeds(batch.commit());
+    const savedSessions = await getDocs(collection(
+      exactDb,
+      `${paths.parentPath}/levelPlacementSessions`
+    ));
+    assert.equal(savedSessions.size, 1);
+    const savedParent = await getDoc(doc(exactDb, paths.parentPath));
+    assert.equal(savedParent.data().activeLevelPlacementAssessmentId, assessmentId);
+    console.log(
+      '# full new-ranks start diagnosis: session-create=pass, parent-update=pass, ' +
+      'combined-batch=pass; no local Rules predicate rejects this payload'
+    );
+  });
+
   await test('a locked initial rank cannot be used to create a journey', async () => {
     const batch = writeBatch(userA);
     batch.update(doc(userA, 'users/user-a/contentProgress/journey-world'), {
@@ -2939,7 +3155,7 @@ try {
     ));
   });
 
-  assert.equal(passed, 60);
+  assert.equal(passed, 61);
   console.log(`# ${passed} Firestore Rules emulator tests passed`);
 } finally {
   await environment.cleanup();

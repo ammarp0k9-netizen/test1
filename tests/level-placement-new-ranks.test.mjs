@@ -93,6 +93,35 @@ test('new-ranks mode fetches and samples only the unassessed rank IDs', () => {
   assert.match(startBlock, /previousHistory: overview\.history/);
 });
 
+test('new-ranks session start is single-flight and retries resume the active session', () => {
+  const startBlock = cloudSource.slice(
+    cloudSource.indexOf('async function startLevelPlacementOnce'),
+    cloudSource.indexOf('async function resumeLevelPlacement')
+  );
+  assert.match(cloudSource, /const levelPlacementStartRequests = new Map\(\)/);
+  assert.match(startBlock, /levelPlacementStartRequests\.get\(requestKey\)/);
+  assert.match(startBlock, /if \(activeRequest\) return activeRequest/);
+  assert.match(startBlock, /levelPlacementStartRequests\.set\(requestKey, request\)/);
+  assert.match(startBlock, /levelPlacementStartRequests\.delete\(requestKey\)/);
+  assert.match(startBlock, /activeLevelPlacementAssessmentId/);
+  assert.match(startBlock, /return makeLevelPlacementBundle\(journey, activeSession\)/);
+});
+
+test('new-ranks start keeps one atomic session-plus-parent write', () => {
+  const startBlock = cloudSource.slice(
+    cloudSource.indexOf('async function startLevelPlacementOnce'),
+    cloudSource.indexOf('async function resumeLevelPlacement')
+  );
+  assert.match(startBlock, /await runTransaction/);
+  assert.match(startBlock, /getActiveJourney\(\{ force: true \}\)/);
+  assert.match(startBlock, /activeJourney\?\.worldId/);
+  assert.match(startBlock, /journey\.status !== 'active'/);
+  assert.match(startBlock, /transaction\.set\(sessionRef, sessionCreate\)/);
+  assert.match(startBlock, /transaction\.update\(targetJourneyRef, parentUpdate\)/);
+  assert.equal((startBlock.match(/transaction\.set\(/g) || []).length, 1);
+  assert.equal((startBlock.match(/transaction\.update\(/g) || []).length, 1);
+});
+
 test('opening a published page derives new ranks without writing progression', () => {
   const reconcileBlock = cloudSource.slice(
     cloudSource.indexOf('async function reconcileLevelPlacementJourney'),
@@ -213,6 +242,42 @@ test('Published UI labels and counts only the new ranks', () => {
   assert.match(worldsSource, /'new-content': 'اختبار الرتب الجديدة'/);
   assert.match(worldsSource, /const newRankCount = overview\?\.unassessedRankIds\?\.length \|\| 0/);
   assert.match(worldsSource, /published-level-new-count/);
+});
+
+test('Published UI reports new-ranks start failures precisely and preserves the visible journey', () => {
+  const beginBlock = worldsSource.slice(
+    worldsSource.indexOf('async function beginPublishedLevelPlacement'),
+    worldsSource.indexOf('async function maybeRenderPublishedLevelPlacementResume')
+  );
+  assert.match(worldsSource, /تعذر بدء اختبار الرتب الجديدة\. لم يتم تغيير تقدمك\./);
+  assert.match(beginBlock, /publishedContentState\.levelPlacementPending = true/);
+  assert.match(beginBlock, /if \(publishedContentState\.levelPlacementPending\) return null/);
+  assert.match(beginBlock, /start-new-ranks-placement/);
+  assert.doesNotMatch(beginBlock, /publishedContentState\.(?:journey|activeJourney)\s*=\s*null/);
+});
+
+test('continue routing opens the first pending new rank CTA without writing progress', () => {
+  const routeBlock = worldsSource.slice(
+    worldsSource.indexOf('async function openPublishedJourneyDestination'),
+    worldsSource.indexOf('async function startOrResumePublishedJourney')
+  );
+  const rankBlock = worldsSource.slice(
+    worldsSource.indexOf('function renderPublishedGates'),
+    worldsSource.indexOf('function publishedDetailText')
+  );
+  const continueBlock = worldsSource.slice(
+    worldsSource.indexOf('async function startOrResumePublishedJourney'),
+    worldsSource.indexOf('function makePublishedJourneyStartPanel')
+  );
+  assert.match(routeBlock, /destination\.type === 'new-rank-assessment'/);
+  assert.match(routeBlock, /openPublishedRank\(worldId, destination\.rank\.rankId\)/);
+  assert.doesNotMatch(routeBlock, /startLevelPlacement|runTransaction|\.update\(/);
+  assert.match(continueBlock, /const sameActiveWorld = activeJourney/);
+  assert.match(continueBlock, /const resumed = sameActiveWorld[\s\S]*publishedContentState\.journey \|\| activeJourney/);
+  assert.match(rankBlock, /unassessedRankIds/);
+  assert.match(rankBlock, /اختبر الرتب الجديدة/);
+  assert.match(rankBlock, /beginPublishedLevelPlacement\(world, level\)/);
+  assert.doesNotMatch(rankBlock, /startJourney|loadGate|runTransaction|\.update\(/);
 });
 
 test('applying new-rank results does not load words, start a quiz, or award XP', () => {

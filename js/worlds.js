@@ -1669,6 +1669,9 @@ function requestJourneySignIn() {
 function publishedJourneyErrorText(error) {
   const code = String(error?.code || '');
   const operation = String(error?.operation || '');
+  if (operation === 'start-new-ranks-placement') {
+    return 'تعذر بدء اختبار الرتب الجديدة. لم يتم تغيير تقدمك.';
+  }
   if ([
     'journey-reconciliation',
     'progression-unlock',
@@ -1766,6 +1769,10 @@ async function openPublishedJourneyDestination(worldId, options) {
   if (destination.type === 'level-placement') {
     return showPublishedLevelPlacementResume(worldId);
   }
+  if (destination.type === 'new-rank-assessment') {
+    window.openPublishedRank(worldId, destination.rank.rankId);
+    return destination;
+  }
   if (destination.type === 'gate' || destination.type === 'gate-clear') {
     window.openPublishedGate(
       worldId,
@@ -1813,9 +1820,14 @@ async function startOrResumePublishedJourney(world) {
   rerenderPublishedRoute();
   try {
     const api = getJourneyCloudApi();
-    const resumed = activeJourney && String(activeJourney.worldId) !== String(world.worldId)
-      ? await api.switchActiveJourney(world.worldId)
-      : await api.startJourney(world.worldId);
+    const sameActiveWorld = activeJourney &&
+      String(activeJourney.worldId) === String(world.worldId) &&
+      String(activeJourney.status || publishedContentState.journey?.status || '') === 'active';
+    const resumed = sameActiveWorld
+      ? (publishedContentState.journey || activeJourney)
+      : (activeJourney && String(activeJourney.worldId) !== String(world.worldId)
+        ? await api.switchActiveJourney(world.worldId)
+        : await api.startJourney(world.worldId));
     publishedContentState.journey = resumed;
     publishedContentState.activeJourney = resumed;
     publishedContentState.journeyAction = null;
@@ -1966,9 +1978,15 @@ async function beginPublishedLevelPlacement(world, cefrLevel) {
     return bundle;
   } catch (error) {
     publishedContentState.levelPlacementPending = false;
+    const overview = publishedContentState.levelPlacementOverviews.get(
+      getLevelPlacementContract().normalizeLevel(cefrLevel)
+    );
+    const operation = overview?.history && overview.unassessedRankIds?.length
+      ? 'start-new-ranks-placement'
+      : 'start-level-placement';
     const journeyError = setPublishedJourneyError(
       error,
-      'start-level-placement',
+      operation,
       () => beginPublishedLevelPlacement(world, cefrLevel),
       world.worldId
     );
@@ -4295,6 +4313,27 @@ function renderPublishedGates(
       { label: rank.title || 'الرتبة' },
     ],
   });
+  const level = getLevelPlacementContract().normalizeLevel(rank.cefrLevel);
+  const overview = publishedContentState.levelPlacementOverviews.get(level);
+  if (overview?.unassessedRankIds?.map(String).includes(String(rank.rankId))) {
+    const panel = publishedElement('div', 'published-journey-panel');
+    panel.append(
+      publishedElement('strong', '', 'هذه رتبة جديدة'),
+      publishedElement('p', '', 'اختبر الرتب الجديدة لتحديد نقطة المتابعة المناسبة دون تغيير تقدمك السابق.')
+    );
+    const button = publishedButton(
+      publishedContentState.levelPlacementPending ? 'جارٍ بدء الاختبار...' : 'اختبر الرتب الجديدة',
+      'published-action-btn published-level-test-btn',
+      () => beginPublishedLevelPlacement(world, level),
+      publishedContentState.levelPlacementPending
+        ? 'fa-solid fa-circle-notch fa-spin'
+        : 'fa-solid fa-location-crosshairs'
+    );
+    button.disabled = publishedContentState.levelPlacementPending;
+    button.setAttribute('aria-busy', String(publishedContentState.levelPlacementPending));
+    panel.append(button);
+    section.append(panel);
+  }
   if (!gates.length) {
     section.append(renderPublishedEmpty('لا توجد بوابات منشورة في هذه الرتبة.', 'fa-solid fa-dungeon'));
   } else {

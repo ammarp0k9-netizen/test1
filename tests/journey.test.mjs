@@ -238,9 +238,52 @@ test('active destination resolves new ranks before the completed-current-content
     progressByRank,
     unassessedRankIds: ['rank-new'],
   });
-  assert.equal(destination.type, 'gate');
+  assert.equal(destination.type, 'new-rank-assessment');
   assert.equal(destination.reason, 'new-rank');
   assert.equal(destination.gate.gateId, 'gate-new');
+});
+
+test('pending new ranks route before an older learning gate', () => {
+  const ranks = [rank('rank-old', 0, 'available'), rank('rank-new', 1, 'locked')];
+  const gatesByRank = new Map([
+    ['rank-old', [gate('rank-old', 'gate-old', 0)]],
+    ['rank-new', [gate('rank-new', 'gate-new', 0)]],
+  ]);
+  const destination = journey.resolveActiveJourneyDestination({
+    journey: { activeRankId: 'rank-old', activeGateId: 'gate-old' },
+    ranks,
+    gatesByRank,
+    progressByRank: new Map([
+      ['rank-old', new Map([['gate-old', { status: 'learning' }]])],
+      ['rank-new', new Map([['gate-new', { status: 'locked' }]])],
+    ]),
+    unassessedRankIds: ['rank-new'],
+  });
+  assert.equal(destination.type, 'new-rank-assessment');
+  assert.equal(destination.rank.rankId, 'rank-new');
+  assert.equal(destination.gate.gateId, 'gate-new');
+});
+
+test('an active new-ranks session resumes before an older clear attempt', () => {
+  const ranks = [rank('rank-old', 0, 'available')];
+  const gatesByRank = new Map([['rank-old', [gate('rank-old', 'gate-old', 0)]]]);
+  const destination = journey.resolveActiveJourneyDestination({
+    journey: { activeRankId: 'rank-old', activeGateId: 'gate-old' },
+    ranks,
+    gatesByRank,
+    progressByRank: new Map([
+      ['rank-old', new Map([['gate-old', {
+        status: 'ready',
+        activeClearAttemptId: 'clear-old',
+      }]])],
+    ]),
+    levelPlacementSession: {
+      assessmentMode: 'new-ranks',
+      status: 'active',
+    },
+  });
+  assert.equal(destination.type, 'level-placement');
+  assert.equal(destination.session.assessmentMode, 'new-ranks');
 });
 
 test('new-rank Placement preserves older progress outside the ranks under test', () => {
@@ -260,18 +303,42 @@ test('new-rank Placement preserves older progress outside the ranks under test',
   });
 });
 
-test('new-rank Placement restores completion when the new rank was the only remaining work', () => {
+test('new-rank Placement routes to the first passed new rank and first gate', () => {
   const destination = journey.resolveLevelPlacementResultDestination({
-    journey: { activeRankId: 'rank-new', activeGateId: 'gate-new' },
+    journey: { activeRankId: 'rank-old', activeGateId: 'gate-old' },
+    session: {
+      assessmentMode: 'new-ranks',
+      testedRankIds: ['rank-new-a', 'rank-new-b'],
+      orderedRankIds: ['rank-new-a', 'rank-new-b'],
+      passedRankIds: ['rank-new-a'],
+      rankFirstGateIds: {
+        'rank-new-a': 'gate-new-a',
+        'rank-new-b': 'gate-new-b',
+      },
+      passedLevel: false,
+    },
+  });
+  assert.equal(destination.rankId, 'rank-new-a');
+  assert.equal(destination.gateId, 'gate-new-a');
+  assert.equal(destination.completedCurrentContent, false);
+  assert.equal(destination.preserveExistingPointer, false);
+});
+
+test('new-rank Placement with no passed rank preserves the old pointer', () => {
+  const destination = journey.resolveLevelPlacementResultDestination({
+    journey: { activeRankId: 'rank-old', activeGateId: 'gate-old' },
     session: {
       assessmentMode: 'new-ranks',
       testedRankIds: ['rank-new'],
-      passedLevel: true,
+      orderedRankIds: ['rank-new'],
+      passedRankIds: [],
+      passedLevel: false,
     },
   });
-  assert.equal(destination.rankId, '');
-  assert.equal(destination.gateId, '');
-  assert.equal(destination.completedCurrentContent, true);
+  assert.equal(destination.rankId, 'rank-old');
+  assert.equal(destination.gateId, 'gate-old');
+  assert.equal(destination.completedCurrentContent, false);
+  assert.equal(destination.preserveExistingPointer, true);
 });
 
 test('full-level Placement advances to the supplied next-level target', () => {
