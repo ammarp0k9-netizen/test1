@@ -1766,8 +1766,20 @@ try {
       updatedBy: 'admin-a'
     }));
     await assertFails(updateDoc(doc(admin, rankPath), {
-      gateCount: 9,
+      cefrLevel: 'A1',
       version: 4,
+      updatedAt: serverTimestamp(),
+      updatedBy: 'admin-a'
+    }));
+    await assertSucceeds(updateDoc(doc(admin, rankPath), {
+      title: 'Classified Rank Metadata Edit',
+      version: 4,
+      updatedAt: serverTimestamp(),
+      updatedBy: 'admin-a'
+    }));
+    await assertFails(updateDoc(doc(admin, rankPath), {
+      gateCount: 9,
+      version: 5,
       updatedAt: serverTimestamp(),
       updatedBy: 'admin-a'
     }));
@@ -3519,6 +3531,194 @@ try {
     assert.equal(projectedGate.exists(), false);
   });
 
+  await test('accepts a production-sized A2 start from the committed A1 outcome', async () => {
+    const uid = 'production-sized-a2-start-user';
+    const worldId = 'production-sized-a2-start-world';
+    const assessmentId = 'level_placement_v2_A2_production_sized_start';
+    const a1RankIds = Array.from({ length: 4 }, (_, index) => `a1-rank-${index + 1}`);
+    const a1GateIds = Array.from({ length: 19 }, (_, index) => `a1-gate-${index + 1}`);
+    const a2RankIds = Array.from({ length: 6 }, (_, index) => `a2-rank-${index + 1}`);
+    const activeRankId = a2RankIds[0];
+    const activeGateId = 'a2-gate-1-1';
+    const journeyPath = `users/${uid}/contentProgress/${worldId}`;
+    const sessionPath = `${journeyPath}/levelPlacementSessions/${assessmentId}`;
+    const db = environment.authenticatedContext(uid).firestore();
+    const selectedWords = a2RankIds.flatMap((rankId, rankIndex) => (
+      Array.from({ length: 6 }, (_, wordIndex) => {
+        const questionNumber = (rankIndex * 6) + wordIndex + 1;
+        return {
+          questionId: `a2-question-${questionNumber}`,
+          rankId,
+          gateId: `a2-gate-${rankIndex + 1}-${(wordIndex % 3) + 1}`,
+          contentWordId: `a2-word-${questionNumber}`,
+          wordKey: `a2-word-key-${questionNumber}`,
+          order: wordIndex,
+          word: `word-${questionNumber}`,
+          translation: `meaning-${questionNumber}`,
+          passThreshold: 0.75,
+          category: '',
+          partOfSpeech: '',
+          definition: '',
+          definition_ar: '',
+          example: '',
+          exampleTranslation: '',
+          level: 'A2',
+          tags: [],
+          synonyms: [],
+          pronunciation: '',
+          notes: ''
+        };
+      })
+    ));
+    const primaryWords = a2RankIds.flatMap((_, rankIndex) => (
+      selectedWords.slice(rankIndex * 6, (rankIndex * 6) + 4)
+    ));
+    const rankVersions = Object.fromEntries(a2RankIds.map((rankId) => [rankId, 1]));
+    const firstGateIds = Object.fromEntries(a2RankIds.map((rankId, index) => [
+      rankId,
+      `a2-gate-${index + 1}-1`
+    ]));
+    const session = levelPlacementSession(assessmentId, {
+      worldId,
+      cefrLevel: 'A2',
+      assessmentSeed: `${worldId}:A2:production-shaped-emulator-payload`,
+      orderedQuestionIds: primaryWords.map((item) => item.questionId),
+      selectedContentWordIds: selectedWords.map((item) => item.contentWordId),
+      selectedWords,
+      placementVersion: 2,
+      assessmentMode: 'full-level',
+      previousAssessmentId: '',
+      testedRankIds: a2RankIds,
+      assessedRankIds: a2RankIds,
+      assessedRankVersions: rankVersions,
+      publishedRankSetHash: 'six-a2-rank-snapshot',
+      rankVersions,
+      orderedRankIds: a2RankIds,
+      rankTitles: Object.fromEntries(a2RankIds.map((rankId) => [rankId, rankId])),
+      rankFirstGateIds: firstGateIds,
+      rankCoverage: Object.fromEntries(a2RankIds.map((rankId) => [rankId, {
+        requested: 4,
+        selected: 4,
+        reserve: 2,
+        weak: false
+      }])),
+      adaptiveReserveIdsByRank: Object.fromEntries(a2RankIds.map((rankId, index) => [
+        rankId,
+        selectedWords.slice((index * 6) + 4, (index * 6) + 6).map((item) => item.questionId)
+      ]))
+    });
+
+    const parent = {
+      ...journey(worldId, activeRankId, activeGateId),
+      placementStatus: 'completed',
+      activePlacementAssessmentId: '',
+      unlockedRankIds: [...a1RankIds, activeRankId],
+      unlockedGateIds: [...a1GateIds, activeGateId],
+      activeLevelPlacementAssessmentId: '',
+      activeLevelPlacementCefrLevel: '',
+      levelPlacementStatus: 'completed',
+      levelPlacementVersion: 2,
+      passedCefrLevels: ['A1'],
+      partialCefrLevels: [],
+      contentJourneyStatus: 'in-progress',
+      levelPlacementAssessmentIds: { A1: 'level_placement_v2_A1_committed' },
+      levelPlacementPassedRankIds: a1RankIds,
+      levelPlacementClearedGateIds: a1GateIds
+    };
+    const seedJourneyCase = async (caseUid, options = {}) => {
+      const caseJourneyPath = `users/${caseUid}/contentProgress/${worldId}`;
+      const caseSessionPath = `${caseJourneyPath}/levelPlacementSessions/${assessmentId}`;
+      const casePointerPath = `users/${caseUid}/meta/active_content_journey`;
+      await environment.withSecurityRulesDisabled(async (context) => {
+        const seedDb = context.firestore();
+        await setDoc(doc(seedDb, caseJourneyPath), {
+          ...parent,
+          ...(options.parentActive ? {
+            activeLevelPlacementAssessmentId: assessmentId,
+            activeLevelPlacementCefrLevel: 'A2',
+            levelPlacementStatus: 'active'
+          } : {})
+        });
+        await setDoc(doc(seedDb, casePointerPath), {
+          worldId,
+          journeyVersion: 1,
+          updatedAt: timestamp
+        });
+        if (options.seedSession) {
+          await setDoc(doc(seedDb, caseSessionPath), {
+            ...session,
+            startedAt: timestamp,
+            updatedAt: timestamp
+          });
+        }
+      });
+      return { caseJourneyPath, caseSessionPath };
+    };
+
+    await environment.withSecurityRulesDisabled(async (context) => {
+      const seedDb = context.firestore();
+      await setDoc(doc(seedDb, `content_worlds/${worldId}`), world(worldId, 'published'));
+      await setDoc(doc(seedDb, `content_worlds/${worldId}/ranks/${activeRankId}`), {
+        ...rank(worldId, activeRankId, 'published'),
+        cefrLevel: 'A2'
+      });
+      await setDoc(
+        doc(seedDb, `content_worlds/${worldId}/ranks/${activeRankId}/gates/${activeGateId}`),
+        gate(worldId, activeRankId, activeGateId, 'published')
+      );
+    });
+    await seedJourneyCase(uid);
+
+    const sessionOnlyUid = `${uid}-session-only`;
+    const sessionOnlyPaths = await seedJourneyCase(sessionOnlyUid, { parentActive: true });
+    const sessionOnlyDb = environment.authenticatedContext(sessionOnlyUid).firestore();
+    await assertSucceeds(setDoc(doc(sessionOnlyDb, sessionOnlyPaths.caseSessionPath), session));
+
+    const parentOnlyUid = `${uid}-parent-only`;
+    const parentOnlyPaths = await seedJourneyCase(parentOnlyUid, { seedSession: true });
+    const parentOnlyDb = environment.authenticatedContext(parentOnlyUid).firestore();
+    await assertSucceeds(updateDoc(doc(parentOnlyDb, parentOnlyPaths.caseJourneyPath), {
+      activeLevelPlacementAssessmentId: assessmentId,
+      activeLevelPlacementCefrLevel: 'A2',
+      levelPlacementStatus: 'active',
+      levelPlacementVersion: 2,
+      placementStatus: 'completed',
+      passedCefrLevels: ['A1'],
+      updatedAt: serverTimestamp()
+    }));
+
+    const batch = writeBatch(db);
+    batch.set(doc(db, sessionPath), session);
+    batch.update(doc(db, journeyPath), {
+      activeLevelPlacementAssessmentId: assessmentId,
+      activeLevelPlacementCefrLevel: 'A2',
+      levelPlacementStatus: 'active',
+      levelPlacementVersion: 2,
+      placementStatus: 'completed',
+      passedCefrLevels: ['A1'],
+      updatedAt: serverTimestamp()
+    });
+    await assertSucceeds(batch.commit());
+
+    const [savedJourney, savedSession] = await Promise.all([
+      getDoc(doc(db, journeyPath)),
+      getDoc(doc(db, sessionPath))
+    ]);
+    assert.equal(savedSession.exists(), true);
+    assert.equal(savedSession.data().status, 'active');
+    assert.equal(savedSession.data().cefrLevel, 'A2');
+    assert.equal(savedSession.data().orderedQuestionIds.length, 24);
+    assert.equal(savedSession.data().selectedWords.length, 36);
+    assert.deepEqual(savedSession.data().testedRankIds, a2RankIds);
+    assert.equal(savedJourney.data().activeLevelPlacementAssessmentId, assessmentId);
+    assert.equal(savedJourney.data().activeLevelPlacementCefrLevel, 'A2');
+    assert.equal(savedJourney.data().levelPlacementStatus, 'active');
+    assert.equal(savedJourney.data().activeRankId, activeRankId);
+    assert.equal(savedJourney.data().activeGateId, activeGateId);
+    assert.deepEqual(savedJourney.data().levelPlacementPassedRankIds, a1RankIds);
+    assert.deepEqual(savedJourney.data().levelPlacementClearedGateIds, a1GateIds);
+  });
+
   await test('a completed paused Level Placement resumes to its result decision', async () => {
     const uid = 'paused-level-result-user';
     const worldId = 'level-world';
@@ -3613,7 +3813,7 @@ try {
   });
 
   if (testFilter) assert.ok(selected > 0, `No Rules test matched "${testFilter}"`);
-  assert.equal(passed, testFilter ? selected : 64);
+  assert.equal(passed, testFilter ? selected : 65);
   console.log(`# ${passed} Firestore Rules emulator tests passed`);
 } finally {
   await environment.cleanup();

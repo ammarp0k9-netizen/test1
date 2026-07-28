@@ -286,6 +286,34 @@ await assert.rejects(
 );
 assert.equal(store.get(createdPath).title, 'Updated Rank');
 
+const classifiedPath = 'content_worlds/world_1/ranks/classified-rank';
+store.set(classifiedPath, {
+  ...store.get(createdPath),
+  rankId: 'classified-rank',
+  title: 'Stable A1 Rank',
+  cefrLevel: 'A1',
+  status: 'published',
+  version: 7
+});
+await assert.rejects(
+  () => api.updateRank(
+    'world_1',
+    'classified-rank',
+    realmObject({ cefrLevel: 'A2' }),
+    7
+  ),
+  (error) => error?.code === 'content/rank-cefr-immutable'
+);
+assert.equal(store.get(classifiedPath).cefrLevel, 'A1');
+const classifiedMetadataEdit = await api.updateRank(
+  'world_1',
+  'classified-rank',
+  realmObject({ title: 'Stable A1 Rank Updated' }),
+  7
+);
+assert.equal(classifiedMetadataEdit.cefrLevel, 'A1');
+assert.equal(classifiedMetadataEdit.version, 8);
+
 const archived = await api.setRankStatus('world_1', created.rankId, 'archived', 2);
 assert.equal(archived.status, 'archived');
 assert.equal(archived.version, 3);

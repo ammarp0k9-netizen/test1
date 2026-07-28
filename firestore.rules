@@ -393,6 +393,12 @@ service cloud.firestore {
         data.createdBy is string && data.updatedBy is string;
     }
 
+    function validRankCefrUpdate(before, after) {
+      let previousLevel = before.get('cefrLevel', 'unclassified');
+      let nextLevel = after.get('cefrLevel', 'unclassified');
+      return previousLevel == nextLevel || previousLevel == 'unclassified';
+    }
+
     function validGate(data, worldId, rankId, gateId) {
       return data.keys().hasOnly([
           'worldId', 'rankId', 'gateId', 'title', 'subtitle', 'description',
@@ -1133,6 +1139,13 @@ service cloud.firestore {
         after.activeGateId == before.activeGateId &&
         after.unlockedRankIds == before.unlockedRankIds &&
         after.unlockedGateIds == before.unlockedGateIds &&
+        after.worldId == worldId &&
+        after.startedAt == before.startedAt &&
+        after.journeyVersion == before.journeyVersion &&
+        after.journeyVersion == 1 &&
+        worldPublished(worldId) &&
+        rankPublished(worldId, after.activeRankId) &&
+        gatePublished(worldId, after.activeRankId, after.activeGateId) &&
         after.get('passedCefrLevels', []) == before.get('passedCefrLevels', []) &&
         after.get('partialCefrLevels', []) == before.get('partialCefrLevels', []) &&
         after.updatedAt == request.time &&
@@ -1450,16 +1463,17 @@ service cloud.firestore {
       return (before.get('activeLevelPlacementAssessmentId', '') != '' ||
           after.get('activeLevelPlacementAssessmentId', '') != '')
         ? (
-          validJourney(after, worldId) &&
-          (before.get('activeLevelPlacementAssessmentId', '') == ''
+          before.get('activeLevelPlacementAssessmentId', '') == ''
             ? validJourneyLevelPlacementStart(before, after, uid, worldId)
             : (
-              after.get('levelPlacementStatus', '') == 'awaiting-decision' &&
-                before.get('levelPlacementStatus', '') != 'awaiting-decision'
-                ? validJourneyLevelPlacementResult(before, after, uid, worldId)
-                : validJourneyLevelPlacementFinish(before, after, uid, worldId)
+              validJourney(after, worldId) &&
+              (
+                after.get('levelPlacementStatus', '') == 'awaiting-decision' &&
+                  before.get('levelPlacementStatus', '') != 'awaiting-decision'
+                  ? validJourneyLevelPlacementResult(before, after, uid, worldId)
+                  : validJourneyLevelPlacementFinish(before, after, uid, worldId)
+              )
             )
-          )
         )
         : (
         (
@@ -3342,6 +3356,7 @@ service cloud.firestore {
           !('_adminRankOperation' in resource.data) &&
           !('_adminCopyOperation' in resource.data) &&
           validRank(request.resource.data, worldId, rankId) &&
+          validRankCefrUpdate(resource.data, request.resource.data) &&
           (
             (request.resource.data.version == resource.data.version + 1 &&
               request.resource.data.gateCount == resource.data.gateCount &&

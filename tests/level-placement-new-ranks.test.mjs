@@ -164,6 +164,12 @@ test('new-ranks start keeps one atomic session-plus-parent write', () => {
   assert.match(startBlock, /transaction\.update\(targetJourneyRef, parentUpdate\)/);
   assert.equal((startBlock.match(/transaction\.set\(/g) || []).length, 1);
   assert.equal((startBlock.match(/transaction\.update\(/g) || []).length, 1);
+  assert.match(startBlock, /committedJourney = \{/);
+  assert.match(startBlock, /committedSession = \{/);
+  const afterCommit = startBlock.slice(startBlock.lastIndexOf('resetCache(user.uid)'));
+  assert.doesNotMatch(afterCommit, /await getJourney\(/);
+  assert.doesNotMatch(afterCommit, /await getLevelPlacementSession\(/);
+  assert.match(afterCommit, /return makeLevelPlacementBundle\(journey, committedSession\)/);
 });
 
 test('opening a published page derives new ranks without writing progression', () => {

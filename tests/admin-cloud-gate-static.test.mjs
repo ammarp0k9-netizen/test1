@@ -42,6 +42,11 @@ assert.match(
 );
 assert.match(
   source,
+  /getContentSchema\(\)\.LIMITS\?\.wordsPerGate[\s\S]*?getCountFromServer\(wordsCollection\([\s\S]*?content\/gate-word-limit/,
+  'Gate publication can exceed the central schema limit and outgrow published consumers.'
+);
+assert.match(
+  source,
   /async function publishGateDraftWords\([\s\S]*?gate\.status !== 'published'/,
   'Existing-gate repair is not restricted to published gates.'
 );

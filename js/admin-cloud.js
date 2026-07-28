@@ -162,7 +162,6 @@ const WORD_INPUT_FIELDS = new Set([
 const WORD_PAGE_SIZE_DEFAULT = 50;
 const WORD_PAGE_SIZE_MAX = 100;
 const BULK_WORD_LIMIT = 100;
-const MAX_GATE_DRAFT_PUBLISH_BATCHES = 100;
 const WORD_CURSOR_PREFIX = 'llw1_';
 const STAGING_CURSOR_PREFIX = 'lls1_';
 const STAGING_IMPORT_LIMIT = 100;
@@ -1183,6 +1182,18 @@ function cleanRankForStorage(candidate, worldId, rankId) {
   return rank;
 }
 
+function assertRankCefrTransition(existing, candidate) {
+  const schema = getContentSchema();
+  const previousLevel = schema.normalizeCefrLevel(existing?.cefrLevel);
+  const nextLevel = schema.normalizeCefrLevel(candidate?.cefrLevel);
+  if (previousLevel !== 'unclassified' && previousLevel !== nextLevel) {
+    throw adminCloudError(
+      'content/rank-cefr-immutable',
+      'A classified rank cannot move to another CEFR level. Duplicate it as a new draft rank instead.'
+    );
+  }
+}
+
 function buildRankCreateCandidate(payload, worldId, rankId, uid) {
   const source = requireRankInput(payload);
   const candidate = {};
@@ -1708,6 +1719,7 @@ async function updateRank(worldId, rankId, payload, expectedVersion) {
         context.uid,
         existing.version + 1
       );
+      assertRankCefrTransition(existing, rank);
       const updatedAt = serverTimestamp();
       const saved = {
         ...rank,
@@ -2034,8 +2046,30 @@ async function setGateStatus(worldId, rankId, gateId, status, expectedVersion) {
 }
 
 async function publishDraftWordsForGate(context, worldId, rankId, gateId) {
+  const schemaLimit = Number(getContentSchema().LIMITS?.wordsPerGate);
+  if (!Number.isSafeInteger(schemaLimit) || schemaLimit < 1) {
+    throw adminCloudError(
+      'admin/schema-unavailable',
+      'The content schema does not expose a safe words-per-gate limit.'
+    );
+  }
+  const countSnapshot = await getCountFromServer(wordsCollection(worldId, rankId, gateId));
+  assertAdminContext(context);
+  const actualWordCount = Number(countSnapshot.data().count);
+  if (!Number.isSafeInteger(actualWordCount) || actualWordCount < 0) {
+    throw adminCloudError('admin/corrupt-data', 'The actual gate word count is invalid.');
+  }
+  if (actualWordCount > schemaLimit) {
+    throw adminCloudError(
+      'content/gate-word-limit',
+      `A gate cannot publish more than ${schemaLimit} words. Archive or move the excess words first.`,
+      { actualWordCount, schemaLimit }
+    );
+  }
+
   let publishedDraftWordCount = 0;
-  for (let batchIndex = 0; batchIndex < MAX_GATE_DRAFT_PUBLISH_BATCHES; batchIndex += 1) {
+  const maximumBatches = Math.ceil(schemaLimit / BULK_WORD_LIMIT) + 1;
+  for (let batchIndex = 0; batchIndex < maximumBatches; batchIndex += 1) {
     const snapshot = await getDocs(query(
       wordsCollection(worldId, rankId, gateId),
       where('status', '==', 'draft'),

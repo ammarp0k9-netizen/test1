@@ -2847,6 +2847,8 @@ async function startLevelPlacementOnce(user, world, level, options) {
   });
   const targetJourneyRef = journeyRef(user.uid, world);
   const sessionRef = levelPlacementSessionRef(user.uid, world, assessment);
+  let committedJourney = null;
+  let committedSession = null;
   try {
     await runTransaction(db, async (transaction) => {
       const [journeySnapshot, sessionSnapshot] = await Promise.all([
@@ -2886,6 +2888,20 @@ async function startLevelPlacementOnce(user, world, level, options) {
         passedCefrLevels: Array.from(new Set(current.passedCefrLevels || [])),
         updatedAt: serverTimestamp(),
       };
+      const committedAt = new Date();
+      committedSession = {
+        ...seedData,
+        assessmentId: assessment,
+        worldId: world,
+        startedAt: committedAt,
+        updatedAt: committedAt,
+      };
+      committedJourney = {
+        ...current,
+        ...parentUpdate,
+        worldId: world,
+        updatedAt: committedAt,
+      };
       logJourneyProgressionCommit({
         authUid: user.uid,
         operations: [
@@ -2919,10 +2935,17 @@ async function startLevelPlacementOnce(user, world, level, options) {
     );
   }
   resetCache(user.uid);
-  journey = await getJourney(world, { force: true });
+  if (!committedJourney || !committedSession) {
+    throw journeyCloudError(
+      'level-placement/start-missing',
+      'Level Placement started without a local commit receipt.'
+    );
+  }
+  journey = committedJourney;
+  cache.journeys.set(world, journey);
   cache.active = journey;
-  const session = await getLevelPlacementSession(world, assessment, { force: true });
-  return makeLevelPlacementBundle(journey, session);
+  cache.levelPlacementSessions.set(`${world}/${assessment}`, committedSession);
+  return makeLevelPlacementBundle(journey, committedSession);
 }
 
 async function startLevelPlacement(worldId, cefrLevel, options) {

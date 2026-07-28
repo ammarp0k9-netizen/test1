@@ -19,6 +19,7 @@ let transactionBarrier = null;
 let callableBarrier = null;
 let failNextCallable = '';
 let conflictNextCallable = '';
+let forcedWordCount = null;
 
 function collection(parent, name) {
   const path = parent?.path ? `${parent.path}/${name}` : name;
@@ -84,6 +85,15 @@ function getDocs(reference) {
     .find((constraint) => constraint.type === 'limit');
   if (pageLimit) docs = docs.slice(0, pageLimit.value);
   return Promise.resolve({ docs });
+}
+
+async function getCountFromServer(reference) {
+  const snapshot = await getDocs(reference);
+  return {
+    data: () => ({
+      count: forcedWordCount === null ? snapshot.docs.length : forcedWordCount,
+    }),
+  };
 }
 
 function query(reference, ...constraints) {
@@ -191,6 +201,7 @@ const dependencies = {
   doc,
   getDoc: async (reference) => snapshotFor(reference),
   getDocs,
+  getCountFromServer,
   getFirestore: () => db,
   limit,
   orderBy: () => ({}),
@@ -631,6 +642,30 @@ assert.equal(store.get(draftWordOnePath).version, 2);
 assert.equal(store.get(draftWordTwoPath).version, 2);
 assert.equal(store.get(archivedWordPath).status, 'archived');
 assert.equal(store.get(archivedWordPath).version, 1);
+
+const overLimitGateId = 'over-limit-gate';
+const overLimitGatePath = `${rankPath}/gates/${overLimitGateId}`;
+store.set(overLimitGatePath, {
+  ...store.get(createdPath),
+  gateId: overLimitGateId,
+  title: 'Over Limit Gate',
+  status: 'draft',
+  version: 1,
+  wordCount: 0,
+});
+forcedWordCount = windowObject.LootLinguaContentSchema.LIMITS.wordsPerGate + 1;
+await assert.rejects(
+  () => api.setGateStatus('world_1', 'rank_1', overLimitGateId, 'published', 1),
+  (error) => (
+    error?.code === 'content/gate-word-limit' &&
+    error?.details?.actualWordCount === 2001 &&
+    error?.details?.schemaLimit === 2000
+  )
+);
+assert.equal(store.get(overLimitGatePath).status, 'draft');
+assert.equal(store.get(overLimitGatePath).version, 1);
+forcedWordCount = null;
+
 assert.deepEqual(
   plain(await api.publishGateDraftWords('world_1', 'rank_1', publishGateId)),
   { publishedDraftWordCount: 0 },
