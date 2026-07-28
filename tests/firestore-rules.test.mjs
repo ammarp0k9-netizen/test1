@@ -2354,13 +2354,57 @@ try {
     assert.equal(nextGate.data().status, 'available');
   });
 
-  await test('Level Placement sources are owner-only, selected, and reward-free', async () => {
+  await test('level-placement-source-contract-e2e is owner-only, selected, retryable, and reward-free', async () => {
+    const sourceUid = 'level-source-contract-user';
+    const sourceUser = environment.authenticatedContext(sourceUid).firestore();
+    const sourceJourneyPath = `users/${sourceUid}/contentProgress/level-world`;
+    const sourceSessionPath =
+      `${sourceJourneyPath}/levelPlacementSessions/${levelAssessmentId}`;
+    await environment.withSecurityRulesDisabled(async (context) => {
+      const seedDb = context.firestore();
+      await Promise.all([
+        setDoc(doc(seedDb, sourceJourneyPath), {
+          ...journey('level-world', 'level-rank-a1', 'level-gate-a1'),
+          activeLevelPlacementAssessmentId: '',
+          activeLevelPlacementCefrLevel: '',
+          levelPlacementStatus: 'completed',
+          passedCefrLevels: ['A1'],
+          levelPlacementAssessmentIds: { A1: levelAssessmentId }
+        }),
+        setDoc(doc(seedDb, `users/${sourceUid}/meta/active_content_journey`), {
+          worldId: 'level-world',
+          journeyVersion: 1,
+          updatedAt: timestamp
+        }),
+        setDoc(doc(seedDb, sourceSessionPath), {
+          ...levelPlacementSession(levelAssessmentId),
+          status: 'completed',
+          answers: [{
+            questionId: 'level-question-a1',
+            rankId: 'level-rank-a1',
+            gateId: 'level-gate-a1',
+            contentWordId: 'level-word-a1',
+            wordKey: 'level-word-a1',
+            selectedQuestionId: 'level-question-a1',
+            correct: true
+          }],
+          currentQuestionIndex: 1,
+          correctCount: 1,
+          resultApplied: true,
+          startedAt: timestamp,
+          updatedAt: timestamp,
+          answersCompletedAt: timestamp,
+          assessedAt: timestamp,
+          completedAt: timestamp
+        })
+      ]);
+    });
     const sourceId = `${levelAssessmentId}~level-word-a1`;
     const sourcePath =
-      `users/level-user/contentWords/level-word-a1/sources/level_placement_${sourceId}`;
-    const canonicalPath = 'users/level-user/contentWords/level-word-a1';
-    const batch = writeBatch(levelUser);
-    batch.set(doc(levelUser, canonicalPath), {
+      `users/${sourceUid}/contentWords/level-word-a1/sources/level_placement_${sourceId}`;
+    const canonicalPath = `users/${sourceUid}/contentWords/level-word-a1`;
+    const batch = writeBatch(sourceUser);
+    batch.set(doc(sourceUser, canonicalPath), {
       canonicalId: 'level-word-a1',
       normalizationVersion: 1,
       normalizedWord: 'level-word-a1',
@@ -2386,7 +2430,7 @@ try {
       joinedAt: serverTimestamp(),
       updatedAt: serverTimestamp()
     });
-    batch.set(doc(levelUser, sourcePath), {
+    batch.set(doc(sourceUser, sourcePath), {
       worldId: 'level-world',
       rankId: 'level-rank-a1',
       gateId: 'level-gate-a1',
@@ -2401,7 +2445,97 @@ try {
     });
     await assertSucceeds(batch.commit());
     await assertFails(getDoc(doc(userB, sourcePath)));
-    await assertFails(updateDoc(doc(levelUser, levelSessionPath), {
+    const forgedSource = writeBatch(sourceUser);
+    forgedSource.set(doc(
+      sourceUser,
+      `users/${sourceUid}/contentWords/forged-level-word`
+    ), {
+      canonicalId: 'forged-level-word',
+      normalizationVersion: 1,
+      normalizedWord: 'forged-level-word',
+      masteryKey: 'forged-level-word',
+      legacyWordId: 'forged-level-word',
+      word: 'forged-level-word',
+      wordKey: 'forged-level-word',
+      translation: 'meaning',
+      meaning: 'meaning',
+      forgetCount: 0,
+      contentRefPath: paths.levelWordA1,
+      primarySource: {
+        worldId: 'level-world',
+        rankId: 'level-rank-a1',
+        gateId: 'level-gate-a1',
+        contentWordId: 'forged-level-word',
+        sourceId: `level_placement_${levelAssessmentId}~forged-level-word`,
+        addedFrom: 'level-placement'
+      },
+      sourceCount: 1,
+      schemaVersion: 1,
+      createdAt: serverTimestamp(),
+      joinedAt: serverTimestamp(),
+      updatedAt: serverTimestamp()
+    });
+    forgedSource.set(doc(
+      sourceUser,
+      `users/${sourceUid}/contentWords/forged-level-word/sources/level_placement_${levelAssessmentId}~forged-level-word`
+    ), {
+      worldId: 'level-world',
+      rankId: 'level-rank-a1',
+      gateId: 'level-gate-a1',
+      contentWordId: 'forged-level-word',
+      type: 'level-placement',
+      addedFrom: 'level-placement',
+      operationId: `level-placement:${levelAssessmentId}`,
+      linkedAt: serverTimestamp(),
+      assessmentId: levelAssessmentId,
+      cefrLevel: 'A1',
+      placementResult: 'correct'
+    });
+    await assertFails(forgedSource.commit());
+    await assertSucceeds(updateDoc(doc(sourceUser, sourceSessionPath), {
+      saveWordChoice: 'all',
+      saveWordPendingIds: [],
+      saveWordSavedIds: ['level-question-a1'],
+      saveWordFailures: [],
+      saveWordSummary: {
+        created: 1,
+        sourceLinked: 0,
+        alreadyLinked: 0,
+        restored: 0,
+        updatedMissingFields: 0,
+        hiddenPreserved: 0,
+        failed: 0
+      },
+      wordsSaveCompletedAt: serverTimestamp(),
+      updatedAt: serverTimestamp()
+    }));
+    await assertSucceeds(updateDoc(doc(sourceUser, sourceSessionPath), {
+      saveWordChoice: 'all',
+      saveWordPendingIds: [],
+      saveWordSavedIds: ['level-question-a1'],
+      saveWordFailures: [],
+      saveWordSummary: {
+        created: 1,
+        sourceLinked: 0,
+        alreadyLinked: 1,
+        restored: 0,
+        updatedMissingFields: 0,
+        hiddenPreserved: 0,
+        failed: 0
+      },
+      wordsSaveCompletedAt: serverTimestamp(),
+      updatedAt: serverTimestamp()
+    }));
+    await assertFails(updateDoc(doc(sourceUser, sourceSessionPath), {
+      saveWordChoice: 'none',
+      saveWordPendingIds: [],
+      saveWordSavedIds: [],
+      saveWordFailures: [],
+      saveWordSummary: {},
+      wordsSaveCompletedAt: serverTimestamp(),
+      updatedAt: serverTimestamp()
+    }));
+    await assertFails(updateDoc(doc(sourceUser, sourceSessionPath), {
       userXP: 100,
       updatedAt: serverTimestamp()
     }));
@@ -3531,15 +3665,22 @@ try {
     assert.equal(projectedGate.exists(), false);
   });
 
-  await test('accepts a production-sized A2 start from the committed A1 outcome', async () => {
+  await test('production-a2-e2e accepts 24 answers and the full next-level outcome', async () => {
     const uid = 'production-sized-a2-start-user';
     const worldId = 'production-sized-a2-start-world';
     const assessmentId = 'level_placement_v2_A2_production_sized_start';
     const a1RankIds = Array.from({ length: 4 }, (_, index) => `a1-rank-${index + 1}`);
     const a1GateIds = Array.from({ length: 19 }, (_, index) => `a1-gate-${index + 1}`);
     const a2RankIds = Array.from({ length: 6 }, (_, index) => `a2-rank-${index + 1}`);
+    const a2GateIds = a2RankIds.flatMap((_, rankIndex) => (
+      Array.from({ length: 3 }, (_, gateIndex) => (
+        `a2-gate-${rankIndex + 1}-${gateIndex + 1}`
+      ))
+    ));
     const activeRankId = a2RankIds[0];
     const activeGateId = 'a2-gate-1-1';
+    const nextRankId = 'b1-rank-1';
+    const nextGateId = 'b1-gate-1-1';
     const journeyPath = `users/${uid}/contentProgress/${worldId}`;
     const sessionPath = `${journeyPath}/levelPlacementSessions/${assessmentId}`;
     const db = environment.authenticatedContext(uid).firestore();
@@ -3551,6 +3692,7 @@ try {
           rankId,
           gateId: `a2-gate-${rankIndex + 1}-${(wordIndex % 3) + 1}`,
           contentWordId: `a2-word-${questionNumber}`,
+          normalizedWord: `word-${questionNumber}`,
           wordKey: `a2-word-key-${questionNumber}`,
           order: wordIndex,
           word: `word-${questionNumber}`,
@@ -3658,13 +3800,28 @@ try {
     await environment.withSecurityRulesDisabled(async (context) => {
       const seedDb = context.firestore();
       await setDoc(doc(seedDb, `content_worlds/${worldId}`), world(worldId, 'published'));
-      await setDoc(doc(seedDb, `content_worlds/${worldId}/ranks/${activeRankId}`), {
-        ...rank(worldId, activeRankId, 'published'),
-        cefrLevel: 'A2'
+      for (const [rankIndex, rankId] of a2RankIds.entries()) {
+        await setDoc(doc(seedDb, `content_worlds/${worldId}/ranks/${rankId}`), {
+          ...rank(worldId, rankId, 'published'),
+          cefrLevel: 'A2',
+          order: rankIndex + 1
+        });
+        for (let gateIndex = 0; gateIndex < 3; gateIndex += 1) {
+          const gateId = `a2-gate-${rankIndex + 1}-${gateIndex + 1}`;
+          await setDoc(
+            doc(seedDb, `content_worlds/${worldId}/ranks/${rankId}/gates/${gateId}`),
+            { ...gate(worldId, rankId, gateId, 'published'), order: gateIndex + 1 }
+          );
+        }
+      }
+      await setDoc(doc(seedDb, `content_worlds/${worldId}/ranks/${nextRankId}`), {
+        ...rank(worldId, nextRankId, 'published'),
+        cefrLevel: 'B1',
+        order: 1
       });
       await setDoc(
-        doc(seedDb, `content_worlds/${worldId}/ranks/${activeRankId}/gates/${activeGateId}`),
-        gate(worldId, activeRankId, activeGateId, 'published')
+        doc(seedDb, `content_worlds/${worldId}/ranks/${nextRankId}/gates/${nextGateId}`),
+        gate(worldId, nextRankId, nextGateId, 'published')
       );
     });
     await seedJourneyCase(uid);
@@ -3717,6 +3874,106 @@ try {
     assert.equal(savedJourney.data().activeGateId, activeGateId);
     assert.deepEqual(savedJourney.data().levelPlacementPassedRankIds, a1RankIds);
     assert.deepEqual(savedJourney.data().levelPlacementClearedGateIds, a1GateIds);
+
+    const answers = [];
+    for (let index = 0; index < primaryWords.length; index += 1) {
+      const word = primaryWords[index];
+      answers.push({
+        questionId: word.questionId,
+        rankId: word.rankId,
+        gateId: word.gateId,
+        contentWordId: word.contentWordId,
+        wordKey: word.wordKey,
+        selectedQuestionId: word.questionId,
+        correct: true
+      });
+      const finalAnswer = index === primaryWords.length - 1;
+      const update = {
+        status: finalAnswer ? 'awaiting-decision' : 'active',
+        currentQuestionIndex: index + 1,
+        orderedQuestionIds: primaryWords.map((item) => item.questionId),
+        answers: answers.slice(),
+        correctCount: index + 1,
+        adaptiveRound: 0,
+        adaptiveRankIds: [],
+        perRankStats: finalAnswer ? Object.fromEntries(a2RankIds.map((rankId) => [rankId, {
+          asked: 4,
+          correct: 4,
+          ratio: 1,
+          passThreshold: 0.75,
+          requiredCorrect: 3,
+          confidence: 'high',
+          status: 'passed'
+        }])) : {},
+        ambiguousRankIds: [],
+        recommendedStartRankId: '',
+        recommendedStartGateId: '',
+        passedRankIds: finalAnswer ? a2RankIds : [],
+        passedPrefixLength: finalAnswer ? a2RankIds.length : 0,
+        passedLevel: finalAnswer,
+        ...(finalAnswer ? {
+          answersCompletedAt: serverTimestamp(),
+          resultApplied: false
+        } : {}),
+        updatedAt: serverTimestamp()
+      };
+      await assertSucceeds(updateDoc(doc(db, sessionPath), update));
+    }
+
+    const awaitingSession = await getDoc(doc(db, sessionPath));
+    assert.equal(awaitingSession.data().status, 'awaiting-decision');
+    assert.equal(awaitingSession.data().answers.length, 24);
+    assert.deepEqual(awaitingSession.data().passedRankIds, a2RankIds);
+    assert.equal(awaitingSession.data().passedLevel, true);
+
+    const result = writeBatch(db);
+    result.update(doc(db, journeyPath), {
+      activeRankId: nextRankId,
+      activeGateId: nextGateId,
+      unlockedRankIds: [...a1RankIds, ...a2RankIds, nextRankId],
+      unlockedGateIds: [...a1GateIds, ...a2GateIds, nextGateId],
+      passedCefrLevels: ['A1', 'A2'],
+      partialCefrLevels: [],
+      activeLevelPlacementAssessmentId: '',
+      activeLevelPlacementCefrLevel: '',
+      levelPlacementStatus: 'completed',
+      contentJourneyStatus: 'in-progress',
+      levelPlacementAssessmentIds: {
+        A1: 'level_placement_v2_A1_committed',
+        A2: assessmentId
+      },
+      levelPlacementPassedRankIds: [...a1RankIds, ...a2RankIds],
+      levelPlacementClearedGateIds: [...a1GateIds, ...a2GateIds],
+      updatedAt: serverTimestamp()
+    });
+    result.update(doc(db, sessionPath), {
+      status: 'completed',
+      resultApplied: true,
+      assessedAt: serverTimestamp(),
+      completedAt: serverTimestamp(),
+      nextCefrLevel: 'B1',
+      resultStartRankId: nextRankId,
+      resultStartGateId: nextGateId,
+      resultUnlockedRankIds: [...a2RankIds, nextRankId],
+      resultUnlockedGateIds: [...a2GateIds, nextGateId],
+      resultClearedGateIds: a2GateIds,
+      completedCurrentContent: false,
+      updatedAt: serverTimestamp()
+    });
+    await assertSucceeds(result.commit());
+
+    const [completedJourney, completedSession] = await Promise.all([
+      getDoc(doc(db, journeyPath)),
+      getDoc(doc(db, sessionPath))
+    ]);
+    assert.equal(completedSession.data().status, 'completed');
+    assert.equal(completedSession.data().resultApplied, true);
+    assert.equal(completedSession.data().resultStartRankId, nextRankId);
+    assert.equal(completedSession.data().resultStartGateId, nextGateId);
+    assert.equal(completedJourney.data().activeRankId, nextRankId);
+    assert.equal(completedJourney.data().activeGateId, nextGateId);
+    assert.equal(completedJourney.data().levelPlacementStatus, 'completed');
+    assert.deepEqual(completedJourney.data().passedCefrLevels, ['A1', 'A2']);
   });
 
   await test('a completed paused Level Placement resumes to its result decision', async () => {

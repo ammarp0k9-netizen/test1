@@ -144,6 +144,41 @@ test('the v2 session preserves sampled rank versions required by Firestore Rules
   assert.deepEqual(Object.keys(session.rankVersions).sort(), ['rank-1', 'rank-2']);
 });
 
+test('session snapshots preserve normalized identity and legacy snapshots are upgraded safely', () => {
+  const value = sample(1);
+  const current = value.selectedWords[0];
+  assert.equal(typeof current.normalizedWord, 'string');
+  assert.ok(current.normalizedWord);
+  assert.equal(current.wordKey, placement.normalizeSavedWordSnapshot(current).wordKey);
+
+  const { normalizedWord, ...legacy } = current;
+  const upgraded = placement.normalizeSavedWordSnapshot(legacy);
+  assert.equal(upgraded.normalizedWord, normalizedWord);
+  assert.equal(upgraded.wordKey, current.wordKey);
+  assert.throws(
+    () => placement.normalizeSavedWordSnapshot({ ...legacy, wordKey: 'forged-key' }),
+    (error) => error?.code === 'level-placement/invalid-word-snapshot'
+  );
+});
+
+test('Level Placement question construction ignores personal and mixed word pools', () => {
+  const published = rankBundle(1);
+  const result = placement.buildLevelSample({
+    cefrLevel: 'A1',
+    assessmentSeed: 'published-only-contract',
+    rankBundles: [published],
+    personalWords: [{
+      id: 'personal-only',
+      word: 'Personal',
+      translation: 'شخصية',
+      wordKey: 'personal-only',
+      status: 'published',
+    }],
+  });
+  assert.equal(result.selectedWords.every((item) => item.contentWordId.startsWith('word-')), true);
+  assert.equal(result.selectedWords.some((item) => item.contentWordId === 'personal-only'), false);
+});
+
 test('sampling distributes a rank across gates and never repeats wordKey', () => {
   const result = sample(2);
   const primary = result.selectedWords.filter((item) => result.orderedQuestionIds.includes(item.questionId));
@@ -339,6 +374,17 @@ test('word-save retry keeps the original choice and retries pending IDs only', (
     worldsSource,
     /إعادة حفظ الكلمات المتعثرة'[\s\S]{0,180}savePublishedLevelPlacementWords\(bundle, 'incorrect-only'\)/
   );
+});
+
+test('final-answer UI distinguishes a saved answer from a failed outcome application', () => {
+  const answerBlock = worldsSource.slice(
+    worldsSource.indexOf('async function submitPublishedLevelPlacementAnswer'),
+    worldsSource.indexOf('function appendPublishedLevelPlacementStats')
+  );
+  assert.match(answerBlock, /error\?\.operation[\s\S]*apply-placement-outcome/);
+  assert.match(answerBlock, /تم حفظ إجابتك الأخيرة، لكن تعذر تثبيت نتيجة الاختبار/);
+  assert.match(answerBlock, /submitPublishedLevelPlacementAnswer\(bundle, question, selectedId\)/);
+  assert.match(worldsSource, /save-level-placement-word-receipt/);
 });
 
 test('completed paused results resume into result application and keep save choices usable', () => {

@@ -132,6 +132,33 @@ function logJourneyProgressionCommit(details) {
   });
 }
 
+function logJourneyOperationStage(details) {
+  if (window.__LOOTLINGUA_JOURNEY_DIAGNOSTICS__ !== true) return;
+  const source = details && typeof details === 'object' ? details : {};
+  console.info('[LootLingua journey operation]', {
+    operation: String(source.operation || 'journey'),
+    stage: String(source.stage || ''),
+    worldId: String(source.worldId || ''),
+    assessmentId: String(source.assessmentId || ''),
+    sessionStatusBefore: String(source.sessionStatusBefore || ''),
+    sessionStatusAfter: String(source.sessionStatusAfter || ''),
+    resultApplied: source.resultApplied === true,
+    saveWordChoice: String(source.saveWordChoice || ''),
+    questionCount: Number(source.questionCount) || 0,
+    answerCount: Number(source.answerCount) || 0,
+    targetCount: Number(source.targetCount) || 0,
+    savedCount: Number(source.savedCount) || 0,
+    failureCount: Number(source.failureCount) || 0,
+    commitSucceeded: source.commitSucceeded === true,
+    destination: {
+      rankId: String(source.destination?.rankId || ''),
+      gateId: String(source.destination?.gateId || ''),
+      completedCurrentContent: source.destination?.completedCurrentContent === true,
+    },
+    failureCode: String(source.failureCode || ''),
+  });
+}
+
 function requireServices() {
   if (!auth || !db) {
     throw journeyCloudError('journey/unavailable', 'Journey storage is unavailable.');
@@ -749,22 +776,30 @@ function legacyWordPayload(uid, word) {
 }
 
 async function linkPublishedWord(uid, word, personalIndex, operationId, options) {
-  const identity = schemaApi().normalizeWordIdentity(word);
+  let savedWord;
+  try {
+    savedWord = options?.sourceType === 'level-placement'
+      ? levelPlacementCore().normalizeSavedWordSnapshot(word)
+      : word;
+  } catch (error) {
+    throw journeyCloudError('journey/invalid-word', error?.message, error);
+  }
+  const identity = schemaApi().normalizeWordIdentity(savedWord);
   if (!identity.normalizedWord || !identity.wordKey) {
     throw journeyCloudError('journey/invalid-word', 'Published word identity is invalid.');
   }
   if (
-    word.normalizedWord !== identity.normalizedWord ||
-    word.wordKey !== identity.wordKey
+    savedWord.normalizedWord !== identity.normalizedWord ||
+    savedWord.wordKey !== identity.wordKey
   ) {
     throw journeyCloudError('journey/invalid-word', 'Published word identity is inconsistent.');
   }
 
   const source = {
-    worldId: core().cleanId(word.worldId, 'World'),
-    rankId: core().cleanId(word.rankId, 'Rank'),
-    gateId: core().cleanId(word.gateId, 'Gate'),
-    contentWordId: core().cleanId(word.contentWordId, 'Word'),
+    worldId: core().cleanId(savedWord.worldId, 'World'),
+    rankId: core().cleanId(savedWord.rankId, 'Rank'),
+    gateId: core().cleanId(savedWord.gateId, 'Gate'),
+    contentWordId: core().cleanId(savedWord.contentWordId, 'Word'),
   };
   const sourceType = options?.sourceType === 'level-placement'
     ? 'level-placement'
@@ -780,7 +815,7 @@ async function linkPublishedWord(uid, word, personalIndex, operationId, options)
     const indexedWord = personalIndex.get(identity.wordKey);
     const result = await lifecycleCloud.upsertUserWordWithSource({
       uid,
-      word,
+      word: savedWord,
       existingWordId: indexedWord?.id,
       operationId,
       restoreHidden: options?.restoreHidden === true,
@@ -803,7 +838,7 @@ async function linkPublishedWord(uid, word, personalIndex, operationId, options)
       id: result.wordId,
       data: {
         ...(indexedWord?.data || {}),
-        ...contentWordToUserWordFields(word, identity),
+        ...contentWordToUserWordFields(savedWord, identity),
         hiddenFromDictionary: result.hiddenPreserved,
       },
     });
@@ -833,13 +868,13 @@ async function linkPublishedWord(uid, word, personalIndex, operationId, options)
       if (!canonicalSnapshot.exists()) {
         transaction.set(
           canonicalRef,
-          canonicalWordPayload(word, identity, legacyWordId, source, {
+          canonicalWordPayload(savedWord, identity, legacyWordId, source, {
             sourceId,
             sourceType,
           })
         );
       }
-      const incomingWord = legacyWordPayload(uid, word);
+      const incomingWord = legacyWordPayload(uid, savedWord);
       if (!legacySnapshot.exists() && !indexedWord) {
         transaction.set(legacyRef, incomingWord);
       } else if (legacySnapshot.exists()) {
@@ -1065,8 +1100,20 @@ async function recordQuizEvidenceBatch(input = {}) {
     ineligible: results.filter((result) => result === 'ineligible').length +
       Math.max(0, entries.length - correctEntries.length),
   };
-  if (summary.recorded > 0) await evaluateActiveJourneyReadiness();
-  return summary;
+  let readinessError = null;
+  if (summary.recorded > 0) {
+    try {
+      await evaluateActiveJourneyReadiness();
+    } catch (error) {
+      readinessError = journeyOperationError(error, 'project-quiz-evidence-readiness');
+      console.warn('[Journey] Quiz evidence committed; readiness projection remains retryable.', {
+        code: readinessError.code,
+        operation: readinessError.operation,
+        recordedCount: summary.recorded,
+      });
+    }
+  }
+  return { ...summary, readinessError };
 }
 
 let journeyReadinessEvaluation = null;
@@ -2733,6 +2780,50 @@ async function makeLevelPlacementBundle(journey, session) {
   };
 }
 
+async function makeCommittedLevelPlacementBundle(journey, session, details = {}) {
+  let world = null;
+  let postCommitRefreshError = null;
+  try {
+    world = await contentApi().getPublishedWorld(journey.worldId);
+  } catch (error) {
+    postCommitRefreshError = journeyOperationError(
+      error,
+      'refresh-level-placement-result',
+      {
+        worldId: String(journey?.worldId || session?.worldId || ''),
+        assessmentId: String(session?.assessmentId || ''),
+      }
+    );
+    logJourneyOperationStage({
+      operation: 'apply-placement-outcome',
+      stage: 'post-commit-refresh-failed',
+      worldId: journey?.worldId || session?.worldId,
+      assessmentId: session?.assessmentId,
+      sessionStatusAfter: session?.status,
+      resultApplied: session?.resultApplied,
+      commitSucceeded: true,
+      destination: {
+        rankId: session?.resultStartRankId,
+        gateId: session?.resultStartGateId,
+        completedCurrentContent: session?.completedCurrentContent,
+      },
+      failureCode: postCommitRefreshError.code,
+    });
+  }
+  return {
+    journey,
+    session,
+    world: world || {
+      worldId: String(journey?.worldId || session?.worldId || ''),
+      title: '',
+      status: 'published',
+    },
+    executionContext: { source: 'level-placement', suppressRewards: true },
+    postCommitRefreshError,
+    ...details,
+  };
+}
+
 async function getLevelPlacementResult(worldId, assessmentId, options) {
   const [journey, session] = await Promise.all([
     getJourney(worldId, options),
@@ -3105,13 +3196,39 @@ async function reconcilePreviouslyAppliedPlacementOutcome(user, world, assessmen
       { uid: user.uid, worldId: world, assessmentId: assessment }
     );
   }
+  let sessionReconciliationError = null;
+  let savedSession = session;
   if (session.status !== 'completed') {
-    await finishLevelPlacement(world, assessment, 'complete');
+    try {
+      await finishLevelPlacement(world, assessment, 'complete');
+      savedSession = cache.levelPlacementSessions.get(`${world}/${assessment}`) || session;
+    } catch (error) {
+      sessionReconciliationError = journeyOperationError(
+        error,
+        'reconcile-placement-session-status',
+        { worldId: world, assessmentId: assessment }
+      );
+    }
   }
-  return {
-    ...(await getLevelPlacementResult(world, assessment, { force: true })),
+  let journey = cache.journeys.get(world) || cache.active;
+  let journeyRefreshError = null;
+  try {
+    journey = await getJourney(world, { force: true });
+  } catch (error) {
+    journeyRefreshError = journeyOperationError(
+      error,
+      'refresh-applied-placement-journey',
+      { worldId: world, assessmentId: assessment }
+    );
+    if (!journey || String(journey.worldId || '') !== world) {
+      throw journeyRefreshError;
+    }
+  }
+  return makeCommittedLevelPlacementBundle(journey, savedSession, {
     progressReconciliationError,
-  };
+    sessionReconciliationError,
+    journeyRefreshError,
+  });
 }
 
 async function applyPlacementOutcome(worldId, assessmentId) {
@@ -3170,6 +3287,21 @@ async function applyPlacementOutcome(worldId, assessmentId) {
   const pointerRef = activeJourneyRef(user.uid);
   let committedJourney = null;
   let committedSession = null;
+  logJourneyOperationStage({
+    operation: 'apply-placement-outcome',
+    stage: 'commit-attempt',
+    worldId: world,
+    assessmentId: assessment,
+    sessionStatusBefore: session.status,
+    resultApplied: session.resultApplied,
+    questionCount: session.orderedQuestionIds?.length,
+    answerCount: session.answers?.length,
+    destination: {
+      rankId: targetRankId,
+      gateId: targetGateId,
+      completedCurrentContent,
+    },
+  });
   try {
     await runTransaction(db, async (transaction) => {
         const snapshots = await Promise.all([
@@ -3371,6 +3503,23 @@ async function applyPlacementOutcome(worldId, assessmentId) {
         }
       });
   } catch (error) {
+    logJourneyOperationStage({
+      operation: 'apply-placement-outcome',
+      stage: 'commit-failed',
+      worldId: world,
+      assessmentId: assessment,
+      sessionStatusBefore: session.status,
+      resultApplied: false,
+      questionCount: session.orderedQuestionIds?.length,
+      answerCount: session.answers?.length,
+      commitSucceeded: false,
+      destination: {
+        rankId: targetRankId,
+        gateId: targetGateId,
+        completedCurrentContent,
+      },
+      failureCode: error?.code,
+    });
     throw journeyOperationError(error, 'apply-placement-outcome', {
       uid: user.uid,
       worldId: world,
@@ -3391,6 +3540,23 @@ async function applyPlacementOutcome(worldId, assessmentId) {
   cache.journeys.set(world, journey);
   cache.active = journey;
   cache.levelPlacementSessions.set(`${world}/${assessment}`, savedSession);
+  logJourneyOperationStage({
+    operation: 'apply-placement-outcome',
+    stage: 'commit-succeeded',
+    worldId: world,
+    assessmentId: assessment,
+    sessionStatusBefore: session.status,
+    sessionStatusAfter: savedSession.status,
+    resultApplied: savedSession.resultApplied,
+    questionCount: savedSession.orderedQuestionIds?.length,
+    answerCount: savedSession.answers?.length,
+    commitSucceeded: true,
+    destination: {
+      rankId: savedSession.resultStartRankId,
+      gateId: savedSession.resultStartGateId,
+      completedCurrentContent: savedSession.completedCurrentContent,
+    },
+  });
   let progressReconciliationError = null;
   try {
     await reconcilePlacementOutcomeProgress(user, world, assessment, savedSession);
@@ -3415,10 +3581,9 @@ async function applyPlacementOutcome(worldId, assessmentId) {
       recommendedStartRankId: savedSession.recommendedStartRankId || '',
     },
   }));
-  return {
-    ...(await makeLevelPlacementBundle(journey, savedSession)),
+  return makeCommittedLevelPlacementBundle(journey, savedSession, {
     progressReconciliationError,
-  };
+  });
 }
 
 async function applyLevelPlacementResult(worldId, assessmentId) {
@@ -3434,6 +3599,7 @@ async function answerLevelPlacementQuestion(worldId, assessmentId, selectedQuest
   let preview = null;
   let savedJourney = null;
   let savedSession = null;
+  let resumesSavedOutcome = false;
   const trace = window.LootLinguaOperations?.startTrace('level-placement-answer');
   try {
     await runTransaction(db, async (transaction) => {
@@ -3444,6 +3610,21 @@ async function answerLevelPlacementQuestion(worldId, assessmentId, selectedQuest
       trace?.count('firestoreReads', 2);
       const journey = journeySnapshot.data() || {};
       const session = sessionSnapshot.data() || {};
+      const answersComplete =
+        Number(session.currentQuestionIndex) === (session.orderedQuestionIds || []).length &&
+        (session.answers || []).length === (session.orderedQuestionIds || []).length;
+      const savedFinalAnswer = (session.answers || []).at(-1);
+      if (
+        sessionSnapshot.exists() &&
+        answersComplete &&
+        ['awaiting-decision', 'paused', 'completed'].includes(session.status) &&
+        String(savedFinalAnswer?.selectedQuestionId || '') === String(selectedQuestionId || '')
+      ) {
+        savedJourney = { ...journey, worldId: world };
+        savedSession = { ...session, assessmentId: assessment, worldId: world };
+        resumesSavedOutcome = true;
+        return;
+      }
       if (
         !journeySnapshot.exists() ||
         !sessionSnapshot.exists() ||
@@ -3495,8 +3676,18 @@ async function answerLevelPlacementQuestion(worldId, assessmentId, selectedQuest
   cache.active = savedJourney;
   cache.levelPlacementSessions.set(`${world}/${assessment}`, savedSession);
   trace?.stage('transaction-complete');
-  if (savedSession.status === 'awaiting-decision') {
-    trace?.stage('round-complete').end({ finalQuestion: true });
+  if (
+    resumesSavedOutcome ||
+    ['awaiting-decision', 'completed'].includes(savedSession.status) ||
+    (
+      savedSession.status === 'paused' &&
+      Number(savedSession.currentQuestionIndex) === (savedSession.orderedQuestionIds || []).length
+    )
+  ) {
+    trace?.stage('round-complete').end({
+      finalQuestion: true,
+      resumedSavedOutcome: resumesSavedOutcome,
+    });
     return applyPlacementOutcome(world, assessment);
   }
   const bundle = {
@@ -3539,6 +3730,18 @@ async function saveLevelPlacementWords(worldId, assessmentId, choice) {
   const targetIds = previousPending.length
     ? previousPending
     : initialIds.filter((id) => !savedIds.has(String(id)));
+  logJourneyOperationStage({
+    operation: 'save-level-placement-words',
+    stage: 'word-writes-started',
+    worldId: world,
+    assessmentId: assessment,
+    sessionStatusBefore: session.status,
+    resultApplied: session.resultApplied,
+    saveWordChoice: selectedChoice,
+    questionCount: session.orderedQuestionIds?.length,
+    answerCount: session.answers?.length,
+    targetCount: targetIds.length,
+  });
   const byId = new Map((session.selectedWords || []).map((word) => [String(word.questionId), word]));
   const answerById = new Map((session.answers || []).map((answer) => [String(answer.questionId), answer]));
   const personalIndex = targetIds.length ? await readPersonalWordIndex(user.uid) : new Map();
@@ -3597,23 +3800,77 @@ async function saveLevelPlacementWords(worldId, assessmentId, choice) {
   }
   summary.failed = failures.length;
   const sessionRef = levelPlacementSessionRef(user.uid, world, assessment);
-  await runTransaction(db, async (transaction) => {
-    const snapshot = await transaction.get(sessionRef);
-    const current = snapshot.data() || {};
-    if (!snapshot.exists() || String(current.assessmentId || assessment) !== assessment) {
-      throw journeyCloudError('level-placement/session-mismatch', 'Placement session changed.');
-    }
-    transaction.update(sessionRef, {
-      saveWordChoice: selectedChoice,
-      saveWordPendingIds: failures.map((failure) => failure.questionId),
-      saveWordSavedIds: [...savedIds],
-      saveWordFailures: failures,
-      saveWordSummary: summary,
-      wordsSaveCompletedAt: failures.length ? null : serverTimestamp(),
-      updatedAt: serverTimestamp(),
+  let committedSession = null;
+  try {
+    await runTransaction(db, async (transaction) => {
+      const snapshot = await transaction.get(sessionRef);
+      const current = snapshot.data() || {};
+      if (!snapshot.exists() || String(current.assessmentId || assessment) !== assessment) {
+        throw journeyCloudError('level-placement/session-mismatch', 'Placement session changed.');
+      }
+      const committedAt = new Date();
+      committedSession = {
+        ...current,
+        assessmentId: assessment,
+        saveWordChoice: selectedChoice,
+        saveWordPendingIds: failures.map((failure) => failure.questionId),
+        saveWordSavedIds: [...savedIds],
+        saveWordFailures: failures,
+        saveWordSummary: summary,
+        wordsSaveCompletedAt: failures.length ? null : committedAt,
+        updatedAt: committedAt,
+      };
+      transaction.update(sessionRef, {
+        saveWordChoice: selectedChoice,
+        saveWordPendingIds: failures.map((failure) => failure.questionId),
+        saveWordSavedIds: [...savedIds],
+        saveWordFailures: failures,
+        saveWordSummary: summary,
+        wordsSaveCompletedAt: failures.length ? null : serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      });
     });
+  } catch (error) {
+    logJourneyOperationStage({
+      operation: 'save-level-placement-words',
+      stage: 'receipt-commit-failed',
+      worldId: world,
+      assessmentId: assessment,
+      sessionStatusBefore: session.status,
+      resultApplied: session.resultApplied,
+      saveWordChoice: selectedChoice,
+      targetCount: targetIds.length,
+      savedCount: targetIds.length - failures.length,
+      failureCount: failures.length,
+      commitSucceeded: false,
+      failureCode: error?.code,
+    });
+    throw journeyOperationError(error, 'save-level-placement-word-receipt', {
+      worldId: world,
+      assessmentId: assessment,
+    });
+  }
+  if (!committedSession) {
+    throw journeyCloudError(
+      'level-placement/save-receipt-missing',
+      'Placement word save committed without a local receipt.'
+    );
+  }
+  cache.levelPlacementSessions.set(`${world}/${assessment}`, committedSession);
+  logJourneyOperationStage({
+    operation: 'save-level-placement-words',
+    stage: failures.length ? 'partial-receipt-committed' : 'receipt-committed',
+    worldId: world,
+    assessmentId: assessment,
+    sessionStatusBefore: session.status,
+    sessionStatusAfter: committedSession.status,
+    resultApplied: committedSession.resultApplied,
+    saveWordChoice: selectedChoice,
+    targetCount: targetIds.length,
+    savedCount: targetIds.length - failures.length,
+    failureCount: failures.length,
+    commitSucceeded: true,
   });
-  cache.levelPlacementSessions.delete(`${world}/${assessment}`);
   return {
     choice: selectedChoice,
     summary,
@@ -3621,7 +3878,7 @@ async function saveLevelPlacementWords(worldId, assessmentId, choice) {
     partial: failures.length > 0,
     saved: targetIds.length - failures.length,
     total: targetIds.length,
-    session: await getLevelPlacementSession(world, assessment, { force: true }),
+    session: committedSession,
   };
 }
 

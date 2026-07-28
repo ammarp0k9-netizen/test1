@@ -241,12 +241,32 @@ const harnessSource = `(() => {
       });
     },
     async setGateStatus() { throw new Error('smoke/unexpected-gate-status'); },
+    async publishGateDraftWords() { throw new Error('smoke/unexpected-publish-gate-words'); },
     async duplicateGateAsDraft() { throw new Error('smoke/unexpected-duplicate-gate'); },
     async moveGate() {
       state.moveGateCalls += 1;
       throw new Error('smoke/move-submit-was-not-requested');
     },
-    async requestDeleteGate() { throw new Error('smoke/unexpected-delete-gate'); }
+    async requestDeleteGate() { throw new Error('smoke/unexpected-delete-gate'); },
+    async importStagingWords() { throw new Error('smoke/unexpected-import-staging'); },
+    async listStagingWords() { throw new Error('smoke/unexpected-list-staging'); },
+    async countStagingWords() { throw new Error('smoke/unexpected-count-staging'); },
+    async getStagingWord() { throw new Error('smoke/unexpected-get-staging'); },
+    async deleteStagingWords() { throw new Error('smoke/unexpected-delete-staging'); },
+    async distributeStagingWords() { throw new Error('smoke/unexpected-distribute-staging'); },
+    async listWords() { throw new Error('smoke/unexpected-list-words'); },
+    async getWord() { throw new Error('smoke/unexpected-get-word'); },
+    async createWord() { throw new Error('smoke/unexpected-create-word'); },
+    async updateWord() { throw new Error('smoke/unexpected-update-word'); },
+    async setWordStatus() { throw new Error('smoke/unexpected-word-status'); },
+    async inspectWordDuplicates() { throw new Error('smoke/unexpected-word-duplicates'); },
+    async archiveWord() { throw new Error('smoke/unexpected-archive-word'); },
+    async duplicateWord() { throw new Error('smoke/unexpected-duplicate-word'); },
+    async moveWord() { throw new Error('smoke/unexpected-move-word'); },
+    async bulkPublishWords() { throw new Error('smoke/unexpected-bulk-publish-words'); },
+    async bulkArchiveWords() { throw new Error('smoke/unexpected-bulk-archive-words'); },
+    async bulkMoveWords() { throw new Error('smoke/unexpected-bulk-move-words'); },
+    async requestDeleteWord() { throw new Error('smoke/unexpected-delete-word'); }
   });
 
   Object.defineProperty(window, 'LootLinguaAdminCloud', {

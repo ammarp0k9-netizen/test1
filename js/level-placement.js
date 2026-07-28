@@ -284,12 +284,14 @@
   }
 
   function normalizeCandidate(rank, gate, word, passThreshold) {
+    const identity = schemaApi().normalizeWordIdentity(word);
     return {
       questionId: questionId(rank.rankId, gate.gateId, word.contentWordId),
       rankId: String(rank.rankId),
       gateId: String(gate.gateId),
       contentWordId: String(word.contentWordId),
-      wordKey: String(word.wordKey),
+      normalizedWord: identity.normalizedWord,
+      wordKey: identity.wordKey,
       order: Number.isFinite(Number(word.order)) ? Number(word.order) : 0,
       word: String(word.word),
       translation: String(word.translation || word.meaning || ''),
@@ -305,6 +307,30 @@
       synonyms: Array.isArray(word.synonyms) ? word.synonyms.map(String).filter(Boolean) : [],
       pronunciation: String(word.pronunciation || ''),
       notes: String(word.notes || ''),
+    };
+  }
+
+  function normalizeSavedWordSnapshot(word) {
+    const identity = schemaApi().normalizeWordIdentity(word);
+    if (!identity.normalizedWord || !identity.wordKey) {
+      throw levelPlacementError(
+        'level-placement/invalid-word-snapshot',
+        'Placement word identity is invalid.'
+      );
+    }
+    if (
+      (word?.normalizedWord && String(word.normalizedWord) !== identity.normalizedWord) ||
+      (word?.wordKey && String(word.wordKey) !== identity.wordKey)
+    ) {
+      throw levelPlacementError(
+        'level-placement/invalid-word-snapshot',
+        'Placement word identity is inconsistent.'
+      );
+    }
+    return {
+      ...(word || {}),
+      normalizedWord: identity.normalizedWord,
+      wordKey: identity.wordKey,
     };
   }
 
@@ -806,6 +832,7 @@
     canStartLevelPlacement,
     shouldResumeLevelPlacement,
     wordIdsForSaveChoice,
+    normalizeSavedWordSnapshot,
   });
 
   Object.defineProperty(root, 'LootLinguaLevelPlacement', {

@@ -1678,8 +1678,14 @@ function publishedJourneyErrorText(error) {
   ].includes(operation)) {
     return 'تعذر تحديث تقدم العالم. لم يتم تغيير تقدمك.';
   }
-  if (operation === 'apply-level-placement-result') {
+  if (operation === 'apply-level-placement-result' || operation === 'apply-placement-outcome') {
     return 'تم حفظ إجاباتك، لكن تعذر تثبيت نتيجة الاختبار. أعد المحاولة.';
+  }
+  if (
+    operation === 'save-level-placement-words' ||
+    operation === 'save-level-placement-word-receipt'
+  ) {
+    return 'تم حفظ نتيجة الاختبار وتقدم الرحلة، لكن تعذر حفظ كلمات الاختبار. أعد محاولة الكلمات فقط.';
   }
   if (
     (code === 'permission-denied' || code === 'firestore/permission-denied') &&
@@ -2271,14 +2277,18 @@ async function submitPublishedLevelPlacementAnswer(bundle, question, selectedId)
   } catch (error) {
     publishedContentState.levelPlacementPending = false;
     publishedContentState.levelPlacementFeedback = null;
-    showToast(publishedJourneyErrorText(error), 'danger', 4800);
+    const resultSaveFailed = String(error?.operation || '') === 'apply-placement-outcome';
+    const failureText = resultSaveFailed
+      ? 'تم حفظ إجابتك الأخيرة، لكن تعذر تثبيت نتيجة الاختبار. أعد محاولة النتيجة فقط.'
+      : 'تعذر تثبيت الإجابة. أعد هذه الخطوة فقط.';
+    showToast(resultSaveFailed ? failureText : publishedJourneyErrorText(error), 'danger', 4800);
     renderPublishedLevelPlacementAssessment(bundle);
     const retryUi = window.LootLinguaOperations?.beginStatus({
       scope: 'level-placement-answer-retry',
       host: document.querySelector('.published-level-placement-view'),
-      loadingMessage: 'تعذر تثبيت الإجابة.',
+      loadingMessage: resultSaveFailed ? 'تعذر تثبيت نتيجة الاختبار.' : 'تعذر تثبيت الإجابة.',
     });
-    retryUi?.fail('تعذر تثبيت الإجابة. أعد هذه الخطوة فقط.', () => {
+    retryUi?.fail(failureText, () => {
       retryUi.clear();
       submitPublishedLevelPlacementAnswer(bundle, question, selectedId);
     });
