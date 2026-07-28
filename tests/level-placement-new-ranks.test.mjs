@@ -270,14 +270,14 @@ test('Published route preserves last-known-good journey and retries reconciliati
 
 test('failed explicit progression is classified without mutating cached Journey first', () => {
   const applyBlock = cloudSource.slice(
-    cloudSource.indexOf('async function applyLevelPlacementResult'),
+    cloudSource.indexOf('async function applyPlacementOutcome'),
     cloudSource.indexOf('async function answerLevelPlacementQuestion')
   );
   const transactionIndex = applyBlock.indexOf('await runTransaction');
   const resetIndex = applyBlock.indexOf('resetCache');
   assert.ok(transactionIndex >= 0 && resetIndex > transactionIndex);
   assert.doesNotMatch(applyBlock.slice(0, transactionIndex), /cache\.journeys\.set|cache\.active\s*=/);
-  assert.match(applyBlock, /journeyOperationError\(error, 'apply-level-placement-result'/);
+  assert.match(applyBlock, /journeyOperationError\(error, 'apply-placement-outcome'/);
   assert.match(applyBlock, /logJourneyProgressionCommit/);
   assert.match(cloudSource, /__LOOTLINGUA_JOURNEY_DIAGNOSTICS__/);
 });
@@ -326,13 +326,15 @@ test('continue routing opens the first pending new rank CTA without writing prog
 
 test('applying new-rank results does not load words, start a quiz, or award XP', () => {
   const applyBlock = cloudSource.slice(
-    cloudSource.indexOf('async function applyLevelPlacementResult'),
+    cloudSource.indexOf('async function applyPlacementOutcome'),
     cloudSource.indexOf('async function answerLevelPlacementQuestion')
   );
-  assert.match(applyBlock, /resolveLevelPlacementResultDestination/);
+  assert.match(applyBlock, /planPlacementOutcome/);
   assert.match(cloudSource, /clearedBy: 'level-placement'/);
-  assert.match(cloudSource, /async function reconcileLevelPlacementClearedGates/);
+  assert.match(applyBlock, /levelPlacementClearedGateIds/);
+  assert.match(applyBlock, /reconcilePlacementOutcomeProgress/);
+  assert.doesNotMatch(applyBlock, /progressRefs/);
   assert.match(applyBlock, /resultClearedGateIds/);
-  assert.doesNotMatch(applyBlock, /passedProgressRefs|targetSnapshotIndex/);
+  assert.match(applyBlock, /status: 'completed'/);
   assert.doesNotMatch(applyBlock, /loadGate|linkPublishedWord|startQuiz|awardXP|markDailyQuest/);
 });

@@ -1771,6 +1771,33 @@ async function openPublishedJourneyDestination(worldId, options) {
   if (destination.type === 'level-placement') {
     return showPublishedLevelPlacementResume(worldId);
   }
+  if (destination.type === 'level-placement-result' && destination.requiresApply) {
+    try {
+      const bundle = await getJourneyCloudApi().applyPlacementOutcome(
+        worldId,
+        destination.session.assessmentId
+      );
+      publishedContentState.levelPlacementBundle = bundle;
+      publishedContentState.journey = bundle.journey;
+      publishedContentState.activeJourney = bundle.journey;
+      clearPublishedJourneyError();
+      renderPublishedLevelPlacementResult(bundle);
+      return { ...destination, applied: true, bundle };
+    } catch (error) {
+      const journeyError = setPublishedJourneyError(
+        error,
+        'apply-level-placement-result',
+        () => openPublishedJourneyDestination(worldId, options),
+        worldId
+      );
+      rerenderPublishedRoute();
+      showToast(journeyError.text, 'danger', 5200);
+      return { ...destination, error };
+    }
+  }
+  if (destination.type === 'placement') {
+    return showPublishedPlacementResume(worldId);
+  }
   if (destination.type === 'new-rank-assessment') {
     window.openPublishedRank(worldId, destination.rank.rankId);
     return destination;
@@ -1813,11 +1840,6 @@ async function startOrResumePublishedJourney(world) {
     rerenderPublishedRoute();
     return null;
   }
-  if (journey.placementStatus === 'active') {
-    await showPublishedPlacementResume(world.worldId);
-    return journey;
-  }
-
   publishedContentState.journeyAction = { type: 'start', pending: true };
   rerenderPublishedRoute();
   try {
@@ -2036,6 +2058,23 @@ async function showPublishedLevelPlacementResume(worldId) {
       worldId
     );
     rerenderPublishedRoute();
+    return null;
+  }
+}
+
+async function showPublishedLevelPlacementResult(worldId, assessmentId) {
+  try {
+    const bundle = await getJourneyCloudApi().getLevelPlacementResult(
+      worldId,
+      assessmentId,
+      { force: true }
+    );
+    publishedContentState.levelPlacementBundle = bundle;
+    publishedContentState.journey = bundle.journey;
+    renderPublishedLevelPlacementResult(bundle);
+    return bundle;
+  } catch (error) {
+    showToast(publishedJourneyErrorText(error), 'danger', 5200);
     return null;
   }
 }
@@ -2304,12 +2343,26 @@ function renderPublishedLevelPlacementResult(bundle) {
     )
   );
 
+  if (bundle.progressReconciliationError) {
+    const reconciliationPanel = publishedElement('div', 'published-level-save-panel');
+    reconciliationPanel.append(
+      publishedElement('strong', '', 'تم حفظ تقدم الرحلة، وما زالت مزامنة تفاصيل بعض البوابات معلّقة.'),
+      publishedElement('span', 'published-level-save-summary', 'يمكنك متابعة الرحلة الآن أو إعادة محاولة المزامنة بشكل مستقل.'),
+      publishedButton(
+        'إعادة مزامنة تفاصيل البوابات',
+        'published-action-btn published-placement-secondary',
+        () => retryPublishedPlacementProgressReconciliation(bundle),
+        'fa-solid fa-rotate-right'
+      )
+    );
+    section.append(reconciliationPanel);
+  }
+
   const savePanel = publishedElement('div', 'published-level-save-panel');
   savePanel.append(publishedElement('strong', '', 'هل تريد حفظ كلمات الاختبار للمراجعة؟'));
   const saveActions = publishedElement('div', 'published-placement-resume-actions');
   const pendingWordIds = session.saveWordPendingIds || [];
   const saveChoiceResolved = session.saveWordChoice !== 'undecided';
-  const saveDecisionComplete = saveChoiceResolved && pendingWordIds.length === 0;
   if (pendingWordIds.length) {
     saveActions.append(publishedButton(
       'إعادة حفظ الكلمات المتعثرة',
@@ -2360,23 +2413,29 @@ function renderPublishedLevelPlacementResult(bundle) {
   section.append(savePanel);
 
   const actions = publishedElement('div', 'published-placement-resume-actions');
-  if (saveDecisionComplete && passedLevel && session.nextCefrLevel) {
+  if (passedLevel && session.nextCefrLevel) {
     actions.append(publishedButton(
-      `اختبار مستوى ${session.nextCefrLevel}`,
+      `متابعة الرحلة في ${session.nextCefrLevel}`,
       'published-action-btn published-placement-primary',
       () => continueToNextPublishedLevel(bundle),
-      'fa-solid fa-chart-line'
+      'fa-solid fa-route'
     ));
   } else if (
-    saveDecisionComplete &&
-    session.recommendedStartRankId &&
-    session.recommendedStartGateId
+    session.resultStartRankId &&
+    session.resultStartGateId
   ) {
     actions.append(publishedButton(
-      'ابدأ من هذه الرتبة',
+      'متابعة رحلة التعلم',
       'published-action-btn published-placement-primary',
       () => beginPublishedJourneyAtLevelResult(bundle),
-      'fa-solid fa-play'
+      'fa-solid fa-route'
+    ));
+  } else if (session.completedCurrentContent) {
+    actions.append(publishedButton(
+      'العودة إلى العالم',
+      'published-action-btn published-placement-primary',
+      () => window.openPublishedWorld(bundle.journey.worldId),
+      'fa-solid fa-circle-check'
     ));
   }
   actions.append(
@@ -2399,6 +2458,31 @@ function renderPublishedLevelPlacementResult(bundle) {
   section.append(actions);
   appendPublishedLevelPlacementStats(section, session);
   root.replaceChildren(section);
+}
+
+async function retryPublishedPlacementProgressReconciliation(bundle) {
+  if (publishedContentState.levelPlacementPending) return;
+  publishedContentState.levelPlacementPending = true;
+  try {
+    const next = await getJourneyCloudApi().applyPlacementOutcome(
+      bundle.journey.worldId,
+      bundle.session.assessmentId
+    );
+    publishedContentState.levelPlacementBundle = next;
+    showToast(
+      next.progressReconciliationError
+        ? 'بقيت مزامنة بعض تفاصيل البوابات معلّقة، لكن تقدم الرحلة محفوظ.'
+        : 'اكتملت مزامنة تفاصيل البوابات.',
+      next.progressReconciliationError ? 'warning' : 'success',
+      5200
+    );
+    renderPublishedLevelPlacementResult(next);
+  } catch (error) {
+    showToast(publishedJourneyErrorText(error), 'danger', 5200);
+    renderPublishedLevelPlacementResult(bundle);
+  } finally {
+    publishedContentState.levelPlacementPending = false;
+  }
 }
 
 function levelPlacementSaveSummaryText(summary) {
@@ -2444,25 +2528,11 @@ async function savePublishedLevelPlacementWords(bundle, choice) {
 }
 
 async function beginPublishedJourneyAtLevelResult(bundle) {
-  const journey = await getJourneyCloudApi().finishLevelPlacement(
-    bundle.journey.worldId,
-    bundle.session.assessmentId,
-    'complete'
-  );
-  publishedContentState.journey = journey;
-  publishedContentState.activeJourney = journey;
-  await openPublishedJourneyDestination(journey.worldId);
+  await openPublishedJourneyDestination(bundle.journey.worldId);
 }
 
 async function continueToNextPublishedLevel(bundle) {
-  const journey = await getJourneyCloudApi().finishLevelPlacement(
-    bundle.journey.worldId,
-    bundle.session.assessmentId,
-    'complete'
-  );
-  publishedContentState.journey = journey;
-  publishedContentState.activeJourney = journey;
-  await beginPublishedLevelPlacement(bundle.world, bundle.session.nextCefrLevel);
+  await openPublishedJourneyDestination(bundle.journey.worldId);
 }
 
 async function pausePublishedLevelPlacement(bundle) {
@@ -2479,6 +2549,11 @@ async function pausePublishedLevelPlacement(bundle) {
 
 async function stopPublishedLevelPlacement(bundle) {
   if (publishedContentState.levelPlacementPending) return null;
+  if (bundle.session.resultApplied === true || bundle.session.status === 'completed') {
+    setPublishedPlacementMode(false);
+    window.openPublishedWorld(bundle.journey.worldId);
+    return bundle.journey;
+  }
   publishedContentState.levelPlacementPending = true;
   try {
     const journey = await pausePublishedLevelPlacement(bundle);
@@ -3098,11 +3173,7 @@ async function stopPublishedPlacement(result) {
     publishedContentState.journey = journey;
     publishedContentState.activeJourney = journey;
     setPublishedPlacementMode(false);
-    window.openPublishedGate(
-      journey.worldId,
-      journey.activeRankId,
-      journey.activeGateId
-    );
+    await openPublishedJourneyDestination(journey.worldId);
   } catch (error) {
     publishedContentState.placementPending = false;
     showToast(publishedJourneyErrorText(error), 'danger', 4800);
@@ -3212,11 +3283,7 @@ async function abandonPublishedPlacement(bundle) {
     publishedContentState.activeJourney = journey;
     setPublishedPlacementMode(false);
     showToast('تم إلغاء اختبار التحديد وبدء الرحلة من البداية.', 'info', 4200);
-    window.openPublishedGate(
-      journey.worldId,
-      journey.activeRankId,
-      journey.activeGateId
-    );
+    await openPublishedJourneyDestination(journey.worldId);
   } catch (error) {
     publishedContentState.placementPending = false;
     showToast(publishedJourneyErrorText(error), 'danger', 4800);
@@ -4229,8 +4296,8 @@ function makePublishedLevelSection(world, cefrLevel, ranks, journey) {
       'published-action-btn published-level-test-btn',
       () => {
         if (state === 'in-progress') showPublishedLevelPlacementResume(world.worldId);
-        else if (state === 'partially-passed' && journey?.activeRankId && journey?.activeGateId) {
-          window.openPublishedGate(world.worldId, journey.activeRankId, journey.activeGateId);
+        else if (state === 'partially-passed') {
+          openPublishedJourneyDestination(world.worldId, { resumePausedLevelPlacement: true });
         }
         else beginPublishedLevelPlacement(world, cefrLevel);
       },
@@ -4241,6 +4308,23 @@ function makePublishedLevelSection(world, cefrLevel, ranks, journey) {
     button.disabled = state === 'locked' || state === 'passed' ||
       publishedContentState.levelPlacementPending;
     summary.append(button);
+    const history = overview?.history;
+    const pendingWordDecision = history?.resultApplied === true &&
+      history?.status === 'completed' &&
+      (
+        history?.saveWordChoice === 'undecided' ||
+        (history?.saveWordPendingIds || []).length > 0
+      );
+    if (pendingWordDecision && history?.assessmentId) {
+      summary.append(publishedButton(
+        (history.saveWordPendingIds || []).length
+          ? 'إعادة حفظ كلمات الاختبار'
+          : 'حفظ كلمات الاختبار لاحقًا',
+        'published-action-btn published-placement-secondary',
+        () => showPublishedLevelPlacementResult(world.worldId, history.assessmentId),
+        'fa-solid fa-bookmark'
+      ));
+    }
     if (state === 'new-content') {
       summary.append(publishedElement(
         'small',

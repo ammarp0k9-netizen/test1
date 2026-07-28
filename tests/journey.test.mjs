@@ -286,6 +286,118 @@ test('an active new-ranks session resumes before an older clear attempt', () => 
   assert.equal(destination.session.assessmentMode, 'new-ranks');
 });
 
+test('a completed assessment awaiting application is resolved before new ranks or old progress', () => {
+  const destination = journey.resolveJourneyDestination({
+    journey: { activeRankId: 'rank-old', activeGateId: 'gate-old' },
+    ranks: [rank('rank-old', 0, 'available'), rank('rank-new', 1)],
+    gatesByRank: new Map([
+      ['rank-old', [gate('rank-old', 'gate-old', 0)]],
+      ['rank-new', [gate('rank-new', 'gate-new', 0)]],
+    ]),
+    progressByRank: new Map([
+      ['rank-old', new Map([['gate-old', { status: 'learning' }]])],
+    ]),
+    unassessedRankIds: ['rank-new'],
+    levelPlacementSession: {
+      assessmentId: 'assessment-a',
+      status: 'awaiting-decision',
+      resultApplied: false,
+      orderedQuestionIds: ['q-1'],
+      currentQuestionIndex: 1,
+      answers: [{}],
+    },
+  });
+  assert.equal(destination.type, 'level-placement-result');
+  assert.equal(destination.reason, 'outcome-pending');
+  assert.equal(destination.requiresApply, true);
+});
+
+test('legacy Placement is a central resolver destination instead of a UI special case', () => {
+  const destination = journey.resolveJourneyDestination({
+    journey: { activeRankId: 'rank-old', activeGateId: 'gate-old' },
+    ranks: [rank('rank-old', 0, 'available')],
+    gatesByRank: new Map([['rank-old', [gate('rank-old', 'gate-old', 0)]]]),
+    progressByRank: new Map(),
+    legacyPlacementActive: true,
+  });
+  assert.equal(destination.type, 'placement');
+  assert.equal(destination.reason, 'legacy-placement');
+});
+
+test('an unlocked active pointer with missing Gate Progress is derived as available before old work', () => {
+  const destination = journey.resolveJourneyDestination({
+    journey: {
+      worldId: 'world-a',
+      activeRankId: 'rank-new',
+      activeGateId: 'gate-new',
+      unlockedRankIds: ['rank-old', 'rank-new'],
+      unlockedGateIds: ['gate-old', 'gate-new'],
+    },
+    ranks: [rank('rank-old', 0, 'available'), rank('rank-new', 1)],
+    gatesByRank: new Map([
+      ['rank-old', [gate('rank-old', 'gate-old', 0)]],
+      ['rank-new', [gate('rank-new', 'gate-new', 0)]],
+    ]),
+    progressByRank: new Map([
+      ['rank-old', new Map([['gate-old', { status: 'learning' }]])],
+    ]),
+  });
+  assert.equal(destination.gate.gateId, 'gate-new');
+  assert.equal(destination.reason, 'active-pointer');
+  assert.equal(destination.derivedProgress, true);
+});
+
+test('the atomic cleared-gate ledger overrides stale gate progress after full-level placement', () => {
+  const destination = journey.resolveJourneyDestination({
+    journey: {
+      worldId: 'world-a',
+      activeRankId: 'rank-a2',
+      activeGateId: 'gate-a2',
+      unlockedRankIds: ['rank-a1', 'rank-a2'],
+      unlockedGateIds: ['gate-a1', 'gate-a2'],
+      levelPlacementClearedGateIds: ['gate-a1'],
+    },
+    ranks: [rank('rank-a1', 0, 'available'), rank('rank-a2', 1)],
+    gatesByRank: new Map([
+      ['rank-a1', [gate('rank-a1', 'gate-a1', 0)]],
+      ['rank-a2', [gate('rank-a2', 'gate-a2', 0)]],
+    ]),
+    progressByRank: new Map([
+      ['rank-a1', new Map([['gate-a1', { status: 'learning' }]])],
+    ]),
+  });
+  assert.equal(destination.gate.gateId, 'gate-a2');
+  assert.equal(destination.state, 'available');
+});
+
+test('a gate published later is not inferred as cleared from an older full-level receipt', () => {
+  const savedJourney = {
+    worldId: 'world-a',
+    unlockedRankIds: ['rank-a1'],
+    unlockedGateIds: ['gate-a1', 'gate-a1-later'],
+    levelPlacementClearedGateIds: ['gate-a1'],
+  };
+  const savedRank = rank('rank-a1', 0, 'available');
+  assert.equal(
+    journey.getJourneyGateState(
+      savedJourney,
+      null,
+      gate('rank-a1', 'gate-a1', 0),
+      { rank: savedRank }
+    ),
+    'cleared'
+  );
+  assert.equal(
+    journey.getJourneyGateState(
+      savedJourney,
+      null,
+      gate('rank-a1', 'gate-a1-later', 1),
+      { rank: savedRank }
+    ),
+    'available'
+  );
+});
+
 test('new-rank Placement preserves older progress outside the ranks under test', () => {
   const destination = journey.resolveLevelPlacementResultDestination({
     journey: { activeRankId: 'rank-b2', activeGateId: 'gate-b2' },
@@ -339,6 +451,58 @@ test('new-rank Placement with no passed rank preserves the old pointer', () => {
   assert.equal(destination.gateId, 'gate-old');
   assert.equal(destination.completedCurrentContent, false);
   assert.equal(destination.preserveExistingPointer, true);
+});
+
+test('new-ranks outcome unlocks only the destination gate and clears none of them', () => {
+  const outcome = journey.planPlacementOutcome({
+    journey: { activeRankId: 'rank-old', activeGateId: 'gate-old' },
+    session: {
+      assessmentMode: 'new-ranks',
+      orderedRankIds: ['rank-new-a', 'rank-new-b'],
+      passedRankIds: ['rank-new-a', 'rank-new-b'],
+      rankFirstGateIds: {
+        'rank-new-a': 'gate-new-a',
+        'rank-new-b': 'gate-new-b',
+      },
+    },
+  });
+  assert.deepEqual(Array.from(outcome.resultClearedGateIds), []);
+  assert.deepEqual(
+    Array.from(outcome.availableGateTargets, (target) => target.gateId),
+    []
+  );
+  assert.deepEqual(Array.from(outcome.resultUnlockedGateIds), ['gate-new-a']);
+  assert.equal(outcome.destination.gateId, 'gate-new-a');
+});
+
+test('full-level outcome clears passed ranks and opens the next-level target', () => {
+  const outcome = journey.planPlacementOutcome({
+    journey: { activeRankId: 'rank-a1', activeGateId: 'gate-a1' },
+    session: {
+      assessmentMode: 'full-level',
+      passedLevel: true,
+      passedRankIds: ['rank-a1'],
+    },
+    nextLevelTarget: {
+      rank: { rankId: 'rank-a2' },
+      gate: { gateId: 'gate-a2' },
+    },
+    gatesByRank: new Map([
+      ['rank-a1', [
+        { gateId: 'gate-a1', order: 0, status: 'published' },
+        { gateId: 'gate-a1-last', order: 1, status: 'published' },
+      ]],
+    ]),
+  });
+  assert.deepEqual(
+    Array.from(outcome.resultClearedGateIds),
+    ['gate-a1', 'gate-a1-last']
+  );
+  assert.deepEqual(
+    Array.from(outcome.availableGateTargets, (target) => target.gateId),
+    ['gate-a2']
+  );
+  assert.equal(outcome.destination.rankId, 'rank-a2');
 });
 
 test('full-level Placement advances to the supplied next-level target', () => {

@@ -93,6 +93,10 @@
 
   function getJourneyGateState(journey, gateProgress, gate, options) {
     if (!canAccessGate(gate, journey, options)) return 'locked';
+    if (includesId(
+      journey?.levelPlacementClearedGateIds,
+      itemId(gate, 'gateId')
+    )) return 'cleared';
     const savedStatus = String(gateProgress?.status || '');
     if (GATE_STATUSES.includes(savedStatus)) return savedStatus;
     return 'available';
@@ -107,7 +111,34 @@
       : rankProgress?.[String(gateId)] || null;
   }
 
-  function resolveActiveJourneyDestination(input) {
+  function targetProgressState(target, journey) {
+    if (includesId(
+      journey?.levelPlacementClearedGateIds,
+      itemId(target?.gate, 'gateId')
+    )) return 'cleared';
+    const savedStatus = String(target?.progress?.status || '');
+    if (GATE_STATUSES.includes(savedStatus)) return savedStatus;
+    if (
+      target?.rank &&
+      target?.gate &&
+      canAccessRank(target.rank, journey) &&
+      canAccessGate(target.gate, journey, { rank: target.rank })
+    ) {
+      return 'available';
+    }
+    return 'locked';
+  }
+
+  function levelPlacementAnswersComplete(session) {
+    const questions = Array.isArray(session?.orderedQuestionIds)
+      ? session.orderedQuestionIds.length
+      : 0;
+    return questions > 0 &&
+      Number(session?.currentQuestionIndex) === questions &&
+      (session?.answers || []).length === questions;
+  }
+
+  function resolveJourneyDestination(input) {
     const journey = input?.journey || null;
     const ranks = stableRankOrder(input?.ranks).filter((rank) => rank?.status === 'published');
     const gatesByRank = input?.gatesByRank instanceof Map
@@ -132,23 +163,53 @@
       itemId(target.gate, 'gateId') === pointerGateId
     );
     const levelPlacementSession = input?.levelPlacementSession || null;
-    const levelPlacementActive = levelPlacementSession && (
-      ['active', 'submitting'].includes(String(levelPlacementSession.status || '')) ||
+    const levelPlacementStatus = String(levelPlacementSession?.status || '');
+    const pendingLevelPlacementResult = Boolean(
+      levelPlacementSession &&
+      levelPlacementSession.resultApplied !== true &&
       (
-        input?.resumePausedLevelPlacement === true &&
-        String(levelPlacementSession.status || '') === 'paused'
+        levelPlacementStatus === 'awaiting-decision' ||
+        (levelPlacementStatus === 'paused' && levelPlacementAnswersComplete(levelPlacementSession))
       )
     );
-    if (levelPlacementActive && levelPlacementSession.assessmentMode === 'new-ranks') {
-      return { type: 'level-placement', session: levelPlacementSession };
-    }
-    const activeClear = orderedTargets.find((target) =>
-      ['active', 'submitting'].includes(String(target.progress?.clearAttemptStatus || '')) ||
-      Boolean(target.progress?.activeClearAttemptId)
+    const appliedLevelPlacementNeedsClosure = Boolean(
+      levelPlacementSession &&
+      levelPlacementSession.resultApplied === true &&
+      ['awaiting-decision', 'paused'].includes(levelPlacementStatus)
     );
-    if (activeClear) return { type: 'gate-clear', ...activeClear };
+    const levelPlacementActive = Boolean(levelPlacementSession && (
+      ['active', 'submitting'].includes(levelPlacementStatus) ||
+      (
+        input?.resumePausedLevelPlacement === true &&
+        levelPlacementStatus === 'paused' &&
+        !pendingLevelPlacementResult
+      )
+    ));
     if (levelPlacementActive) {
-      return { type: 'level-placement', session: levelPlacementSession };
+      return { type: 'level-placement', reason: 'active-assessment', session: levelPlacementSession };
+    }
+    if (pendingLevelPlacementResult) {
+      return {
+        type: 'level-placement-result',
+        reason: 'outcome-pending',
+        requiresApply: true,
+        session: levelPlacementSession,
+      };
+    }
+    if (appliedLevelPlacementNeedsClosure) {
+      return {
+        type: 'level-placement-result',
+        reason: 'outcome-finalization',
+        requiresApply: true,
+        session: levelPlacementSession,
+      };
+    }
+    if (input?.legacyPlacementActive === true || input?.legacyPlacementSession) {
+      return {
+        type: 'placement',
+        reason: 'legacy-placement',
+        session: input?.legacyPlacementSession || null,
+      };
     }
     const unassessed = new Set((input?.unassessedRankIds || []).map(String));
     const newTarget = orderedTargets.find((target) =>
@@ -157,30 +218,43 @@
     if (newTarget) {
       return { type: 'new-rank-assessment', reason: 'new-rank', ...newTarget };
     }
+    const activeClear = orderedTargets.find((target) =>
+      ['active', 'submitting'].includes(String(target.progress?.clearAttemptStatus || '')) ||
+      Boolean(target.progress?.activeClearAttemptId)
+    );
+    if (activeClear) return { type: 'gate-clear', reason: 'active-clear', ...activeClear };
+    const pointerState = pointerTarget ? targetProgressState(pointerTarget, journey) : 'locked';
+    if (pointerTarget && ['learning', 'ready', 'available'].includes(pointerState)) {
+      return {
+        type: 'gate',
+        reason: pointerState === 'available' ? 'active-pointer' : 'started',
+        derivedProgress: !pointerTarget.progress,
+        state: pointerState,
+        ...pointerTarget,
+      };
+    }
     const started = (
-      pointerTarget && ['learning', 'ready'].includes(String(pointerTarget.progress?.status || ''))
-        ? pointerTarget
-        : orderedTargets.find((target) =>
-      ['learning', 'ready'].includes(String(target.progress?.status || ''))
-        )
+      orderedTargets.find((target) =>
+        ['learning', 'ready'].includes(targetProgressState(target, journey))
+      )
     );
     if (started) return { type: 'gate', reason: 'started', ...started };
     const available = (
-      pointerTarget && String(pointerTarget.progress?.status || '') === 'available'
-        ? pointerTarget
-        : orderedTargets.find((target) =>
-      String(target.progress?.status || '') === 'available'
-        )
+      orderedTargets.find((target) =>
+        targetProgressState(target, journey) === 'available'
+      )
     );
     if (available) return { type: 'gate', reason: 'available', ...available };
     const allCleared = orderedTargets.length > 0 && orderedTargets.every((target) =>
-      String(target.progress?.status || '') === 'cleared'
+      targetProgressState(target, journey) === 'cleared'
     );
     if (journey?.contentJourneyStatus === 'completed-current-content' || allCleared) {
       return { type: 'completed-current-content' };
     }
     return { type: 'unavailable' };
   }
+
+  const resolveActiveJourneyDestination = resolveJourneyDestination;
 
   function resolveLevelPlacementResultDestination(input) {
     const session = input?.session || {};
@@ -223,6 +297,74 @@
       gateId: String(session.recommendedStartGateId || ''),
       completedCurrentContent: false,
       preserveExistingPointer: false,
+    };
+  }
+
+  function planPlacementOutcome(input) {
+    const session = input?.session || {};
+    const journey = input?.journey || {};
+    const passedRankIds = Array.from(new Set((session.passedRankIds || []).map(String).filter(Boolean)));
+    const destination = resolveLevelPlacementResultDestination(input);
+    const gatesByRank = input?.gatesByRank instanceof Map
+      ? input.gatesByRank
+      : new Map(Object.entries(input?.gatesByRank || {}));
+    const clearedGateTargets = [];
+    const availableGateTargets = [];
+    const seenClearedPaths = new Set();
+    const seenAvailablePaths = new Set();
+    const addTarget = (target, collection, seen) => {
+      const rankId = String(target?.rankId || '');
+      const gateId = String(target?.gateId || '');
+      const key = `${rankId}/${gateId}`;
+      if (!rankId || !gateId || seen.has(key)) return;
+      seen.add(key);
+      collection.push({ rankId, gateId });
+    };
+
+    if (session.assessmentMode !== 'new-ranks') {
+      passedRankIds.forEach((rankId) => {
+        stableContentOrder(gatesByRank.get(rankId), 'gateId')
+          .filter((gate) => gate?.status === 'published')
+          .forEach((gate) => addTarget({
+            rankId,
+            gateId: itemId(gate, 'gateId'),
+          }, clearedGateTargets, seenClearedPaths));
+      });
+    }
+
+    if (
+      destination.rankId && destination.gateId &&
+      session.assessmentMode !== 'new-ranks'
+    ) {
+      const targetPath = `${destination.rankId}/${destination.gateId}`;
+      if (!seenClearedPaths.has(targetPath)) {
+        addTarget(destination, availableGateTargets, seenAvailablePaths);
+      }
+    }
+
+    const resultUnlockedRankIds = Array.from(new Set([
+      ...passedRankIds,
+      ...(destination.rankId ? [destination.rankId] : []),
+    ]));
+    const resultClearedGateIds = Array.from(new Set(
+      clearedGateTargets.map((target) => target.gateId)
+    ));
+    const resultUnlockedGateIds = Array.from(new Set([
+      ...resultClearedGateIds,
+      ...availableGateTargets.map((target) => target.gateId),
+      ...(destination.gateId ? [destination.gateId] : []),
+    ]));
+
+    return {
+      destination,
+      passedRankIds,
+      clearedGateTargets,
+      availableGateTargets,
+      resultUnlockedRankIds,
+      resultUnlockedGateIds,
+      resultClearedGateIds,
+      completedCurrentContent: Boolean(destination.completedCurrentContent),
+      preserveExistingPointer: Boolean(destination.preserveExistingPointer),
     };
   }
 
@@ -376,8 +518,10 @@
     canAccessRank,
     canAccessGate,
     getJourneyGateState,
+    resolveJourneyDestination,
     resolveActiveJourneyDestination,
     resolveLevelPlacementResultDestination,
+    planPlacementOutcome,
     selectJourneyStart,
     selectNextJourneyTarget,
     createJourneySeed,

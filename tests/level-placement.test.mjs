@@ -328,7 +328,7 @@ test('partial levels navigate to the saved starting gate instead of starting ano
   );
   assert.match(
     worldsSource,
-    /state === 'partially-passed'[\s\S]{0,240}openPublishedGate\(world\.worldId, journey\.activeRankId, journey\.activeGateId\)/
+    /state === 'partially-passed'[\s\S]{0,240}openPublishedJourneyDestination\(world\.worldId, \{ resumePausedLevelPlacement: true \}\)/
   );
 });
 
@@ -355,26 +355,32 @@ test('completed paused results resume into result application and keep save choi
     worldsSource.indexOf('function renderPublishedLevelPlacementResumePrompt')
   );
   assert.match(continueBlock, /pausedSession\?\.status === 'paused' && answersComplete/);
-  assert.match(continueBlock, /return applyLevelPlacementResult\(world, assessment\)/);
+  assert.match(continueBlock, /return applyPlacementOutcome\(world, assessment\)/);
   assert.match(uiContinueBlock, /next\.session\.status === 'active'/);
   assert.match(uiContinueBlock, /renderPublishedLevelPlacementResult\(next\)/);
   assert.match(finishBlock, /session\.status === 'paused'/);
   assert.match(finishBlock, /journey\.levelPlacementStatus === 'paused'/);
   assert.match(finishBlock, /return;/);
-  assert.match(cloudSource, /\['awaiting-decision', 'paused', 'completed'\]\.includes\(session\.status\)/);
+  assert.match(cloudSource, /\['awaiting-decision', 'paused'\]\.includes\(session\.status\)/);
+  assert.match(worldsSource, /showPublishedLevelPlacementResult/);
 });
 
-test('result application stores a small receipt before reconciling gates independently', () => {
+test('result application commits authoritative ledgers atomically and projects gate documents separately', () => {
   const applyBlock = cloudSource.slice(
-    cloudSource.indexOf('async function applyLevelPlacementResult'),
-    cloudSource.indexOf('async function answerLevelPlacementQuestion')
+    cloudSource.indexOf('async function applyPlacementOutcome'),
+    cloudSource.indexOf('async function applyLevelPlacementResult')
   );
-  assert.match(cloudSource, /async function reconcileLevelPlacementClearedGates/);
-  assert.match(cloudSource, /Promise\.all\(gateTargets\.map/);
+  assert.match(applyBlock, /planPlacementOutcome/);
+  assert.match(applyBlock, /await runTransaction/);
+  assert.match(applyBlock, /transaction\.update\(targetJourneyRef/);
+  assert.match(applyBlock, /transaction\.update\(sessionRef/);
+  assert.match(applyBlock, /transaction\.set\(pointerRef/);
+  assert.match(applyBlock, /levelPlacementClearedGateIds/);
+  assert.match(applyBlock, /reconcilePlacementOutcomeProgress/);
+  assert.match(applyBlock, /progressReconciliationError/);
+  assert.doesNotMatch(applyBlock, /const progressRefs/);
   assert.match(applyBlock, /resultClearedGateIds/);
-  assert.match(applyBlock, /reconcileLevelPlacementClearedGates/);
-  assert.match(applyBlock, /ensureLevelPlacementTargetGate/);
-  assert.doesNotMatch(applyBlock, /passedProgressRefs|targetSnapshotIndex/);
+  assert.match(applyBlock, /status: 'completed'/);
 });
 
 test('the result stop action is single-flight and navigates after the pause succeeds', () => {
@@ -436,7 +442,13 @@ test('continue later clears the active assessment and keeps the next-level CTA o
   assert.match(finishBlock, /activeLevelPlacementAssessmentId: ''/);
   assert.match(finishBlock, /activeLevelPlacementCefrLevel: ''/);
   assert.match(worldsSource, /shouldResumeLevelPlacement\(null, journey\)/);
-  assert.match(worldsSource, /`اختبار مستوى \$\{session\.nextCefrLevel\}`/);
+  assert.match(worldsSource, /`متابعة الرحلة في \$\{session\.nextCefrLevel\}`/);
+  const continueNextBlock = worldsSource.slice(
+    worldsSource.indexOf('async function continueToNextPublishedLevel'),
+    worldsSource.indexOf('async function pausePublishedLevelPlacement')
+  );
+  assert.match(continueNextBlock, /openPublishedJourneyDestination/);
+  assert.doesNotMatch(continueNextBlock, /beginPublishedLevelPlacement/);
   assert.doesNotMatch(finishBlock, /startLevelPlacement/);
 });
 

@@ -482,7 +482,11 @@ async function seed() {
 }
 
 let passed = 0;
+let selected = 0;
+const testFilter = String(process.argv[2] || '');
 async function test(name, callback) {
+  if (testFilter && !name.includes(testFilter)) return;
+  selected += 1;
   try {
     await callback();
     passed += 1;
@@ -642,6 +646,24 @@ try {
     const saved = await getDoc(doc(userA, 'users/user-a/contentProgress/journey-world'));
     assert.equal(saved.data().status, 'active');
     assert.deepEqual(saved.data().unlockedGateIds, ['journey-gate']);
+
+    const forgedUid = 'forged-cleared-journey-user';
+    const forgedDb = environment.authenticatedContext(forgedUid).firestore();
+    const forged = writeBatch(forgedDb);
+    forged.set(doc(forgedDb, `users/${forgedUid}/contentProgress/journey-world`), {
+      ...journey('journey-world', 'journey-rank', 'journey-gate'),
+      levelPlacementClearedGateIds: ['journey-gate']
+    });
+    forged.set(doc(forgedDb, `users/${forgedUid}/meta/active_content_journey`), {
+      worldId: 'journey-world',
+      journeyVersion: 1,
+      updatedAt: serverTimestamp()
+    });
+    forged.set(
+      doc(forgedDb, `users/${forgedUid}/contentProgress/journey-world/ranks/journey-rank/gates/journey-gate`),
+      availableGateProgress('journey-world', 'journey-rank', 'journey-gate')
+    );
+    await assertFails(forged.commit());
   });
 
   await test('the exact legacy auto-reconcile batch reproduces the Rules expression-budget rejection', async () => {
@@ -2173,7 +2195,7 @@ try {
     assert.equal(savedJourney.data().activeRankId, 'level-rank-a2');
   });
 
-  await test('Level Placement v2 atomically reconciles cleared gates and the next journey target', async () => {
+  await test('Level Placement v2 commits its authoritative outcome before retryable gate projection', async () => {
     const uid = 'level-v2-user';
     const assessmentId = 'level_placement_v2_A1_rules_test';
     const journeyPath = `users/${uid}/contentProgress/level-world`;
@@ -2253,8 +2275,10 @@ try {
 
     const result = writeBatch(db);
     result.update(doc(db, sessionPath), {
+      status: 'completed',
       resultApplied: true,
       assessedAt: serverTimestamp(),
+      completedAt: serverTimestamp(),
       nextCefrLevel: 'A2',
       resultStartRankId: 'level-rank-a2',
       resultStartGateId: 'level-gate-a2',
@@ -2271,13 +2295,28 @@ try {
       unlockedGateIds: ['level-gate-a1', 'level-gate-a2'],
       passedCefrLevels: ['A1'],
       partialCefrLevels: [],
-      levelPlacementStatus: 'awaiting-decision',
+      activeLevelPlacementAssessmentId: '',
+      activeLevelPlacementCefrLevel: '',
+      levelPlacementStatus: 'completed',
       contentJourneyStatus: 'in-progress',
       levelPlacementAssessmentIds: { A1: assessmentId },
       levelPlacementPassedRankIds: ['level-rank-a1'],
+      levelPlacementClearedGateIds: ['level-gate-a1'],
       updatedAt: serverTimestamp()
     });
-    result.update(doc(db, firstGatePath), {
+    await assertSucceeds(result.commit());
+
+    const savedOutcomeJourney = await getDoc(doc(db, journeyPath));
+    const unprojectedNextGate = await getDoc(doc(db, nextGatePath));
+    assert.equal(savedOutcomeJourney.data().activeRankId, 'level-rank-a2');
+    assert.deepEqual(
+      savedOutcomeJourney.data().levelPlacementClearedGateIds,
+      ['level-gate-a1']
+    );
+    assert.equal(unprojectedNextGate.exists(), false);
+
+    const projection = writeBatch(db);
+    projection.update(doc(db, firstGatePath), {
       status: 'cleared',
       clearedAt: serverTimestamp(),
       clearedBy: 'level-placement',
@@ -2286,12 +2325,11 @@ try {
       placementClearedWithoutLoad: true,
       lastActivityAt: serverTimestamp()
     });
-    result.set(
+    projection.set(
       doc(db, nextGatePath),
       availableGateProgress('level-world', 'level-rank-a2', 'level-gate-a2')
     );
-    result.update(doc(db, pointerPath), { updatedAt: serverTimestamp() });
-    await assertSucceeds(result.commit());
+    await assertSucceeds(projection.commit());
 
     const [savedJourney, clearedGate, nextGate] = await Promise.all([
       getDoc(doc(db, journeyPath)),
@@ -2299,6 +2337,7 @@ try {
       getDoc(doc(db, nextGatePath))
     ]);
     assert.equal(savedJourney.data().activeRankId, 'level-rank-a2');
+    assert.equal(savedJourney.data().activeLevelPlacementAssessmentId, '');
     assert.equal(clearedGate.data().clearedBy, 'level-placement');
     assert.equal(nextGate.data().status, 'available');
   });
@@ -3160,10 +3199,10 @@ try {
   });
 
   await test('diagnoses the production-sized new-ranks result commit', async () => {
-    const uid = '2YWSZ8MdhPZBsqRqTozZvtTbzt83';
-    const worldId = 'GyQfaD75uZFFpgB9Me9V';
+    const uid = 'production-sized-outcome-user';
+    const worldId = 'production-sized-outcome-world';
     const assessmentId =
-      'level_placement_v2_A1_GyQfaD75uZFFpgB9Me9V_A1__ohanmo';
+      'level_placement_v2_A1_production_sized_outcome';
     const oldRankIds = [
       'R4NDhUw0L0gXgSwkbE1O',
       'VVSBrZ9o2F4eQUfaCqnf',
@@ -3188,9 +3227,9 @@ try {
       ]
     };
     const newRankIds = Object.keys(rankGateIds);
-    const clearedGateIds = Object.values(rankGateIds).flat();
     const targetRankId = newRankIds[0];
     const targetGateId = rankGateIds[targetRankId][0];
+    const availableGateIds = [targetGateId];
     const activeRankId = oldRankIds[0];
     const activeGateId = 'fP49BRVyujuU4UqzUoey';
     const journeyPath = `users/${uid}/contentProgress/${worldId}`;
@@ -3280,114 +3319,204 @@ try {
       }
     });
 
+    const addOutcomeWrites = (
+      batch,
+      includeSession,
+      includeTargetProgress,
+      clearedGateLedgerIds = []
+    ) => {
+      batch.update(doc(db, journeyPath), {
+        activeRankId: targetRankId,
+        activeGateId: targetGateId,
+        unlockedRankIds: [...oldRankIds, ...newRankIds],
+        unlockedGateIds: [...oldGateIds, ...availableGateIds],
+        passedCefrLevels: ['A1'],
+        partialCefrLevels: [],
+        levelPlacementAssessmentIds: { A1: assessmentId },
+        levelPlacementPassedRankIds: [...oldRankIds, ...newRankIds],
+        levelPlacementClearedGateIds: clearedGateLedgerIds,
+        contentJourneyStatus: 'in-progress',
+        activeLevelPlacementAssessmentId: '',
+        activeLevelPlacementCefrLevel: '',
+        levelPlacementStatus: 'completed',
+        updatedAt: serverTimestamp()
+      });
+      if (includeSession) {
+        batch.update(doc(db, sessionPath), {
+          status: 'completed',
+          resultApplied: true,
+          assessedAt: serverTimestamp(),
+          completedAt: serverTimestamp(),
+          nextCefrLevel: '',
+          resultStartRankId: targetRankId,
+          resultStartGateId: targetGateId,
+          resultUnlockedRankIds: newRankIds,
+          resultUnlockedGateIds: availableGateIds,
+          resultClearedGateIds: [],
+          completedCurrentContent: false,
+          updatedAt: serverTimestamp()
+        });
+      }
+      if (includeTargetProgress) {
+        batch.set(
+          doc(db, `${journeyPath}/ranks/${targetRankId}/gates/${targetGateId}`),
+          availableGateProgress(worldId, targetRankId, targetGateId)
+        );
+      }
+    };
+
+    const incomplete = writeBatch(db);
+    addOutcomeWrites(incomplete, false, false);
+    await assertFails(incomplete.commit());
+
+    const forgedClear = writeBatch(db);
+    addOutcomeWrites(forgedClear, true, false, availableGateIds);
+    await assertFails(forgedClear.commit());
+
+    const result = writeBatch(db);
+    addOutcomeWrites(result, true, false);
+    await assertSucceeds(result.commit());
+
+    const savedJourney = await getDoc(doc(db, journeyPath));
+    const savedSession = await getDoc(doc(db, sessionPath));
+    const savedTarget = await getDoc(
+      doc(db, `${journeyPath}/ranks/${targetRankId}/gates/${targetGateId}`)
+    );
+    assert.equal(savedJourney.data().levelPlacementStatus, 'completed');
+    assert.equal(savedJourney.data().activeLevelPlacementAssessmentId, '');
+    assert.equal(savedSession.data().status, 'completed');
+    assert.deepEqual(savedSession.data().resultClearedGateIds, []);
+    assert.equal(savedTarget.exists(), false);
+  });
+
+  await test('accepts a production-sized full-level outcome without atomic gate fan-out', async () => {
+    const uid = 'production-sized-full-level-user';
+    const worldId = 'production-sized-full-level-world';
+    const assessmentId = 'level_placement_v2_A1_production_full_level';
+    const passedRankIds = ['full-rank-1', 'full-rank-2', 'full-rank-3', 'full-rank-4'];
+    const rankGateIds = Object.fromEntries(passedRankIds.map((rankId, rankIndex) => [
+      rankId,
+      Array.from({ length: rankIndex === 0 ? 4 : 5 }, (_, gateIndex) => (
+        `full-gate-${rankIndex + 1}-${gateIndex + 1}`
+      ))
+    ]));
+    const clearedGateIds = Object.values(rankGateIds).flat();
+    const targetRankId = 'full-rank-a2';
+    const targetGateId = 'full-gate-a2-1';
+    const activeRankId = passedRankIds[0];
+    const activeGateId = rankGateIds[activeRankId][0];
+    const journeyPath = `users/${uid}/contentProgress/${worldId}`;
+    const sessionPath = `${journeyPath}/levelPlacementSessions/${assessmentId}`;
+    const pointerPath = `users/${uid}/meta/active_content_journey`;
+    const db = environment.authenticatedContext(uid).firestore();
+
+    await environment.withSecurityRulesDisabled(async (context) => {
+      const seedDb = context.firestore();
+      const documents = [
+        [`content_worlds/${worldId}`, world(worldId, 'published')],
+        [`content_worlds/${worldId}/ranks/${targetRankId}`, {
+          ...rank(worldId, targetRankId, 'published'),
+          cefrLevel: 'A2'
+        }],
+        [`content_worlds/${worldId}/ranks/${targetRankId}/gates/${targetGateId}`,
+          gate(worldId, targetRankId, targetGateId, 'published')]
+      ];
+      for (const [rankId, gateIds] of Object.entries(rankGateIds)) {
+        documents.push([`content_worlds/${worldId}/ranks/${rankId}`, {
+          ...rank(worldId, rankId, 'published'),
+          cefrLevel: 'A1'
+        }]);
+        gateIds.forEach((gateId, order) => documents.push([
+          `content_worlds/${worldId}/ranks/${rankId}/gates/${gateId}`,
+          { ...gate(worldId, rankId, gateId, 'published'), order }
+        ]));
+      }
+      documents.push([journeyPath, {
+        ...journey(worldId, activeRankId, activeGateId),
+        placementStatus: 'completed',
+        activeLevelPlacementAssessmentId: assessmentId,
+        activeLevelPlacementCefrLevel: 'A1',
+        levelPlacementStatus: 'active',
+        levelPlacementVersion: 2,
+        passedCefrLevels: [],
+        partialCefrLevels: [],
+        contentJourneyStatus: 'in-progress',
+        levelPlacementAssessmentIds: {},
+        levelPlacementPassedRankIds: []
+      }]);
+      documents.push([pointerPath, {
+        worldId,
+        journeyVersion: 1,
+        updatedAt: timestamp
+      }]);
+      documents.push([sessionPath, levelPlacementSession(assessmentId, {
+        worldId,
+        cefrLevel: 'A1',
+        placementVersion: 2,
+        assessmentMode: 'full-level',
+        status: 'awaiting-decision',
+        orderedRankIds: passedRankIds,
+        testedRankIds: passedRankIds,
+        assessedRankIds: passedRankIds,
+        passedRankIds,
+        passedPrefixLength: passedRankIds.length,
+        passedLevel: true,
+        perRankStats: Object.fromEntries(passedRankIds.map((rankId) => [rankId, {
+          asked: 1,
+          correct: 1,
+          ratio: 1,
+          passThreshold: 0.75,
+          requiredCorrect: 1,
+          confidence: 'low',
+          status: 'passed'
+        }])),
+        resultApplied: false,
+        answersCompletedAt: timestamp
+      })]);
+      for (const [path, data] of documents) {
+        await setDoc(doc(seedDb, path), data);
+      }
+    });
+
     const result = writeBatch(db);
     result.update(doc(db, journeyPath), {
       activeRankId: targetRankId,
       activeGateId: targetGateId,
-      unlockedRankIds: [...oldRankIds, ...newRankIds],
-      unlockedGateIds: [...oldGateIds, ...clearedGateIds],
+      unlockedRankIds: [...passedRankIds, targetRankId],
+      unlockedGateIds: [...clearedGateIds, targetGateId],
       passedCefrLevels: ['A1'],
       partialCefrLevels: [],
-      levelPlacementAssessmentIds: { A1: assessmentId },
-      levelPlacementPassedRankIds: [...oldRankIds, ...newRankIds],
+      activeLevelPlacementAssessmentId: '',
+      activeLevelPlacementCefrLevel: '',
+      levelPlacementStatus: 'completed',
       contentJourneyStatus: 'in-progress',
-      levelPlacementStatus: 'awaiting-decision',
+      levelPlacementAssessmentIds: { A1: assessmentId },
+      levelPlacementPassedRankIds: passedRankIds,
+      levelPlacementClearedGateIds: clearedGateIds,
       updatedAt: serverTimestamp()
     });
     result.update(doc(db, sessionPath), {
+      status: 'completed',
       resultApplied: true,
       assessedAt: serverTimestamp(),
-      nextCefrLevel: '',
+      completedAt: serverTimestamp(),
+      nextCefrLevel: 'A2',
       resultStartRankId: targetRankId,
       resultStartGateId: targetGateId,
-      resultUnlockedRankIds: newRankIds,
-      resultUnlockedGateIds: clearedGateIds,
+      resultUnlockedRankIds: [...passedRankIds, targetRankId],
+      resultUnlockedGateIds: [...clearedGateIds, targetGateId],
       resultClearedGateIds: clearedGateIds,
       completedCurrentContent: false,
       updatedAt: serverTimestamp()
     });
-    for (const [rankId, gateIds] of Object.entries(rankGateIds)) {
-      for (const gateId of gateIds) {
-        result.set(doc(db, `${journeyPath}/ranks/${rankId}/gates/${gateId}`), {
-          worldId,
-          rankId,
-          gateId,
-          status: 'cleared',
-          journeyVersion: 1,
-          readyEvidenceCount: 0,
-          clearAttempts: 0,
-          clearedAt: serverTimestamp(),
-          clearedBy: 'level-placement',
-          levelPlacementAssessmentId: assessmentId,
-          levelPlacementScore: 1,
-          placementClearedWithoutLoad: true,
-          lastActivityAt: serverTimestamp()
-        });
-      }
-    }
-    result.set(
-      doc(db, `${journeyPath}/ranks/${targetRankId}/gates/${targetGateId}`),
-      availableGateProgress(worldId, targetRankId, targetGateId)
-    );
-    result.update(doc(db, pointerPath), { updatedAt: serverTimestamp() });
-    await assertFails(result.commit());
-
-    const receipt = writeBatch(db);
-    receipt.update(doc(db, journeyPath), {
-      activeRankId: targetRankId,
-      activeGateId: targetGateId,
-      unlockedRankIds: [...oldRankIds, ...newRankIds],
-      unlockedGateIds: [...oldGateIds, ...clearedGateIds],
-      passedCefrLevels: ['A1'],
-      partialCefrLevels: [],
-      levelPlacementAssessmentIds: { A1: assessmentId },
-      levelPlacementPassedRankIds: [...oldRankIds, ...newRankIds],
-      contentJourneyStatus: 'in-progress',
-      levelPlacementStatus: 'awaiting-decision',
-      updatedAt: serverTimestamp()
-    });
-    receipt.update(doc(db, sessionPath), {
-      resultApplied: true,
-      assessedAt: serverTimestamp(),
-      nextCefrLevel: '',
-      resultStartRankId: targetRankId,
-      resultStartGateId: targetGateId,
-      resultUnlockedRankIds: newRankIds,
-      resultUnlockedGateIds: clearedGateIds,
-      resultClearedGateIds: clearedGateIds,
-      completedCurrentContent: false,
-      updatedAt: serverTimestamp()
-    });
-    receipt.update(doc(db, pointerPath), { updatedAt: serverTimestamp() });
-    await assertSucceeds(receipt.commit());
-
-    for (const [rankId, gateIds] of Object.entries(rankGateIds)) {
-      for (const gateId of gateIds) {
-        await assertSucceeds(setDoc(
-          doc(db, `${journeyPath}/ranks/${rankId}/gates/${gateId}`),
-          {
-            worldId,
-            rankId,
-            gateId,
-            status: 'cleared',
-            journeyVersion: 1,
-            readyEvidenceCount: 0,
-            clearAttempts: 0,
-            clearedAt: serverTimestamp(),
-            clearedBy: 'level-placement',
-            levelPlacementAssessmentId: assessmentId,
-            levelPlacementScore: 1,
-            placementClearedWithoutLoad: true,
-            lastActivityAt: serverTimestamp()
-          }
-        ));
-      }
-    }
-    const savedTarget = await getDoc(
-      doc(db, `${journeyPath}/ranks/${targetRankId}/gates/${targetGateId}`)
-    );
-    assert.equal(savedTarget.data().status, 'cleared');
-    assert.equal(savedTarget.data().clearedBy, 'level-placement');
+    await assertSucceeds(result.commit());
+    const savedJourney = await getDoc(doc(db, journeyPath));
+    const projectedGate = await getDoc(doc(
+      db,
+      `${journeyPath}/ranks/${passedRankIds[0]}/gates/${clearedGateIds[0]}`
+    ));
+    assert.deepEqual(savedJourney.data().levelPlacementClearedGateIds, clearedGateIds);
+    assert.equal(projectedGate.exists(), false);
   });
 
   await test('a completed paused Level Placement resumes to its result decision', async () => {
@@ -3483,7 +3612,8 @@ try {
     }));
   });
 
-  assert.equal(passed, 63);
+  if (testFilter) assert.ok(selected > 0, `No Rules test matched "${testFilter}"`);
+  assert.equal(passed, testFilter ? selected : 64);
   console.log(`# ${passed} Firestore Rules emulator tests passed`);
 } finally {
   await environment.cleanup();

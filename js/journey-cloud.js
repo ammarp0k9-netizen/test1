@@ -2704,12 +2704,20 @@ async function getLevelPlacementSession(worldId, assessmentId, options) {
 }
 
 async function makeLevelPlacementBundle(journey, session) {
+  const activeAssessmentMatches =
+    String(journey?.activeLevelPlacementAssessmentId || '') ===
+      String(session?.assessmentId || '') &&
+    ['active', 'submitting', 'awaiting-decision', 'paused'].includes(session?.status);
+  const completedAssessmentMatches =
+    session?.status === 'completed' &&
+    session?.resultApplied === true &&
+    String(journey?.levelPlacementAssessmentIds?.[session?.cefrLevel] || '') ===
+      String(session?.assessmentId || '');
   if (
     !journey ||
     !session ||
     String(journey.worldId || '') !== String(session.worldId || '') ||
-    String(journey.activeLevelPlacementAssessmentId || '') !== String(session.assessmentId || '') ||
-    !['active', 'submitting', 'awaiting-decision', 'paused'].includes(session.status)
+    (!activeAssessmentMatches && !completedAssessmentMatches)
   ) {
     throw journeyCloudError(
       'level-placement/session-mismatch',
@@ -2723,6 +2731,14 @@ async function makeLevelPlacementBundle(journey, session) {
     world,
     executionContext: { source: 'level-placement', suppressRewards: true },
   };
+}
+
+async function getLevelPlacementResult(worldId, assessmentId, options) {
+  const [journey, session] = await Promise.all([
+    getJourney(worldId, options),
+    getLevelPlacementSession(worldId, assessmentId, options),
+  ]);
+  return makeLevelPlacementBundle(journey, session);
 }
 
 function nextClassifiedLevel(cefrLevel) {
@@ -2956,7 +2972,7 @@ async function continueLevelPlacement(worldId) {
     (pausedSession?.answers || []).length === (pausedSession?.orderedQuestionIds || []).length &&
     Boolean(pausedSession?.answersCompletedAt);
   if (pausedSession?.status === 'paused' && answersComplete) {
-    return applyLevelPlacementResult(world, assessment);
+    return applyPlacementOutcome(world, assessment);
   }
   const sessionRef = levelPlacementSessionRef(user.uid, world, assessment);
   let savedJourney = null;
@@ -2994,79 +3010,100 @@ async function continueLevelPlacement(worldId) {
   return makeLevelPlacementBundle(savedJourney, savedSession);
 }
 
-async function levelPlacementUnlockedIds(worldId, session) {
-  const rankIds = new Set(session.passedRankIds || []);
-  if (session.recommendedStartRankId) rankIds.add(session.recommendedStartRankId);
-  const gateIds = new Set();
-  await Promise.all([...rankIds].map(async (rankId) => {
-    const gates = await contentApi().listPublishedGates(worldId, rankId);
-    if ((session.passedRankIds || []).includes(rankId)) {
-      gates.forEach((gate) => gateIds.add(String(gate.gateId)));
-    } else {
-      const first = core().stableContentOrder(gates, 'gateId')[0];
-      if (first) gateIds.add(String(first.gateId));
-    }
+async function reconcilePlacementOutcomeProgress(user, world, assessment, session) {
+  const clearedIds = new Set((session.resultClearedGateIds || []).map(String));
+  const clearedTargets = [];
+  await Promise.all((session.passedRankIds || []).map(async (rankId) => {
+    const gates = await contentApi().listPublishedGates(world, rankId);
+    gates.forEach((gate) => {
+      if (clearedIds.has(String(gate.gateId))) {
+        clearedTargets.push({ rankId: String(rankId), gateId: String(gate.gateId) });
+      }
+    });
   }));
-  return { rankIds, gateIds };
-}
-
-async function reconcileLevelPlacementClearedGates(
-  user,
-  world,
-  assessment,
-  session,
-  gateTargets
-) {
-  await Promise.all(gateTargets.map(async (target) => {
-    const progressRef = gateProgressRef(user.uid, world, target.rankId, target.gateId);
+  await Promise.all(clearedTargets.map(async (target) => {
+      const progressReference = gateProgressRef(
+        user.uid,
+        world,
+        target.rankId,
+        target.gateId
+      );
+      await runTransaction(db, async (transaction) => {
+        const snapshot = await transaction.get(progressReference);
+        const progress = snapshot.exists() ? snapshot.data() : {};
+        if (progress.status === 'cleared') return;
+        const rankStat = session.perRankStats?.[target.rankId] || {};
+        transaction.set(progressReference, {
+          worldId: world,
+          rankId: target.rankId,
+          gateId: target.gateId,
+          status: 'cleared',
+          journeyVersion: core().JOURNEY_VERSION,
+          readyEvidenceCount: Math.max(0, Number(progress.readyEvidenceCount) || 0),
+          clearAttempts: Math.max(0, Number(progress.clearAttempts) || 0),
+          clearedAt: serverTimestamp(),
+          clearedBy: 'level-placement',
+          levelPlacementAssessmentId: assessment,
+          levelPlacementScore: Math.max(0, Math.min(1, Number(rankStat.ratio) || 0)),
+          placementClearedWithoutLoad: !progress.loadedAt,
+          lastActivityAt: serverTimestamp(),
+        }, { merge: true });
+      });
+  }));
+  const targetRankId = String(session.resultStartRankId || '');
+  const targetGateId = String(session.resultStartGateId || '');
+  if (targetRankId && targetGateId && !clearedIds.has(targetGateId)) {
+    const targetReference = gateProgressRef(user.uid, world, targetRankId, targetGateId);
     await runTransaction(db, async (transaction) => {
-      const progressSnapshot = await transaction.get(progressRef);
-      const currentProgress = progressSnapshot.exists() ? progressSnapshot.data() : {};
-      if (currentProgress.status === 'cleared') return;
-      const rankStat = session.perRankStats?.[target.rankId] || {};
-      transaction.set(progressRef, {
+      const snapshot = await transaction.get(targetReference);
+      if (snapshot.exists()) return;
+      transaction.set(targetReference, {
         worldId: world,
-        rankId: target.rankId,
-        gateId: target.gateId,
-        status: 'cleared',
+        rankId: targetRankId,
+        gateId: targetGateId,
+        status: 'available',
         journeyVersion: core().JOURNEY_VERSION,
-        readyEvidenceCount: Math.max(0, Number(currentProgress.readyEvidenceCount) || 0),
-        clearAttempts: Math.max(0, Number(currentProgress.clearAttempts) || 0),
-        clearedAt: serverTimestamp(),
-        clearedBy: 'level-placement',
-        levelPlacementAssessmentId: assessment,
-        levelPlacementScore: Math.max(0, Math.min(1, Number(rankStat.ratio) || 0)),
-        placementClearedWithoutLoad: !currentProgress.loadedAt,
+        readyEvidenceCount: 0,
+        clearAttempts: 0,
         lastActivityAt: serverTimestamp(),
-      }, { merge: true });
+      });
     });
-  }));
+  }
 }
 
-async function ensureLevelPlacementTargetGate(user, world, rankId, gateId, clearedGateIds) {
-  if (!rankId || !gateId || clearedGateIds.has(gateId)) return;
-  const progressRef = gateProgressRef(user.uid, world, rankId, gateId);
-  await runTransaction(db, async (transaction) => {
-    const progressSnapshot = await transaction.get(progressRef);
-    if (progressSnapshot.exists()) return;
-    transaction.set(progressRef, {
-      worldId: world,
-      rankId,
-      gateId,
-      status: 'available',
-      journeyVersion: core().JOURNEY_VERSION,
-      readyEvidenceCount: 0,
-      clearAttempts: 0,
-      lastActivityAt: serverTimestamp(),
-    });
-  });
+async function reconcilePreviouslyAppliedPlacementOutcome(user, world, assessment, session) {
+  let progressReconciliationError = null;
+  try {
+    await reconcilePlacementOutcomeProgress(user, world, assessment, session);
+  } catch (error) {
+    progressReconciliationError = journeyOperationError(
+      error,
+      'reconcile-placement-outcome-progress',
+      { uid: user.uid, worldId: world, assessmentId: assessment }
+    );
+  }
+  if (session.status !== 'completed') {
+    await finishLevelPlacement(world, assessment, 'complete');
+  }
+  return {
+    ...(await getLevelPlacementResult(world, assessment, { force: true })),
+    progressReconciliationError,
+  };
 }
 
-async function applyLevelPlacementResult(worldId, assessmentId) {
+async function applyPlacementOutcome(worldId, assessmentId) {
   const user = requireUser();
   const world = core().cleanId(worldId, 'World');
   const assessment = levelPlacementCore().cleanId(assessmentId, 'Assessment');
   const session = await getLevelPlacementSession(world, assessment, { force: true });
+  if (session?.resultApplied === true) {
+    if (session.status === 'completed') {
+      return reconcilePreviouslyAppliedPlacementOutcome(user, world, assessment, session);
+    }
+    if (['awaiting-decision', 'paused'].includes(session.status)) {
+      return reconcilePreviouslyAppliedPlacementOutcome(user, world, assessment, session);
+    }
+  }
   const resumesCompletedResult = session?.status === 'paused' &&
     Number(session.currentQuestionIndex) === (session.orderedQuestionIds || []).length &&
     (session.answers || []).length === (session.orderedQuestionIds || []).length &&
@@ -3088,60 +3125,45 @@ async function applyLevelPlacementResult(worldId, assessmentId) {
     );
     passedRankGates.set(rankId, gates);
   }));
-  const allPassedGateTargets = [];
-  passedRankIds.forEach((rankId) => {
-    (passedRankGates.get(rankId) || []).forEach((gate) => {
-      allPassedGateTargets.push({ rankId, gateId: String(gate.gateId) });
-    });
+  const nextTarget = session.passedLevel && session.assessmentMode !== 'new-ranks'
+    ? await resolveNextPublishedLevelTarget(world, session.cefrLevel)
+    : null;
+  const nextLevel = String(nextTarget?.cefrLevel || '');
+  const outcome = core().planPlacementOutcome({
+    session,
+    journey: journeyBeforeResult,
+    nextLevelTarget: nextTarget,
+    gatesByRank: passedRankGates,
   });
-
-  let nextLevel = String(session.nextCefrLevel || '');
-  let targetRankId = String(session.resultStartRankId || '');
-  let targetGateId = String(session.resultStartGateId || '');
-  let completedCurrentContent = Boolean(session.completedCurrentContent);
-  let resultUnlockedRankIds = (session.resultUnlockedRankIds || []).map(String);
-  let resultUnlockedGateIds = (session.resultUnlockedGateIds || []).map(String);
-  let resultClearedGateIds = (session.resultClearedGateIds || []).map(String);
-
-  if (session.resultApplied !== true) {
-    let nextTarget = null;
-    nextLevel = '';
-    if (session.passedLevel && session.assessmentMode !== 'new-ranks') {
-      nextTarget = await resolveNextPublishedLevelTarget(world, session.cefrLevel);
-      nextLevel = String(nextTarget?.cefrLevel || '');
-    }
-    const resultDestination = core().resolveLevelPlacementResultDestination({
-      session,
-      journey: journeyBeforeResult,
-      nextLevelTarget: nextTarget,
-    });
-    targetRankId = resultDestination.rankId;
-    targetGateId = resultDestination.gateId;
-    completedCurrentContent = resultDestination.completedCurrentContent;
-    resultClearedGateIds = allPassedGateTargets.map((target) => target.gateId);
-    resultUnlockedRankIds = Array.from(new Set([
-      ...passedRankIds,
-      ...(targetRankId ? [targetRankId] : []),
-    ]));
-    resultUnlockedGateIds = Array.from(new Set([
-      ...resultClearedGateIds,
-      ...(targetGateId ? [targetGateId] : []),
-    ]));
-  }
+  const targetRankId = outcome.destination.rankId;
+  const targetGateId = outcome.destination.gateId;
+  const completedCurrentContent = outcome.completedCurrentContent;
+  const resultUnlockedRankIds = outcome.resultUnlockedRankIds;
+  const resultUnlockedGateIds = outcome.resultUnlockedGateIds;
+  const resultClearedGateIds = outcome.resultClearedGateIds;
 
   const targetJourneyRef = journeyRef(user.uid, world);
   const sessionRef = levelPlacementSessionRef(user.uid, world, assessment);
   const pointerRef = activeJourneyRef(user.uid);
+  let committedJourney = null;
+  let committedSession = null;
   try {
-    if (session.resultApplied !== true) {
-      await runTransaction(db, async (transaction) => {
-        const [journeySnapshot, sessionSnapshot, pointerSnapshot] = await Promise.all([
+    await runTransaction(db, async (transaction) => {
+        const snapshots = await Promise.all([
           transaction.get(targetJourneyRef),
           transaction.get(sessionRef),
           transaction.get(pointerRef),
         ]);
+        const journeySnapshot = snapshots[0];
+        const sessionSnapshot = snapshots[1];
+        const pointerSnapshot = snapshots[2];
         const journey = journeySnapshot.data() || {};
         const currentSession = sessionSnapshot.data() || {};
+        if (currentSession.resultApplied === true && currentSession.status === 'completed') {
+          committedJourney = { ...journey, worldId: world };
+          committedSession = { ...currentSession, assessmentId: assessment };
+          return;
+        }
         if (
           !journeySnapshot.exists() ||
           !sessionSnapshot.exists() ||
@@ -3163,7 +3185,6 @@ async function applyLevelPlacementResult(worldId, assessmentId) {
             'Level Placement result is no longer current.'
           );
         }
-        if (currentSession.resultApplied === true) return;
         const passedLevels = Array.from(new Set([
           ...(journey.passedCefrLevels || []),
           ...(currentSession.passedLevel ? [currentSession.cefrLevel] : []),
@@ -3184,6 +3205,10 @@ async function applyLevelPlacementResult(worldId, assessmentId) {
           ...(journey.levelPlacementPassedRankIds || []),
           ...passedRankIds,
         ]));
+        const placementClearedGateIds = Array.from(new Set([
+          ...(journey.levelPlacementClearedGateIds || []),
+          ...resultClearedGateIds,
+        ]));
         const proposedJourney = {
           activeRankId: targetRankId || journey.activeRankId,
           activeGateId: targetGateId || journey.activeGateId,
@@ -3199,6 +3224,37 @@ async function applyLevelPlacementResult(worldId, assessmentId) {
             ? 'completed-current-content'
             : 'in-progress',
         };
+        const committedAt = new Date();
+        committedJourney = {
+          ...journey,
+          ...proposedJourney,
+          worldId: world,
+          passedCefrLevels: passedLevels,
+          partialCefrLevels: partialLevels,
+          levelPlacementAssessmentIds: assessmentIds,
+          levelPlacementPassedRankIds: placementPassedRankIds,
+          levelPlacementClearedGateIds: placementClearedGateIds,
+          activeLevelPlacementAssessmentId: '',
+          activeLevelPlacementCefrLevel: '',
+          levelPlacementStatus: 'completed',
+          updatedAt: committedAt,
+        };
+        committedSession = {
+          ...currentSession,
+          assessmentId: assessment,
+          status: 'completed',
+          resultApplied: true,
+          assessedAt: committedAt,
+          completedAt: committedAt,
+          nextCefrLevel: nextLevel,
+          resultStartRankId: targetRankId,
+          resultStartGateId: targetGateId,
+          resultUnlockedRankIds,
+          resultUnlockedGateIds,
+          resultClearedGateIds,
+          completedCurrentContent,
+          updatedAt: committedAt,
+        };
         logJourneyProgressionCommit({
           authUid: user.uid,
           operations: [
@@ -3211,7 +3267,10 @@ async function applyLevelPlacementResult(worldId, assessmentId) {
                 partialCefrLevels: partialLevels,
                 levelPlacementAssessmentIds: assessmentIds,
                 levelPlacementPassedRankIds: placementPassedRankIds,
-                levelPlacementStatus: 'awaiting-decision',
+                levelPlacementClearedGateIds: placementClearedGateIds,
+                activeLevelPlacementAssessmentId: '',
+                activeLevelPlacementCefrLevel: '',
+                levelPlacementStatus: 'completed',
                 updatedAt: 'request.time',
               },
             },
@@ -3226,6 +3285,7 @@ async function applyLevelPlacementResult(worldId, assessmentId) {
                 resultUnlockedGateIds,
                 resultClearedGateIds,
                 completedCurrentContent,
+                status: 'completed',
                 updatedAt: 'request.time',
               },
             },
@@ -3258,15 +3318,18 @@ async function applyLevelPlacementResult(worldId, assessmentId) {
           partialCefrLevels: partialLevels,
           levelPlacementAssessmentIds: assessmentIds,
           levelPlacementPassedRankIds: placementPassedRankIds,
+          levelPlacementClearedGateIds: placementClearedGateIds,
           contentJourneyStatus: proposedJourney.contentJourneyStatus,
-          levelPlacementStatus: 'awaiting-decision',
+          activeLevelPlacementAssessmentId: '',
+          activeLevelPlacementCefrLevel: '',
+          levelPlacementStatus: 'completed',
           updatedAt: serverTimestamp(),
         });
         transaction.update(sessionRef, {
-          status: 'awaiting-decision',
-          ...(currentSession.status === 'paused' ? { resumedAt: serverTimestamp() } : {}),
+          status: 'completed',
           resultApplied: true,
           assessedAt: serverTimestamp(),
+          completedAt: serverTimestamp(),
           nextCefrLevel: nextLevel,
           resultStartRankId: targetRankId,
           resultStartGateId: targetGateId,
@@ -3276,36 +3339,16 @@ async function applyLevelPlacementResult(worldId, assessmentId) {
           completedCurrentContent,
           updatedAt: serverTimestamp(),
         });
-        transaction.set(pointerRef, {
-          worldId: world,
-          journeyVersion: core().JOURNEY_VERSION,
-          updatedAt: serverTimestamp(),
-        });
+        if (!pointerSnapshot.exists() || String(pointerSnapshot.data()?.worldId || '') !== world) {
+          transaction.set(pointerRef, {
+            worldId: world,
+            journeyVersion: core().JOURNEY_VERSION,
+            updatedAt: serverTimestamp(),
+          });
+        }
       });
-    }
-
-    cache.levelPlacementSessions.delete(`${world}/${assessment}`);
-    const savedSession = await getLevelPlacementSession(world, assessment, { force: true });
-    const clearedReceipt = new Set((savedSession.resultClearedGateIds || []).map(String));
-    const clearedTargets = allPassedGateTargets.filter((target) => (
-      clearedReceipt.has(target.gateId)
-    ));
-    await reconcileLevelPlacementClearedGates(
-      user,
-      world,
-      assessment,
-      savedSession,
-      clearedTargets
-    );
-    await ensureLevelPlacementTargetGate(
-      user,
-      world,
-      String(savedSession.resultStartRankId || targetRankId),
-      String(savedSession.resultStartGateId || targetGateId),
-      clearedReceipt
-    );
   } catch (error) {
-    throw journeyOperationError(error, 'apply-level-placement-result', {
+    throw journeyOperationError(error, 'apply-placement-outcome', {
       uid: user.uid,
       worldId: world,
       assessmentId: assessment,
@@ -3314,9 +3357,33 @@ async function applyLevelPlacementResult(worldId, assessmentId) {
   }
 
   resetCache(user.uid);
-  const journey = await getJourney(world, { force: true });
+  if (!committedJourney || !committedSession) {
+    throw journeyCloudError(
+      'level-placement/result-missing',
+      'Level Placement outcome committed without a local receipt.'
+    );
+  }
+  const journey = committedJourney;
+  const savedSession = committedSession;
+  cache.journeys.set(world, journey);
   cache.active = journey;
-  const savedSession = await getLevelPlacementSession(world, assessment, { force: true });
+  cache.levelPlacementSessions.set(`${world}/${assessment}`, savedSession);
+  let progressReconciliationError = null;
+  try {
+    await reconcilePlacementOutcomeProgress(user, world, assessment, savedSession);
+  } catch (error) {
+    progressReconciliationError = journeyOperationError(
+      error,
+      'reconcile-placement-outcome-progress',
+      { uid: user.uid, worldId: world, assessmentId: assessment }
+    );
+    console.warn('[Journey] Placement outcome projection remains retryable.', {
+      code: progressReconciliationError.code,
+      operation: progressReconciliationError.operation,
+      worldId: world,
+      assessmentId: assessment,
+    });
+  }
   window.dispatchEvent(new CustomEvent('lootlingua:level-placement-result', {
     detail: {
       worldId: world,
@@ -3325,7 +3392,14 @@ async function applyLevelPlacementResult(worldId, assessmentId) {
       recommendedStartRankId: savedSession.recommendedStartRankId || '',
     },
   }));
-  return makeLevelPlacementBundle(journey, savedSession);
+  return {
+    ...(await makeLevelPlacementBundle(journey, savedSession)),
+    progressReconciliationError,
+  };
+}
+
+async function applyLevelPlacementResult(worldId, assessmentId) {
+  return applyPlacementOutcome(worldId, assessmentId);
 }
 
 async function answerLevelPlacementQuestion(worldId, assessmentId, selectedQuestionId) {
@@ -3400,7 +3474,7 @@ async function answerLevelPlacementQuestion(worldId, assessmentId, selectedQuest
   trace?.stage('transaction-complete');
   if (savedSession.status === 'awaiting-decision') {
     trace?.stage('round-complete').end({ finalQuestion: true });
-    return applyLevelPlacementResult(world, assessment);
+    return applyPlacementOutcome(world, assessment);
   }
   const bundle = {
     ...(await makeLevelPlacementBundle(savedJourney, savedSession)),
@@ -3684,12 +3758,18 @@ async function resolveActiveJourneyDestination(worldId, options) {
   const session = assessment
     ? await getLevelPlacementSession(worldId, assessment, options)
     : null;
+  const legacyAssessment = String(journey.activePlacementAssessmentId || '');
+  const legacySession = legacyAssessment
+    ? await getPlacementSession(worldId, legacyAssessment, options)
+    : null;
   return core().resolveActiveJourneyDestination({
     journey,
     ranks: graph.ranks,
     gatesByRank: graph.gatesByRank,
     progressByRank: graph.progressByRank,
     levelPlacementSession: session,
+    legacyPlacementActive: journey.placementStatus === 'active',
+    legacyPlacementSession: legacySession,
     resumePausedLevelPlacement: options?.resumePausedLevelPlacement === true,
     unassessedRankIds: reconciliation.unassessedRankIds,
   });
@@ -3752,12 +3832,14 @@ const API = Object.freeze({
   resumeLevelPlacement,
   continueLevelPlacement,
   getLevelPlacementSession,
+  getLevelPlacementResult,
   listLevelPlacementSessions,
   getLevelPlacementOverview,
   getLevelPlacementOverviews,
   reconcileLevelPlacementJourney,
   resolveActiveJourneyDestination,
   answerLevelPlacementQuestion,
+  applyPlacementOutcome,
   applyLevelPlacementResult,
   saveLevelPlacementWords,
   finishLevelPlacement,
