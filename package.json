@@ -17,7 +17,7 @@
     "test:evidence": "node --test tests/learning-evidence.test.mjs",
     "test:gate-readiness": "node --test tests/learning-evidence.test.mjs tests/gate-readiness-static.test.mjs",
     "test:gate-clear": "node --test tests/gate-clear.test.mjs",
-    "test:quiz": "node --test tests/quiz-lifecycle.test.mjs",
+    "test:quiz": "node --test tests/quiz-lifecycle.test.mjs tests/quiz-finish-transaction.test.mjs",
     "test:srs": "node --test tests/srs-lifecycle.test.mjs",
     "test:performance": "node --test tests/performance-regression.test.mjs",
     "test:admin:browser": "node tools/admin-rank-browser-smoke.mjs",

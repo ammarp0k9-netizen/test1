@@ -1118,7 +1118,10 @@ async function recordQuizEvidenceBatch(input = {}) {
       Math.max(0, entries.length - correctEntries.length),
   };
   let readinessError = null;
-  if (summary.recorded > 0) {
+  if (
+    (summary.recorded > 0 || summary.duplicate > 0) &&
+    input.projectReadiness !== false
+  ) {
     try {
       await evaluateActiveJourneyReadiness();
     } catch (error) {
@@ -4111,6 +4114,35 @@ function installJourneyMasteryHook() {
   window.updateQuizWordInSource = wrapped;
 }
 
+function installQuizEvidenceBeforeRewardHook() {
+  const original = window.awardWordTransitionXPBatch;
+  if (
+    typeof original !== 'function' ||
+    original.__lootlinguaEvidenceBeforeRewardHook
+  ) {
+    return;
+  }
+  const wrapped = async function evidenceFirstQuizReward(entries, sessionId) {
+    const context = window.getActiveVerifiedQuizCommitContext?.(sessionId);
+    if (!window.auth?.currentUser || !context) {
+      return original.apply(this, arguments);
+    }
+    await recordQuizEvidenceBatch({
+      sessionId: context.sessionId,
+      mode: context.mode,
+      source: context.source,
+      completed: true,
+      entries,
+      projectReadiness: false,
+    });
+    return original.apply(this, arguments);
+  };
+  Object.defineProperty(wrapped, '__lootlinguaEvidenceBeforeRewardHook', {
+    value: true,
+  });
+  window.awardWordTransitionXPBatch = wrapped;
+}
+
 const API = Object.freeze({
   getActiveJourney,
   getJourney,
@@ -4179,8 +4211,12 @@ window.evaluateActivePublishedJourney = evaluateActiveJourneyProgress;
 
 if (document.readyState === 'complete') {
   installJourneyMasteryHook();
+  installQuizEvidenceBeforeRewardHook();
 } else {
-  window.addEventListener('load', installJourneyMasteryHook, { once: true });
+  window.addEventListener('load', () => {
+    installJourneyMasteryHook();
+    installQuizEvidenceBeforeRewardHook();
+  }, { once: true });
 }
 
 window.dispatchEvent(new CustomEvent('lootlingua:journey-cloud-ready'));

@@ -526,7 +526,7 @@ test('ordinary quiz evidence success is not reported as result failure when read
     personalDictionaryState: 'active',
   });
   harness.controls.failReadinessProjection = true;
-  const result = await harness.api.recordQuizEvidenceBatch({
+  const input = {
     sessionId: 'quiz-session-a',
     mode: 'timeAttack',
     source: 'personal',
@@ -535,11 +535,17 @@ test('ordinary quiz evidence success is not reported as result failure when read
       word: { word: 'Apple', wordKey: identity.wordKey },
       result: { correct: true, answeredAt: Date.now() },
     }],
-  });
+  };
+  const result = await harness.api.recordQuizEvidenceBatch(input);
   assert.equal(result.recorded, 1);
   assert.equal(result.readinessError?.code, 'unavailable');
   assert.equal(
     [...harness.values.keys()].some((path) => path.includes(`/contentWords/${identity.wordKey}/evidence/`)),
     true
   );
+  harness.controls.failReadinessProjection = false;
+  const retried = await harness.api.recordQuizEvidenceBatch(input);
+  assert.equal(retried.recorded, 0);
+  assert.equal(retried.duplicate, 1);
+  assert.equal(retried.readinessError, null);
 });

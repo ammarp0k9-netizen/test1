@@ -80,6 +80,16 @@ test('partial gate loads remain retryable and learning is written only after ful
   assert.match(worlds, /إعادة المحاولة/);
 });
 
+test('a loaded learning gate continues to the quiz page', () => {
+  const learningActions = worlds.slice(
+    worlds.indexOf("} else if (state === 'learning')"),
+    worlds.indexOf("} else if (state === 'ready')")
+  );
+  assert.match(learningActions, /متابعة التعلم/);
+  assert.match(learningActions, /window\.loadQuizView\(\)/);
+  assert.doesNotMatch(learningActions, /window\.loadPersonalDictionary\(\)/);
+});
+
 test('Journey preserves the original Firestore failure and identifies its operation', () => {
   const errorHelpers = cloud.slice(
     cloud.indexOf('function journeyCloudError'),

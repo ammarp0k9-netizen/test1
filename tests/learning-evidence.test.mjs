@@ -146,9 +146,11 @@ test('word and gate readiness require every loaded gate word', () => {
   assert.equal(gate.needsEvidenceWordCount, 1);
 });
 
-test('verified quiz completion records evidence after SRS without replacing reward logic', () => {
+test('verified quiz Evidence stays idempotent and separate from reward implementation', () => {
   assert.match(runtimeSource, /recordQuizEvidenceBatch/);
   assert.match(runtimeSource, /completed: true/);
+  assert.match(cloudSource, /function installQuizEvidenceBeforeRewardHook/);
+  assert.match(cloudSource, /projectReadiness: false/);
   assert.match(cloudSource, /eventSnapshot\.exists\(\)\) return 'duplicate'/);
   assert.match(cloudSource, /isEligibleRecall\(\{\s*uid: user\.uid,/);
   assert.match(cloudSource, /eligibleEvidenceCount: nextCount/);

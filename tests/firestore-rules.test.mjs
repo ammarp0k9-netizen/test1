@@ -17,6 +17,7 @@ import {
   limit,
   orderBy,
   query,
+  runTransaction,
   serverTimestamp,
   setDoc,
   updateDoc,
@@ -2970,6 +2971,91 @@ try {
     assert.equal((await getDocs(collection(userA, `${lifecycleCanonicalPath}/sources`))).size, 2);
   });
 
+  await test('legacy Journey word visibility tolerates schema drift without changing learning fields', async () => {
+    const uid = 'legacy-visibility-user';
+    const wordKey = 'legacy-visible-word';
+    const legacyPath = `users/${uid}/words/published_${wordKey}`;
+    const canonicalPath = `users/${uid}/contentWords/${wordKey}`;
+    const sourcePath = `${canonicalPath}/sources/published_legacy~rank~gate~word`;
+    await environment.withSecurityRulesDisabled(async (context) => {
+      const db = context.firestore();
+      await Promise.all([
+        setDoc(doc(db, legacyPath), {
+          word: 'legacy',
+          meaning: 'قديم',
+          difficulty: 'A1',
+          mastery_status: 'Reviewing',
+          mastery_streak: 2,
+          importedByLegacyClient: true,
+          createdAt: timestamp
+        }),
+        setDoc(doc(db, canonicalPath), {
+          canonicalId: wordKey,
+          normalizationVersion: 1,
+          normalizedWord: wordKey,
+          masteryKey: wordKey,
+          legacyWordId: `published_${wordKey}`,
+          word: 'legacy',
+          forgetCount: 0,
+          primarySource: { addedFrom: 'published-gate', sourceId: 'published_legacy~rank~gate~word' },
+          sourceCount: 1,
+          schemaVersion: 1,
+          createdAt: timestamp,
+          updatedAt: timestamp
+        }),
+        setDoc(doc(db, sourcePath), {
+          addedFrom: 'published-gate',
+          worldId: 'legacy',
+          rankId: 'rank',
+          gateId: 'gate',
+          contentWordId: 'word',
+          operationId: 'legacy-load',
+          linkedAt: timestamp
+        })
+      ]);
+    });
+    const db = environment.authenticatedContext(uid).firestore();
+    await assertSucceeds(updateDoc(doc(db, legacyPath), {
+      hiddenFromDictionary: true,
+      hiddenFromDictionaryAt: serverTimestamp()
+    }));
+    const hidden = (await getDoc(doc(db, legacyPath))).data();
+    assert.equal(hidden.hiddenFromDictionary, true);
+    assert.equal(hidden.mastery_status, 'Reviewing');
+    assert.equal((await getDoc(doc(db, sourcePath))).exists(), true);
+    await assertFails(updateDoc(doc(db, legacyPath), {
+      hiddenFromDictionary: false,
+      hiddenFromDictionaryAt: null,
+      mastery_status: 'Mastered'
+    }));
+    await assertSucceeds(updateDoc(doc(db, legacyPath), {
+      hiddenFromDictionary: false,
+      hiddenFromDictionaryAt: null
+    }));
+    await assertSucceeds(updateDoc(doc(db, legacyPath), {
+      forgetCount: 0,
+      mastery_status: 'Mastered',
+      mastery_streak: 3,
+      last_recalled_at: serverTimestamp(),
+      first_recalled_at: serverTimestamp(),
+      last_recall_day: '2026-07-29',
+      last_recall_session_id: 'quiz-legacy',
+      last_quizzed_at: serverTimestamp(),
+      quiz_seen_count: 3,
+      mastered_once: true,
+      firstMasteredAt: serverTimestamp(),
+      hasEarnedMasteryXP: true,
+      earnedTransitions: ['new_learning', 'learning_reviewing', 'reviewing_mastered'],
+      remasteryAwardCount: 0,
+      xpEconomyVersion: 2
+    }));
+    assert.equal((await getDoc(doc(db, legacyPath))).data().mastery_status, 'Mastered');
+    await assertFails(updateDoc(doc(db, legacyPath), {
+      mastery_streak: 2,
+      meaning: 'forged'
+    }));
+  });
+
   await test('visibility rules reject another user and a combined SRS mutation', async () => {
     await assertFails(updateDoc(doc(userB, lifecycleLegacyPath), {
       hiddenFromDictionary: true,
@@ -3420,6 +3506,161 @@ try {
     });
     await assertSucceeds(evidenceBatch('evidence-v2-session-3', 3, currentDayKey));
     assert.equal((await getDoc(doc(db, canonicalPath))).data().eligibleEvidenceCount, 3);
+  });
+
+  await test('the reported Evidence v2 transaction accepts its legacy read precondition', async () => {
+    const uid = 'reported-evidence-user-00001';
+    const wordKey = 'she';
+    const legacyWordId = 'published_she';
+    const sessionId = 'quiz_1785315205783_b72jesr';
+    const eventId = `e2~${uid}~${sessionId}~${wordKey}`;
+    const canonicalPath = `users/${uid}/contentWords/${wordKey}`;
+    const legacyPath = `users/${uid}/words/${legacyWordId}`;
+    const sessionPath = `users/${uid}/quizEvidenceSessions/${sessionId}`;
+    const eventPath = `${canonicalPath}/evidence/${eventId}`;
+    const timezoneOffsetMinutes = -180;
+    const localDayKey = Math.floor(
+      (Date.now() - timezoneOffsetMinutes * 60 * 1000) / (24 * 60 * 60 * 1000)
+    );
+    await environment.withSecurityRulesDisabled(async (context) => {
+      const seedDb = context.firestore();
+      await Promise.all([
+        setDoc(doc(seedDb, legacyPath), {
+          text: 'she',
+          word: 'she',
+          normalizedWord: 'she',
+          wordKey,
+          translation: 'هي',
+          definition: 'A female person previously mentioned.',
+          definition_ar: 'ضمير للغائبة.',
+          example: 'She is here.',
+          exampleTranslation: 'هي هنا.',
+          partOfSpeech: 'pronoun',
+          category: 'Pronouns',
+          level: 'A1',
+          tags: ['pronoun'],
+          synonyms: [],
+          pronunciation: '',
+          notes: '',
+          meaning: 'هي',
+          starred: false,
+          forgetCount: 0,
+          userId: uid,
+          xpValue: 0,
+          mastery_status: 'New',
+          mastery_streak: 0,
+          last_recalled_at: null,
+          first_recalled_at: null,
+          last_recall_day: '',
+          last_recall_session_id: '',
+          last_quizzed_at: null,
+          quiz_seen_count: 0,
+          mastered_once: false,
+          firstMasteredAt: null,
+          hasEarnedMasteryXP: false,
+          earnedTransitions: [],
+          remasteryAwardCount: 0,
+          xpEconomyVersion: 0,
+          hiddenFromDictionary: false,
+          hiddenFromDictionaryAt: null,
+          personalDictionaryState: 'active',
+          order: 0,
+          createdAt: timestamp
+        }),
+        setDoc(doc(seedDb, canonicalPath), {
+          canonicalId: wordKey,
+          normalizationVersion: 1,
+          normalizedWord: wordKey,
+          masteryKey: wordKey,
+          legacyWordId,
+          word: wordKey,
+          wordKey,
+          translation: 'هي',
+          definition: 'A female person previously mentioned.',
+          definition_ar: 'ضمير للغائبة.',
+          meaning: 'هي',
+          example: 'She is here.',
+          exampleTranslation: 'هي هنا.',
+          partOfSpeech: 'pronoun',
+          category: 'Pronouns',
+          level: 'A1',
+          tags: ['pronoun'],
+          synonyms: [],
+          pronunciation: '',
+          notes: '',
+          difficulty: 'A1',
+          forgetCount: 0,
+          contentRefPath: 'content_worlds/w/ranks/r/gates/g/words/she',
+          primarySource: {
+            sourceId: 'published_w~r~g~she',
+            addedFrom: 'published-gate',
+            worldId: 'w',
+            rankId: 'r',
+            gateId: 'g',
+            contentWordId: 'she'
+          },
+          sourceCount: 1,
+          eligibleEvidenceCount: 0,
+          lastEligibleEvidenceAt: null,
+          lastEvidenceEventId: '',
+          evidenceVersion: 1,
+          schemaVersion: 1,
+          createdAt: timestamp,
+          joinedAt: timestamp,
+          updatedAt: timestamp
+        })
+      ]);
+    });
+    const db = environment.authenticatedContext(uid).firestore();
+    await assertSucceeds(setDoc(doc(db, sessionPath), {
+      sessionId,
+      status: 'completed',
+      mode: 'timeAttack',
+      sourceType: 'personal',
+      privateWorldId: '',
+      wordKeys: [wordKey],
+      correctWordKeys: [wordKey],
+      totalCount: 1,
+      correctCount: 1,
+      evidenceVersion: 2,
+      completedAt: serverTimestamp()
+    }));
+    await assertSucceeds(runTransaction(db, async (transaction) => {
+      const canonicalRef = doc(db, canonicalPath);
+      const eventRef = doc(db, eventPath);
+      const legacyRef = doc(db, legacyPath);
+      await Promise.all([
+        transaction.get(canonicalRef),
+        transaction.get(eventRef),
+        transaction.get(legacyRef)
+      ]);
+      transaction.set(eventRef, {
+        eventId,
+        sessionId,
+        wordKey,
+        sourceType: 'personal',
+        privateWorldId: '',
+        membershipWordId: '',
+        mode: 'timeAttack',
+        correct: true,
+        completed: true,
+        sequence: 1,
+        evidenceVersion: 2,
+        timezoneOffsetMinutes,
+        localDayKey,
+        occurredAt: serverTimestamp()
+      });
+      transaction.update(canonicalRef, {
+        eligibleEvidenceCount: 1,
+        lastEligibleEvidenceAt: serverTimestamp(),
+        lastEvidenceEventId: eventId,
+        evidenceVersion: 2,
+        evidenceTimezoneOffsetMinutes: timezoneOffsetMinutes,
+        lastEvidenceLocalDayKey: localDayKey,
+        updatedAt: serverTimestamp()
+      });
+    }));
+    assert.equal((await getDoc(doc(db, eventPath))).exists(), true);
   });
 
   await test('Gate Clear atomically clears only a ready gate and opens its next gate', async () => {
@@ -4296,7 +4537,7 @@ try {
   });
 
   if (testFilter) assert.ok(selected > 0, `No Rules test matched "${testFilter}"`);
-  assert.equal(passed, testFilter ? selected : 66);
+  assert.equal(passed, testFilter ? selected : 68);
   console.log(`# ${passed} Firestore Rules emulator tests passed`);
 } finally {
   await environment.cleanup();

@@ -623,16 +623,22 @@ service cloud.firestore {
       let visibilityChanged = after.diff(before).affectedKeys().hasAny([
         'hiddenFromDictionary', 'hiddenFromDictionaryAt'
       ]);
+      let srsChanged = after.diff(before).affectedKeys().hasAny([
+        'forgetCount', 'xpValue', 'mastery_status', 'mastery_streak',
+        'last_recalled_at', 'first_recalled_at', 'last_recall_day',
+        'last_recall_session_id', 'last_quizzed_at', 'quiz_seen_count',
+        'mastered_once', 'firstMasteredAt', 'hasEarnedMasteryXP',
+        'earnedTransitions', 'remasteryAwardCount', 'xpEconomyVersion'
+      ]);
       let membershipChanged = after.diff(before).affectedKeys().hasAny([
         'personalDictionaryState'
       ]);
-      return validLegacyWord(after, uid) &&
-        (!membershipChanged || validPersonalDictionaryState(after.personalDictionaryState)) &&
-        (!visibilityChanged || (
+      let validVisibilityOnly = visibilityChanged &&
           after.diff(before).affectedKeys().hasOnly([
             'hiddenFromDictionary', 'hiddenFromDictionaryAt',
             'personalDictionaryState'
           ]) &&
+          (!membershipChanged || validPersonalDictionaryState(after.personalDictionaryState)) &&
           (
             (
               after.hiddenFromDictionary == true &&
@@ -642,8 +648,41 @@ service cloud.firestore {
               after.hiddenFromDictionary == false &&
               after.hiddenFromDictionaryAt == null
             )
-          )
-        ));
+          );
+      let validSrsOnly = srsChanged &&
+        after.diff(before).affectedKeys().hasOnly([
+          'forgetCount', 'xpValue', 'mastery_status', 'mastery_streak',
+          'last_recalled_at', 'first_recalled_at', 'last_recall_day',
+          'last_recall_session_id', 'last_quizzed_at', 'quiz_seen_count',
+          'mastered_once', 'firstMasteredAt', 'hasEarnedMasteryXP',
+          'earnedTransitions', 'remasteryAwardCount', 'xpEconomyVersion'
+        ]) &&
+        optionalNonNegativeInt(after, 'forgetCount') &&
+        after.get('forgetCount', 0) <= 100000 &&
+        optionalNumber(after, 'xpValue') &&
+        (!('mastery_status' in after) || validSrsStatus(after.mastery_status)) &&
+        (!('mastery_streak' in after) ||
+          (after.mastery_streak is int && after.mastery_streak >= 0 &&
+            after.mastery_streak <= 3)) &&
+        optionalTime(after, 'last_recalled_at') &&
+        optionalTime(after, 'first_recalled_at') &&
+        optionalString(after, 'last_recall_day', 20) &&
+        optionalString(after, 'last_recall_session_id', 180) &&
+        optionalTime(after, 'last_quizzed_at') &&
+        optionalNonNegativeInt(after, 'quiz_seen_count') &&
+        optionalBool(after, 'mastered_once') &&
+        optionalTime(after, 'firstMasteredAt') &&
+        optionalBool(after, 'hasEarnedMasteryXP') &&
+        optionalList(after, 'earnedTransitions', 8) &&
+        optionalNonNegativeInt(after, 'remasteryAwardCount') &&
+        optionalNonNegativeInt(after, 'xpEconomyVersion');
+      return validVisibilityOnly ||
+        validSrsOnly ||
+        (
+          !visibilityChanged && !srsChanged &&
+          validLegacyWord(after, uid) &&
+          (!membershipChanged || validPersonalDictionaryState(after.personalDictionaryState))
+        );
     }
 
     function legacyWordDeleteLeavesNoSources(data, uid) {
@@ -3801,34 +3840,45 @@ service cloud.firestore {
           exists(/databases/$(database)/documents/users/$(uid)/contentWords/$(contentWordId)) &&
           (
             (
-              request.resource.data.diff(resource.data).affectedKeys()
-                .hasOnly(['forgetCount', 'updatedAt']) &&
-              (request.resource.data.forgetCount == resource.data.forgetCount ||
-                request.resource.data.forgetCount == resource.data.forgetCount + 1 ||
-                (resource.data.forgetCount > 0 &&
-                  request.resource.data.forgetCount == resource.data.forgetCount - 1))
-            ) ||
-            (
-              request.resource.data.diff(resource.data).affectedKeys()
-                .hasOnly(['sourceCount', 'updatedAt']) &&
-              (
-                request.resource.data.sourceCount == resource.data.sourceCount + 1 ||
-                request.resource.data.sourceCount == resource.data.sourceCount - 1 ||
-                (
-                  request.resource.data.sourceCount == 0 &&
-                  resource.data.sourceCount > 0
-                )
+              request.resource.data.diff(resource.data).affectedKeys().hasAny([
+                'eligibleEvidenceCount', 'lastEligibleEvidenceAt',
+                'lastEvidenceEventId', 'evidenceVersion',
+                'evidenceTimezoneOffsetMinutes', 'lastEvidenceLocalDayKey'
+              ]) &&
+              validEvidenceSummaryUpdate(
+                resource.data,
+                request.resource.data,
+                uid,
+                contentWordId
               )
             ) ||
-            validEvidenceSummaryUpdate(
-              resource.data,
-              request.resource.data,
-              uid,
-              contentWordId
+            (
+              (
+                (
+                  request.resource.data.diff(resource.data).affectedKeys()
+                    .hasOnly(['forgetCount', 'updatedAt']) &&
+                  (request.resource.data.forgetCount == resource.data.forgetCount ||
+                    request.resource.data.forgetCount == resource.data.forgetCount + 1 ||
+                    (resource.data.forgetCount > 0 &&
+                      request.resource.data.forgetCount == resource.data.forgetCount - 1))
+                ) ||
+                (
+                  request.resource.data.diff(resource.data).affectedKeys()
+                    .hasOnly(['sourceCount', 'updatedAt']) &&
+                  (
+                    request.resource.data.sourceCount == resource.data.sourceCount + 1 ||
+                    request.resource.data.sourceCount == resource.data.sourceCount - 1 ||
+                    (
+                      request.resource.data.sourceCount == 0 &&
+                      resource.data.sourceCount > 0
+                    )
+                  )
+                )
+              ) &&
+              validContentLearningWord(request.resource.data, contentWordId) &&
+              request.resource.data.updatedAt == request.time
             )
-          ) &&
-          validContentLearningWord(request.resource.data, contentWordId) &&
-          request.resource.data.updatedAt == request.time;
+          );
 
         match /sources/{sourceId} {
           allow read: if isOwner(uid);

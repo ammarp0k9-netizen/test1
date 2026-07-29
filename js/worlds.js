@@ -4112,8 +4112,8 @@ function makePublishedGateJourneyPanel(world, rank, gate) {
     actions.append(publishedButton(
       'متابعة التعلم',
       'published-action-btn published-journey-btn published-journey-cta',
-      () => window.loadPersonalDictionary(),
-      'fa-solid fa-book-open-reader'
+      () => window.loadQuizView(),
+      'fa-solid fa-gamepad'
     ));
     if (publishedContentState.newGateWords.length) {
       const sync = publishedButton(

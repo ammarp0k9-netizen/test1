@@ -525,6 +525,23 @@ function toQuizTimestamp(value) {
   return Number.isFinite(parsed) ? parsed : 0;
 }
 
+window.getActiveVerifiedQuizCommitContext = function(sessionId) {
+  const requestedSessionId = String(sessionId || '');
+  if (
+    !requestedSessionId ||
+    !activeQuizSession ||
+    !isVerifiedQuizMode(activeQuizSession.mode) ||
+    String(activeQuizSession.id || '') !== requestedSessionId
+  ) {
+    return null;
+  }
+  return {
+    sessionId: requestedSessionId,
+    mode: activeQuizSession.mode,
+    source: activeQuizSession.source || currentQuizSource,
+  };
+};
+
 function getQuizDueInfo(word, state, now) {
   const status = state.mastery_status;
   const lastQuizAt = toQuizTimestamp(state.last_quizzed_at || state.last_recalled_at);

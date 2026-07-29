@@ -712,8 +712,13 @@ async function confirmDeleteWords(ids, {
         const action = actionById.get(id) || 'delete';
         const word = wordsToDelete.find((item) => String(item.id) === id);
         try {
+          if (action === 'hide' && typeof window.hideUserWordFromDictionary !== 'function') {
+            const unavailable = new Error('Dictionary visibility service is unavailable.');
+            unavailable.code = 'word-lifecycle/visibility-unavailable';
+            throw unavailable;
+          }
           const result = action === 'hide'
-            ? await window.hideUserWordFromDictionary?.(id)
+            ? await window.hideUserWordFromDictionary(id)
             : await deleteWordFromCapturedScope(
               id,
               deleteCustomWorldId,
@@ -726,6 +731,12 @@ async function confirmDeleteWords(ids, {
             );
           return { id, action, ok: action === 'hide' ? Boolean(result) : result === true };
         } catch (error) {
+          console.error('[Dictionary] word removal operation failed.', {
+            operation: action,
+            wordId: id,
+            code: error?.code || 'unknown',
+            message: error?.message || String(error),
+          }, error);
           return { id, action, ok: false, error };
         }
       }));
