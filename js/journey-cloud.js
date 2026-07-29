@@ -1332,7 +1332,10 @@ async function resumeGateClearAttempt(worldId, rankId, gateId) {
 
 async function finalizeGateClearAttempt(worldId, rankId, gateId, attemptId) {
   const user = requireUser();
-  const nextTarget = await resolveNextContentTarget(worldId, rankId, gateId);
+  const [nextTarget, currentRank] = await Promise.all([
+    resolveNextContentTarget(worldId, rankId, gateId),
+    contentApi().getPublishedRank(worldId, rankId),
+  ]);
   const attemptRef = gateClearAttemptRef(user.uid, worldId, attemptId);
   const progressRef = gateProgressRef(user.uid, worldId, rankId, gateId);
   const targetJourneyRef = journeyRef(user.uid, worldId);
@@ -1396,6 +1399,20 @@ async function finalizeGateClearAttempt(worldId, rankId, gateId, attemptId) {
       committed = { result, journey, nextTarget: null };
       return;
     }
+    const completesRank = !nextTarget ||
+      String(nextTarget.rank?.rankId || '') !== String(rankId);
+    const wasRankCompleted = (journey.completedRankIds || [])
+      .map(String)
+      .includes(String(rankId));
+    const completedRankIds = completesRank && !wasRankCompleted
+      ? Array.from(new Set([...(journey.completedRankIds || []), String(rankId)]))
+      : (journey.completedRankIds || []);
+    const rankCompletionVersions = completesRank && !wasRankCompleted
+      ? {
+        ...(journey.rankCompletionVersions || {}),
+        [String(rankId)]: Math.max(1, Number(currentRank?.version) || 1),
+      }
+      : (journey.rankCompletionVersions || {});
     transaction.update(progressRef, {
       status: 'cleared',
       activeClearAttemptId: '',
@@ -1420,12 +1437,14 @@ async function finalizeGateClearAttempt(worldId, rankId, gateId, attemptId) {
         activeGateId: nextGateId,
         unlockedRankIds,
         unlockedGateIds,
+        ...(completesRank ? { completedRankIds, rankCompletionVersions } : {}),
       };
       transaction.update(targetJourneyRef, {
         activeRankId: nextRankId,
         activeGateId: nextGateId,
         unlockedRankIds,
         unlockedGateIds,
+        ...(completesRank ? { completedRankIds, rankCompletionVersions } : {}),
         updatedAt: serverTimestamp(),
       });
       if (!nextProgressSnapshot?.exists()) {
@@ -1441,8 +1460,32 @@ async function finalizeGateClearAttempt(worldId, rankId, gateId, attemptId) {
         });
       }
       transaction.update(pointerRef, { updatedAt: serverTimestamp() });
+    } else {
+      nextJourney = {
+        ...journey,
+        completedRankIds,
+        rankCompletionVersions,
+        contentJourneyStatus: 'completed-current-content',
+      };
+      transaction.update(targetJourneyRef, {
+        completedRankIds,
+        rankCompletionVersions,
+        contentJourneyStatus: 'completed-current-content',
+        updatedAt: serverTimestamp(),
+      });
+      transaction.update(pointerRef, { updatedAt: serverTimestamp() });
     }
-    committed = { result, journey: nextJourney, nextTarget };
+    committed = {
+      result,
+      journey: nextJourney,
+      nextTarget,
+      rankCompleted: completesRank,
+      rankCompletionRecorded: completesRank && !wasRankCompleted,
+      completedCurrentContent: !nextTarget,
+      rankCompletionVersion: completesRank
+        ? Math.max(1, Number(rankCompletionVersions[String(rankId)]) || 1)
+        : 0,
+    };
   });
   cache.gateClearAttempts.delete(`${String(worldId)}/${String(attemptId)}`);
   cache.gateProgress.delete(gateCacheKey(worldId, rankId, gateId));
@@ -1482,7 +1525,18 @@ async function answerGateClearQuestion(worldId, rankId, gateId, attemptId, selec
   cache.gateClearAttempts.set(`${String(worldId)}/${String(attemptId)}`, nextSession);
   if (nextSession.status === 'submitting') {
     const result = await finalizeGateClearAttempt(worldId, rankId, gateId, attemptId);
-    return { ...await gateClearBundle(worldId, rankId, gateId, nextSession), result };
+    try {
+      return { ...await gateClearBundle(worldId, rankId, gateId, nextSession), result };
+    } catch (error) {
+      console.warn('[Journey] Gate Clear committed; result decoration failed.', {
+        code: error?.code || error?.message || 'unavailable',
+        worldId: String(worldId),
+        rankId: String(rankId),
+        gateId: String(gateId),
+        attemptId: String(attemptId),
+      });
+      return { attempt: nextSession, words: [], question: null, result };
+    }
   }
   return gateClearBundle(worldId, rankId, gateId, nextSession);
 }

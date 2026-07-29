@@ -1329,6 +1329,7 @@ const publishedContentState = {
   gateClearBundle: null,
   gateClearPending: false,
   gateClearFeedback: null,
+  shownRankCompletionCelebrations: new Set(),
   readinessTimer: null,
   wordPager: null,
   wordSnapshot: null,
@@ -1614,6 +1615,27 @@ function publishedGateMasteryIndex(progress) {
     if (state) index.set(wordKey, state);
   });
   return index;
+}
+
+function publishedRankProgressView(rank, gates, journey, progressByGate, ranks) {
+  const masteryByWordKey = new Map();
+  (progressByGate instanceof Map ? [...progressByGate.values()] : [])
+    .forEach((progress) => {
+      publishedGateMasteryIndex(progress).forEach((state, wordKey) => {
+        masteryByWordKey.set(wordKey, state);
+      });
+    });
+  const level = getLevelPlacementContract().normalizeLevel(rank?.cefrLevel);
+  const placementHistory = publishedContentState.levelPlacementOverviews.get(level)?.history || null;
+  return getJourneyContract().deriveRankProgressView({
+    rank,
+    gates,
+    progressByGate,
+    journey,
+    ranks,
+    masteryByWordKey,
+    placementHistory,
+  });
 }
 
 function publishedGateJourneyState(gate, rank, gates, ranks, journey, progress) {
@@ -3700,6 +3722,14 @@ function makePublishedHierarchyCard(kind, item, onClick, options) {
       stateIcons[journeyState] || 'fa-solid fa-lock'
     );
   }
+  if (kind === 'rank' && options?.rankProgress?.completed) {
+    appendMetaChip(meta, 'رتبة مكتملة', 'fa-solid fa-trophy');
+  }
+  if (kind === 'rank' && options?.rankProgress?.mastered) {
+    appendMetaChip(meta, 'رتبة متقنة', 'fa-solid fa-crown');
+  } else if (kind === 'rank' && options?.rankProgress?.hasNewContent) {
+    appendMetaChip(meta, 'محتوى جديد', 'fa-solid fa-sparkles');
+  }
   const footer = publishedElement('span', 'published-card-footer');
   footer.append(meta);
   const actionLabels = {
@@ -3962,19 +3992,35 @@ function renderPublishedGateClearResult(world, rank, gate, bundle) {
   if (!root) return;
   setPublishedPlacementMode(true);
   const passed = bundle.result?.result?.passed === true;
+  const rankCompleted = passed && bundle.result?.rankCompleted === true;
+  const completedCurrentContent = rankCompleted &&
+    bundle.result?.completedCurrentContent === true;
   const attempt = bundle.attempt;
   const section = publishedElement(
     'section',
     `published-placement-result ${passed ? 'is-passed' : 'is-learning'}`
   );
   section.append(
-    publishedIcon(passed ? 'fa-solid fa-flag-checkered' : 'fa-solid fa-book-open-reader'),
-    publishedElement('strong', '', passed ? 'تم اجتياز البوابة' : 'تحتاج إلى مراجعة إضافية'),
+    publishedIcon(
+      rankCompleted
+        ? 'fa-solid fa-trophy'
+        : (passed ? 'fa-solid fa-flag-checkered' : 'fa-solid fa-book-open-reader')
+    ),
+    publishedElement(
+      'strong',
+      '',
+      rankCompleted ? `اكتملت رتبة ${rank.title || ''}` :
+        (passed ? 'تم اجتياز البوابة' : 'تحتاج إلى مراجعة إضافية')
+    ),
     publishedElement(
       'p',
       '',
       passed
-        ? 'فُتحت الخطوة التالية في رحلتك، ولن تبدأ تلقائيًا.'
+        ? (completedCurrentContent
+          ? 'أكملت كل المحتوى المنشور حاليًا. بقيت المراجعات والكلمات غير المتقنة متاحة دون أن تعيق إنجازك.'
+          : (rankCompleted
+            ? 'حُفظ إنجاز الرتبة وفتح resolver المركزي وجهتك التالية. الكلمات المتبقية للمراجعة لا تعيق التقدم.'
+            : 'فُتحت الخطوة التالية في رحلتك، ولن تبدأ تلقائيًا.'))
         : 'بقيت البوابة جاهزة، ويمكنك إعادة المحاولة لاحقًا دون فقدان أدلتك.'
     ),
     publishedElement(
@@ -3984,20 +4030,37 @@ function renderPublishedGateClearResult(world, rank, gate, bundle) {
     )
   );
   section.append(publishedButton(
-    'العودة إلى الرحلة',
+    passed
+      ? (completedCurrentContent ? 'عرض إنجاز الرحلة' : (rankCompleted ? 'متابعة الوجهة التالية' : 'متابعة الرحلة'))
+      : 'العودة إلى البوابة',
     'published-action-btn published-placement-primary',
     () => {
       setPublishedPlacementMode(false);
-      const next = bundle.result?.nextTarget;
-      window.openPublishedGate(
-        world.worldId,
-        next?.rank?.rankId || rank.rankId,
-        next?.gate?.gateId || gate.gateId
-      );
+      if (passed) {
+        openPublishedJourneyDestination(world.worldId, {
+          resumePausedLevelPlacement: true,
+        });
+      } else {
+        window.openPublishedGate(world.worldId, rank.rankId, gate.gateId);
+      }
     },
     'fa-solid fa-arrow-right'
   ));
   root.replaceChildren(section);
+  if (rankCompleted) {
+    const celebrationKey = [
+      world.worldId,
+      rank.rankId,
+      bundle.result?.rankCompletionVersion || 1,
+      attempt?.attemptId || '',
+    ].join(':');
+    if (!publishedContentState.shownRankCompletionCelebrations.has(celebrationKey)) {
+      publishedContentState.shownRankCompletionCelebrations.add(celebrationKey);
+      try { launchConfetti(); } catch (error) {
+        console.warn('[Journey] Rank celebration unavailable.', error?.message || error);
+      }
+    }
+  }
 }
 
 async function maybeRenderPublishedGateClearResume(world, rank, gate, progress, generation) {
@@ -4495,7 +4558,10 @@ function makePublishedLevelSection(world, cefrLevel, ranks, journey) {
       'rank',
       rank,
       () => window.openPublishedRank(world.worldId, rank.rankId),
-      { journeyState: rankState }
+      {
+        journeyState: rankState,
+        rankProgress: publishedRankProgressView(rank, [], journey, new Map(), ranks),
+      }
     ));
   });
   section.append(grid);
@@ -4564,6 +4630,37 @@ function renderPublishedGates(
       { label: rank.title || 'الرتبة' },
     ],
   });
+  const rankProgress = publishedRankProgressView(
+    rank,
+    gates,
+    journey,
+    gateProgressById,
+    ranks
+  );
+  if (rankProgress.completed) {
+    const achievement = publishedElement(
+      'section',
+      `published-rank-achievement${rankProgress.mastered ? ' is-mastered' : ''}`
+    );
+    achievement.append(
+      publishedIcon(rankProgress.mastered ? 'fa-solid fa-crown' : 'fa-solid fa-trophy'),
+      publishedElement(
+        'strong',
+        '',
+        rankProgress.mastered ? 'رتبة مكتملة ومتقنة' : 'رتبة مكتملة'
+      ),
+      publishedElement(
+        'span',
+        '',
+        rankProgress.mastered
+          ? 'جميع بوابات الرتبة تحمل Crown وفق سجل الإتقان الدائم.'
+          : (rankProgress.hasNewContent
+            ? 'إنجازك التاريخي محفوظ، ويوجد محتوى أحدث من نسخة الإكمال.'
+            : 'اجتزت جميع البوابات المطلوبة. الكلمات المتبقية تظل ضمن المراجعات ولا تعيق تقدمك.')
+      )
+    );
+    section.append(achievement);
+  }
   const level = getLevelPlacementContract().normalizeLevel(rank.cefrLevel);
   const overview = publishedContentState.levelPlacementOverviews.get(level);
   if (overview?.unassessedRankIds?.map(String).includes(String(rank.rankId))) {

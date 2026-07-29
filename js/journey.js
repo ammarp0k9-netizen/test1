@@ -442,6 +442,8 @@
       activePlacementAssessmentId: '',
       unlockedRankIds: [safeRankId],
       unlockedGateIds: [safeGateId],
+      completedRankIds: [],
+      rankCompletionVersions: {},
     };
   }
 
@@ -594,6 +596,91 @@
     return state;
   }
 
+  function rankProgressFor(progressByGate, gateId) {
+    return progressByGate instanceof Map
+      ? progressByGate.get(String(gateId)) || null
+      : progressByGate?.[String(gateId)] || null;
+  }
+
+  function rankCompletionVersion(input, rankId) {
+    const stored = Number(input?.journey?.rankCompletionVersions?.[rankId]);
+    if (Number.isSafeInteger(stored) && stored > 0) return stored;
+    const history = input?.placementHistory || {};
+    const assessed = Number(
+      history?.rankVersions?.[rankId] ?? history?.assessedRankVersions?.[rankId]
+    );
+    return Number.isSafeInteger(assessed) && assessed > 0 ? assessed : 0;
+  }
+
+  function rankWasPassedByPlacement(journey, rankId) {
+    return includesId(journey?.levelPlacementPassedRankIds, rankId);
+  }
+
+  function rankWasPassedByLegacyProgress(input, rankId) {
+    const journey = input?.journey || {};
+    const ranks = stableRankOrder(input?.ranks)
+      .filter((rank) => rank?.status === 'published');
+    const rankIndex = ranks.findIndex((rank) => itemId(rank, 'rankId') === rankId);
+    const activeIndex = ranks.findIndex((rank) =>
+      itemId(rank, 'rankId') === String(journey.activeRankId || '')
+    );
+    if (rankIndex < 0) return false;
+    if (activeIndex > rankIndex && includesId(journey.unlockedRankIds, journey.activeRankId)) {
+      return true;
+    }
+    return journey.contentJourneyStatus === 'completed-current-content' &&
+      ranks.length > 0 && rankIndex <= activeIndex;
+  }
+
+  function deriveRankProgressView(input) {
+    const rank = input?.rank || {};
+    const rankId = itemId(rank, 'rankId');
+    const journey = input?.journey || {};
+    const gates = stableContentOrder(input?.gates, 'gateId')
+      .filter((gate) => gate?.status === 'published');
+    const progressByGate = input?.progressByGate || new Map();
+    const storedCompletion = includesId(journey.completedRankIds, rankId);
+    const placementCompletion = rankWasPassedByPlacement(journey, rankId);
+    const legacyCompletion = rankWasPassedByLegacyProgress(input, rankId);
+    const allCurrentGatesCleared = gates.length > 0 && gates.every((gate) => {
+      const gateId = itemId(gate, 'gateId');
+      const progress = rankProgressFor(progressByGate, gateId);
+      return getJourneyGateState(journey, progress, gate, { rank }) === 'cleared';
+    });
+    const completed = Boolean(
+      storedCompletion || placementCompletion || legacyCompletion || allCurrentGatesCleared
+    );
+    const completionVersion = rankCompletionVersion(input, rankId) ||
+      (allCurrentGatesCleared ? Math.max(1, Number(rank.version) || 1) : 0);
+    const currentVersion = Math.max(1, Number(rank.version) || 1);
+    const masteredGateIds = gates.filter((gate) => {
+      const progress = rankProgressFor(progressByGate, itemId(gate, 'gateId'));
+      if (String(progress?.status || '') !== 'cleared') return false;
+      return deriveGateCrownAchievement(
+        progress,
+        input?.masteryByWordKey
+      ).masteryAchieved;
+    }).map((gate) => itemId(gate, 'gateId'));
+    const mastered = Boolean(
+      completed && gates.length > 0 && masteredGateIds.length === gates.length
+    );
+    return {
+      rankId,
+      completed,
+      mastered,
+      storedCompletion,
+      placementCompletion,
+      legacyCompletion,
+      allCurrentGatesCleared,
+      completionVersion,
+      currentVersion,
+      hasNewContent: completed && completionVersion > 0 && currentVersion > completionVersion,
+      requiredGateCount: gates.length,
+      masteredGateCount: masteredGateIds.length,
+      masteredGateIds,
+    };
+  }
+
   function canTransitionGateProgress(beforeStatus, afterStatus, options) {
     const before = beforeStatus ? String(beforeStatus) : '';
     const after = String(afterStatus || '');
@@ -655,6 +742,7 @@
     deriveGateCrownAchievement,
     deriveGateMasteryView,
     gatePresentationState,
+    deriveRankProgressView,
     canTransitionGateProgress,
     gateStatusLabel,
   });

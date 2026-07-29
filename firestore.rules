@@ -633,6 +633,9 @@ service cloud.firestore {
       let membershipChanged = after.diff(before).affectedKeys().hasAny([
         'personalDictionaryState'
       ]);
+      let validMembershipOnly = membershipChanged &&
+        after.diff(before).affectedKeys().hasOnly(['personalDictionaryState']) &&
+        validPersonalDictionaryState(after.personalDictionaryState);
       let validVisibilityOnly = visibilityChanged &&
           after.diff(before).affectedKeys().hasOnly([
             'hiddenFromDictionary', 'hiddenFromDictionaryAt',
@@ -676,7 +679,8 @@ service cloud.firestore {
         optionalList(after, 'earnedTransitions', 8) &&
         optionalNonNegativeInt(after, 'remasteryAwardCount') &&
         optionalNonNegativeInt(after, 'xpEconomyVersion');
-      return validVisibilityOnly ||
+      return validMembershipOnly ||
+        validVisibilityOnly ||
         validSrsOnly ||
         (
           !visibilityChanged && !srsChanged &&
@@ -860,7 +864,8 @@ service cloud.firestore {
           'levelPlacementStatus', 'levelPlacementVersion',
           'passedCefrLevels', 'partialCefrLevels',
           'contentJourneyStatus', 'levelPlacementAssessmentIds',
-          'levelPlacementPassedRankIds', 'levelPlacementClearedGateIds'
+          'levelPlacementPassedRankIds', 'levelPlacementClearedGateIds',
+          'completedRankIds', 'rankCompletionVersions'
         ]) &&
         data.keys().hasAll([
           'worldId', 'activeRankId', 'activeGateId', 'status',
@@ -896,6 +901,13 @@ service cloud.firestore {
             data.levelPlacementClearedGateIds.size() <= 2000 &&
             data.levelPlacementClearedGateIds.toSet().size() ==
               data.levelPlacementClearedGateIds.size())) &&
+        (!('completedRankIds' in data) ||
+          (data.completedRankIds is list &&
+            data.completedRankIds.size() <= 500 &&
+            data.completedRankIds.toSet().size() == data.completedRankIds.size())) &&
+        (!('rankCompletionVersions' in data) ||
+          (data.rankCompletionVersions is map &&
+            data.rankCompletionVersions.size() <= 500)) &&
         validPassedCefrLevels(data.get('passedCefrLevels', [])) &&
         validPartialCefrLevels(data.get('partialCefrLevels', [])) &&
         data.get('partialCefrLevels', []).toSet().intersection(
@@ -946,6 +958,8 @@ service cloud.firestore {
         data.unlockedRankIds.size() == 1 &&
         data.unlockedGateIds.size() == 1 &&
         data.get('levelPlacementClearedGateIds', []).size() == 0 &&
+        data.get('completedRankIds', []).size() == 0 &&
+        data.get('rankCompletionVersions', {}).size() == 0 &&
         data.unlockedRankIds[0] == data.activeRankId &&
         data.unlockedGateIds[0] == data.activeGateId &&
         rankInitiallyAvailable(worldId, data.activeRankId) &&
@@ -1461,6 +1475,30 @@ service cloud.firestore {
         );
     }
 
+    function rankCompletionLedgerUnchanged(before, after) {
+      return after.get('completedRankIds', []) == before.get('completedRankIds', []) &&
+        after.get('rankCompletionVersions', {}) == before.get('rankCompletionVersions', {});
+    }
+
+    function validRankCompletionAppend(before, after, worldId, rankId) {
+      let beforeIds = before.get('completedRankIds', []);
+      let afterIds = after.get('completedRankIds', []);
+      let beforeVersions = before.get('rankCompletionVersions', {});
+      let afterVersions = after.get('rankCompletionVersions', {});
+      let publishedRank = get(
+        /databases/$(database)/documents/content_worlds/$(worldId)/ranks/$(rankId)
+      ).data;
+      return (
+          rankId in beforeIds && rankCompletionLedgerUnchanged(before, after)
+        ) || (
+          !(rankId in beforeIds) &&
+          afterIds.toSet() == beforeIds.toSet().union([rankId].toSet()) &&
+          afterIds.size() == beforeIds.size() + 1 &&
+          afterVersions.diff(beforeVersions).affectedKeys().hasOnly([rankId]) &&
+          afterVersions[rankId] == publishedRank.version
+        );
+    }
+
     function validJourneyGateClearAdvance(before, after, uid, worldId) {
       let progress = getAfter(
         /databases/$(database)/documents/users/$(uid)/contentProgress/$(worldId)/ranks/$(before.activeRankId)/gates/$(before.activeGateId)
@@ -1471,7 +1509,8 @@ service cloud.firestore {
       return before.status == 'active' && after.status == 'active' &&
         after.diff(before).affectedKeys().hasOnly([
           'activeRankId', 'activeGateId', 'unlockedRankIds',
-          'unlockedGateIds', 'updatedAt'
+          'unlockedGateIds', 'completedRankIds',
+          'rankCompletionVersions', 'updatedAt'
         ]) &&
         progress.status == 'cleared' && progress.clearedBy == 'gate-clear' &&
         progress.nextRankId == after.activeRankId &&
@@ -1491,6 +1530,43 @@ service cloud.firestore {
         rankPublished(worldId, after.activeRankId) &&
         gatePublished(worldId, after.activeRankId, after.activeGateId) &&
         after.updatedAt == request.time &&
+        (after.activeRankId == before.activeRankId
+          ? rankCompletionLedgerUnchanged(before, after)
+          : validRankCompletionAppend(
+              before,
+              after,
+              worldId,
+              before.activeRankId
+            )) &&
+        activeJourneyPointerAfter(uid, worldId);
+    }
+
+    function validJourneyGateClearCompleteContent(before, after, uid, worldId) {
+      let progress = getAfter(
+        /databases/$(database)/documents/users/$(uid)/contentProgress/$(worldId)/ranks/$(before.activeRankId)/gates/$(before.activeGateId)
+      ).data;
+      let attempt = getAfter(
+        /databases/$(database)/documents/users/$(uid)/contentProgress/$(worldId)/gateClearAttempts/$(progress.lastClearAttemptId)
+      ).data;
+      return before.status == 'active' && after.status == 'active' &&
+        after.diff(before).affectedKeys().hasOnly([
+          'completedRankIds', 'rankCompletionVersions',
+          'contentJourneyStatus', 'updatedAt'
+        ]) &&
+        after.activeRankId == before.activeRankId &&
+        after.activeGateId == before.activeGateId &&
+        after.unlockedRankIds == before.unlockedRankIds &&
+        after.unlockedGateIds == before.unlockedGateIds &&
+        after.contentJourneyStatus == 'completed-current-content' &&
+        progress.status == 'cleared' && progress.clearedBy == 'gate-clear' &&
+        progress.nextRankId == '' && progress.nextGateId == '' &&
+        nonEmptyString(progress.lastClearAttemptId, 500) &&
+        attempt.status == 'passed' && attempt.result == 'passed' &&
+        attempt.worldId == worldId &&
+        attempt.rankId == before.activeRankId &&
+        attempt.gateId == before.activeGateId &&
+        after.updatedAt == request.time &&
+        validRankCompletionAppend(before, after, worldId, before.activeRankId) &&
         activeJourneyPointerAfter(uid, worldId);
     }
 
@@ -1533,10 +1609,18 @@ service cloud.firestore {
         (
           after.diff(before).affectedKeys().hasOnly([
             'activeRankId', 'activeGateId', 'unlockedRankIds',
-            'unlockedGateIds', 'updatedAt'
+            'unlockedGateIds', 'completedRankIds',
+            'rankCompletionVersions', 'updatedAt'
           ]) &&
           after.activeGateId != before.activeGateId &&
           validJourneyGateClearAdvance(before, after, uid, worldId)
+        ) ||
+        (
+          after.get('contentJourneyStatus', 'in-progress') ==
+            'completed-current-content' &&
+          before.get('contentJourneyStatus', 'in-progress') !=
+            'completed-current-content' &&
+          validJourneyGateClearCompleteContent(before, after, uid, worldId)
         ) ||
         (
           validJourney(after, worldId) &&
@@ -3034,7 +3118,9 @@ service cloud.firestore {
             after.clearTotal == attempt.totalCount &&
             after.clearedBy == 'gate-clear' && after.clearedAt == request.time &&
             (
-              (after.nextGateId == '' && journey.activeGateId == gateId) ||
+              (after.nextGateId == '' && journey.activeGateId == gateId &&
+                journey.get('contentJourneyStatus', 'in-progress') ==
+                  'completed-current-content') ||
               (after.nextGateId != '' && journey.activeGateId == after.nextGateId &&
                 journey.activeRankId == after.nextRankId)
             )

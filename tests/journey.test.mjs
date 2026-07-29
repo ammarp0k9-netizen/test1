@@ -185,6 +185,8 @@ test('journey seed stores IDs and placeholders without content or reward data', 
     activePlacementAssessmentId: '',
     unlockedRankIds: ['rank-a'],
     unlockedGateIds: ['gate-a'],
+    completedRankIds: [],
+    rankCompletionVersions: {},
   });
   assert.equal('xp' in seed, false);
   assert.equal('words' in seed, false);

@@ -1716,6 +1716,322 @@ try {
     await assertSucceeds(batch.commit());
   });
 
+  await test('word membership move and copy preserve Journey identity, SRS, Crown inputs, and retry safety', async () => {
+    const seedLifecycleWord = async (uid, wordKey, options = {}) => {
+      const legacyWordId = `legacy_${wordKey}`;
+      const journeySources = options.journeySources === false ? [] : [
+        {
+          id: `published_journey-world~journey-rank~journey-gate~${wordKey}`,
+          data: {
+            worldId: 'journey-world',
+            rankId: 'journey-rank',
+            gateId: 'journey-gate',
+            contentWordId: wordKey,
+            addedFrom: 'published-gate',
+            operationId: `seed_${wordKey}`,
+            linkedAt: timestamp
+          }
+        },
+        ...(options.sharedJourney ? [{
+          id: `published_journey-world~journey-rank~journey-gate-next~${wordKey}`,
+          data: {
+            worldId: 'journey-world',
+            rankId: 'journey-rank',
+            gateId: 'journey-gate-next',
+            contentWordId: wordKey,
+            addedFrom: 'published-gate',
+            operationId: `seed_shared_${wordKey}`,
+            linkedAt: timestamp
+          }
+        }] : [])
+      ];
+      const personalSource = options.journeySources === false ? [{
+        id: 'manual',
+        data: { addedFrom: 'manual', operationId: `manual_${wordKey}`, linkedAt: timestamp }
+      }] : [];
+      const sources = [...journeySources, ...personalSource];
+      const legacy = {
+        text: wordKey,
+        word: wordKey,
+        normalizedWord: wordKey,
+        wordKey,
+        translation: `meaning-${wordKey}`,
+        meaning: `meaning-${wordKey}`,
+        category: 'عام',
+        userId: uid,
+        xpValue: 8,
+        mastery_status: options.mastered ? 'Mastered' : 'Reviewing',
+        mastery_streak: options.mastered ? 3 : 2,
+        mastered_once: options.mastered === true,
+        hasEarnedMasteryXP: options.mastered === true,
+        earnedTransitions: options.mastered ? ['reviewing_mastered'] : [],
+        remasteryAwardCount: 0,
+        xpEconomyVersion: 2,
+        hiddenFromDictionary: options.hidden === true,
+        hiddenFromDictionaryAt: options.hidden ? timestamp : null,
+        personalDictionaryState: 'active',
+        order: 0,
+        createdAt: timestamp
+      };
+      await environment.withSecurityRulesDisabled(async (context) => {
+        const seedDb = context.firestore();
+        const canonicalPath = `users/${uid}/contentWords/${wordKey}`;
+        await Promise.all([
+          setDoc(doc(seedDb, canonicalPath), {
+            canonicalId: wordKey,
+            normalizationVersion: 1,
+            normalizedWord: wordKey,
+            wordKey,
+            masteryKey: wordKey,
+            legacyWordId,
+            word: wordKey,
+            translation: legacy.translation,
+            meaning: legacy.meaning,
+            forgetCount: 0,
+            primarySource: {
+              sourceId: sources[0].id,
+              addedFrom: sources[0].data.addedFrom,
+              ...(sources[0].data.addedFrom === 'published-gate' ? {
+                worldId: 'journey-world',
+                rankId: 'journey-rank',
+                gateId: 'journey-gate',
+                contentWordId: wordKey
+              } : {})
+            },
+            sourceCount: sources.length,
+            schemaVersion: 1,
+            createdAt: timestamp,
+            joinedAt: timestamp,
+            updatedAt: timestamp
+          }),
+          setDoc(doc(seedDb, `users/${uid}/words/${legacyWordId}`), legacy),
+          ...sources.map((source) => setDoc(
+            doc(seedDb, `${canonicalPath}/sources/${source.id}`),
+            source.data
+          ))
+        ]);
+      });
+      return { legacyWordId, legacy, sourceIds: sources.map((source) => source.id) };
+    };
+
+    const linkPrivateMembership = async (
+      db,
+      uid,
+      wordKey,
+      legacyWordId,
+      worldId,
+      mode,
+      options = {}
+    ) => {
+      const canonicalRef = doc(db, `users/${uid}/contentWords/${wordKey}`);
+      const legacyRef = doc(db, `users/${uid}/words/${legacyWordId}`);
+      const sourceRef = doc(db, `${canonicalRef.path}/sources/private_world_${worldId}`);
+      const membershipRef = doc(db, `users/${uid}/customWorlds/${worldId}/words/member_${wordKey}`);
+      return runTransaction(db, async (transaction) => {
+        const [canonicalSnapshot, legacySnapshot, sourceSnapshot, membershipSnapshot] =
+          await Promise.all([
+            transaction.get(canonicalRef),
+            transaction.get(legacyRef),
+            transaction.get(sourceRef),
+            transaction.get(membershipRef)
+          ]);
+        const canonical = canonicalSnapshot.data();
+        const legacy = legacySnapshot.data();
+        if (!sourceSnapshot.exists()) {
+          transaction.update(canonicalRef, {
+            sourceCount: canonical.sourceCount + 1,
+            updatedAt: serverTimestamp()
+          });
+          transaction.set(sourceRef, {
+            addedFrom: 'private-world',
+            customWorldId: worldId,
+            operationId: `membership-${mode}-${worldId}-${wordKey}`,
+            linkedAt: serverTimestamp()
+          });
+        }
+        if (
+          (mode === 'move' && legacy.personalDictionaryState !== 'moved-to-private-world') ||
+          options.forgedXp === true
+        ) {
+          transaction.update(legacyRef, {
+            ...(mode === 'move' ? {
+              personalDictionaryState: 'moved-to-private-world'
+            } : {}),
+            ...(options.forgedXp === true ? { xpValue: 999999 } : {})
+          });
+        }
+        if (!membershipSnapshot.exists()) {
+          transaction.set(membershipRef, {
+            ...legacy,
+            personalDictionaryState: mode === 'move' ? 'moved-to-private-world' : 'active'
+          });
+        }
+      });
+    };
+
+    const journeyUid = 'journey-membership-user';
+    const journeyWordKey = 'journey-membership-word';
+    const journeySeed = await seedLifecycleWord(journeyUid, journeyWordKey, {
+      hidden: true,
+      mastered: true,
+      sharedJourney: true
+    });
+    const journeyDbA = environment.authenticatedContext(journeyUid).firestore();
+    const journeyDbB = environment.authenticatedContext(journeyUid).firestore();
+
+    await assertSucceeds(linkPrivateMembership(
+      journeyDbA,
+      journeyUid,
+      journeyWordKey,
+      journeySeed.legacyWordId,
+      'copied-world',
+      'copy'
+    ));
+    let legacySnapshot = await getDoc(doc(
+      journeyDbA,
+      `users/${journeyUid}/words/${journeySeed.legacyWordId}`
+    ));
+    assert.equal(legacySnapshot.data().personalDictionaryState, 'active');
+
+    await assertFails(linkPrivateMembership(
+      journeyDbA,
+      journeyUid,
+      journeyWordKey,
+      journeySeed.legacyWordId,
+      'retry-world',
+      'move',
+      { forgedXp: true }
+    ));
+    const failedRetrySource = await getDoc(doc(
+      journeyDbA,
+      `users/${journeyUid}/contentWords/${journeyWordKey}/sources/private_world_retry-world`
+    ));
+    const failedRetryMembership = await getDoc(doc(
+      journeyDbA,
+      `users/${journeyUid}/customWorlds/retry-world/words/member_${journeyWordKey}`
+    ));
+    legacySnapshot = await getDoc(doc(
+      journeyDbA,
+      `users/${journeyUid}/words/${journeySeed.legacyWordId}`
+    ));
+    assert.equal(failedRetrySource.exists(), false);
+    assert.equal(failedRetryMembership.exists(), false);
+    assert.equal(legacySnapshot.data().personalDictionaryState, 'active');
+    assert.equal(legacySnapshot.data().xpValue, 8);
+    await assertSucceeds(linkPrivateMembership(
+      journeyDbA,
+      journeyUid,
+      journeyWordKey,
+      journeySeed.legacyWordId,
+      'retry-world',
+      'move'
+    ));
+
+    await assertSucceeds(linkPrivateMembership(
+      journeyDbA,
+      journeyUid,
+      journeyWordKey,
+      journeySeed.legacyWordId,
+      'moved-world',
+      'move'
+    ));
+    await assertSucceeds(linkPrivateMembership(
+      journeyDbA,
+      journeyUid,
+      journeyWordKey,
+      journeySeed.legacyWordId,
+      'moved-world',
+      'move'
+    ));
+    await Promise.all([
+      assertSucceeds(linkPrivateMembership(
+        journeyDbA,
+        journeyUid,
+        journeyWordKey,
+        journeySeed.legacyWordId,
+        'concurrent-world',
+        'copy'
+      )),
+      assertSucceeds(linkPrivateMembership(
+        journeyDbB,
+        journeyUid,
+        journeyWordKey,
+        journeySeed.legacyWordId,
+        'concurrent-world',
+        'copy'
+      ))
+    ]);
+
+    const [canonicalSnapshot, movedMembership, copyMembership, concurrentMembership] =
+      await Promise.all([
+        getDoc(doc(journeyDbA, `users/${journeyUid}/contentWords/${journeyWordKey}`)),
+        getDoc(doc(
+          journeyDbA,
+          `users/${journeyUid}/customWorlds/moved-world/words/member_${journeyWordKey}`
+        )),
+        getDoc(doc(
+          journeyDbA,
+          `users/${journeyUid}/customWorlds/copied-world/words/member_${journeyWordKey}`
+        )),
+        getDoc(doc(
+          journeyDbA,
+          `users/${journeyUid}/customWorlds/concurrent-world/words/member_${journeyWordKey}`
+        ))
+      ]);
+    legacySnapshot = await getDoc(doc(
+      journeyDbA,
+      `users/${journeyUid}/words/${journeySeed.legacyWordId}`
+    ));
+    assert.equal(canonicalSnapshot.data().sourceCount, 6);
+    assert.equal(legacySnapshot.data().personalDictionaryState, 'moved-to-private-world');
+    assert.equal(legacySnapshot.data().hiddenFromDictionary, true);
+    assert.equal(legacySnapshot.data().mastered_once, true);
+    assert.equal(legacySnapshot.data().mastery_status, 'Mastered');
+    assert.equal(movedMembership.exists(), true);
+    assert.equal(copyMembership.exists(), true);
+    assert.equal(concurrentMembership.exists(), true);
+    for (const sourceId of journeySeed.sourceIds) {
+      await assertSucceeds(getDoc(doc(
+        journeyDbA,
+        `users/${journeyUid}/contentWords/${journeyWordKey}/sources/${sourceId}`
+      )));
+    }
+
+    await assertFails(updateDoc(doc(
+      journeyDbA,
+      `users/${journeyUid}/words/${journeySeed.legacyWordId}`
+    ), {
+      personalDictionaryState: 'forged-state'
+    }));
+    await assertFails(updateDoc(doc(
+      journeyDbA,
+      `users/${journeyUid}/words/${journeySeed.legacyWordId}`
+    ), {
+      personalDictionaryState: 'active',
+      xpValue: 999999
+    }));
+
+    const personalUid = 'ordinary-membership-user';
+    const personalWordKey = 'ordinary-word';
+    const personalSeed = await seedLifecycleWord(personalUid, personalWordKey, {
+      journeySources: false
+    });
+    const personalDb = environment.authenticatedContext(personalUid).firestore();
+    await assertSucceeds(linkPrivateMembership(
+      personalDb,
+      personalUid,
+      personalWordKey,
+      personalSeed.legacyWordId,
+      'ordinary-world',
+      'move'
+    ));
+    const personalLegacy = await getDoc(doc(
+      personalDb,
+      `users/${personalUid}/words/${personalSeed.legacyWordId}`
+    ));
+    assert.equal(personalLegacy.data().personalDictionaryState, 'moved-to-private-world');
+  });
+
   await test('the reported three-write gate-word payload is accepted only for the active unlocked journey', async () => {
     const worldId = 'GyQfaD75uZFFpgB9Me9V';
     const rankId = 'gw7HL4JwTwKDUpCs2JcF';
@@ -3850,6 +4166,200 @@ try {
     await assertFails(getDoc(doc(userB, attemptPath)));
   });
 
+  await test('Gate Clear records rank completion only with its atomic boundary transition', async () => {
+    async function seedReadyGate({
+      uid,
+      worldId,
+      rankId,
+      gateId,
+      contentWordId,
+      nextRankId,
+      nextGateId,
+      attemptId
+    }) {
+      const journeyPath = `users/${uid}/contentProgress/${worldId}`;
+      const progressPath = `${journeyPath}/ranks/${rankId}/gates/${gateId}`;
+      const attemptPath = `${journeyPath}/gateClearAttempts/${attemptId}`;
+      const pointerPath = `users/${uid}/meta/active_content_journey`;
+      await environment.withSecurityRulesDisabled(async (context) => {
+        const db = context.firestore();
+        await Promise.all([
+          setDoc(doc(db, journeyPath), {
+            ...journey(worldId, rankId, gateId),
+            completedRankIds: [],
+            rankCompletionVersions: {}
+          }),
+          setDoc(doc(db, pointerPath), {
+            worldId,
+            journeyVersion: 1,
+            updatedAt: timestamp
+          }),
+          setDoc(doc(db, progressPath), {
+            ...learningGateProgress(
+              worldId,
+              rankId,
+              gateId,
+              [contentWordId],
+              nextRankId,
+              nextGateId
+            ),
+            status: 'ready',
+            readyEvidenceCount: 1,
+            readyWordCount: 1,
+            requiredWordCount: 1,
+            needsEvidenceWordCount: 0,
+            readinessVersion: 1,
+            readyAt: timestamp,
+            activeClearAttemptId: attemptId,
+            clearAttempts: 1
+          }),
+          setDoc(doc(db, attemptPath), {
+            attemptId,
+            worldId,
+            rankId,
+            gateId,
+            questionOrder: [contentWordId],
+            answers: [{
+              contentWordId,
+              selectedContentWordId: contentWordId,
+              correct: true
+            }],
+            currentQuestionIndex: 1,
+            correctCount: 1,
+            totalCount: 1,
+            passRatio: 0.75,
+            requiredCorrect: 1,
+            status: 'submitting',
+            gateClearVersion: 1,
+            startedAt: timestamp,
+            updatedAt: timestamp
+          })
+        ]);
+      });
+      return { journeyPath, progressPath, attemptPath, pointerPath };
+    }
+
+    function finishGateBatch(db, paths, {
+      worldId,
+      rankId,
+      gateId,
+      attemptId,
+      nextRankId,
+      nextGateId,
+      completedCurrentContent = false
+    }) {
+      const batch = writeBatch(db);
+      batch.update(doc(db, paths.attemptPath), {
+        status: 'passed',
+        result: 'passed',
+        score: 1,
+        completedAt: serverTimestamp(),
+        updatedAt: serverTimestamp()
+      });
+      batch.update(doc(db, paths.progressPath), {
+        status: 'cleared',
+        activeClearAttemptId: '',
+        lastClearAttemptId: attemptId,
+        lastClearResult: 'passed',
+        clearScore: 1,
+        clearCorrect: 1,
+        clearTotal: 1,
+        clearedBy: 'gate-clear',
+        clearedAt: serverTimestamp(),
+        lastActivityAt: serverTimestamp()
+      });
+      if (completedCurrentContent) {
+        batch.update(doc(db, paths.journeyPath), {
+          completedRankIds: [rankId],
+          rankCompletionVersions: { [rankId]: 1 },
+          contentJourneyStatus: 'completed-current-content',
+          updatedAt: serverTimestamp()
+        });
+      } else {
+        batch.update(doc(db, paths.journeyPath), {
+          activeRankId: nextRankId,
+          activeGateId: nextGateId,
+          unlockedRankIds: [rankId, nextRankId],
+          unlockedGateIds: [gateId, nextGateId],
+          completedRankIds: [rankId],
+          rankCompletionVersions: { [rankId]: 1 },
+          updatedAt: serverTimestamp()
+        });
+        batch.set(
+          doc(db, `${paths.journeyPath}/ranks/${nextRankId}/gates/${nextGateId}`),
+          availableGateProgress(worldId, nextRankId, nextGateId)
+        );
+      }
+      batch.update(doc(db, paths.pointerPath), { updatedAt: serverTimestamp() });
+      return batch;
+    }
+
+    const boundary = {
+      uid: 'rank-boundary-user',
+      worldId: 'level-world',
+      rankId: 'level-rank-a1',
+      gateId: 'level-gate-a1',
+      contentWordId: 'level-word-a1',
+      nextRankId: 'level-rank-a2',
+      nextGateId: 'level-gate-a2',
+      attemptId: 'rank-boundary-attempt'
+    };
+    const boundaryPaths = await seedReadyGate(boundary);
+    const boundaryDb = environment.authenticatedContext(boundary.uid).firestore();
+    const boundaryDbSecondDevice = environment.authenticatedContext(boundary.uid).firestore();
+    await assertFails(updateDoc(doc(boundaryDb, boundaryPaths.journeyPath), {
+      completedRankIds: [boundary.rankId],
+      rankCompletionVersions: { [boundary.rankId]: 1 },
+      updatedAt: serverTimestamp()
+    }));
+    await assertFails(updateDoc(doc(boundaryDb, boundaryPaths.journeyPath), {
+      rewardXp: 5000,
+      updatedAt: serverTimestamp()
+    }));
+    const concurrentResults = await Promise.allSettled([
+      finishGateBatch(boundaryDb, boundaryPaths, boundary).commit(),
+      finishGateBatch(boundaryDbSecondDevice, boundaryPaths, boundary).commit()
+    ]);
+    assert.equal(
+      concurrentResults.filter((result) => result.status === 'fulfilled').length,
+      1
+    );
+    assert.equal(
+      concurrentResults.filter((result) => result.status === 'rejected').length,
+      1
+    );
+    const boundaryJourney = (await getDoc(
+      doc(boundaryDb, boundaryPaths.journeyPath)
+    )).data();
+    assert.deepEqual(boundaryJourney.completedRankIds, [boundary.rankId]);
+    assert.equal(boundaryJourney.rankCompletionVersions[boundary.rankId], 1);
+    assert.equal(boundaryJourney.activeRankId, boundary.nextRankId);
+
+    const finalContent = {
+      uid: 'rank-final-content-user',
+      worldId: 'journey-world-two',
+      rankId: 'journey-rank-two',
+      gateId: 'journey-gate-two',
+      contentWordId: 'final-content-word',
+      nextRankId: '',
+      nextGateId: '',
+      attemptId: 'rank-final-content-attempt',
+      completedCurrentContent: true
+    };
+    const finalPaths = await seedReadyGate(finalContent);
+    const finalDb = environment.authenticatedContext(finalContent.uid).firestore();
+    await assertSucceeds(finishGateBatch(
+      finalDb,
+      finalPaths,
+      finalContent
+    ).commit());
+    const finalJourney = (await getDoc(
+      doc(finalDb, finalPaths.journeyPath)
+    )).data();
+    assert.equal(finalJourney.contentJourneyStatus, 'completed-current-content');
+    assert.deepEqual(finalJourney.completedRankIds, [finalContent.rankId]);
+  });
+
   await test('manual unlock placeholders reject invented thresholds', async () => {
     const invalid = {
       ...rank('published-world', 'invented-unlock', 'draft'),
@@ -4603,7 +5113,7 @@ try {
   });
 
   if (testFilter) assert.ok(selected > 0, `No Rules test matched "${testFilter}"`);
-  assert.equal(passed, testFilter ? selected : 70);
+  assert.equal(passed, testFilter ? selected : 72);
   console.log(`# ${passed} Firestore Rules emulator tests passed`);
 } finally {
   await environment.cleanup();

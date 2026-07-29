@@ -154,7 +154,160 @@ const probe = `(() => {
     clearAction: ready.textContent.includes('اختبار اجتياز البوابة'),
     noCrown: !ready.querySelector('.fa-crown'),
   };
-  return { gapResult, masteredResult, withoutLoadResult, readyResult };
+  const secondGate = {
+    ...gate,
+    gateId: 'smoke-gate-two',
+    title: 'Gate two',
+    order: 1,
+  };
+  const rankForProgress = { ...rank, version: 2, cefrLevel: 'A1' };
+  const rankJourney = {
+    worldId: world.worldId,
+    activeRankId: rank.rankId,
+    activeGateId: secondGate.gateId,
+    unlockedRankIds: [rank.rankId],
+    unlockedGateIds: [gate.gateId, secondGate.gateId],
+    completedRankIds: [rank.rankId],
+    rankCompletionVersions: { [rank.rankId]: 2 },
+  };
+  const rankProgress = new Map([
+    [gate.gateId, { ...loaded, loadedWordKeys: ['one'] }],
+    [secondGate.gateId, {
+      ...loaded,
+      gateId: secondGate.gateId,
+      loadedWordKeys: ['two'],
+      loadedContentWordIds: ['two'],
+    }],
+  ]);
+  masteryByKey = new Map([
+    ['one', { mastery_status: 'Mastered', mastered_once: true }],
+    ['two', { mastery_status: 'Reviewing', mastered_once: false }],
+  ]);
+  const completedRank = publishedRankProgressView(
+    rankForProgress,
+    [gate, secondGate],
+    rankJourney,
+    rankProgress,
+    [rankForProgress]
+  );
+  renderPublishedGates(
+    world,
+    rankForProgress,
+    [gate, secondGate],
+    [rankForProgress],
+    rankJourney,
+    rankJourney,
+    rankProgress
+  );
+  const completedBanner = document.querySelector('.published-rank-achievement');
+  const rankCompletedResult = {
+    completed: completedRank.completed === true,
+    notMastered: completedRank.mastered === false,
+    banner: Boolean(completedBanner),
+    trophy: Boolean(completedBanner?.querySelector('.fa-trophy')),
+    noCrown: !completedBanner?.querySelector('.fa-crown'),
+  };
+
+  masteryByKey.set('two', { mastery_status: 'Mastered', mastered_once: true });
+  const masteredRank = publishedRankProgressView(
+    rankForProgress,
+    [gate, secondGate],
+    rankJourney,
+    rankProgress,
+    [rankForProgress]
+  );
+  renderPublishedGates(
+    world,
+    rankForProgress,
+    [gate, secondGate],
+    [rankForProgress],
+    rankJourney,
+    rankJourney,
+    rankProgress
+  );
+  const masteredBanner = document.querySelector('.published-rank-achievement');
+  const rankMasteredResult = {
+    mastered: masteredRank.mastered === true,
+    banner: masteredBanner?.classList.contains('is-mastered') === true,
+    crown: Boolean(masteredBanner?.querySelector('.fa-crown')),
+  };
+
+  const changedRank = { ...rankForProgress, version: 3 };
+  const changedRankView = publishedRankProgressView(
+    changedRank,
+    [gate, secondGate, { ...gate, gateId: 'new-gate', order: 2 }],
+    rankJourney,
+    rankProgress,
+    [changedRank]
+  );
+  const newContentResult = {
+    completedPreserved: changedRankView.completed === true,
+    newContent: changedRankView.hasNewContent === true,
+    masteryRevokedForCurrentSet: changedRankView.mastered === false,
+  };
+
+  let confettiCount = 0;
+  const resolverCalls = [];
+  window.launchConfetti = () => { confettiCount += 1; };
+  window.getJourneyCloudApi = () => ({
+    resolveActiveJourneyDestination: (worldId, options) => {
+      resolverCalls.push({ worldId, options: { ...options } });
+      return Promise.resolve({ type: 'completed-current-content' });
+    },
+  });
+  window.openPublishedWorld = () => {};
+  const completionBundle = {
+    attempt: {
+      attemptId: 'rank-smoke-attempt',
+      correctCount: 2,
+      totalCount: 2,
+    },
+    result: {
+      result: { passed: true },
+      rankCompleted: true,
+      completedCurrentContent: true,
+      rankCompletionVersion: 2,
+    },
+  };
+  renderPublishedGateClearResult(world, rankForProgress, secondGate, completionBundle);
+  renderPublishedGateClearResult(world, rankForProgress, secondGate, completionBundle);
+  const resultPanel = document.querySelector('.published-placement-result');
+  resultPanel?.querySelector('.published-placement-primary')?.click();
+  const rankCelebrationResult = {
+    panel: Boolean(resultPanel),
+    trophy: Boolean(resultPanel?.querySelector('.fa-trophy')),
+    oncePerCommit: confettiCount === 1,
+    resolverAuthority: resolverCalls.length === 1 &&
+      resolverCalls[0].worldId === world.worldId &&
+      resolverCalls[0].options.resumePausedLevelPlacement === true,
+  };
+
+  window.launchConfetti = () => { throw new Error('animation unavailable'); };
+  let animationIsolated = true;
+  try {
+    renderPublishedGateClearResult(world, rankForProgress, secondGate, {
+      ...completionBundle,
+      attempt: { ...completionBundle.attempt, attemptId: 'rank-smoke-animation-failure' },
+    });
+  } catch {
+    animationIsolated = false;
+  }
+  const failureIsolationResult = {
+    animationIsolated,
+    resultStillVisible: Boolean(document.querySelector('.published-placement-result')),
+  };
+
+  return {
+    gapResult,
+    masteredResult,
+    withoutLoadResult,
+    readyResult,
+    rankCompletedResult,
+    rankMasteredResult,
+    newContentResult,
+    rankCelebrationResult,
+    failureIsolationResult,
+  };
 })()`;
 
 try {
