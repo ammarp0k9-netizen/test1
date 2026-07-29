@@ -162,6 +162,19 @@ test('partial lifecycle retries keep successful IDs and retry pending items only
   assert.match(dictionarySource, /const failed = results\.filter/);
 });
 
+test('published words keep canonical source atomic and project the legacy dictionary separately', () => {
+  const lifecycleBlock = cloudSource.slice(
+    cloudSource.indexOf('async function upsertUserWordWithSource'),
+    cloudSource.indexOf('async function getUserWordSourceSummary')
+  );
+  assert.match(lifecycleBlock, /splitLegacyProjection/);
+  assert.match(lifecycleBlock, /legacyProjectionPending/);
+  assert.match(lifecycleBlock, /else if \(legacySnapshot\.exists\(\)\)/);
+  assert.match(lifecycleBlock, /transaction\.set\(canonicalRef/);
+  assert.match(lifecycleBlock, /transaction\.set\(sourceRef/);
+  assert.match(lifecycleBlock, /await runTransaction\(db,[\s\S]*projection\.reference/);
+});
+
 test('the lifecycle adds no Evidence, Ready, Gate Clear, XP, or Cloud Functions', () => {
   assert.doesNotMatch(lifecycleSource, /Evidence|Gate Clear|awardXP|httpsCallable|getFunctions/);
   assert.doesNotMatch(cloudSource.slice(

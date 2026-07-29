@@ -1306,12 +1306,8 @@ service cloud.firestore {
         after.get('levelPlacementClearedGateIds', []).toSet().size() ==
           after.get('levelPlacementClearedGateIds', []).size() &&
         after.get('levelPlacementClearedGateIds', []).toSet() ==
-          (
-            session.get('assessmentMode', 'full-level') == 'new-ranks'
-              ? before.get('levelPlacementClearedGateIds', []).toSet()
-              : before.get('levelPlacementClearedGateIds', []).toSet().union(
-                  session.resultClearedGateIds.toSet()
-                )
+          before.get('levelPlacementClearedGateIds', []).toSet().union(
+            session.resultClearedGateIds.toSet()
           ) &&
         after.get('contentJourneyStatus', 'in-progress') ==
           (session.completedCurrentContent ? 'completed-current-content' : 'in-progress') &&
@@ -3199,8 +3195,22 @@ service cloud.firestore {
     }
 
     function validContentWordSource(data, uid, canonicalId, sourceId) {
-      return validPersonalContentWordSource(data, uid, canonicalId, sourceId) ||
-        validJourneyContentWordSource(data, uid, canonicalId, sourceId);
+      return (
+          (
+            data.get('addedFrom', '') == 'manual' ||
+            data.get('addedFrom', '') == 'dictionary-search' ||
+            data.get('addedFrom', '') == 'private-world' ||
+            data.get('addedFrom', '') == 'import'
+          ) &&
+          validPersonalContentWordSource(data, uid, canonicalId, sourceId)
+        ) ||
+        (
+          (
+            data.get('addedFrom', '') == 'published-gate' ||
+            data.get('addedFrom', '') == 'level-placement'
+          ) &&
+          validJourneyContentWordSource(data, uid, canonicalId, sourceId)
+        );
     }
 
     function validContentLearningWordCreate(data, uid, contentWordId) {

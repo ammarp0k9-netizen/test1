@@ -1649,6 +1649,220 @@ try {
     await assertSucceeds(batch.commit());
   });
 
+  await test('the reported three-write gate-word payload is accepted only for the active unlocked journey', async () => {
+    const worldId = 'GyQfaD75uZFFpgB9Me9V';
+    const rankId = 'gw7HL4JwTwKDUpCs2JcF';
+    const gateId = 'RaXFlTd649dE8rd1z7NJ';
+    const fallbackGateId = 'gate-before-reported-target';
+    const contentWordId =
+      'word_61d9432cf2fd4c49850fc9e125460ce0a2550b6a716da1092277acd6b0409695';
+    const wordKey = 'school';
+    const sourceId = `published_${worldId}~${rankId}~${gateId}~${contentWordId}`;
+    const operationId = `gate_${gateId}_366b45d3-b65d-419f-a771-f1492e2e3300`;
+    const publishedWordPath =
+      `content_worlds/${worldId}/ranks/${rankId}/gates/${gateId}/words/${contentWordId}`;
+
+    await environment.withSecurityRulesDisabled(async (context) => {
+      const seedDb = context.firestore();
+      await Promise.all([
+        setDoc(doc(seedDb, `content_worlds/${worldId}`), world(worldId, 'published')),
+        setDoc(doc(seedDb, `content_worlds/${worldId}/ranks/${rankId}`), {
+          ...rank(worldId, rankId, 'published'),
+          cefrLevel: 'A1'
+        }),
+        setDoc(doc(seedDb, `content_worlds/${worldId}/ranks/${rankId}/gates/${gateId}`),
+          gate(worldId, rankId, gateId, 'published')),
+        setDoc(doc(seedDb, `content_worlds/${worldId}/ranks/${rankId}/gates/${fallbackGateId}`),
+          gate(worldId, rankId, fallbackGateId, 'published')),
+        setDoc(doc(seedDb, publishedWordPath), {
+          ...word(worldId, rankId, gateId, contentWordId, 'published'),
+          word: 'school',
+          normalizedWord: wordKey,
+          wordKey,
+          translation: 'مدرسة',
+          level: 'A1'
+        })
+      ]);
+    });
+
+    const seedUserState = async (uid, { targetUnlocked, pointerWorldId = worldId }) => {
+      await environment.withSecurityRulesDisabled(async (context) => {
+        const seedDb = context.firestore();
+        const activeGateId = targetUnlocked ? gateId : fallbackGateId;
+        await Promise.all([
+          setDoc(doc(seedDb, `users/${uid}/contentProgress/${worldId}`), {
+            ...journey(worldId, rankId, activeGateId),
+            placementStatus: 'completed',
+            unlockedRankIds: [rankId],
+            unlockedGateIds: [activeGateId]
+          }),
+          setDoc(doc(seedDb, `users/${uid}/meta/active_content_journey`), {
+            worldId: pointerWorldId,
+            journeyVersion: 1,
+            updatedAt: timestamp
+          })
+        ]);
+      });
+    };
+
+    const reportedBatch = (
+      uid,
+      { includeLegacy = true, compactCanonical = false } = {}
+    ) => {
+      const db = environment.authenticatedContext(uid).firestore();
+      const batch = writeBatch(db);
+      const canonicalPath = `users/${uid}/contentWords/${wordKey}`;
+      const canonicalPayload = {
+        word: 'school',
+        normalizedWord: wordKey,
+        wordKey,
+        translation: 'مدرسة',
+        definition: 'A place where children and students learn.',
+        definition_ar: 'مكان يتعلم فيه الأطفال والطلاب.',
+        example: 'The school is near my house.',
+        exampleTranslation: 'المدرسة قريبة من منزلي.',
+        partOfSpeech: 'noun',
+        category: 'Places',
+        level: 'A1',
+        tags: ['common', 'place'],
+        synonyms: [],
+        pronunciation: '',
+        notes: '',
+        canonicalId: wordKey,
+        normalizationVersion: 1,
+        masteryKey: wordKey,
+        legacyWordId: 'published_school',
+        meaning: 'مدرسة',
+        difficulty: 'A1',
+        forgetCount: 0,
+        contentRefPath: publishedWordPath,
+        primarySource: {
+          sourceId,
+          addedFrom: 'published-gate',
+          worldId,
+          rankId,
+          gateId,
+          contentWordId
+        },
+        sourceCount: 1,
+        eligibleEvidenceCount: 0,
+        lastEligibleEvidenceAt: null,
+        lastEvidenceEventId: '',
+        evidenceVersion: 1,
+        schemaVersion: 1,
+        createdAt: serverTimestamp(),
+        joinedAt: serverTimestamp(),
+        updatedAt: serverTimestamp()
+      };
+      if (compactCanonical) {
+        [
+          'definition', 'definition_ar', 'example', 'exampleTranslation',
+          'partOfSpeech', 'category', 'level', 'tags', 'synonyms',
+          'pronunciation', 'notes'
+        ].forEach((field) => delete canonicalPayload[field]);
+      }
+      batch.set(doc(db, canonicalPath), canonicalPayload);
+      const legacyPayload = {
+        word: 'school',
+        normalizedWord: wordKey,
+        wordKey,
+        translation: 'مدرسة',
+        definition: 'A place where children and students learn.',
+        definition_ar: 'مكان يتعلم فيه الأطفال والطلاب.',
+        example: 'The school is near my house.',
+        exampleTranslation: 'المدرسة قريبة من منزلي.',
+        partOfSpeech: 'noun',
+        category: 'Places',
+        level: 'A1',
+        tags: ['common', 'place'],
+        synonyms: [],
+        pronunciation: '',
+        notes: '',
+        text: 'school',
+        meaning: 'مدرسة',
+        starred: false,
+        forgetCount: 0,
+        userId: uid,
+        xpValue: 0,
+        mastery_status: 'New',
+        mastery_streak: 0,
+        last_recalled_at: null,
+        first_recalled_at: null,
+        last_recall_day: '',
+        last_recall_session_id: '',
+        last_quizzed_at: null,
+        quiz_seen_count: 0,
+        mastered_once: false,
+        firstMasteredAt: null,
+        hasEarnedMasteryXP: false,
+        earnedTransitions: [],
+        remasteryAwardCount: 0,
+        xpEconomyVersion: 0,
+        hiddenFromDictionary: false,
+        hiddenFromDictionaryAt: null,
+        personalDictionaryState: 'active',
+        order: 2,
+        createdAt: timestamp
+      };
+      if (includeLegacy) {
+        batch.set(doc(db, `users/${uid}/words/published_school`), legacyPayload);
+      }
+      batch.set(doc(db, `${canonicalPath}/sources/${sourceId}`), {
+        addedFrom: 'published-gate',
+        operationId,
+        worldId,
+        rankId,
+        gateId,
+        contentWordId,
+        linkedAt: serverTimestamp()
+      });
+      return { batch, db, legacyPayload };
+    };
+
+    const allowedUid = 'reported-gate-word-allowed';
+    await seedUserState(allowedUid, { targetUnlocked: true });
+    await assertFails(reportedBatch(allowedUid).batch.commit());
+    const allowedRequest = reportedBatch(allowedUid, {
+      includeLegacy: false,
+      compactCanonical: true
+    });
+    await assertSucceeds(allowedRequest.batch.commit());
+    await assertSucceeds(setDoc(
+      doc(allowedRequest.db, `users/${allowedUid}/words/published_school`),
+      allowedRequest.legacyPayload
+    ));
+    const [canonicalSnapshot, sourceSnapshot, legacySnapshot] = await Promise.all([
+      getDoc(doc(allowedRequest.db, `users/${allowedUid}/contentWords/${wordKey}`)),
+      getDoc(doc(
+        allowedRequest.db,
+        `users/${allowedUid}/contentWords/${wordKey}/sources/${sourceId}`
+      )),
+      getDoc(doc(allowedRequest.db, `users/${allowedUid}/words/published_school`))
+    ]);
+    assert.equal(canonicalSnapshot.exists(), true);
+    assert.equal(sourceSnapshot.exists(), true);
+    assert.equal(legacySnapshot.exists(), true);
+
+    const lockedUid = 'reported-gate-word-locked';
+    await seedUserState(lockedUid, { targetUnlocked: false });
+    await assertFails(reportedBatch(lockedUid, {
+      includeLegacy: false,
+      compactCanonical: true
+    }).batch.commit());
+
+    const stalePointerUid = 'reported-gate-word-stale-pointer';
+    await seedUserState(stalePointerUid, {
+      targetUnlocked: true,
+      pointerWorldId: 'another-world'
+    });
+    await assertFails(
+      reportedBatch(stalePointerUid, {
+        includeLegacy: false,
+        compactCanonical: true
+      }).batch.commit()
+    );
+  });
+
   await test('draft content cannot be linked as a journey source', async () => {
     const sourceId = 'published_published-world~published-rank~draft-gate~hidden';
     const canonicalPath = 'users/user-a/contentWords/hidden';
@@ -3373,8 +3587,9 @@ try {
       ]
     };
     const newRankIds = Object.keys(rankGateIds);
-    const targetRankId = newRankIds[0];
-    const targetGateId = rankGateIds[targetRankId][0];
+    const clearedGateIds = Object.values(rankGateIds).flat();
+    const targetRankId = 'first-a2-rank';
+    const targetGateId = 'first-a2-gate';
     const availableGateIds = [targetGateId];
     const activeRankId = oldRankIds[0];
     const activeGateId = 'fP49BRVyujuU4UqzUoey';
@@ -3401,6 +3616,14 @@ try {
           { ...gate(worldId, rankId, gateId, 'published'), order }
         ]));
       }
+      documents.push([
+        `content_worlds/${worldId}/ranks/${targetRankId}`,
+        { ...rank(worldId, targetRankId, 'published'), cefrLevel: 'A2', order: 0 }
+      ]);
+      documents.push([
+        `content_worlds/${worldId}/ranks/${targetRankId}/gates/${targetGateId}`,
+        { ...gate(worldId, targetRankId, targetGateId, 'published'), order: 0 }
+      ]);
       documents.push([
         journeyPath,
         {
@@ -3474,8 +3697,8 @@ try {
       batch.update(doc(db, journeyPath), {
         activeRankId: targetRankId,
         activeGateId: targetGateId,
-        unlockedRankIds: [...oldRankIds, ...newRankIds],
-        unlockedGateIds: [...oldGateIds, ...availableGateIds],
+        unlockedRankIds: [...oldRankIds, ...newRankIds, targetRankId],
+        unlockedGateIds: [...oldGateIds, ...clearedGateIds, ...availableGateIds],
         passedCefrLevels: ['A1'],
         partialCefrLevels: [],
         levelPlacementAssessmentIds: { A1: assessmentId },
@@ -3493,12 +3716,12 @@ try {
           resultApplied: true,
           assessedAt: serverTimestamp(),
           completedAt: serverTimestamp(),
-          nextCefrLevel: '',
+          nextCefrLevel: 'A2',
           resultStartRankId: targetRankId,
           resultStartGateId: targetGateId,
-          resultUnlockedRankIds: newRankIds,
-          resultUnlockedGateIds: availableGateIds,
-          resultClearedGateIds: [],
+          resultUnlockedRankIds: [...newRankIds, targetRankId],
+          resultUnlockedGateIds: [...clearedGateIds, ...availableGateIds],
+          resultClearedGateIds: clearedGateIds,
           completedCurrentContent: false,
           updatedAt: serverTimestamp()
         });
@@ -3512,15 +3735,15 @@ try {
     };
 
     const incomplete = writeBatch(db);
-    addOutcomeWrites(incomplete, false, false);
+    addOutcomeWrites(incomplete, false, false, clearedGateIds);
     await assertFails(incomplete.commit());
 
-    const forgedClear = writeBatch(db);
-    addOutcomeWrites(forgedClear, true, false, availableGateIds);
-    await assertFails(forgedClear.commit());
+    const missingClearLedger = writeBatch(db);
+    addOutcomeWrites(missingClearLedger, true, false, []);
+    await assertFails(missingClearLedger.commit());
 
     const result = writeBatch(db);
-    addOutcomeWrites(result, true, false);
+    addOutcomeWrites(result, true, false, clearedGateIds);
     await assertSucceeds(result.commit());
 
     const savedJourney = await getDoc(doc(db, journeyPath));
@@ -3531,7 +3754,10 @@ try {
     assert.equal(savedJourney.data().levelPlacementStatus, 'completed');
     assert.equal(savedJourney.data().activeLevelPlacementAssessmentId, '');
     assert.equal(savedSession.data().status, 'completed');
-    assert.deepEqual(savedSession.data().resultClearedGateIds, []);
+    assert.deepEqual(savedSession.data().resultClearedGateIds, clearedGateIds);
+    assert.deepEqual(savedJourney.data().levelPlacementClearedGateIds, clearedGateIds);
+    assert.equal(savedJourney.data().activeRankId, targetRankId);
+    assert.equal(savedJourney.data().activeGateId, targetGateId);
     assert.equal(savedTarget.exists(), false);
   });
 
@@ -4070,7 +4296,7 @@ try {
   });
 
   if (testFilter) assert.ok(selected > 0, `No Rules test matched "${testFilter}"`);
-  assert.equal(passed, testFilter ? selected : 65);
+  assert.equal(passed, testFilter ? selected : 66);
   console.log(`# ${passed} Firestore Rules emulator tests passed`);
 } finally {
   await environment.cleanup();

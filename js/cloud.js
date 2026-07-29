@@ -410,7 +410,10 @@
     const educational = educationalWordFields(word, identity);
     const hierarchy = source.type === 'published-gate' || source.type === 'level-placement';
     return {
-      ...educational,
+      word: educational.word,
+      normalizedWord: educational.normalizedWord,
+      wordKey: educational.wordKey,
+      translation: educational.translation,
       canonicalId: identity.wordKey,
       normalizationVersion: identity.normalizationVersion,
       masteryKey: identity.wordKey,
@@ -531,6 +534,8 @@
       )
       : null;
     const localWord = lifecycle.findUserWordByKey(window.words || [], identity.wordKey);
+    const splitLegacyProjection = source.type === 'published-gate' ||
+      source.type === 'level-placement';
     const trace = window.LootLinguaOperations?.startTrace('word-source-upsert', {
       sourceType: source.type,
       hasPrivateWorldMembership: Boolean(membershipRef),
@@ -593,10 +598,11 @@
           trace?.count('firestoreWrites');
         }
 
-        if (!legacySnapshot.exists()) {
+        const legacyProjectionPending = splitLegacyProjection && !legacySnapshot.exists();
+        if (!legacySnapshot.exists() && !legacyProjectionPending) {
           transaction.set(legacyRef, incomingLegacy);
           trace?.count('firestoreWrites');
-        } else {
+        } else if (legacySnapshot.exists()) {
           const patch = { ...educationalPatch };
           const requestedPersonalState = input.personalDictionaryState === 'moved-to-private-world'
             ? 'moved-to-private-world'
@@ -675,8 +681,24 @@
           membershipWordId: membershipRef ? privateWorldMembershipId(identity.wordKey) : '',
           existingWord: !created,
           restoredReady: restored,
+          legacyProjectionPending,
+          legacyProjection: legacyProjectionPending
+            ? { reference: legacyRef, payload: incomingLegacy }
+            : null,
         };
       });
+      if (result.legacyProjectionPending && result.legacyProjection) {
+        const projection = result.legacyProjection;
+        await runTransaction(db, async (transaction) => {
+          const snapshot = await transaction.get(projection.reference);
+          trace?.count('firestoreReads');
+          if (snapshot.exists()) return;
+          transaction.set(projection.reference, projection.payload);
+          trace?.count('firestoreWrites');
+        });
+      }
+      delete result.legacyProjection;
+      delete result.legacyProjectionPending;
       trace?.stage('transaction-complete').end({ status: result.status });
       return result;
     } catch (error) {

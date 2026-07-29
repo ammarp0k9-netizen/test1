@@ -43,7 +43,9 @@ test('gate loading reads every public page and never depends on the visible 25-w
 
 test('word linking is idempotent and preserves an existing personal SRS record', () => {
   assert.match(cloud, /if \(!sourceSnapshot\.exists\(\)\)/);
-  assert.match(cloud, /if \(!legacySnapshot\.exists\(\) && !indexedWord\)/);
+  assert.match(cloud, /const legacyProjectionPending = !legacySnapshot\.exists\(\)/);
+  assert.match(cloud, /if \(result\.legacyProjectionPending && result\.legacyProjection\)/);
+  assert.match(cloud, /if \(snapshot\.exists\(\)\) return;/);
   assert.match(cloud, /missingEducationalWordPatch/);
   assert.match(cloud, /USER_WORD_EDUCATIONAL_FIELDS/);
   assert.match(cloud, /mastery_status: 'New'/);

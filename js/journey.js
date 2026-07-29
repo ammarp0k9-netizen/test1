@@ -261,13 +261,23 @@
     const journey = input?.journey || {};
     const passedLevel = session.passedLevel === true;
     if (session.assessmentMode === 'new-ranks') {
-      const passedRankIds = new Set((session.passedRankIds || []).map(String));
-      const orderedRankIds = (session.orderedRankIds || session.testedRankIds || []).map(String);
-      const firstPassedRankId = orderedRankIds.find((rankId) => passedRankIds.has(rankId)) || '';
-      if (firstPassedRankId) {
+      if (passedLevel) {
+        const nextTarget = input?.nextLevelTarget || null;
+        const rankId = String(nextTarget?.rank?.rankId || '');
+        const gateId = String(nextTarget?.gate?.gateId || '');
         return {
-          rankId: firstPassedRankId,
-          gateId: String(session.rankFirstGateIds?.[firstPassedRankId] || ''),
+          rankId,
+          gateId,
+          completedCurrentContent: !rankId || !gateId,
+          preserveExistingPointer: false,
+        };
+      }
+      const rankId = String(session.recommendedStartRankId || '');
+      const gateId = String(session.recommendedStartGateId || '');
+      if (rankId && gateId) {
+        return {
+          rankId,
+          gateId,
           completedCurrentContent: false,
           preserveExistingPointer: false,
         };
@@ -321,20 +331,17 @@
       collection.push({ rankId, gateId });
     };
 
-    if (session.assessmentMode !== 'new-ranks') {
-      passedRankIds.forEach((rankId) => {
-        stableContentOrder(gatesByRank.get(rankId), 'gateId')
-          .filter((gate) => gate?.status === 'published')
-          .forEach((gate) => addTarget({
-            rankId,
-            gateId: itemId(gate, 'gateId'),
-          }, clearedGateTargets, seenClearedPaths));
-      });
-    }
+    passedRankIds.forEach((rankId) => {
+      stableContentOrder(gatesByRank.get(rankId), 'gateId')
+        .filter((gate) => gate?.status === 'published')
+        .forEach((gate) => addTarget({
+          rankId,
+          gateId: itemId(gate, 'gateId'),
+        }, clearedGateTargets, seenClearedPaths));
+    });
 
     if (
-      destination.rankId && destination.gateId &&
-      session.assessmentMode !== 'new-ranks'
+      destination.rankId && destination.gateId
     ) {
       const targetPath = `${destination.rankId}/${destination.gateId}`;
       if (!seenClearedPaths.has(targetPath)) {

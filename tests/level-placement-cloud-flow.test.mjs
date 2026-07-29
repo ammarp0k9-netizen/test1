@@ -158,7 +158,14 @@ function createHarness(options = {}) {
   vm.runInContext(journeySource, context);
   vm.runInContext(levelPlacementSource, context);
 
-  const ranks = options.noNextLevel
+  const ranks = options.newRanks
+    ? [
+      { worldId: 'world-a', rankId: 'rank-a1-old', cefrLevel: 'A1', order: 0, status: 'published' },
+      { worldId: 'world-a', rankId: 'rank-a1-new-a', cefrLevel: 'A1', order: 1, status: 'published' },
+      { worldId: 'world-a', rankId: 'rank-a1-new-b', cefrLevel: 'A1', order: 2, status: 'published' },
+      { worldId: 'world-a', rankId: 'rank-a2', cefrLevel: 'A2', order: 0, status: 'published' },
+    ]
+    : options.noNextLevel
     ? [
       { worldId: 'world-a', rankId: 'rank-a2', cefrLevel: 'A2', order: 1, status: 'published' },
     ]
@@ -167,12 +174,27 @@ function createHarness(options = {}) {
       { worldId: 'world-a', rankId: 'rank-b1', cefrLevel: 'B1', order: 2, status: 'published' },
     ];
   const gates = new Map([
-    ['rank-a2', [
-      { worldId: 'world-a', rankId: 'rank-a2', gateId: 'old-gate', order: 0, status: 'published' },
-      { worldId: 'world-a', rankId: 'rank-a2', gateId: 'gate-a2', order: 1, status: 'published' },
-    ]],
+    ['rank-a2', options.newRanks
+      ? [
+        { worldId: 'world-a', rankId: 'rank-a2', gateId: 'gate-a2', order: 0, status: 'published' },
+      ]
+      : [
+        { worldId: 'world-a', rankId: 'rank-a2', gateId: 'old-gate', order: 0, status: 'published' },
+        { worldId: 'world-a', rankId: 'rank-a2', gateId: 'gate-a2', order: 1, status: 'published' },
+      ]],
     ['rank-b1', [
       { worldId: 'world-a', rankId: 'rank-b1', gateId: 'gate-b1', order: 1, status: 'published' },
+    ]],
+    ['rank-a1-old', [
+      { worldId: 'world-a', rankId: 'rank-a1-old', gateId: 'gate-a1-old', order: 0, status: 'published' },
+    ]],
+    ['rank-a1-new-a', [
+      { worldId: 'world-a', rankId: 'rank-a1-new-a', gateId: 'gate-new-a-0', order: 0, status: 'published' },
+      { worldId: 'world-a', rankId: 'rank-a1-new-a', gateId: 'gate-new-a-1', order: 1, status: 'published' },
+    ]],
+    ['rank-a1-new-b', [
+      { worldId: 'world-a', rankId: 'rank-a1-new-b', gateId: 'gate-new-b-0', order: 0, status: 'published' },
+      { worldId: 'world-a', rankId: 'rank-a1-new-b', gateId: 'gate-new-b-1', order: 1, status: 'published' },
     ]],
   ]);
   root.LootLinguaPublishedContent = {
@@ -289,9 +311,29 @@ function createHarness(options = {}) {
     saveWordChoice: 'undecided', saveWordPendingIds: [], saveWordSavedIds: [],
     saveWordFailures: [], saveWordSummary: {}, resultApplied: false,
   };
+  if (options.newRanks) {
+    Object.assign(session, {
+      cefrLevel: 'A1',
+      assessmentMode: 'new-ranks',
+      orderedRankIds: ['rank-a1-new-a', 'rank-a1-new-b'],
+      testedRankIds: ['rank-a1-new-a', 'rank-a1-new-b'],
+      passedRankIds: ['rank-a1-new-a', 'rank-a1-new-b'],
+      passedLevel: true,
+      rankFirstGateIds: {
+        'rank-a1-new-a': 'gate-new-a-0',
+        'rank-a1-new-b': 'gate-new-b-0',
+      },
+      perRankStats: {
+        'rank-a1-new-a': { asked: 4, correct: 4, ratio: 1 },
+        'rank-a1-new-b': { asked: 4, correct: 4, ratio: 1 },
+      },
+    });
+  }
+  const initialRankId = options.newRanks ? 'rank-a1-old' : 'rank-a2';
+  const initialGateId = options.newRanks ? 'gate-a1-old' : 'old-gate';
   values.set(journeyPath, {
-    worldId: 'world-a', status: 'active', activeRankId: 'rank-a2', activeGateId: 'old-gate',
-    unlockedRankIds: ['rank-a2'], unlockedGateIds: ['old-gate'],
+    worldId: 'world-a', status: 'active', activeRankId: initialRankId, activeGateId: initialGateId,
+    unlockedRankIds: [initialRankId], unlockedGateIds: [initialGateId],
     passedCefrLevels: ['A1'], partialCefrLevels: [],
     activeLevelPlacementAssessmentId: 'assessment-a2',
     activeLevelPlacementCefrLevel: 'A2', levelPlacementStatus: 'active',
@@ -300,8 +342,8 @@ function createHarness(options = {}) {
   });
   values.set(sessionPath, session);
   values.set(pointerPath, { worldId: 'world-a', journeyVersion: 1, updatedAt: new Date() });
-  values.set(`${journeyPath}/ranks/rank-a2/gates/old-gate`, {
-    worldId: 'world-a', rankId: 'rank-a2', gateId: 'old-gate',
+  values.set(`${journeyPath}/ranks/${initialRankId}/gates/${initialGateId}`, {
+    worldId: 'world-a', rankId: initialRankId, gateId: initialGateId,
     status: 'learning', journeyVersion: 1, loadedWordKeys: ['old-word-key'],
   });
 
@@ -351,6 +393,46 @@ test('actual cloud flow keeps an atomic outcome authoritative when projection an
   const afterSignIn = await harness.api.resolveActiveJourneyDestination('world-a', { force: true });
   assert.equal(afterSignIn.rank.rankId, 'rank-b1');
   assert.equal(afterSignIn.gate.gateId, 'gate-b1');
+});
+
+test('actual perfect new-ranks flow clears both new ranks and advances to order-zero A2', async () => {
+  const harness = createHarness({ newRanks: true });
+  const result = await harness.api.applyPlacementOutcome('world-a', 'assessment-a2');
+  const clearedGateIds = [
+    'gate-new-a-0',
+    'gate-new-a-1',
+    'gate-new-b-0',
+    'gate-new-b-1',
+  ];
+
+  assert.equal(result.session.assessmentMode, 'new-ranks');
+  assert.equal(result.session.resultApplied, true);
+  assert.deepEqual(Array.from(result.session.resultClearedGateIds), clearedGateIds);
+  assert.equal(result.session.nextCefrLevel, 'A2');
+  assert.equal(result.session.resultStartRankId, 'rank-a2');
+  assert.equal(result.session.resultStartGateId, 'gate-a2');
+  assert.equal(result.journey.activeRankId, 'rank-a2');
+  assert.equal(result.journey.activeGateId, 'gate-a2');
+  assert.deepEqual(Array.from(result.journey.levelPlacementClearedGateIds), clearedGateIds);
+  for (const gateId of clearedGateIds) {
+    const rankId = gateId.includes('-a-') ? 'rank-a1-new-a' : 'rank-a1-new-b';
+    assert.equal(
+      harness.values.get(`${harness.journeyPath}/ranks/${rankId}/gates/${gateId}`).status,
+      'cleared'
+    );
+  }
+  assert.equal(
+    harness.values.get(`${harness.journeyPath}/ranks/rank-a2/gates/gate-a2`).status,
+    'available'
+  );
+
+  harness.api.invalidate('all');
+  const destination = await harness.api.resolveActiveJourneyDestination('world-a', {
+    force: true,
+  });
+  assert.equal(destination.type, 'gate');
+  assert.equal(destination.rank.rankId, 'rank-a2');
+  assert.equal(destination.gate.gateId, 'gate-a2');
 });
 
 test('actual final-answer retry resumes the saved outcome and applies it exactly once', async () => {

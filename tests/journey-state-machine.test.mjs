@@ -178,7 +178,7 @@ function resolve(state, extra = {}) {
   });
 }
 
-test('scenario 1: legacy A1 plus two new ranks applies once, skips words, exits, and refreshes at the first passed new gate', () => {
+test('scenario 1: perfect new-ranks result clears both ranks and refreshes at the first A2 gate', () => {
   const legacyCoverage = placementContract.deriveLegacyRankCoverage({
     cefrLevel: 'A1',
     journey: baseJourney(),
@@ -226,16 +226,19 @@ test('scenario 1: legacy A1 plus two new ranks applies once, skips words, exits,
     resolve(state, { levelPlacementSession: state.session }).type,
     'level-placement-result'
   );
-  state = applyOutcome(state);
+  state = applyOutcome(state, {
+    nextLevelTarget: { rank: a2, gate: gatesByRank.get('a2-first')[0] },
+  });
   state.session.saveWordChoice = 'none';
   state.view = 'world';
   const destination = resolve(state);
-  assert.equal(destination.rank.rankId, 'a1-new-a');
-  assert.equal(destination.gate.gateId, 'gate-new-a');
+  assert.equal(destination.rank.rankId, 'a2-first');
+  assert.equal(destination.gate.gateId, 'gate-a2');
   assert.equal(destination.reason, 'active-pointer');
-  assert.equal(state.progress['a1-new-a/gate-new-a'], undefined);
-  assert.equal(state.progress['a1-new-b/gate-new-b'], undefined);
-  assert.equal(resolve(clone(state)).gate.gateId, 'gate-new-a');
+  assert.deepEqual(state.journey.levelPlacementClearedGateIds, ['gate-new-a', 'gate-new-b']);
+  assert.deepEqual(state.session.resultClearedGateIds, ['gate-new-a', 'gate-new-b']);
+  assert.equal(state.session.resultStartGateId, 'gate-a2');
+  assert.equal(resolve(clone(state)).gate.gateId, 'gate-a2');
 });
 
 test('scenario 2: clearing the final A1 gate advances to the first A2 gate and refresh preserves it', () => {
@@ -264,16 +267,22 @@ test('scenario 2: clearing the final A1 gate advances to the first A2 gate and r
   assert.equal(resolve(clone(state)).gate.gateId, 'gate-a2');
 });
 
-test('scenario 3: failing every new rank preserves old progress and creates no new unlock', () => {
+test('scenario 3: failing every new rank preserves old progress and opens the first failed rank', () => {
   const before = {
     journey: baseJourney(),
-    session: newRanksSession({ passedRankIds: [], passedLevel: false }),
+    session: newRanksSession({
+      passedRankIds: [],
+      passedLevel: false,
+      recommendedStartRankId: 'a1-new-a',
+      recommendedStartGateId: 'gate-new-a',
+    }),
     progress: { 'a1-old/gate-old': { status: 'learning' } },
   };
   const state = applyOutcome(before);
-  assert.deepEqual(state.journey.unlockedRankIds, ['a1-old']);
-  assert.deepEqual(state.journey.unlockedGateIds, ['gate-old']);
-  assert.equal(resolve(state).gate.gateId, 'gate-old');
+  assert.deepEqual(state.journey.unlockedRankIds, ['a1-old', 'a1-new-a']);
+  assert.deepEqual(state.journey.unlockedGateIds, ['gate-old', 'gate-new-a']);
+  assert.equal(resolve(state).gate.gateId, 'gate-new-a');
+  assert.equal(state.progress['a1-old/gate-old'].status, 'learning');
 });
 
 test('scenario 4: permission denied exposes no partial success and retry applies exactly once', () => {
@@ -285,7 +294,9 @@ test('scenario 4: permission denied exposes no partial success and retry applies
   const snapshot = clone(before);
   assert.throws(() => applyOutcome(before, { failBeforeCommit: true }), /permission-denied/);
   assert.deepEqual(before, snapshot);
-  const applied = applyOutcome(before);
+  const applied = applyOutcome(before, {
+    nextLevelTarget: { rank: a2, gate: gatesByRank.get('a2-first')[0] },
+  });
   assert.equal(applied.session.resultApplied, true);
   assert.equal(applyOutcome(applied), applied);
 });
@@ -296,11 +307,13 @@ test('scenario 5: double finish and reload retain one receipt without duplicate 
     session: newRanksSession(),
     progress: { 'a1-old/gate-old': { status: 'learning' } },
   };
-  const once = applyOutcome(initial);
+  const once = applyOutcome(initial, {
+    nextLevelTarget: { rank: a2, gate: gatesByRank.get('a2-first')[0] },
+  });
   const twice = applyOutcome(once);
   assert.equal(twice, once);
   assert.equal(Object.keys(twice.progress).length, 1);
-  assert.equal(new Set(twice.session.resultUnlockedGateIds).size, 1);
+  assert.equal(new Set(twice.session.resultUnlockedGateIds).size, 3);
 });
 
 test('scenario 6: missing legacy metadata derives coverage without relocking or duplicate assessment', () => {
@@ -327,6 +340,8 @@ test('scenario 7: word-save failure leaves applied progression complete and retr
     journey: baseJourney(),
     session: newRanksSession(),
     progress: { 'a1-old/gate-old': { status: 'learning' } },
+  }, {
+    nextLevelTarget: { rank: a2, gate: gatesByRank.get('a2-first')[0] },
   });
   const journeySnapshot = clone(state.journey);
   state.session.saveWordChoice = 'all';
@@ -335,7 +350,7 @@ test('scenario 7: word-save failure leaves applied progression complete and retr
   state.session.saveWordPendingIds = [];
   state.session.saveWordSavedIds = ['question-1'];
   assert.deepEqual(state.journey, journeySnapshot);
-  assert.equal(resolve(state).gate.gateId, 'gate-new-a');
+  assert.equal(resolve(state).gate.gateId, 'gate-a2');
 });
 
 test('scenario 8: later new-rank publication tests only the latest unseen ID', () => {

@@ -716,7 +716,10 @@ function canonicalWordPayload(word, identity, legacyWordId, source, options) {
   const addedFrom = String(options?.sourceType || 'published-gate');
   const educational = contentWordToUserWordFields(word, identity);
   return {
-    ...educational,
+    word: educational.word,
+    normalizedWord: educational.normalizedWord,
+    wordKey: educational.wordKey,
+    translation: educational.translation,
     canonicalId: identity.wordKey,
     normalizationVersion: identity.normalizationVersion,
     masteryKey: identity.wordKey,
@@ -849,7 +852,7 @@ async function linkPublishedWord(uid, word, personalIndex, operationId, options)
   const indexedWord = personalIndex.get(identity.wordKey);
 
   try {
-    return await runTransaction(db, async (transaction) => {
+    const result = await runTransaction(db, async (transaction) => {
       const [canonicalSnapshot, sourceSnapshot] = await Promise.all([
         transaction.get(canonicalRef),
         transaction.get(sourceRef),
@@ -875,9 +878,8 @@ async function linkPublishedWord(uid, word, personalIndex, operationId, options)
         );
       }
       const incomingWord = legacyWordPayload(uid, savedWord);
-      if (!legacySnapshot.exists() && !indexedWord) {
-        transaction.set(legacyRef, incomingWord);
-      } else if (legacySnapshot.exists()) {
+      const legacyProjectionPending = !legacySnapshot.exists();
+      if (legacySnapshot.exists()) {
         const educationalPatch = missingEducationalWordPatch(
           legacySnapshot.data() || {},
           incomingWord
@@ -922,8 +924,23 @@ async function linkPublishedWord(uid, word, personalIndex, operationId, options)
         sourceLinked: !created && !restoredReady && !sourceSnapshot.exists(),
         alreadyLinked: sourceSnapshot.exists(),
         restoredReady,
+        legacyProjectionPending,
+        legacyProjection: legacyProjectionPending
+          ? { reference: legacyRef, payload: incomingWord }
+          : null,
       };
     });
+    if (result.legacyProjectionPending && result.legacyProjection) {
+      const projection = result.legacyProjection;
+      await runTransaction(db, async (transaction) => {
+        const snapshot = await transaction.get(projection.reference);
+        if (snapshot.exists()) return;
+        transaction.set(projection.reference, projection.payload);
+      });
+    }
+    delete result.legacyProjection;
+    delete result.legacyProjectionPending;
+    return result;
   } catch (error) {
     throw journeyOperationError(error, 'link-published-word-source-transaction', {
       uid,
@@ -3265,7 +3282,7 @@ async function applyPlacementOutcome(worldId, assessmentId) {
     );
     passedRankGates.set(rankId, gates);
   }));
-  const nextTarget = session.passedLevel && session.assessmentMode !== 'new-ranks'
+  const nextTarget = session.passedLevel
     ? await resolveNextPublishedLevelTarget(world, session.cefrLevel)
     : null;
   const nextLevel = String(nextTarget?.cefrLevel || '');
