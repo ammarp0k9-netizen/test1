@@ -1081,6 +1081,34 @@ try {
     }));
   });
 
+  await test('clients cannot forge masteryComplete on learning, ready, or cleared Gates', async () => {
+    const progressPath =
+      'users/user-a/contentProgress/journey-world/ranks/journey-rank/gates/journey-gate';
+    const savedSnapshot = await getDoc(doc(userA, progressPath));
+    const saved = savedSnapshot.data();
+    await assertFails(updateDoc(doc(userA, progressPath), {
+      masteryComplete: true,
+      lastActivityAt: serverTimestamp()
+    }));
+    await environment.withSecurityRulesDisabled(async (context) => {
+      await updateDoc(doc(context.firestore(), progressPath), { status: 'ready' });
+    });
+    await assertFails(updateDoc(doc(userA, progressPath), {
+      masteryComplete: true,
+      lastActivityAt: serverTimestamp()
+    }));
+    await environment.withSecurityRulesDisabled(async (context) => {
+      await updateDoc(doc(context.firestore(), progressPath), { status: 'cleared' });
+    });
+    await assertFails(updateDoc(doc(userA, progressPath), {
+      masteryComplete: true,
+      lastActivityAt: serverTimestamp()
+    }));
+    await environment.withSecurityRulesDisabled(async (context) => {
+      await setDoc(doc(context.firestore(), progressPath), saved);
+    });
+  });
+
   await test('a passing Placement session clears the gate and unlocks exactly the next gate', async () => {
     const journeyPath = 'users/user-a/contentProgress/journey-world';
     const currentPath =
@@ -4537,7 +4565,7 @@ try {
   });
 
   if (testFilter) assert.ok(selected > 0, `No Rules test matched "${testFilter}"`);
-  assert.equal(passed, testFilter ? selected : 68);
+  assert.equal(passed, testFilter ? selected : 69);
   console.log(`# ${passed} Firestore Rules emulator tests passed`);
 } finally {
   await environment.cleanup();

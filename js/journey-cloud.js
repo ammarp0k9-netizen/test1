@@ -6,6 +6,7 @@ import {
   getDoc,
   getDocs,
   getFirestore,
+  onSnapshot,
   runTransaction,
   serverTimestamp,
   setDoc,
@@ -1585,9 +1586,10 @@ async function updateGateProgress(worldId, rankId, gateId, values, options) {
     readyEvidenceCount: Math.max(0, Number(values?.readyEvidenceCount ?? current?.readyEvidenceCount) || 0),
     clearAttempts: Math.max(0, Number(values?.clearAttempts ?? current?.clearAttempts) || 0),
   };
-  if (typeof (values?.masteryComplete ?? current?.masteryComplete) === 'boolean') {
-    payload.masteryComplete = Boolean(values?.masteryComplete ?? current?.masteryComplete);
-  }
+  if (
+    current?.masteryComplete === true &&
+    current?.placementClearedWithoutLoad !== true
+  ) payload.masteryComplete = true;
   if (current?.placementAssessmentId) {
     Object.assign(payload, {
       placementAssessmentId: String(current.placementAssessmentId),
@@ -1833,10 +1835,67 @@ function currentPersonalMasteryIndex(uid) {
   return index;
 }
 
+function currentMasteryIndexForGateWords(words) {
+  const index = new Map();
+  const sharedMasteryAvailable = typeof window.getWordMasteryState === 'function';
+  const personalFallback = sharedMasteryAvailable
+    ? null
+    : currentPersonalMasteryIndex(auth?.currentUser?.uid);
+  (Array.isArray(words) ? words : []).forEach((word) => {
+    const wordKey = String(word?.wordKey || '');
+    if (!wordKey) return;
+    const mastery = sharedMasteryAvailable
+      ? window.getWordMasteryState(word)
+      : personalFallback.get(wordKey);
+    index.set(wordKey, mastery || {});
+  });
+  return index;
+}
+
+async function getGateMasteryView(worldId, rankId, gateId, options) {
+  requireUser();
+  const [progress, words] = await Promise.all([
+    options?.progress
+      ? Promise.resolve(options.progress)
+      : getGateProgress(worldId, rankId, gateId, options),
+    listAllGateWords(worldId, rankId, gateId, options),
+  ]);
+  const view = core().deriveGateMasteryView(
+    progress,
+    words,
+    currentMasteryIndexForGateWords(words)
+  );
+  const newContentWordIds = new Set(core().detectNewContentWordIds(words, progress));
+  return {
+    ...view,
+    newContentWords: words.filter((word) =>
+      newContentWordIds.has(String(word?.contentWordId || ''))
+    ),
+  };
+}
+
+function subscribeGateProgress(worldId, rankId, gateId, listener, onError) {
+  const user = requireUser();
+  const key = gateCacheKey(worldId, rankId, gateId);
+  return onSnapshot(
+    gateProgressRef(user.uid, worldId, rankId, gateId),
+    (snapshot) => {
+      const progress = record(snapshot, 'gateId');
+      if (progress) cache.gateProgress.set(key, progress);
+      else cache.gateProgress.delete(key);
+      cache.rankGateProgress.delete(rankCacheKey(worldId, rankId));
+      if (typeof listener === 'function') listener(progress);
+    },
+    (error) => {
+      if (typeof onError === 'function') onError(error);
+    }
+  );
+}
+
 async function evaluateActiveJourneyMastery() {
   if (journeyProgressEvaluation) return journeyProgressEvaluation;
   const task = (async () => {
-    const user = requireUser();
+    requireUser();
     const journey = await getActiveJourney({ force: true });
     if (!journey?.activeRankId || !journey?.activeGateId) {
       return { masteryComplete: false, reason: 'no-active-gate' };
@@ -1846,61 +1905,25 @@ async function evaluateActiveJourneyMastery() {
     const rankId = String(journey.activeRankId);
     const gateId = String(journey.activeGateId);
     const progress = await getGateProgress(worldId, rankId, gateId, { force: true });
-    if (!['learning', 'cleared'].includes(progress?.status)) {
-      return { masteryComplete: false, reason: 'gate-not-learning' };
+    if (!['learning', 'ready', 'cleared'].includes(progress?.status)) {
+      return { masteryComplete: false, reason: 'gate-not-loaded' };
     }
-
-    let wordKeys = Array.from(new Set(
-      (progress.loadedWordKeys || []).map(String).filter(Boolean)
-    ));
-    if (!wordKeys.length) {
-      const words = await listAllGateWords(worldId, rankId, gateId, { force: true });
-      wordKeys = Array.from(new Set(words.map((word) => String(word.wordKey || '')).filter(Boolean)));
-    }
-    if (!wordKeys.length) return { masteryComplete: false, reason: 'gate-has-no-words' };
-
-    const masteryIndex = currentPersonalMasteryIndex(user.uid);
-    const allMastered = wordKeys.every(
-      (wordKey) => masteryIndex.get(wordKey)?.mastery_status === 'Mastered'
-    );
-    if (!allMastered) return { masteryComplete: false, reason: 'words-not-mastered' };
-    if (progress.masteryComplete === true) {
-      return { masteryComplete: true, changed: false };
-    }
-
-    const currentProgressRef = gateProgressRef(user.uid, worldId, rankId, gateId);
-
-    const committed = await runTransaction(db, async (transaction) => {
-      const progressSnapshot = await transaction.get(currentProgressRef);
-      const savedProgress = progressSnapshot.data() || {};
-      if (
-        !progressSnapshot.exists() ||
-        !['learning', 'cleared'].includes(savedProgress.status)
-      ) {
-        return false;
-      }
-      transaction.update(currentProgressRef, {
-        masteryComplete: true,
-        loadedWordKeys: wordKeys,
-        lastActivityAt: serverTimestamp(),
-      });
-      return true;
+    const view = await getGateMasteryView(worldId, rankId, gateId, {
+      progress,
+      force: true,
     });
-    if (!committed) return { masteryComplete: false, reason: 'state-changed' };
-
-    cache.gateProgress.delete(gateCacheKey(worldId, rankId, gateId));
-    cache.rankGateProgress.delete(rankCacheKey(worldId, rankId));
-    const detail = {
-      masteryComplete: true,
-      changed: true,
+    const allMastered = view.effectiveWordCount > 0 && view.gapCount === 0;
+    return {
+      masteryComplete: progress.masteryComplete === true,
+      allMastered,
+      changed: false,
+      projectionPending: allMastered && progress.masteryComplete !== true,
+      reason: allMastered ? 'server-projection-pending' : 'words-not-mastered',
       worldId,
       rankId,
       gateId,
+      gapCount: view.gapCount,
     };
-    window.dispatchEvent(new CustomEvent('lootlingua:journey-changed', {
-      detail: { ...detail, type: 'mastery-complete' },
-    }));
-    return detail;
   })();
   journeyProgressEvaluation = task;
   try {
@@ -1929,7 +1952,7 @@ async function syncNewGateWords(worldId, rankId, gateId, options) {
 
 async function findNewGateWords(worldId, rankId, gateId) {
   const progress = await getGateProgress(worldId, rankId, gateId);
-  if (progress?.status !== 'learning') return [];
+  if (!['learning', 'ready', 'cleared'].includes(progress?.status) || !progress.loadedAt) return [];
   const words = await listAllGateWords(worldId, rankId, gateId, { force: true });
   const newIds = new Set(core().detectNewContentWordIds(words, progress));
   return words.filter((word) => newIds.has(String(word.contentWordId || '')));
@@ -4103,7 +4126,11 @@ function installJourneyMasteryHook() {
     if (updatedWord?.mastery_status === 'Mastered') {
       clearTimeout(evaluationTimer);
       evaluationTimer = setTimeout(() => {
-        evaluateActiveJourneyMastery().catch(() => {});
+        window.dispatchEvent(new CustomEvent('lootlingua:gate-mastery-local-change', {
+          detail: {
+            wordKey: window.LootLinguaWordLifecycle?.wordKeyOf?.(updatedWord) || '',
+          },
+        }));
       }, 80);
     }
     return updatedWord;
@@ -4183,6 +4210,8 @@ const API = Object.freeze({
   syncNewGateWords,
   updateGateProgress,
   findNewGateWords,
+  getGateMasteryView,
+  subscribeGateProgress,
   recordQuizEvidenceBatch,
   evaluateActiveJourneyReadiness,
   getGateClearAttempt,

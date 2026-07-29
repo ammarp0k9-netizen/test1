@@ -214,6 +214,9 @@ window.applyGlobalWordMasterySnapshot = function(entries) {
     if (word) propagateMasteryStateAcrossAccount(word.word || word.text, state, { skipMetaSave: true, skipCloudCopies: true });
   });
   if (isEditableDictionaryView()) render();
+  window.dispatchEvent(new CustomEvent('lootlingua:word-mastery-snapshot', {
+    detail: { wordKeys: Object.keys(entries) },
+  }));
 };
 
 function getQuizExposureHistoryStorageKey(uid) {
@@ -380,4 +383,3 @@ window.showWordMasteryPopover = function(event, wordId) {
     document.addEventListener('pointerdown', close, true);
   }, 0);
 };
-

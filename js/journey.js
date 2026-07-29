@@ -480,6 +480,85 @@
       .filter((id) => id && !linked.has(id));
   }
 
+  function effectiveLoadedGateWords(gateProgress, publishedWords) {
+    if (!gateProgress?.loadedAt || !Array.isArray(publishedWords)) return [];
+    const loadedContentWordIds = new Set(
+      (gateProgress.loadedContentWordIds || []).map(String).filter(Boolean)
+    );
+    const loadedWordKeys = new Set(
+      (gateProgress.loadedWordKeys || []).map(String).filter(Boolean)
+    );
+    const byWordKey = new Map();
+    publishedWords.forEach((word) => {
+      if (!word || (word.status && word.status !== 'published')) return;
+      const contentWordId = String(word.contentWordId || word.id || '');
+      const wordKey = String(word.wordKey || '');
+      if (!wordKey || !loadedWordKeys.has(wordKey)) return;
+      if (loadedContentWordIds.size && !loadedContentWordIds.has(contentWordId)) return;
+      if (!byWordKey.has(wordKey)) byWordKey.set(wordKey, word);
+    });
+    return [...byWordKey.values()];
+  }
+
+  function masteryStateForKey(masteryByWordKey, wordKey) {
+    const value = masteryByWordKey instanceof Map
+      ? masteryByWordKey.get(wordKey)
+      : masteryByWordKey?.[wordKey];
+    return typeof value === 'string' ? { mastery_status: value } : (value || null);
+  }
+
+  function deriveGateMasteryView(gateProgress, publishedWords, masteryByWordKey) {
+    const progress = gateProgress || null;
+    const progressionStatus = String(progress?.status || '');
+    const cleared = progressionStatus === 'cleared';
+    const clearedWithoutLoad = Boolean(
+      cleared && progress?.clearedBy === 'level-placement' &&
+      progress?.placementClearedWithoutLoad === true
+    );
+    const membershipKnown = Array.isArray(publishedWords) && Boolean(progress?.loadedAt);
+    const effectiveWords = membershipKnown
+      ? effectiveLoadedGateWords(progress, publishedWords)
+      : [];
+    const effectiveWordKeys = effectiveWords.map((word) => String(word.wordKey));
+    const gapWordKeys = effectiveWordKeys.filter((wordKey) =>
+      masteryStateForKey(masteryByWordKey, wordKey)?.mastery_status !== 'Mastered'
+    );
+    const crownEarned = Boolean(
+      cleared && !clearedWithoutLoad && progress?.masteryComplete === true
+    );
+    let derivedState = progressionStatus || 'locked';
+    if (clearedWithoutLoad) derivedState = 'cleared-without-load';
+    else if (crownEarned) derivedState = 'mastered';
+    else if (cleared && membershipKnown && gapWordKeys.length > 0) {
+      derivedState = 'cleared-with-gap';
+    }
+    return {
+      progressionStatus,
+      derivedState,
+      cleared,
+      clearedWithoutLoad,
+      crownEarned,
+      membershipKnown,
+      effectiveWordCount: membershipKnown ? effectiveWordKeys.length : null,
+      effectiveWordKeys,
+      masteredWordCount: membershipKnown
+        ? effectiveWordKeys.length - gapWordKeys.length
+        : null,
+      gapCount: membershipKnown ? gapWordKeys.length : null,
+      gapWordKeys,
+    };
+  }
+
+  function gatePresentationState(gateProgress, fallbackState) {
+    const state = String(gateProgress?.status || fallbackState || '');
+    if (
+      state === 'cleared' &&
+      gateProgress?.masteryComplete === true &&
+      gateProgress?.placementClearedWithoutLoad !== true
+    ) return 'mastered';
+    return state;
+  }
+
   function canTransitionGateProgress(beforeStatus, afterStatus, options) {
     const before = beforeStatus ? String(beforeStatus) : '';
     const after = String(afterStatus || '');
@@ -505,6 +584,7 @@
       learning: 'قيد التعلم',
       ready: 'جاهزة',
       cleared: 'مجتازة',
+      mastered: 'متقنة',
     }[status] || 'مقفلة';
   }
 
@@ -536,6 +616,9 @@
     levelPlacementSourceId,
     gateProgressPathKey,
     detectNewContentWordIds,
+    effectiveLoadedGateWords,
+    deriveGateMasteryView,
+    gatePresentationState,
     canTransitionGateProgress,
     gateStatusLabel,
   });

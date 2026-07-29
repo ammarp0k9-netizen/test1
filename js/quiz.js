@@ -928,12 +928,17 @@ function startConfiguredQuiz() {
 
 function startActualQuiz(mode, options = {}) {
   stopTimeAttackTimer();
-  let words = options.configured ? getConfiguredQuizWords() : getQuizSourceWords(currentQuizSource);
-  if (!options.configured) currentQuizPool = words;
+  const explicitWords = Array.isArray(options.words) ? options.words.filter(Boolean) : null;
+  const sessionSource = String(options.source || currentQuizSource || 'personal');
+  let words = explicitWords || (options.configured
+    ? getConfiguredQuizWords()
+    : getQuizSourceWords(currentQuizSource));
+  if (!options.configured || explicitWords) currentQuizPool = words;
   const verifiedMode = isVerifiedQuizMode(mode);
   const starredCount = getQuizSourceWords('starred').length;
 
-  if ((options.configured || mode === 'flashcards' || mode === 'timeAttack' || mode === 'scramble') &&
+  if (!options.skipAvailabilityCheck &&
+      (options.configured || mode === 'flashcards' || mode === 'timeAttack' || mode === 'scramble') &&
       warnIfTooFewQuizSourceWords(currentQuizSource, getQuizSourceWords(currentQuizSource).length)) {
     openQuizModeSettings(options.configured ? selectedQuizMode : mode);
     return;
@@ -984,7 +989,7 @@ function startActualQuiz(mode, options = {}) {
   activeQuizSession = verifiedMode ? {
     id: currentQuizExposureSessionId,
     mode,
-    source: currentQuizSource,
+    source: sessionSource,
     createdAt: Date.now(),
     words,
     pool: currentQuizPool,
@@ -1015,6 +1020,58 @@ function startActualQuiz(mode, options = {}) {
     updateCard();
   }
 }
+
+function gateGapReviewWords(wordKeys) {
+  const lifecycle = window.LootLinguaWordLifecycle;
+  const wanted = new Set((Array.isArray(wordKeys) ? wordKeys : []).map(String).filter(Boolean));
+  if (!wanted.size) return [];
+  const uid = window.auth?.currentUser?.uid;
+  const candidates = [
+    ...readWordsFromStorage('normal', uid).map((word) => ({ word, source: 'personal' })),
+    ...customWorlds.flatMap((world) =>
+      readCustomWorldWordsFromStorage(world.id, uid)
+        .map((word) => ({ word, source: `custom:${world.id}` }))
+    ),
+  ];
+  const byWordKey = new Map();
+  candidates.forEach((candidate, index) => {
+    const wordKey = lifecycle?.wordKeyOf?.(candidate.word) || getWordMasteryKey(candidate.word);
+    if (
+      !wanted.has(wordKey) ||
+      byWordKey.has(wordKey) ||
+      lifecycle?.isEligibleForSrsReview?.(candidate.word) === false
+    ) return;
+    const normalized = normalizeQuizWord(candidate.word, candidate.source, index);
+    if (normalized && getWordMasteryState(normalized).mastery_status !== 'Mastered') {
+      byWordKey.set(wordKey, normalized);
+    }
+  });
+  return [...byWordKey.values()];
+}
+
+window.startGateGapReview = function(wordKeys, context = {}) {
+  if (!isFeatureUnlocked('quiz')) {
+    window.loadQuizView();
+    return false;
+  }
+  const reviewWords = gateGapReviewWords(wordKeys);
+  if (!reviewWords.length) {
+    showToast('لا توجد كلمات متبقية متاحة للمراجعة في هذه البوابة.', 'info', 4200);
+    return false;
+  }
+  clearActiveQuizSessionStorage();
+  window.__pendingQuizResumeSession = null;
+  window.loadQuizView({ skipResume: true });
+  const sourceParts = [context.worldId, context.rankId, context.gateId]
+    .map((value) => String(value || '').replace(/[^a-zA-Z0-9_-]/g, '_'))
+    .filter(Boolean);
+  startActualQuiz('scramble', {
+    words: reviewWords,
+    source: `gate-gap:${sourceParts.join('~')}`.slice(0, 500),
+    skipAvailabilityCheck: true,
+  });
+  return true;
+};
 
 function updateCard() {
   if (quizIndex >= currentQuizWords.length) {

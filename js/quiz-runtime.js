@@ -17,7 +17,11 @@ async function commitVerifiedQuizResults(trace, onStage) {
   const advancedWords = [];
   const transitionEntries = [];
 
-  const sourceWords = getQuizSourceWords(activeQuizSession.source || currentQuizSource);
+  const sessionSource = String(activeQuizSession.source || currentQuizSource || 'personal');
+  const sourceWords = sessionSource.startsWith('gate-gap:') &&
+      Array.isArray(activeQuizSession.words) && activeQuizSession.words.length
+    ? activeQuizSession.words
+    : getQuizSourceWords(sessionSource);
   for (const word of sourceWords) {
     const result = byWord.get(String(word.id));
     if (!result) continue;

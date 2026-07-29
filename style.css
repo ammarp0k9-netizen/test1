@@ -9310,6 +9310,12 @@ html[dir="ltr"] .worlds-tabs[data-active-tab="custom"]::before {
   color: var(--accent);
 }
 
+.published-card-journey-mastered .published-meta-chip:last-child {
+  border-color: color-mix(in srgb, #f6c453 58%, var(--border));
+  background: color-mix(in srgb, #f6c453 12%, var(--card-bg));
+  color: #f6c453;
+}
+
 .published-card-action i {
   transition: transform .16s ease;
 }
@@ -9381,6 +9387,16 @@ html[dir="ltr"] .worlds-tabs[data-active-tab="custom"]::before {
 .published-gate-journey-ready {
   border-color: color-mix(in srgb, var(--accent) 52%, var(--border));
   background: color-mix(in srgb, var(--accent) 10%, var(--card-bg));
+}
+
+.published-gate-journey-mastered {
+  border-color: color-mix(in srgb, #f6c453 58%, var(--border));
+  background: color-mix(in srgb, #f6c453 10%, var(--card-bg));
+}
+
+.published-gate-journey-mastered .published-journey-copy strong i {
+  margin-inline-end: 7px;
+  color: #f6c453;
 }
 
 .published-gate-readiness {

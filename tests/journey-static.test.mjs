@@ -3,7 +3,7 @@ import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 import vm from 'node:vm';
 
-const [contract, placement, cloud, worlds, published, admin, html, packageSource] = await Promise.all([
+const [contract, placement, cloud, worlds, published, admin, html, packageSource, gateMasteryFunction] = await Promise.all([
   readFile(new URL('../js/journey.js', import.meta.url), 'utf8'),
   readFile(new URL('../js/placement.js', import.meta.url), 'utf8'),
   readFile(new URL('../js/journey-cloud.js', import.meta.url), 'utf8'),
@@ -12,6 +12,7 @@ const [contract, placement, cloud, worlds, published, admin, html, packageSource
   readFile(new URL('../js/admin.js', import.meta.url), 'utf8'),
   readFile(new URL('../index.html', import.meta.url), 'utf8'),
   readFile(new URL('../package.json', import.meta.url), 'utf8'),
+  readFile(new URL('../functions/gate-mastery.js', import.meta.url), 'utf8'),
 ]);
 
 test('journey cloud uses the prepared contentProgress hierarchy and one active pointer', () => {
@@ -153,16 +154,19 @@ test('Admin exposes initial availability for ranks only', () => {
   assert.match(admin, /unlockConfig:\s*\{[\s\S]*initialStatus:/);
 });
 
-test('SRS mastery records masteryComplete without clearing or advancing the journey', () => {
+test('SRS mastery leaves Crown projection to the backend without clearing or advancing the journey', () => {
   assert.match(cloud, /function evaluateActiveJourneyMastery/);
   assert.match(cloud, /mastery_status === 'Mastered'/);
-  assert.match(cloud, /masteryComplete: true/);
   const masteryBlock = cloud.slice(
     cloud.indexOf('async function evaluateActiveJourneyMastery'),
     cloud.indexOf('const evaluateActiveJourneyProgress')
   );
+  assert.match(masteryBlock, /projectionPending/);
+  assert.doesNotMatch(masteryBlock, /transaction\.update/);
   assert.doesNotMatch(masteryBlock, /status: 'cleared'/);
   assert.doesNotMatch(masteryBlock, /unlockedGateIds|activeGateId:/);
+  assert.match(gateMasteryFunction, /transaction\.update\(gateRef, \{[\s\S]*masteryComplete: true/);
+  assert.doesNotMatch(gateMasteryFunction, /unlockedGateIds|activeGateId/);
   assert.match(worlds, /blocked: gateState === 'locked'/);
   assert.match(worlds, /if \(!canRevealPublishedGateWords\(gateState, publishedContentState\.journey\)\)/);
   assert.match(worlds, /gateState === 'locked'[\s\S]*أكمل البوابة السابقة لفتح كلمات هذه البوابة/);

@@ -1312,6 +1312,9 @@ const publishedContentState = {
   levelPlacementOverviews: new Map(),
   gateProgress: null,
   gateProgressById: new Map(),
+  gateMasteryView: null,
+  gateProgressUnsubscribe: null,
+  masteryRefreshTimer: null,
   newGateWords: [],
   journeyAction: null,
   journeyError: null,
@@ -1455,6 +1458,12 @@ function setPublishedPlacementMode(active) {
 function clearPublishedJourneyViewState(options) {
   clearTimeout(publishedContentState.readinessTimer);
   publishedContentState.readinessTimer = null;
+  clearTimeout(publishedContentState.masteryRefreshTimer);
+  publishedContentState.masteryRefreshTimer = null;
+  if (typeof publishedContentState.gateProgressUnsubscribe === 'function') {
+    publishedContentState.gateProgressUnsubscribe();
+  }
+  publishedContentState.gateProgressUnsubscribe = null;
   if (!options?.preserveJourney) {
     publishedContentState.journey = null;
     publishedContentState.activeJourney = null;
@@ -1463,6 +1472,7 @@ function clearPublishedJourneyViewState(options) {
   publishedContentState.activeJourneyDestination = null;
   publishedContentState.gateProgress = null;
   publishedContentState.gateProgressById = new Map();
+  publishedContentState.gateMasteryView = null;
   publishedContentState.newGateWords = [];
   publishedContentState.journeyAction = null;
   publishedContentState.placementBundle = null;
@@ -1606,10 +1616,13 @@ function publishedGateJourneyState(gate, rank, gates, ranks, journey, progress) 
     String(firstRank.rankId) === String(rank?.rankId) &&
     String(firstGate.gateId) === String(gate?.gateId)
   );
-  return contract.getJourneyGateState(journey, progress, gate, {
+  const progressionState = contract.getJourneyGateState(journey, progress, gate, {
     rank,
     isFirstEligibleGate,
   });
+  return progressionState === 'locked'
+    ? progressionState
+    : contract.gatePresentationState(progress, progressionState);
 }
 
 function canRevealPublishedGateWords(gateState, journey) {
@@ -1650,6 +1663,86 @@ function rerenderPublishedRoute() {
       publishedContentState.rank,
       publishedContentState.gate,
       publishedContentState.wordSnapshot
+    );
+  }
+}
+
+function isCurrentPublishedGate(worldId, rankId, gateId, generation) {
+  const params = publishedContentState.route?.params || {};
+  return generation === publishedContentState.generation &&
+    publishedContentState.route?.key === 'gate' &&
+    String(params.worldId || '') === String(worldId || '') &&
+    String(params.rankId || '') === String(rankId || '') &&
+    String(params.gateId || '') === String(gateId || '');
+}
+
+async function refreshPublishedGateMasteryView(
+  worldId,
+  rankId,
+  gateId,
+  progress,
+  generation,
+  forceWords = false
+) {
+  if (!isCurrentPublishedGate(worldId, rankId, gateId, generation)) return;
+  if (!progress?.loadedAt) {
+    publishedContentState.gateMasteryView = null;
+    publishedContentState.newGateWords = [];
+    rerenderPublishedRoute();
+    return;
+  }
+  try {
+    const view = await getJourneyCloudApi().getGateMasteryView(
+      worldId,
+      rankId,
+      gateId,
+      { progress, force: forceWords }
+    );
+    if (!isCurrentPublishedGate(worldId, rankId, gateId, generation)) return;
+    publishedContentState.gateMasteryView = view;
+    publishedContentState.newGateWords = view.newContentWords || [];
+    rerenderPublishedRoute();
+  } catch (error) {
+    logPublishedContentError('gate-mastery-view', error);
+  }
+}
+
+function watchPublishedGateProgress(worldId, rankId, gateId, initialProgress, generation) {
+  if (!window.auth?.currentUser) return;
+  if (typeof publishedContentState.gateProgressUnsubscribe === 'function') {
+    publishedContentState.gateProgressUnsubscribe();
+  }
+  try {
+    let firstSnapshot = true;
+    publishedContentState.gateProgressUnsubscribe = getJourneyCloudApi().subscribeGateProgress(
+      worldId,
+      rankId,
+      gateId,
+      (progress) => {
+        if (!isCurrentPublishedGate(worldId, rankId, gateId, generation)) return;
+        publishedContentState.gateProgress = progress || initialProgress || null;
+        if (progress) publishedContentState.gateProgressById.set(String(gateId), progress);
+        const forceWords = firstSnapshot;
+        firstSnapshot = false;
+        refreshPublishedGateMasteryView(
+          worldId,
+          rankId,
+          gateId,
+          publishedContentState.gateProgress,
+          generation,
+          forceWords
+        );
+      },
+      (error) => logPublishedContentError('gate-progress-listener', error)
+    );
+  } catch (error) {
+    logPublishedContentError('gate-progress-listener', error);
+    refreshPublishedGateMasteryView(
+      worldId,
+      rankId,
+      gateId,
+      initialProgress,
+      generation
     );
   }
 }
@@ -3968,6 +4061,7 @@ window.openGateReadinessInfo = function() {
 
 function makePublishedGateJourneyPanel(world, rank, gate) {
   const progress = publishedContentState.gateProgress;
+  const masteryView = publishedContentState.gateMasteryView;
   const state = publishedGateJourneyState(
     gate,
     rank,
@@ -3980,7 +4074,16 @@ function makePublishedGateJourneyPanel(world, rank, gate) {
     'section',
     `published-gate-journey published-gate-journey-${state}`
   );
-  const placementCleared = state === 'cleared' && progress?.clearedBy === 'level-placement';
+  const clearedWithoutLoad = Boolean(
+    progress?.status === 'cleared' &&
+    progress?.clearedBy === 'level-placement' &&
+    progress?.placementClearedWithoutLoad === true
+  );
+  const clearedWithGap = Boolean(
+    progress?.status === 'cleared' &&
+    masteryView?.derivedState === 'cleared-with-gap'
+  );
+  const gapCount = Math.max(0, Number(masteryView?.gapCount) || 0);
   const copy = publishedElement('div', 'published-journey-copy');
   const stateTitles = {
     locked: 'هذه البوابة مقفلة',
@@ -3988,6 +4091,7 @@ function makePublishedGateJourneyPanel(world, rank, gate) {
     learning: 'البوابة قيد التعلم',
     ready: 'البوابة جاهزة للاجتياز',
     cleared: 'اكتملت هذه البوابة',
+    mastered: 'متقنة',
   };
   const stateDescriptions = {
     locked: 'أكمل البوابة السابقة لفتحها.',
@@ -3997,21 +4101,27 @@ function makePublishedGateJourneyPanel(world, rank, gate) {
     learning: 'كلمات البوابة مرتبطة بقاموسك وحالة SRS الحالية.',
     ready: 'أصبحت كل كلمات البوابة جاهزة لاختبار الاجتياز.',
     cleared: 'اجتزت هذه البوابة وحُفظ تقدمك في الرحلة.',
+    mastered: 'أكملت إتقان كلمات هذه البوابة. يبقى Crown محفوظًا حتى مع مراجعات SRS اللاحقة.',
   };
-  copy.append(
-    publishedElement(
-      'strong',
-      '',
-      placementCleared
-        ? 'تم تجاوز هذه البوابة عبر اختبار المستوى'
+  const heading = publishedElement('strong');
+  if (state === 'mastered') heading.append(publishedIcon('fa-solid fa-crown'));
+  heading.append(document.createTextNode(
+    clearedWithoutLoad
+      ? 'مجتازة عبر اختبار المستوى — الكلمات غير محمّلة'
+      : clearedWithGap
+        ? `مجتازة — بقي ${gapCount} كلمات لإتقانها`
         : (stateTitles[state] || getJourneyContract().gateStatusLabel(state))
-    ),
+  ));
+  copy.append(
+    heading,
     publishedElement(
       'span',
       '',
-      placementCleared
-        ? 'يمكنك تعلّم كلماتها اختياريًا دون تغيير نتيجة الاختبار أو إعادة بدء الرحلة.'
-        : (stateDescriptions[state] || '')
+      clearedWithoutLoad
+        ? 'حمّل كلمات البوابة كاملة اختياريًا لبدء رحلة الإتقان دون تغيير نتيجة الاختبار.'
+        : clearedWithGap
+          ? 'اجتياز البوابة محفوظ والبوابة التالية مفتوحة. راجع الكلمات المتبقية ضمن SRS الحالي.'
+          : (stateDescriptions[state] || '')
     )
   );
   panel.append(copy);
@@ -4134,7 +4244,7 @@ function makePublishedGateJourneyPanel(world, rank, gate) {
     );
     clear.disabled = pending || publishedContentState.gateClearPending;
     actions.append(clear);
-  } else if (placementCleared && !progress?.loadedAt) {
+  } else if (clearedWithoutLoad) {
     const learn = publishedButton(
       pending ? 'جارٍ تحميل الكلمات' : 'تعلّم كلمات هذه البوابة',
       'published-action-btn published-journey-btn',
@@ -4143,9 +4253,19 @@ function makePublishedGateJourneyPanel(world, rank, gate) {
     );
     learn.disabled = pending;
     actions.append(learn);
+  } else if (clearedWithGap) {
+    actions.append(publishedButton(
+      'راجع الكلمات المتبقية',
+      'published-action-btn published-journey-btn published-journey-cta',
+      () => window.startGateGapReview?.(masteryView.gapWordKeys, {
+        worldId: world.worldId,
+        rankId: rank.rankId,
+        gateId: gate.gateId,
+      }),
+      'fa-solid fa-arrows-rotate'
+    ));
   } else if (
-    state === 'cleared' &&
-    !placementCleared &&
+    (state === 'cleared' || state === 'mastered') &&
     publishedContentState.activeJourney?.activeGateId &&
     String(publishedContentState.activeJourney.activeGateId) !== String(gate.gateId)
   ) {
@@ -4158,11 +4278,13 @@ function makePublishedGateJourneyPanel(world, rank, gate) {
   }
   panel.append(actions);
 
-  if (state === 'learning' && publishedContentState.newGateWords.length) {
+  if (publishedContentState.newGateWords.length) {
     panel.append(publishedElement(
       'small',
       'published-journey-message published-journey-new-words',
-      `توجد كلمات جديدة في هذه البوابة (${publishedContentState.newGateWords.length}).`
+      state === 'mastered'
+        ? `يوجد محتوى جديد متاح (${publishedContentState.newGateWords.length}) ولا يغيّر Crown المحفوظ.`
+        : `توجد كلمات جديدة في هذه البوابة (${publishedContentState.newGateWords.length}).`
     ));
   }
   if (pending) {
@@ -5138,17 +5260,13 @@ async function loadPublishedRouteData(route, options) {
     if (generation !== publishedContentState.generation) return;
     publishedContentState.wordSnapshot = snapshot;
     renderPublishedGateWords(world, rank, gate, snapshot);
-    if (gateProgress?.status === 'learning' && window.auth?.currentUser) {
-      getJourneyCloudApi().findNewGateWords(
-        params.worldId,
-        params.rankId,
-        params.gateId
-      ).then((newWords) => {
-        if (generation !== publishedContentState.generation) return;
-        publishedContentState.newGateWords = newWords;
-        renderPublishedGateWords(world, rank, gate, publishedContentState.wordSnapshot);
-      }).catch((error) => logPublishedContentError('gate-new-words', error));
-    }
+    watchPublishedGateProgress(
+      params.worldId,
+      params.rankId,
+      params.gateId,
+      gateProgress,
+      generation
+    );
   } catch (error) {
     if (generation !== publishedContentState.generation) return;
     logPublishedContentError(key, error);
@@ -5211,6 +5329,25 @@ window.addEventListener('lootlingua:auth-state', () => {
     loadPublishedRouteData(route, { force: true });
   }
 });
+
+function scheduleCurrentGateMasteryRefresh() {
+  const route = publishedContentState.route;
+  if (route?.key !== 'gate' || !publishedContentState.gateProgress?.loadedAt) return;
+  clearTimeout(publishedContentState.masteryRefreshTimer);
+  const generation = publishedContentState.generation;
+  publishedContentState.masteryRefreshTimer = setTimeout(() => {
+    refreshPublishedGateMasteryView(
+      route.params.worldId,
+      route.params.rankId,
+      route.params.gateId,
+      publishedContentState.gateProgress,
+      generation
+    );
+  }, 100);
+}
+
+window.addEventListener('lootlingua:gate-mastery-local-change', scheduleCurrentGateMasteryRefresh);
+window.addEventListener('lootlingua:word-mastery-snapshot', scheduleCurrentGateMasteryRefresh);
 
 window.addEventListener('lootlingua:journey-advanced', (event) => {
   const detail = event.detail || {};
@@ -6074,7 +6211,7 @@ function renderStarredWords() {
 }
 
 // ── Quiz Full-Page View ──
-window.loadQuizView = function() {
+window.loadQuizView = function(options = {}) {
   window.saveActiveAddFormDraft?.();
   if (!isFeatureUnlocked('quiz')) {
     openUnlockExplainModal('quiz');
@@ -6101,15 +6238,19 @@ window.loadQuizView = function() {
   setTreasureDockActive('quiz');
   document.getElementById('quizView').style.display = 'block';
   showQuizModes();
-  loadStoredActiveQuizSession().then((session) => {
-    if (currentView !== 'quiz') return;
-    if (!isResumableQuizSession(session)) {
-      if (session) clearActiveQuizSessionStorage();
-      return;
-    }
-    window.__pendingQuizResumeSession = session;
-    showQuizResumePrompt();
-  });
+  if (options?.skipResume !== true) {
+    loadStoredActiveQuizSession().then((session) => {
+      if (currentView !== 'quiz') return;
+      if (!isResumableQuizSession(session)) {
+        if (session) clearActiveQuizSessionStorage();
+        return;
+      }
+      window.__pendingQuizResumeSession = session;
+      showQuizResumePrompt();
+    });
+  } else {
+    hideQuizResumePrompt();
+  }
 
   document.querySelector('.page-header h1').innerHTML = '<i class="fas fa-gamepad" aria-hidden="true"></i> الاختبار';
 
