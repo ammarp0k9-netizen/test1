@@ -507,6 +507,41 @@
     return typeof value === 'string' ? { mastery_status: value } : (value || null);
   }
 
+  function wordWasMastered(masteryByWordKey, wordKey) {
+    const state = masteryStateForKey(masteryByWordKey, wordKey);
+    return Boolean(
+      state?.mastered_once === true ||
+      state?.masteredOnce === true ||
+      state?.mastery_status === 'Mastered'
+    );
+  }
+
+  function deriveGateCrownAchievement(gateProgress, masteryByWordKey) {
+    const progress = gateProgress || null;
+    // Crown uses the immutable load cohort; current publication only affects gap UI.
+    // This keeps the achievement monotonic without storing a client-writable claim.
+    const loadedWordKeys = Array.from(new Set(
+      (progress?.loadedWordKeys || []).map(String).filter(Boolean)
+    ));
+    const eligible = Boolean(
+      progress?.loadedAt &&
+      progress?.placementClearedWithoutLoad !== true &&
+      ['learning', 'ready', 'cleared'].includes(String(progress?.status || '')) &&
+      loadedWordKeys.length > 0
+    );
+    const masteryAchieved = Boolean(
+      eligible && loadedWordKeys.every((wordKey) =>
+        wordWasMastered(masteryByWordKey, wordKey)
+      )
+    );
+    return {
+      eligible,
+      masteryAchieved,
+      crownWordCount: eligible ? loadedWordKeys.length : null,
+      crownWordKeys: eligible ? loadedWordKeys : [],
+    };
+  }
+
   function deriveGateMasteryView(gateProgress, publishedWords, masteryByWordKey) {
     const progress = gateProgress || null;
     const progressionStatus = String(progress?.status || '');
@@ -523,9 +558,8 @@
     const gapWordKeys = effectiveWordKeys.filter((wordKey) =>
       masteryStateForKey(masteryByWordKey, wordKey)?.mastery_status !== 'Mastered'
     );
-    const crownEarned = Boolean(
-      cleared && !clearedWithoutLoad && progress?.masteryComplete === true
-    );
+    const crown = deriveGateCrownAchievement(progress, masteryByWordKey);
+    const crownEarned = Boolean(cleared && crown.masteryAchieved);
     let derivedState = progressionStatus || 'locked';
     if (clearedWithoutLoad) derivedState = 'cleared-without-load';
     else if (crownEarned) derivedState = 'mastered';
@@ -538,6 +572,8 @@
       cleared,
       clearedWithoutLoad,
       crownEarned,
+      masteryAchieved: crown.masteryAchieved,
+      crownWordCount: crown.crownWordCount,
       membershipKnown,
       effectiveWordCount: membershipKnown ? effectiveWordKeys.length : null,
       effectiveWordKeys,
@@ -549,12 +585,11 @@
     };
   }
 
-  function gatePresentationState(gateProgress, fallbackState) {
+  function gatePresentationState(gateProgress, fallbackState, masteryByWordKey) {
     const state = String(gateProgress?.status || fallbackState || '');
     if (
       state === 'cleared' &&
-      gateProgress?.masteryComplete === true &&
-      gateProgress?.placementClearedWithoutLoad !== true
+      deriveGateCrownAchievement(gateProgress, masteryByWordKey).masteryAchieved
     ) return 'mastered';
     return state;
   }
@@ -617,6 +652,7 @@
     gateProgressPathKey,
     detectNewContentWordIds,
     effectiveLoadedGateWords,
+    deriveGateCrownAchievement,
     deriveGateMasteryView,
     gatePresentationState,
     canTransitionGateProgress,

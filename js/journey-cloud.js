@@ -792,6 +792,8 @@ async function linkPublishedWord(uid, word, personalIndex, operationId, options)
   if (!identity.normalizedWord || !identity.wordKey) {
     throw journeyCloudError('journey/invalid-word', 'Published word identity is invalid.');
   }
+  // Preserve a legacy server-written value without ever creating or consulting it.
+  // Rules require this field to remain unchanged on every client update.
   if (
     savedWord.normalizedWord !== identity.normalizedWord ||
     savedWord.wordKey !== identity.wordKey
@@ -1794,7 +1796,6 @@ async function runGateWordOperation(worldId, rankId, gateId, options) {
       readinessVersion: evidenceCore().EVIDENCE_VERSION,
       placementClearedWithoutLoad: false,
     }, options);
-    await evaluateActiveJourneyMastery();
   }
 
   return {
@@ -1835,18 +1836,28 @@ function currentPersonalMasteryIndex(uid) {
   return index;
 }
 
-function currentMasteryIndexForGateWords(words) {
+function currentMasteryIndexForGateWords(words, loadedWordKeys) {
   const index = new Map();
-  const sharedMasteryAvailable = typeof window.getWordMasteryState === 'function';
-  const personalFallback = sharedMasteryAvailable
-    ? null
-    : currentPersonalMasteryIndex(auth?.currentUser?.uid);
+  const wordsByKey = new Map();
   (Array.isArray(words) ? words : []).forEach((word) => {
     const wordKey = String(word?.wordKey || '');
     if (!wordKey) return;
-    const mastery = sharedMasteryAvailable
-      ? window.getWordMasteryState(word)
-      : personalFallback.get(wordKey);
+    wordsByKey.set(wordKey, word);
+  });
+  const keys = new Set([
+    ...(Array.isArray(loadedWordKeys) ? loadedWordKeys : []).map(String),
+    ...wordsByKey.keys(),
+  ]);
+  let personalFallback = null;
+  keys.forEach((wordKey) => {
+    if (!wordKey) return;
+    const word = wordsByKey.get(wordKey);
+    let mastery = window.getSharedWordMasteryByKey?.(wordKey) ||
+      (word && window.getWordMasteryState?.(word));
+    if (!mastery) {
+      personalFallback ||= currentPersonalMasteryIndex(auth?.currentUser?.uid);
+      mastery = personalFallback.get(wordKey);
+    }
     index.set(wordKey, mastery || {});
   });
   return index;
@@ -1863,7 +1874,7 @@ async function getGateMasteryView(worldId, rankId, gateId, options) {
   const view = core().deriveGateMasteryView(
     progress,
     words,
-    currentMasteryIndexForGateWords(words)
+    currentMasteryIndexForGateWords(words, progress?.loadedWordKeys)
   );
   const newContentWordIds = new Set(core().detectNewContentWordIds(words, progress));
   return {
@@ -1898,7 +1909,7 @@ async function evaluateActiveJourneyMastery() {
     requireUser();
     const journey = await getActiveJourney({ force: true });
     if (!journey?.activeRankId || !journey?.activeGateId) {
-      return { masteryComplete: false, reason: 'no-active-gate' };
+      return { masteryAchieved: false, crownEarned: false, reason: 'no-active-gate' };
     }
 
     const worldId = String(journey.worldId);
@@ -1906,19 +1917,17 @@ async function evaluateActiveJourneyMastery() {
     const gateId = String(journey.activeGateId);
     const progress = await getGateProgress(worldId, rankId, gateId, { force: true });
     if (!['learning', 'ready', 'cleared'].includes(progress?.status)) {
-      return { masteryComplete: false, reason: 'gate-not-loaded' };
+      return { masteryAchieved: false, crownEarned: false, reason: 'gate-not-loaded' };
     }
     const view = await getGateMasteryView(worldId, rankId, gateId, {
       progress,
       force: true,
     });
-    const allMastered = view.effectiveWordCount > 0 && view.gapCount === 0;
     return {
-      masteryComplete: progress.masteryComplete === true,
-      allMastered,
+      masteryAchieved: view.masteryAchieved,
+      crownEarned: view.crownEarned,
       changed: false,
-      projectionPending: allMastered && progress.masteryComplete !== true,
-      reason: allMastered ? 'server-projection-pending' : 'words-not-mastered',
+      reason: view.masteryAchieved ? 'derived-from-srs-history' : 'words-not-mastered-once',
       worldId,
       rankId,
       gateId,
@@ -2679,6 +2688,7 @@ function resettableGateProgress(data, selection) {
     nextGateId: String(data.nextGateId || ''),
     loadStrategy: 'deterministic-source-docs-v1',
     operationId: String(data.operationId || createOperationId(selection.gate.gateId)),
+    // A Placement reset round-trips the frozen legacy field only.
     ...(typeof data.masteryComplete === 'boolean'
       ? { masteryComplete: data.masteryComplete }
       : {}),
@@ -4123,7 +4133,7 @@ function installJourneyMasteryHook() {
   let evaluationTimer = null;
   const wrapped = function journeyAwareQuizWordUpdate(...args) {
     const updatedWord = original.apply(this, args);
-    if (updatedWord?.mastery_status === 'Mastered') {
+    if (updatedWord) {
       clearTimeout(evaluationTimer);
       evaluationTimer = setTimeout(() => {
         window.dispatchEvent(new CustomEvent('lootlingua:gate-mastery-local-change', {

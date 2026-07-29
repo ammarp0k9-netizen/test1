@@ -1030,9 +1030,14 @@
   window.saveGlobalWordMasteryToCloud = async function(wordKey, state) {
     const user = auth.currentUser;
     if (!user || !wordKey || !state) return false;
+    const cloudState = { ...state };
+    if (cloudState.mastered_once !== true && cloudState.masteredOnce !== true) {
+      delete cloudState.mastered_once;
+      delete cloudState.masteredOnce;
+    }
     try {
       await setDoc(doc(db, "users", user.uid, "meta", "word_mastery"), {
-        entries: { [String(wordKey)]: state },
+        entries: { [String(wordKey)]: cloudState },
         updatedAt: new Date(),
       }, { merge: true });
       return true;

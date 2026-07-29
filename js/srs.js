@@ -101,13 +101,35 @@ function getInlineWordMasteryState(word = {}) {
     last_recall_session_id: word.last_recall_session_id || word.lastRecallSessionId || '',
     last_quizzed_at: word.last_quizzed_at || word.lastQuizzedAt || null,
     quiz_seen_count: Math.max(0, Number(word.quiz_seen_count ?? word.quizSeenCount ?? 0) || 0),
-    mastered_once: Boolean(word.mastered_once || word.masteredOnce),
+    mastered_once: Boolean(
+      word.mastered_once || word.masteredOnce || status === 'Mastered'
+    ),
     firstMasteredAt: word.firstMasteredAt || (status === 'Mastered' ? (word.last_recalled_at || null) : null),
     hasEarnedMasteryXP: Boolean(word.hasEarnedMasteryXP || status === 'Mastered'),
     earnedTransitions,
     remasteryAwardCount: Math.max(0, Number(word.remasteryAwardCount) || 0),
     xpEconomyVersion: XP_ECONOMY_VERSION,
   };
+}
+
+function mergePermanentWordMasteryState(existing, incoming) {
+  const previous = existing ? getInlineWordMasteryState(existing) : null;
+  const next = getInlineWordMasteryState(incoming || {});
+  if (!previous) return next;
+  next.mastered_once = Boolean(previous.mastered_once || next.mastered_once);
+  next.firstMasteredAt = previous.firstMasteredAt || next.firstMasteredAt || null;
+  next.hasEarnedMasteryXP = Boolean(
+    previous.hasEarnedMasteryXP || next.hasEarnedMasteryXP
+  );
+  next.earnedTransitions = Array.from(new Set([
+    ...(previous.earnedTransitions || []),
+    ...(next.earnedTransitions || []),
+  ])).slice(0, 8);
+  next.remasteryAwardCount = Math.max(
+    Number(previous.remasteryAwardCount) || 0,
+    Number(next.remasteryAwardCount) || 0
+  );
+  return next;
 }
 
 function getWordMasteryStorageKey(uid) {
@@ -166,12 +188,19 @@ function getWordMasteryState(word = {}) {
   return getBestKnownMasteryState(word) || getInlineWordMasteryState(word);
 }
 
+window.getSharedWordMasteryByKey = function(wordKey) {
+  const key = String(wordKey || '');
+  if (!key) return null;
+  const stored = readSharedWordMasteryStore()[key];
+  return stored ? getInlineWordMasteryState(stored) : null;
+};
+
 function propagateMasteryStateAcrossAccount(wordText, state, options = {}) {
   const key = getWordMasteryKey(wordText);
   if (!key) return;
-  const normalizedState = getInlineWordMasteryState(state);
   const uid = window.auth?.currentUser?.uid;
   const entries = readSharedWordMasteryStore(uid);
+  const normalizedState = mergePermanentWordMasteryState(entries[key], state);
   entries[key] = normalizedState;
   writeSharedWordMasteryStore(entries, uid);
   if (!options.skipMetaSave) window.saveGlobalWordMasteryToCloud?.(key, normalizedState);
@@ -205,13 +234,17 @@ function propagateMasteryStateAcrossAccount(wordText, state, options = {}) {
 window.applyGlobalWordMasterySnapshot = function(entries) {
   if (!entries || typeof entries !== 'object') return;
   const current = readSharedWordMasteryStore();
-  writeSharedWordMasteryStore({ ...current, ...entries });
+  const merged = { ...current };
+  Object.entries(entries).forEach(([key, state]) => {
+    merged[key] = mergePermanentWordMasteryState(current[key], state);
+  });
+  writeSharedWordMasteryStore(merged);
   Object.entries(entries).forEach(([key, state]) => {
     const word = [
       ...readWordsFromStorage('normal'),
       ...customWorlds.flatMap(world => readCustomWorldWordsFromStorage(world.id))
     ].find(item => getWordMasteryKey(item) === key);
-    if (word) propagateMasteryStateAcrossAccount(word.word || word.text, state, { skipMetaSave: true, skipCloudCopies: true });
+    if (word) propagateMasteryStateAcrossAccount(word.word || word.text, merged[key], { skipMetaSave: true, skipCloudCopies: true });
   });
   if (isEditableDictionaryView()) render();
   window.dispatchEvent(new CustomEvent('lootlingua:word-mastery-snapshot', {

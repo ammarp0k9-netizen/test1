@@ -1107,6 +1107,44 @@ try {
     await environment.withSecurityRulesDisabled(async (context) => {
       await setDoc(doc(context.firestore(), progressPath), saved);
     });
+    await environment.withSecurityRulesDisabled(async (context) => {
+      await updateDoc(doc(context.firestore(), progressPath), {
+        masteryComplete: true
+      });
+    });
+    await assertFails(updateDoc(doc(userA, progressPath), {
+      masteryComplete: false,
+      lastActivityAt: serverTimestamp()
+    }));
+    await environment.withSecurityRulesDisabled(async (context) => {
+      await setDoc(doc(context.firestore(), progressPath), saved);
+    });
+  });
+
+  await test('word mastery merge keeps mastered_once monotonic across stale device saves', async () => {
+    const masteryRef = doc(userA, 'users/user-a/meta/word_mastery');
+    await setDoc(masteryRef, {
+      entries: {
+        gate_mastery_merge_probe: {
+          mastery_status: 'Mastered',
+          mastered_once: true
+        }
+      },
+      updatedAt: serverTimestamp()
+    }, { merge: true });
+    await setDoc(masteryRef, {
+      entries: {
+        gate_mastery_merge_probe: {
+          mastery_status: 'Reviewing'
+        }
+      },
+      updatedAt: serverTimestamp()
+    }, { merge: true });
+    const snapshot = await getDoc(masteryRef);
+    assert.equal(
+      snapshot.data().entries.gate_mastery_merge_probe.mastered_once,
+      true
+    );
   });
 
   await test('a passing Placement session clears the gate and unlocks exactly the next gate', async () => {
@@ -4565,7 +4603,7 @@ try {
   });
 
   if (testFilter) assert.ok(selected > 0, `No Rules test matched "${testFilter}"`);
-  assert.equal(passed, testFilter ? selected : 69);
+  assert.equal(passed, testFilter ? selected : 70);
   console.log(`# ${passed} Firestore Rules emulator tests passed`);
 } finally {
   await environment.cleanup();

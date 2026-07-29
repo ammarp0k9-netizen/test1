@@ -1604,6 +1604,18 @@ function firstJourneyRank(ranks) {
     .find((rank) => getJourneyContract().canAccessRank(rank, null)) || null;
 }
 
+function publishedGateMasteryIndex(progress) {
+  const index = new Map();
+  const keys = Array.from(new Set(
+    (progress?.loadedWordKeys || []).map(String).filter(Boolean)
+  ));
+  keys.forEach((wordKey) => {
+    const state = window.getSharedWordMasteryByKey?.(wordKey);
+    if (state) index.set(wordKey, state);
+  });
+  return index;
+}
+
 function publishedGateJourneyState(gate, rank, gates, ranks, journey, progress) {
   const contract = getJourneyContract();
   const orderedGates = contract.stableContentOrder(gates, 'gateId');
@@ -1622,7 +1634,11 @@ function publishedGateJourneyState(gate, rank, gates, ranks, journey, progress) 
   });
   return progressionState === 'locked'
     ? progressionState
-    : contract.gatePresentationState(progress, progressionState);
+    : contract.gatePresentationState(
+      progress,
+      progressionState,
+      publishedGateMasteryIndex(progress)
+    );
 }
 
 function canRevealPublishedGateWords(gateState, journey) {
@@ -5332,8 +5348,14 @@ window.addEventListener('lootlingua:auth-state', () => {
 
 function scheduleCurrentGateMasteryRefresh() {
   const route = publishedContentState.route;
-  if (route?.key !== 'gate' || !publishedContentState.gateProgress?.loadedAt) return;
   clearTimeout(publishedContentState.masteryRefreshTimer);
+  if (route?.key === 'rank') {
+    publishedContentState.masteryRefreshTimer = setTimeout(() => {
+      rerenderPublishedRoute();
+    }, 100);
+    return;
+  }
+  if (route?.key !== 'gate' || !publishedContentState.gateProgress?.loadedAt) return;
   const generation = publishedContentState.generation;
   publishedContentState.masteryRefreshTimer = setTimeout(() => {
     refreshPublishedGateMasteryView(

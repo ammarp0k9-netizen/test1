@@ -2506,7 +2506,6 @@ service cloud.firestore {
         optionalNonNegativeInt(data, 'clearCorrect') &&
         optionalNonNegativeInt(data, 'clearTotal') &&
         optionalBool(data, 'masteryComplete') &&
-        data.get('masteryComplete', false) == false &&
         (
           (
             data.status == 'available' &&
@@ -2710,9 +2709,8 @@ service cloud.firestore {
           'needsEvidenceWordCount', 'availableForReviewNowCount',
           'waitingLaterTodayCount', 'waitingNextDayCount', 'readinessNextAt',
           'readinessTimezoneOffsetMinutes', 'readinessVersion',
-          'placementClearedWithoutLoad', 'masteryComplete'
+          'placementClearedWithoutLoad'
         ]) &&
-        after.get('masteryComplete', false) == false &&
         validGateProgress(after, worldId, rankId, gateId);
     }
 
@@ -2773,7 +2771,7 @@ service cloud.firestore {
       return (before.status == 'available' || before.status == 'learning') &&
         after.status == 'learning' &&
         after.diff(before).affectedKeys().hasOnly([
-          'status', 'lastActivityAt', 'masteryComplete',
+          'status', 'lastActivityAt',
           'loadedAt', 'wordCountAtLoad', 'contentVersion', 'snapshotVersion',
           'loadedContentWordIds', 'loadedWordKeys', 'nextRankId', 'nextGateId',
           'loadStrategy', 'operationId', 'readyWordCount',
@@ -3714,6 +3712,7 @@ service cloud.firestore {
               );
             allow create: if isOwner(uid) &&
               request.resource.data.status != 'available' &&
+              request.resource.data.get('masteryComplete', false) == false &&
               !(
                 request.resource.data.status == 'cleared' &&
                 request.resource.data.get('clearedBy', '') == 'level-placement'
@@ -3726,6 +3725,9 @@ service cloud.firestore {
                 )
               );
             allow update: if isOwner(uid) &&
+              // masteryComplete is a frozen legacy field. Crown is derived from SRS.
+              request.resource.data.get('masteryComplete', false) ==
+                resource.data.get('masteryComplete', false) &&
               request.resource.data.status == 'cleared' &&
               request.resource.data.get('clearedBy', '') == 'level-placement' &&
               validLevelPlacementClearedUpdate(
@@ -3737,6 +3739,8 @@ service cloud.firestore {
                 gateId
               );
             allow update: if isOwner(uid) &&
+              request.resource.data.get('masteryComplete', false) ==
+                resource.data.get('masteryComplete', false) &&
               'placementAssessmentId' in request.resource.data &&
               validPlacementGateResultUpdate(
                 resource.data,
@@ -3747,6 +3751,8 @@ service cloud.firestore {
                 gateId
               );
             allow update: if isOwner(uid) &&
+              request.resource.data.get('masteryComplete', false) ==
+                resource.data.get('masteryComplete', false) &&
               journeyAllowsGate(uid, worldId, rankId, gateId) &&
               (
                 validLearningGateProgressUpdate(

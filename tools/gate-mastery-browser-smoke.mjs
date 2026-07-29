@@ -105,6 +105,8 @@ const probe = `(() => {
     reviewCall = { keys: [...keys], context: { ...context } };
     return true;
   };
+  let masteryByKey = new Map();
+  window.getSharedWordMasteryByKey = (wordKey) => masteryByKey.get(wordKey) || null;
   const destinationBefore = JSON.stringify(publishedContentState.activeJourney);
   const gap = mount(loaded, {
     derivedState: 'cleared-with-gap', gapCount: 3,
@@ -120,7 +122,10 @@ const probe = `(() => {
   };
 
   publishedContentState.newGateWords = [{ contentWordId: 'new' }];
-  const mastered = mount({ ...loaded, masteryComplete: true }, {
+  masteryByKey = new Map(['one', 'two', 'three'].map((wordKey) => [wordKey, {
+    mastery_status: 'Reviewing', mastered_once: true,
+  }]));
+  const mastered = mount(loaded, {
     derivedState: 'mastered', crownEarned: true, gapCount: 1,
     gapWordKeys: ['one'], newContentWords: [{ contentWordId: 'new' }],
   });
@@ -142,7 +147,7 @@ const probe = `(() => {
     noCrown: !withoutLoad.querySelector('.fa-crown'),
   };
 
-  const ready = mount({ ...loaded, status: 'ready', masteryComplete: true }, {
+  const ready = mount({ ...loaded, status: 'ready' }, {
     derivedState: 'ready', crownEarned: false, gapCount: 0, gapWordKeys: [],
   });
   const readyResult = {

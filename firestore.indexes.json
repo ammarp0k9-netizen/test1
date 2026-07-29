@@ -142,13 +142,5 @@
       ]
     }
   ],
-  "fieldOverrides": [
-    {
-      "collectionGroup": "sources",
-      "fieldPath": "contentWordId",
-      "indexes": [
-        { "order": "ASCENDING", "queryScope": "COLLECTION_GROUP" }
-      ]
-    }
-  ]
+  "fieldOverrides": []
 }
