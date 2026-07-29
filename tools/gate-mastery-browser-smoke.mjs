@@ -282,6 +282,69 @@ const probe = `(() => {
       resolverCalls[0].options.resumePausedLevelPlacement === true,
   };
 
+  confettiCount = 0;
+  const resolverCountBeforeWorld = resolverCalls.length;
+  const worldCompletionBundle = {
+    ...completionBundle,
+    attempt: { ...completionBundle.attempt, attemptId: 'world-smoke-attempt' },
+    result: {
+      ...completionBundle.result,
+      worldCompleted: true,
+      worldCompletionRecorded: true,
+      worldCompletionId: 'wc1-smoke-world',
+    },
+  };
+  renderPublishedGateClearResult(world, rankForProgress, secondGate, worldCompletionBundle);
+  renderPublishedGateClearResult(world, rankForProgress, secondGate, worldCompletionBundle);
+  const worldResultPanel = document.querySelector('.published-placement-result');
+  worldResultPanel?.querySelector('.published-placement-primary')?.click();
+  const worldNotification = (window.__notifications || []).find((item) =>
+    item.meta?.dedupeKey === 'wc1-smoke-world'
+  );
+  const worldCompletionResult = {
+    panel: worldResultPanel?.textContent.includes('World Completed') === true,
+    globe: Boolean(worldResultPanel?.querySelector('.fa-earth-americas')),
+    oncePerCommit: confettiCount === 1,
+    permanentNotification: Boolean(worldNotification?.msg),
+    resolverAuthority: resolverCalls.length === resolverCountBeforeWorld + 1,
+  };
+
+  clearTimeout(window.__toastHideTimer);
+  clearTimeout(window.__toastTransitionTimer);
+  window.__toastActive = null;
+  window.__toastQueue = [];
+  document.getElementById('toastMessage')?.classList.remove('show');
+  const longToast = 'This is a deliberately long multi-result browser smoke message. It must remain complete in the notification center and expose exact details.';
+  const exactNotificationId = showToast(longToast, 'warning', 8000, {
+    persist: true,
+    importance: 'multi-result',
+    resultCount: 3,
+    dedupeKey: 'browser-smoke:toast-details',
+  });
+  showToast('queued-one', 'info', 2000);
+  showToast('queued-two', 'success', 2000);
+  const toastHost = document.getElementById('toastHost');
+  const toastMessage = document.getElementById('toastMessage');
+  const layerValues = [
+    document.getElementById('profileModal'),
+    document.getElementById('customWorldModal'),
+    document.getElementById('deleteModal'),
+    document.getElementById('notificationsPanel'),
+  ].map((element) => Number.parseInt(getComputedStyle(element).zIndex, 10) || 0);
+  toastMessage?.querySelector('.toast-details-btn')?.click();
+  const exactItem = document.querySelector('.notif-item[data-notif-id="' + exactNotificationId + '"]');
+  const toastLayerResult = {
+    rootHost: toastHost?.parentElement === document.body,
+    aboveAppLayers: Number.parseInt(getComputedStyle(toastHost).zIndex, 10) > Math.max(...layerValues),
+    passiveHost: getComputedStyle(toastHost).pointerEvents === 'none',
+    actionableToast: getComputedStyle(toastMessage).pointerEvents === 'auto',
+    exactDetails: document.getElementById('notificationsPanel')?.classList.contains('open') === true &&
+      exactItem?.classList.contains('notif-expanded') === true &&
+      exactItem?.textContent.includes(longToast) === true,
+    queueOrder: window.__toastQueue.map((item) => item.preview).join('|') === 'queued-one|queued-two',
+    mobileViewport: window.innerWidth === 390,
+  };
+
   window.launchConfetti = () => { throw new Error('animation unavailable'); };
   let animationIsolated = true;
   try {
@@ -306,6 +369,8 @@ const probe = `(() => {
     rankMasteredResult,
     newContentResult,
     rankCelebrationResult,
+    worldCompletionResult,
+    toastLayerResult,
     failureIsolationResult,
   };
 })()`;
@@ -348,6 +413,12 @@ try {
     else waiter.resolve(message.result);
   });
   await Promise.all([send('Runtime.enable'), send('Page.enable')]);
+  await send('Emulation.setDeviceMetricsOverride', {
+    width: 390,
+    height: 844,
+    deviceScaleFactor: 1,
+    mobile: true,
+  });
   await send('Page.navigate', { url: appUrl });
   await retry(async () => {
     const readiness = await send('Runtime.evaluate', {

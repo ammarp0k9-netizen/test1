@@ -649,6 +649,11 @@ async function confirmDeleteWords(ids, {
   pendingDeleteId = uniqueIds[0];
   const deleteCustomWorldId = isCustomWorldView() ? String(activeCustomWorldId) : null;
   const deleteScopeKey = deleteCustomWorldId ? `custom:${deleteCustomWorldId}` : 'personal';
+  const removalOperationId = [
+    'dictionary-remove',
+    deleteScopeKey,
+    ...uniqueIds.slice().sort(),
+  ].join(':');
   const actionById = new Map(uniqueIds.map((id) => [id, 'delete']));
   const sourceSummaryById = new Map();
   const privateImpactById = new Map();
@@ -749,7 +754,28 @@ async function confirmDeleteWords(ids, {
             card.style.transform = '';
           }
         });
-        showToast(`تمت معالجة ${results.length - failed.length} من ${results.length}. تعذر حفظ ${failed.length} ويمكنك إعادة المحاولة.`, 'warning', 5600);
+        const failureDetails = failed.map(({ id, error }) => {
+          const word = wordsToDelete.find((item) => String(item.id) === String(id));
+          const code = String(error?.code || '');
+          const reason = code.includes('permission')
+            ? 'لا توجد صلاحية كافية'
+            : (code.includes('unavailable') || code.includes('network')
+              ? 'تعذر الاتصال بالخدمة'
+              : (code.includes('not-found') ? 'لم تعد الكلمة موجودة' : 'تعذر حفظ التغيير'));
+          return `${word?.word || word?.text || 'كلمة غير معروفة'}: ${reason}`;
+        });
+        showToast(
+          `نجحت معالجة ${results.length - failed.length} من ${results.length}. فشل حفظ ${failed.length}. الأسباب: ${failureDetails.join('؛ ')}. يمكنك إعادة المحاولة بأمان.`,
+          'warning',
+          6200,
+          {
+            importance: 'partial-failure',
+            partialFailure: true,
+            resultCount: results.length,
+            operationId: removalOperationId,
+            dedupeKey: `${removalOperationId}:partial`,
+          }
+        );
       }
 
       const successful = results.filter((result) => result.ok);
@@ -792,7 +818,17 @@ async function confirmDeleteWords(ids, {
           const word = wordsToDelete[0];
           showToast(`حُذفت كلمة ”${word.word || word.text}“ من قاموسك.`, 'success', 4200);
         } else {
-          showToast(`تم إخفاء ${hideSet.size} وحذف ${deleteSet.size} من الكلمات.`, 'success', 4800);
+          showToast(
+            `تم إخفاء ${hideSet.size} وحذف ${deleteSet.size} من الكلمات.`,
+            'success',
+            4800,
+            {
+              importance: 'multi-result',
+              resultCount: successful.length,
+              operationId: removalOperationId,
+              dedupeKey: `${removalOperationId}:success`,
+            }
+          );
         }
       }
     }, 300);
@@ -2185,8 +2221,16 @@ function finalizeJsonImport(ctx, uploadResult) {
 
   let toastParts = [`تم استيراد ${added} كلمة`];
   if (skipped > 0) toastParts.push(`تجاوزنا ${skipped} مكررة`);
+  if (uploaded > 0) toastParts.push(`رُفع ${uploaded} إلى السحابة`);
+  if (failed > 0) toastParts.push(`تعذر رفع ${failed} وبقيت محفوظة محليًا`);
   if (totalXp > 0) toastParts.push(`+${totalXp} XP`);
-  showToast(toastParts.join(' — '), 'success', 4800);
+  showToast(toastParts.join(' — '), failed > 0 ? 'warning' : 'success', 5600, {
+    importance: 'multi-result',
+    partialFailure: failed > 0,
+    resultCount: added + skipped,
+    operationId: ctx.operationId,
+    dedupeKey: `${ctx.operationId}:result`,
+  });
 
   const featureId = getHighestNewlyUnlockedFeature(ctx.startUnlocked, endUnlocked);
   if (featureId) {
@@ -2210,21 +2254,6 @@ function finalizeJsonImport(ctx, uploadResult) {
   const dailyAfter = getDailyCount();
   if (dailyBefore < DAILY_GOAL && dailyAfter >= DAILY_GOAL) {
     setTimeout(launchConfetti, 1100);
-  }
-
-  if (window.auth?.currentUser) {
-    setTimeout(() => {
-      if (uploaded > 0) {
-        pushNotification(
-          failed > 0
-            ? `☁️ رُفع ${uploaded} كلمة لحسابك (${failed} ما انرفعت)`
-            : `☁️ رُفع ${uploaded} كلمة لحسابك بنجاح`,
-          failed > 0 ? 'warning' : 'success'
-        );
-      } else if (failed > 0) {
-        pushNotification('☁️ ما قدرنا نرفع الكلمات للسحابة. بياناتك محفوظة محلياً.', 'warning');
-      }
-    }, 1700);
   }
 
   settleOnboardingAfterJsonImport(ctx.wordsBefore, added);
@@ -2296,6 +2325,11 @@ window.importData = async function(event) {
     added: toAdd.length,
     skipped: importedWords.length - toAdd.length,
     totalXp: 0,
+    operationId: `json-import:${toAdd
+      .map((word) => normalizeWord(word.word))
+      .filter(Boolean)
+      .sort()
+      .join(',')}`.slice(0, 220),
   };
 
   window.__jsonImportBatchActive = true;

@@ -506,6 +506,10 @@ try {
   const userA = environment.authenticatedContext('user-a', { email: 'a@example.test' }).firestore();
   const userB = environment.authenticatedContext('user-b').firestore();
   const admin = environment.authenticatedContext('admin-a', { admin: true }).firestore();
+  const testClockAdmin = environment.authenticatedContext('test-clock-admin', {
+    admin: true,
+    testClock: true
+  }).firestore();
 
   await test('anonymous reads a published world but not a draft', async () => {
     await assertSucceeds(getDoc(doc(anonymous, paths.publishedWorld)));
@@ -615,6 +619,43 @@ try {
     await assertFails(getDoc(doc(userA, 'admin_audit_logs/log-a')));
     await assertSucceeds(getDoc(doc(admin, 'admin_audit_logs/log-a')));
     await assertFails(setDoc(doc(admin, 'admin_audit_logs/client-forged'), { action: 'forged' }));
+  });
+
+  await test('Test Clock is owner-bound and requires its separate admin claim', async () => {
+    const normalUserPath = 'users/user-a/testSettings/clock';
+    const normalAdminPath = 'users/admin-a/testSettings/clock';
+    const authorizedPath = 'users/test-clock-admin/testSettings/clock';
+    const validClock = {
+      version: 1,
+      offsetMs: 86_400_000,
+      updatedAt: serverTimestamp(),
+      updatedBy: 'test-clock-admin'
+    };
+
+    await assertFails(setDoc(doc(userA, normalUserPath), {
+      ...validClock,
+      updatedBy: 'user-a'
+    }));
+    await assertFails(setDoc(doc(admin, normalAdminPath), {
+      ...validClock,
+      updatedBy: 'admin-a'
+    }));
+    await assertSucceeds(setDoc(doc(testClockAdmin, authorizedPath), validClock));
+    await assertSucceeds(getDoc(doc(testClockAdmin, authorizedPath)));
+    await assertFails(getDoc(doc(userA, authorizedPath)));
+    await assertFails(setDoc(doc(testClockAdmin, authorizedPath), {
+      ...validClock,
+      offsetMs: 31_536_000_001
+    }));
+    await assertFails(setDoc(doc(testClockAdmin, authorizedPath), {
+      ...validClock,
+      unexpected: true
+    }));
+    await assertSucceeds(updateDoc(doc(testClockAdmin, authorizedPath), {
+      offsetMs: -3_600_000,
+      updatedAt: serverTimestamp()
+    }));
+    await assertFails(deleteDoc(doc(testClockAdmin, authorizedPath)));
   });
 
   await test('progress is account-bound and backend-write-only', async () => {
@@ -4246,7 +4287,8 @@ try {
       attemptId,
       nextRankId,
       nextGateId,
-      completedCurrentContent = false
+      completedCurrentContent = false,
+      recordWorldCompletion = false
     }) {
       const batch = writeBatch(db);
       batch.update(doc(db, paths.attemptPath), {
@@ -4269,12 +4311,25 @@ try {
         lastActivityAt: serverTimestamp()
       });
       if (completedCurrentContent) {
-        batch.update(doc(db, paths.journeyPath), {
+        const journeyUpdate = {
           completedRankIds: [rankId],
           rankCompletionVersions: { [rankId]: 1 },
           contentJourneyStatus: 'completed-current-content',
           updatedAt: serverTimestamp()
-        });
+        };
+        if (recordWorldCompletion) {
+          journeyUpdate.worldCompletion = {
+            version: 1,
+            status: 'completed',
+            worldId,
+            completionId: `world_completion_v1_${worldId}_${rankId}`,
+            requiredRankIds: [rankId],
+            rankVersions: { [rankId]: 1 },
+            completedBy: 'gate-clear',
+            completedAt: serverTimestamp()
+          };
+        }
+        batch.update(doc(db, paths.journeyPath), journeyUpdate);
       } else {
         batch.update(doc(db, paths.journeyPath), {
           activeRankId: nextRankId,
@@ -4344,10 +4399,24 @@ try {
       nextRankId: '',
       nextGateId: '',
       attemptId: 'rank-final-content-attempt',
-      completedCurrentContent: true
+      completedCurrentContent: true,
+      recordWorldCompletion: true
     };
     const finalPaths = await seedReadyGate(finalContent);
     const finalDb = environment.authenticatedContext(finalContent.uid).firestore();
+    await assertFails(updateDoc(doc(finalDb, finalPaths.journeyPath), {
+      worldCompletion: {
+        version: 1,
+        status: 'completed',
+        worldId: finalContent.worldId,
+        completionId: 'forged-before-final-boundary',
+        requiredRankIds: [finalContent.rankId],
+        rankVersions: { [finalContent.rankId]: 1 },
+        completedBy: 'gate-clear',
+        completedAt: serverTimestamp()
+      },
+      updatedAt: serverTimestamp()
+    }));
     await assertSucceeds(finishGateBatch(
       finalDb,
       finalPaths,
@@ -4358,6 +4427,14 @@ try {
     )).data();
     assert.equal(finalJourney.contentJourneyStatus, 'completed-current-content');
     assert.deepEqual(finalJourney.completedRankIds, [finalContent.rankId]);
+    assert.equal(finalJourney.worldCompletion.status, 'completed');
+    assert.equal(finalJourney.worldCompletion.completedBy, 'gate-clear');
+    assert.deepEqual(finalJourney.worldCompletion.requiredRankIds, [finalContent.rankId]);
+    await assertFails(updateDoc(doc(finalDb, finalPaths.journeyPath), {
+      'worldCompletion.completionId': 'replayed-or-replaced',
+      updatedAt: serverTimestamp()
+    }));
+    await assertFails(finishGateBatch(finalDb, finalPaths, finalContent).commit());
   });
 
   await test('manual unlock placeholders reject invented thresholds', async () => {
@@ -5113,7 +5190,7 @@ try {
   });
 
   if (testFilter) assert.ok(selected > 0, `No Rules test matched "${testFilter}"`);
-  assert.equal(passed, testFilter ? selected : 72);
+  assert.equal(passed, testFilter ? selected : 73);
   console.log(`# ${passed} Firestore Rules emulator tests passed`);
 } finally {
   await environment.cleanup();

@@ -1493,28 +1493,78 @@ function hideModal(id) {
   else close();
 }
 
-function showToast(msg, type = 'info', duration = 2500) {
+function displayNextToast() {
   const t = document.getElementById('toastMessage');
-  if (!t) return;
-  const text = String(msg ?? '');
-  const detailId = window.__toastDetailNotifId || '';
-  const needsDetails = notificationNeedsDetails(text);
-  t.innerHTML = needsDetails
-    ? `<span class="toast-text">${escapeHtml(text)}</span><button type="button" class="toast-details-btn" onclick="openNotificationDetails('${escapeHtml(String(detailId))}', event)">التفاصيل</button>`
-    : `<span class="toast-text">${escapeHtml(text)}</span>`;
-  window.__toastDetailNotifId = '';
-  t.style.background = '';
-  t.style.color = '';
-  t.classList.remove('toast-success', 'toast-warning', 'toast-danger', 'toast-info', 'toast-attention-shake');
-  t.classList.add(type === 'success' ? 'toast-success' : type === 'danger' ? 'toast-danger' : type === 'warning' ? 'toast-warning' : 'toast-info');
+  const queue = window.__toastQueue || (window.__toastQueue = []);
+  if (!t || window.__toastActive || queue.length === 0) return;
+  const entry = queue.shift();
+  window.__toastActive = entry;
+  const content = document.createElement('span');
+  content.className = 'toast-text';
+  content.textContent = entry.preview;
+  t.replaceChildren(content);
+  if (entry.notificationId) {
+    const details = document.createElement('button');
+    details.type = 'button';
+    details.className = 'toast-details-btn';
+    details.textContent = 'التفاصيل';
+    details.addEventListener('click', (event) => {
+      window.openNotificationDetails?.(entry.notificationId, event);
+    });
+    t.append(details);
+  }
+  t.classList.toggle('toast-interactive', Boolean(entry.notificationId));
+  t.classList.remove(
+    'toast-success', 'toast-warning', 'toast-danger', 'toast-info',
+    'toast-attention-shake'
+  );
+  t.classList.add(
+    entry.type === 'success' ? 'toast-success' :
+      entry.type === 'danger' ? 'toast-danger' :
+        entry.type === 'warning' ? 'toast-warning' : 'toast-info'
+  );
   t.classList.add('show');
-  if (type === 'warning' || type === 'danger') {
+  if (entry.type === 'warning' || entry.type === 'danger') {
     void t.offsetWidth;
     t.classList.add('toast-attention-shake');
     triggerAttentionFeedback(document.querySelector('.main-content') || document.body);
   }
   clearTimeout(window.__toastHideTimer);
-  window.__toastHideTimer = setTimeout(() => t.classList.remove('show'), duration);
+  window.__toastHideTimer = setTimeout(() => {
+    t.classList.remove('show');
+    clearTimeout(window.__toastTransitionTimer);
+    window.__toastTransitionTimer = setTimeout(() => {
+      window.__toastActive = null;
+      displayNextToast();
+    }, 430);
+  }, entry.duration);
+}
+
+function showToast(msg, type = 'info', duration = 2500, options = {}) {
+  const settings = duration && typeof duration === 'object'
+    ? duration
+    : (options && typeof options === 'object' ? options : {});
+  const displayDuration = duration && typeof duration === 'object'
+    ? Number(duration.duration)
+    : Number(duration);
+  const fullText = String(settings.fullText || settings.details || msg || '').trim();
+  if (!fullText) return '';
+  const notificationId = window.recordNotificationForToast?.(
+    fullText,
+    type,
+    settings
+  ) || '';
+  const preview = window.LootLinguaNotificationPolicy?.toastPreview(fullText) || fullText;
+  const queue = window.__toastQueue || (window.__toastQueue = []);
+  queue.push({
+    preview,
+    type,
+    duration: Math.min(12000, Math.max(1200, displayDuration || 2500)),
+    notificationId,
+  });
+  if (queue.length > 20) queue.splice(0, queue.length - 20);
+  displayNextToast();
+  return notificationId;
 }
 
 // ═══════════════════════════════════════════════════════

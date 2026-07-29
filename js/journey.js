@@ -2,6 +2,7 @@
   'use strict';
 
   const JOURNEY_VERSION = 1;
+  const WORLD_COMPLETION_VERSION = 1;
   const PLACEMENT_STATUS = 'not-started';
   const PLACEMENT_STATUSES = Object.freeze([
     'not-started',
@@ -618,12 +619,22 @@
 
   function rankWasPassedByLegacyProgress(input, rankId) {
     const journey = input?.journey || {};
-    const ranks = stableRankOrder(input?.ranks)
-      .filter((rank) => rank?.status === 'published');
-    const rankIndex = ranks.findIndex((rank) => itemId(rank, 'rankId') === rankId);
-    const activeIndex = ranks.findIndex((rank) =>
-      itemId(rank, 'rankId') === String(journey.activeRankId || '')
-    );
+    const suppliedIndex = input?.rankIndexById instanceof Map
+      ? input.rankIndexById
+      : null;
+    const ranks = suppliedIndex
+      ? []
+      : stableRankOrder(input?.ranks).filter((rank) => rank?.status === 'published');
+    const rankIndex = suppliedIndex
+      ? Number(suppliedIndex.get(String(rankId)))
+      : ranks.findIndex((rank) => itemId(rank, 'rankId') === rankId);
+    const activeIndex = Number.isInteger(input?.activeRankIndex)
+      ? input.activeRankIndex
+      : (suppliedIndex
+        ? Number(suppliedIndex.get(String(journey.activeRankId || '')))
+        : ranks.findIndex((rank) =>
+          itemId(rank, 'rankId') === String(journey.activeRankId || '')
+        ));
     if (rankIndex < 0) return false;
     if (activeIndex > rankIndex && includesId(journey.unlockedRankIds, journey.activeRankId)) {
       return true;
@@ -681,6 +692,133 @@
     };
   }
 
+  function completedWorldRankIds(journey) {
+    return Array.from(new Set([
+      ...(journey?.completedRankIds || []),
+      ...(journey?.levelPlacementPassedRankIds || []),
+    ].map(String).filter(Boolean)));
+  }
+
+  function worldCompletionSnapshot(ranks) {
+    const publishedRanks = stableRankOrder(ranks)
+      .filter((rank) => rank?.status === 'published');
+    const requiredRankIds = publishedRanks
+      .map((rank) => itemId(rank, 'rankId'))
+      .filter(Boolean);
+    const rankVersions = Object.fromEntries(publishedRanks.map((rank) => [
+      itemId(rank, 'rankId'),
+      Math.max(1, Number(rank?.version) || 1),
+    ]));
+    return { requiredRankIds, rankVersions };
+  }
+
+  function worldCompletionId(worldId, snapshot) {
+    const world = cleanId(worldId, 'World');
+    const source = (snapshot?.requiredRankIds || [])
+      .map((rankId) => `${rankId}:${snapshot?.rankVersions?.[rankId] || 1}`)
+      .join('|');
+    let hash = 2166136261;
+    for (let index = 0; index < source.length; index += 1) {
+      hash ^= source.charCodeAt(index);
+      hash = Math.imul(hash, 16777619);
+    }
+    return `wc${WORLD_COMPLETION_VERSION}~${world}~${(hash >>> 0).toString(36)}`;
+  }
+
+  function createWorldCompletionAchievement(input) {
+    const snapshot = input?.snapshot || worldCompletionSnapshot(input?.ranks);
+    const worldId = cleanId(input?.worldId, 'World');
+    const completedBy = input?.completedBy === 'level-placement'
+      ? 'level-placement'
+      : 'gate-clear';
+    return {
+      version: WORLD_COMPLETION_VERSION,
+      status: 'completed',
+      worldId,
+      completionId: worldCompletionId(worldId, snapshot),
+      requiredRankIds: snapshot.requiredRankIds.slice(),
+      rankVersions: { ...snapshot.rankVersions },
+      completedBy,
+      completedAt: input?.completedAt || null,
+    };
+  }
+
+  function deriveWorldProgressView(input) {
+    const journey = input?.journey || {};
+    const ranks = stableRankOrder(input?.ranks)
+      .filter((rank) => rank?.status === 'published');
+    const snapshot = worldCompletionSnapshot(ranks);
+    const coveredIds = new Set(completedWorldRankIds(journey));
+    const rankIndexById = new Map(ranks.map((rank, index) => [
+      itemId(rank, 'rankId'),
+      index,
+    ]));
+    const activeRankIndex = rankIndexById.has(String(journey.activeRankId || ''))
+      ? rankIndexById.get(String(journey.activeRankId || ''))
+      : -1;
+    const rankProgress = ranks.map((rank) => {
+      const rankId = itemId(rank, 'rankId');
+      const gates = input?.gatesByRank instanceof Map
+        ? input.gatesByRank.get(rankId)
+        : input?.gatesByRank?.[rankId];
+      const progressByGate = input?.progressByRank instanceof Map
+        ? input.progressByRank.get(rankId)
+        : input?.progressByRank?.[rankId];
+      return deriveRankProgressView({
+        ...input,
+        rank,
+        ranks,
+        gates,
+        progressByGate,
+        journey,
+        rankIndexById,
+        activeRankIndex,
+        placementHistory: input?.placementHistoryByRank instanceof Map
+          ? input.placementHistoryByRank.get(rankId)
+          : input?.placementHistoryByRank?.[rankId],
+      });
+    });
+    rankProgress.forEach((progress) => {
+      if (progress.completed) coveredIds.add(String(progress.rankId));
+    });
+    const currentContentCompleted = snapshot.requiredRankIds.length > 0 &&
+      snapshot.requiredRankIds.every((rankId) => coveredIds.has(String(rankId)));
+    const storedAchievement = journey?.worldCompletion?.status === 'completed' &&
+      Number(journey.worldCompletion.version) === WORLD_COMPLETION_VERSION
+      ? journey.worldCompletion
+      : null;
+    const legacyCompleted = Boolean(
+      !storedAchievement &&
+      journey?.contentJourneyStatus === 'completed-current-content' &&
+      currentContentCompleted
+    );
+    const completed = Boolean(storedAchievement || legacyCompleted || currentContentCompleted);
+    const mastered = Boolean(
+      currentContentCompleted &&
+      rankProgress.length > 0 &&
+      rankProgress.every((progress) => progress.mastered)
+    );
+    return {
+      completed,
+      mastered,
+      storedAchievement,
+      legacyCompleted,
+      currentContentCompleted,
+      hasNewContent: completed && !currentContentCompleted,
+      completionId: String(
+        storedAchievement?.completionId ||
+        (completed ? worldCompletionId(journey?.worldId || input?.worldId, snapshot) : '')
+      ),
+      completedBy: String(storedAchievement?.completedBy || (legacyCompleted ? 'legacy' : 'derived')),
+      requiredRankCount: snapshot.requiredRankIds.length,
+      completedRankCount: snapshot.requiredRankIds.filter((rankId) => coveredIds.has(String(rankId))).length,
+      masteredRankCount: rankProgress.filter((progress) => progress.mastered).length,
+      requiredRankIds: snapshot.requiredRankIds,
+      rankVersions: snapshot.rankVersions,
+      rankProgress,
+    };
+  }
+
   function canTransitionGateProgress(beforeStatus, afterStatus, options) {
     const before = beforeStatus ? String(beforeStatus) : '';
     const after = String(afterStatus || '');
@@ -712,6 +850,7 @@
 
   const API = Object.freeze({
     JOURNEY_VERSION,
+    WORLD_COMPLETION_VERSION,
     PLACEMENT_STATUS,
     PLACEMENT_STATUSES,
     JOURNEY_STATUSES,
@@ -743,6 +882,11 @@
     deriveGateMasteryView,
     gatePresentationState,
     deriveRankProgressView,
+    completedWorldRankIds,
+    worldCompletionSnapshot,
+    worldCompletionId,
+    createWorldCompletionAchievement,
+    deriveWorldProgressView,
     canTransitionGateProgress,
     gateStatusLabel,
   });

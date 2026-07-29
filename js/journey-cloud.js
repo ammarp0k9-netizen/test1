@@ -1332,9 +1332,10 @@ async function resumeGateClearAttempt(worldId, rankId, gateId) {
 
 async function finalizeGateClearAttempt(worldId, rankId, gateId, attemptId) {
   const user = requireUser();
-  const [nextTarget, currentRank] = await Promise.all([
+  const [nextTarget, currentRank, publishedRanks] = await Promise.all([
     resolveNextContentTarget(worldId, rankId, gateId),
     contentApi().getPublishedRank(worldId, rankId),
+    contentApi().listPublishedRanks(worldId),
   ]);
   const attemptRef = gateClearAttemptRef(user.uid, worldId, attemptId);
   const progressRef = gateProgressRef(user.uid, worldId, rankId, gateId);
@@ -1413,6 +1414,15 @@ async function finalizeGateClearAttempt(worldId, rankId, gateId, attemptId) {
         [String(rankId)]: Math.max(1, Number(currentRank?.version) || 1),
       }
       : (journey.rankCompletionVersions || {});
+    const worldCompletionRecorded = Boolean(!nextTarget && !journey.worldCompletion);
+    const worldCompletion = worldCompletionRecorded
+      ? core().createWorldCompletionAchievement({
+        worldId,
+        ranks: publishedRanks,
+        completedBy: 'gate-clear',
+        completedAt: serverTimestamp(),
+      })
+      : journey.worldCompletion;
     transaction.update(progressRef, {
       status: 'cleared',
       activeClearAttemptId: '',
@@ -1466,11 +1476,13 @@ async function finalizeGateClearAttempt(worldId, rankId, gateId, attemptId) {
         completedRankIds,
         rankCompletionVersions,
         contentJourneyStatus: 'completed-current-content',
+        ...(worldCompletion ? { worldCompletion } : {}),
       };
       transaction.update(targetJourneyRef, {
         completedRankIds,
         rankCompletionVersions,
         contentJourneyStatus: 'completed-current-content',
+        ...(worldCompletionRecorded ? { worldCompletion } : {}),
         updatedAt: serverTimestamp(),
       });
       transaction.update(pointerRef, { updatedAt: serverTimestamp() });
@@ -1482,6 +1494,9 @@ async function finalizeGateClearAttempt(worldId, rankId, gateId, attemptId) {
       rankCompleted: completesRank,
       rankCompletionRecorded: completesRank && !wasRankCompleted,
       completedCurrentContent: !nextTarget,
+      worldCompleted: !nextTarget,
+      worldCompletionRecorded,
+      worldCompletionId: String(worldCompletion?.completionId || ''),
       rankCompletionVersion: completesRank
         ? Math.max(1, Number(rankCompletionVersions[String(rankId)]) || 1)
         : 0,
@@ -3362,7 +3377,10 @@ async function applyPlacementOutcome(worldId, assessmentId) {
     );
   }
 
-  const journeyBeforeResult = await getJourney(world, { force: true });
+  const [journeyBeforeResult, publishedRanks] = await Promise.all([
+    getJourney(world, { force: true }),
+    contentApi().listPublishedRanks(world, { force: true }),
+  ]);
   const passedRankIds = Array.from(new Set((session.passedRankIds || []).map(String)));
   const passedRankGates = new Map();
   await Promise.all(passedRankIds.map(async (rankId) => {
@@ -3394,6 +3412,7 @@ async function applyPlacementOutcome(worldId, assessmentId) {
   const pointerRef = activeJourneyRef(user.uid);
   let committedJourney = null;
   let committedSession = null;
+  let worldCompletionRecorded = false;
   logJourneyOperationStage({
     operation: 'apply-placement-outcome',
     stage: 'commit-attempt',
@@ -3471,6 +3490,26 @@ async function applyPlacementOutcome(worldId, assessmentId) {
           ...(journey.levelPlacementClearedGateIds || []),
           ...resultClearedGateIds,
         ]));
+        worldCompletionRecorded = Boolean(
+          completedCurrentContent && !journey.worldCompletion
+        );
+        const committedAt = new Date();
+        const localWorldCompletion = worldCompletionRecorded
+          ? core().createWorldCompletionAchievement({
+            worldId: world,
+            ranks: publishedRanks,
+            completedBy: 'level-placement',
+            completedAt: committedAt,
+          })
+          : journey.worldCompletion;
+        const storedWorldCompletion = worldCompletionRecorded
+          ? core().createWorldCompletionAchievement({
+            worldId: world,
+            ranks: publishedRanks,
+            completedBy: 'level-placement',
+            completedAt: serverTimestamp(),
+          })
+          : null;
         const proposedJourney = {
           activeRankId: targetRankId || journey.activeRankId,
           activeGateId: targetGateId || journey.activeGateId,
@@ -3485,8 +3524,8 @@ async function applyPlacementOutcome(worldId, assessmentId) {
           contentJourneyStatus: completedCurrentContent
             ? 'completed-current-content'
             : 'in-progress',
+          ...(localWorldCompletion ? { worldCompletion: localWorldCompletion } : {}),
         };
-        const committedAt = new Date();
         committedJourney = {
           ...journey,
           ...proposedJourney,
@@ -3582,6 +3621,7 @@ async function applyPlacementOutcome(worldId, assessmentId) {
           levelPlacementPassedRankIds: placementPassedRankIds,
           levelPlacementClearedGateIds: placementClearedGateIds,
           contentJourneyStatus: proposedJourney.contentJourneyStatus,
+          ...(storedWorldCompletion ? { worldCompletion: storedWorldCompletion } : {}),
           activeLevelPlacementAssessmentId: '',
           activeLevelPlacementCefrLevel: '',
           levelPlacementStatus: 'completed',
@@ -3690,6 +3730,9 @@ async function applyPlacementOutcome(worldId, assessmentId) {
   }));
   return makeCommittedLevelPlacementBundle(journey, savedSession, {
     progressReconciliationError,
+    worldCompleted: Boolean(savedSession.completedCurrentContent),
+    worldCompletionRecorded,
+    worldCompletionId: String(journey?.worldCompletion?.completionId || ''),
   });
 }
 

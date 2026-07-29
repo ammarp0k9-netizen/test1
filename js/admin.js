@@ -149,7 +149,7 @@
     if (typeof root.getLootLinguaAdminState === 'function') {
       return root.getLootLinguaAdminState();
     }
-    return { resolved: false, isAdmin: false, uid: null, errorCode: '' };
+    return { resolved: false, isAdmin: false, canUseTestClock: false, uid: null, errorCode: '' };
   }
 
   function getCloudApi() {
@@ -761,6 +761,114 @@
     return row;
   }
 
+  function formatTestClockOffset(offsetMs) {
+    const offset = Number(offsetMs) || 0;
+    if (!offset) return 'الوقت الحقيقي';
+    const sign = offset > 0 ? '+' : '−';
+    const totalMinutes = Math.round(Math.abs(offset) / 60000);
+    const days = Math.floor(totalMinutes / 1440);
+    const hours = Math.floor((totalMinutes % 1440) / 60);
+    const minutes = totalMinutes % 60;
+    return `${sign}${[
+      days ? `${days} يوم` : '',
+      hours ? `${hours} ساعة` : '',
+      minutes ? `${minutes} دقيقة` : '',
+    ].filter(Boolean).join(' و') || 'أقل من دقيقة'}`;
+  }
+
+  function updateTestClockCard() {
+    const card = document.getElementById('adminTestClockCard');
+    const api = root.LootLinguaTestClock;
+    if (!card || !api) return;
+    const state = api.getState();
+    card.classList.toggle('is-active', state.active);
+    const real = card.querySelector('[data-clock-value="real"]');
+    const effective = card.querySelector('[data-clock-value="effective"]');
+    const offset = card.querySelector('[data-clock-value="offset"]');
+    const marker = card.querySelector('.admin-test-clock-marker');
+    if (real) real.textContent = new Date(state.realNow).toLocaleString('ar-JO');
+    if (effective) effective.textContent = new Date(state.effectiveNow).toLocaleString('ar-JO');
+    if (offset) offset.textContent = formatTestClockOffset(state.offsetMs);
+    if (marker) marker.hidden = !state.active;
+  }
+
+  async function runTestClockAction(action) {
+    const api = root.LootLinguaTestClock;
+    if (!api) return;
+    const card = document.getElementById('adminTestClockCard');
+    const buttons = card ? [...card.querySelectorAll('button')] : [];
+    buttons.forEach((button) => { button.disabled = true; });
+    try {
+      await action(api);
+      notify('تم تحديث الزمن التجريبي.', 'success', 2600);
+    } catch (error) {
+      notify('تعذر تحديث الزمن التجريبي. تحقق من صلاحية حساب الاختبار.', 'danger', 4800);
+    } finally {
+      buttons.forEach((button) => { button.disabled = false; });
+      updateTestClockCard();
+    }
+  }
+
+  function makeTestClockCard() {
+    const card = makeElement('section', 'admin-test-clock-card');
+    card.id = 'adminTestClockCard';
+    const heading = makeElement('div', 'admin-section-heading');
+    appendChildren(heading, [
+      makeElement('h3', 'admin-section-title', 'ساعة الاختبار'),
+      makeElement('span', 'admin-test-clock-marker', 'وضع الزمن التجريبي مفعّل'),
+    ]);
+    card.append(
+      heading,
+      makeElement('p', 'admin-test-clock-copy', 'تغيّر حسابات العرض المؤهلة فقط لهذا الحساب الاختباري. وقت الخادم وسجل النشاط وXP والمكافآت تبقى على الوقت الحقيقي.')
+    );
+    const values = makeElement('div', 'admin-test-clock-values');
+    [
+      ['الوقت الحقيقي الحالي', 'real'],
+      ['الوقت الفعّال الحالي', 'effective'],
+      ['مقدار الإزاحة', 'offset'],
+    ].forEach(([label, key]) => {
+      const row = makeElement('div', 'admin-test-clock-value');
+      row.append(
+        makeElement('span', '', label),
+        makeElement('strong', '', '—')
+      );
+      row.querySelector('strong').dataset.clockValue = key;
+      values.append(row);
+    });
+    card.append(values);
+    const actions = makeElement('div', 'admin-test-clock-actions');
+    [
+      ['+1 ساعة', 60 * 60 * 1000],
+      ['+1 يوم', 24 * 60 * 60 * 1000],
+      ['+2 يوم', 2 * 24 * 60 * 60 * 1000],
+    ].forEach(([label, delta]) => {
+      const button = makeElement('button', 'admin-btn admin-btn-secondary', label);
+      button.type = 'button';
+      button.addEventListener('click', () => runTestClockAction((api) => api.advanceBy(delta)));
+      actions.append(button);
+    });
+    const reset = makeElement('button', 'admin-btn admin-btn-warning', 'Reset للوقت الحقيقي');
+    reset.type = 'button';
+    reset.addEventListener('click', () => runTestClockAction((api) => api.reset()));
+    actions.append(reset);
+    card.append(actions);
+    const target = makeElement('div', 'admin-test-clock-target');
+    const input = document.createElement('input');
+    input.type = 'datetime-local';
+    input.className = 'admin-field';
+    input.setAttribute('aria-label', 'التاريخ التجريبي المحدد');
+    const apply = makeElement('button', 'admin-btn admin-btn-primary', 'تعيين التاريخ');
+    apply.type = 'button';
+    apply.addEventListener('click', () => {
+      if (!input.value) return;
+      runTestClockAction((api) => api.setEffectiveDate(input.value));
+    });
+    target.append(input, apply);
+    card.append(target);
+    queueMicrotask(updateTestClockCard);
+    return card;
+  }
+
   function renderDashboard() {
     const container = getAdminRoot();
     if (!container) return;
@@ -799,6 +907,9 @@
     ]);
     appendChildren(header, [heading, headerActions]);
     container.append(header);
+    if (state.canUseTestClock && root.LootLinguaTestClock) {
+      container.append(makeTestClockCard());
+    }
 
     if (ui.pageError) {
       const errorBox = makeElement('div', 'admin-page-error', ui.pageError);
@@ -5974,6 +6085,7 @@
   root.canLeaveAdminView = canLeaveAdminView;
 
   root.addEventListener('lootlingua:admin-state', handleAdminState);
+  root.addEventListener('lootlingua:test-clock-changed', updateTestClockCard);
   root.addEventListener('keydown', handleGlobalKeydown, true);
   root.addEventListener('beforeunload', handleBeforeUnload);
   document.addEventListener('click', handleNavigationCapture, true);

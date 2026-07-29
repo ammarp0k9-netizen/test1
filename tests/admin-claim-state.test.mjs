@@ -99,7 +99,11 @@ function firebaseUser(uid, claimOrPromise) {
     getIdTokenResult() {
       return typeof claimOrPromise === 'function'
         ? claimOrPromise()
-        : Promise.resolve({ claims: { admin: claimOrPromise } });
+        : Promise.resolve({
+            claims: claimOrPromise && typeof claimOrPromise === 'object'
+              ? claimOrPromise
+              : { admin: claimOrPromise }
+          });
     }
   };
 }
@@ -128,8 +132,18 @@ auth.currentUser = firebaseUser('real-admin', true);
 await windowObject.refreshLootLinguaAdminAccess({ forceRefresh: true });
 assert.deepEqual(
   { ...windowObject.getLootLinguaAdminState() },
-  { resolved: true, isAdmin: true, uid: 'real-admin', errorCode: '' }
+  {
+    resolved: true,
+    isAdmin: true,
+    canUseTestClock: false,
+    uid: 'real-admin',
+    errorCode: ''
+  }
 );
+
+auth.currentUser = firebaseUser('clock-admin', { admin: true, testClock: true });
+await windowObject.refreshLootLinguaAdminAccess({ forceRefresh: true });
+assert.equal(windowObject.getLootLinguaAdminState().canUseTestClock, true);
 
 let resolveOldToken;
 const oldToken = new Promise((resolve) => { resolveOldToken = resolve; });

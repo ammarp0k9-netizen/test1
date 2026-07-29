@@ -1310,6 +1310,7 @@ const publishedContentState = {
   activeJourney: null,
   activeJourneyDestination: null,
   levelPlacementOverviews: new Map(),
+  journeyGraph: null,
   gateProgress: null,
   gateProgressById: new Map(),
   gateMasteryView: null,
@@ -1330,6 +1331,7 @@ const publishedContentState = {
   gateClearPending: false,
   gateClearFeedback: null,
   shownRankCompletionCelebrations: new Set(),
+  shownWorldCompletionCelebrations: new Set(),
   readinessTimer: null,
   wordPager: null,
   wordSnapshot: null,
@@ -1469,6 +1471,7 @@ function clearPublishedJourneyViewState(options) {
     publishedContentState.journey = null;
     publishedContentState.activeJourney = null;
     publishedContentState.levelPlacementOverviews = new Map();
+    publishedContentState.journeyGraph = null;
   }
   publishedContentState.activeJourneyDestination = null;
   publishedContentState.gateProgress = null;
@@ -1511,6 +1514,7 @@ async function readPublishedJourneyContext(worldId, options) {
       journey,
       activeJourney,
       levelPlacementOverviews: reconciliation?.levelPlacementOverviews || null,
+      graph: reconciliation?.graph || null,
       preserved: false,
     };
   } catch (error) {
@@ -1521,6 +1525,7 @@ async function readPublishedJourneyContext(worldId, options) {
       journey: fallbackJourney,
       activeJourney: fallbackActiveJourney,
       levelPlacementOverviews: publishedContentState.levelPlacementOverviews,
+      graph: publishedContentState.journeyGraph,
       preserved: true,
       error,
     };
@@ -1538,6 +1543,7 @@ async function retryPublishedJourneyReconciliation(worldId) {
     publishedContentState.activeJourney = activeJourney;
     publishedContentState.levelPlacementOverviews =
       reconciliation.levelPlacementOverviews || new Map();
+    publishedContentState.journeyGraph = reconciliation.graph || null;
     clearPublishedJourneyError();
     rerenderPublishedRoute();
     return reconciliation;
@@ -1635,6 +1641,39 @@ function publishedRankProgressView(rank, gates, journey, progressByGate, ranks) 
     ranks,
     masteryByWordKey,
     placementHistory,
+  });
+}
+
+function publishedWorldProgressView(world, ranks, journey) {
+  const graph = publishedContentState.journeyGraph || {};
+  const progressByRank = graph.progressByRank instanceof Map
+    ? graph.progressByRank
+    : new Map();
+  const masteryByWordKey = new Map();
+  progressByRank.forEach((progressByGate) => {
+    if (!(progressByGate instanceof Map)) return;
+    progressByGate.forEach((progress) => {
+      publishedGateMasteryIndex(progress).forEach((state, wordKey) => {
+        masteryByWordKey.set(wordKey, state);
+      });
+    });
+  });
+  const placementHistoryByRank = new Map();
+  (Array.isArray(ranks) ? ranks : []).forEach((rank) => {
+    const level = getLevelPlacementContract().normalizeLevel(rank?.cefrLevel);
+    placementHistoryByRank.set(
+      String(rank?.rankId || ''),
+      publishedContentState.levelPlacementOverviews.get(level)?.history || null
+    );
+  });
+  return getJourneyContract().deriveWorldProgressView({
+    worldId: world?.worldId,
+    journey,
+    ranks,
+    gatesByRank: graph.gatesByRank,
+    progressByRank,
+    masteryByWordKey,
+    placementHistoryByRank,
   });
 }
 
@@ -2575,7 +2614,9 @@ function renderPublishedLevelPlacementResult(bundle) {
     actions.append(publishedButton(
       'العودة إلى العالم',
       'published-action-btn published-placement-primary',
-      () => window.openPublishedWorld(bundle.journey.worldId),
+      () => openPublishedJourneyDestination(bundle.journey.worldId, {
+        resumePausedLevelPlacement: true,
+      }),
       'fa-solid fa-circle-check'
     ));
   }
@@ -2599,6 +2640,27 @@ function renderPublishedLevelPlacementResult(bundle) {
   section.append(actions);
   appendPublishedLevelPlacementStats(section, session);
   root.replaceChildren(section);
+  if (bundle.worldCompletionRecorded === true) {
+    const completionId = String(bundle.worldCompletionId || bundle.journey?.worldId || '');
+    if (!publishedContentState.shownWorldCompletionCelebrations.has(completionId)) {
+      publishedContentState.shownWorldCompletionCelebrations.add(completionId);
+      try {
+        launchConfetti();
+        showToast(
+          `اكتمل عالم ${bundle.world?.title || ''} عبر اختبار المستوى. تم حفظ التقدم دون منح Crown أو إتقان غير مكتسب.`,
+          'success',
+          6500,
+          {
+            persist: true,
+            importance: 'achievement',
+            dedupeKey: completionId,
+          }
+        );
+      } catch (error) {
+        console.warn('[Journey] World placement celebration unavailable.', error?.message || error);
+      }
+    }
+  }
 }
 
 async function retryPublishedPlacementProgressReconciliation(bundle) {
@@ -2659,7 +2721,13 @@ async function savePublishedLevelPlacementWords(bundle, choice) {
       : (choice === 'none'
         ? 'لم تُحفظ أي كلمة من الاختبار.'
         : levelPlacementSaveSummaryText(summary));
-    showToast(message, result.partial ? 'warning' : 'success', 6200);
+    showToast(message, result.partial ? 'warning' : 'success', 6200, {
+      importance: 'multi-result',
+      partialFailure: result.partial === true,
+      resultCount: result.total,
+      operationId: String(bundle.session.assessmentId || ''),
+      dedupeKey: `level-placement-save:${bundle.session.assessmentId}:${choice}`,
+    });
     renderPublishedLevelPlacementResult(next);
   } catch (error) {
     publishedContentState.levelPlacementPending = false;
@@ -2915,7 +2983,14 @@ async function runPublishedGateLoad(syncOnly) {
             ? `أصبحت البوابة جاهزة: ${parts.join('، ')}.`
             : (syncOnly ? 'تمت مزامنة الكلمات الجديدة.' : 'تم تحميل البوابة وبدء التعلم.')),
         result.partial ? 'warning' : 'success',
-        5600
+        5600,
+        {
+          importance: result.partial ? 'partial-failure' : 'multi-result',
+          partialFailure: result.partial === true,
+          resultCount: result.total,
+          operationId: String(result.operationId || ''),
+          dedupeKey: result.operationId ? `journey-gate-load:${result.operationId}` : '',
+        }
       );
     }
   } catch (error) {
@@ -3752,7 +3827,15 @@ function makePublishedJourneyPanel(world, ranks, journey, activeJourney) {
   const panel = publishedElement('section', 'published-journey-panel');
   const copy = publishedElement('div', 'published-journey-copy');
   const existing = Boolean(journey);
-  const completedCurrentContent = journey?.contentJourneyStatus === 'completed-current-content';
+  const worldProgress = existing
+    ? publishedWorldProgressView(world, ranks, journey)
+    : null;
+  const worldCompleted = Boolean(worldProgress?.completed);
+  const worldMastered = Boolean(worldProgress?.mastered);
+  const completedCurrentContent = Boolean(
+    journey?.contentJourneyStatus === 'completed-current-content' &&
+    worldProgress?.currentContentCompleted
+  );
   const active = existing &&
     String(activeJourney?.worldId || '') === String(world.worldId || '');
   const firstRank = firstJourneyRank(ranks);
@@ -3761,25 +3844,51 @@ function makePublishedJourneyPanel(world, ranks, journey, activeJourney) {
     publishedElement(
       'strong',
       '',
-      completedCurrentContent
-        ? 'أكملت الرحلة المتاحة حاليًا'
-        : (existing ? 'رحلتك في هذا العالم محفوظة' : 'ابدأ رحلة هذا العالم')
+      worldMastered
+        ? 'العالم مكتمل ومتقن'
+        : (worldProgress?.hasNewContent
+          ? 'العالم مكتمل — محتوى جديد متاح'
+          : (worldCompleted
+            ? 'اكتمل هذا العالم'
+            : (existing ? 'رحلتك في هذا العالم محفوظة' : 'ابدأ رحلة هذا العالم')))
     ),
     publishedElement(
       'span',
       '',
-      completedCurrentContent
-        ? 'أنهيت جميع المستويات المنشورة في هذا العالم. ستظهر المستويات الجديدة هنا عند إضافتها.'
+      worldMastered
+        ? 'أكملت جميع الرتب الحالية، وكل بواباتها المؤهلة تحمل Crown. الإكمال التاريخي مستقل عن الإتقان.'
+        : (worldProgress?.hasNewContent
+          ? 'إنجازك التاريخي محفوظ، وهناك رتب منشورة جديدة يمكنك متابعتها دون فقدان الشارة.'
+          : (completedCurrentContent
+            ? 'أنهيت جميع الرتب المنشورة حاليًا. الكلمات أو البوابات غير المتقنة تبقى للمراجعة ولا تمنع الإكمال.'
         : existing
         ? (active
           ? 'تابع من البوابة النشطة دون فقدان تقدمك.'
           : 'يمكنك جعل هذا العالم رحلتك النشطة مع بقاء تقدم العالم الآخر محفوظًا.')
         : (!window.auth?.currentUser
           ? 'سجّل دخولك لبدء الرحلة وحفظ تقدم البوابات.'
-          : 'تبدأ من أول رتبة وبوابة متاحتين، ثم تختار متى تحمّل الكلمات.')
+          : 'تبدأ من أول رتبة وبوابة متاحتين، ثم تختار متى تحمّل الكلمات.')))
     )
   );
   panel.append(copy);
+  if (worldCompleted) {
+    const achievement = publishedElement(
+      'div',
+      `published-world-achievement${worldMastered ? ' is-mastered' : ''}`
+    );
+    achievement.append(
+      publishedIcon(worldMastered ? 'fa-solid fa-crown' : 'fa-solid fa-trophy'),
+      publishedElement('strong', '', worldMastered ? 'World Mastered' : 'World Completed'),
+      publishedElement(
+        'span',
+        '',
+        worldProgress?.hasNewContent
+          ? 'محتوى جديد متاح'
+          : `${worldProgress?.completedRankCount || 0} / ${worldProgress?.requiredRankCount || 0} رتب مكتملة`
+      )
+    );
+    panel.append(achievement);
+  }
 
   const choosing = publishedContentState.journeyAction?.type === 'choose-start';
   const pending = Boolean(
@@ -3995,6 +4104,8 @@ function renderPublishedGateClearResult(world, rank, gate, bundle) {
   const rankCompleted = passed && bundle.result?.rankCompleted === true;
   const completedCurrentContent = rankCompleted &&
     bundle.result?.completedCurrentContent === true;
+  const worldCompleted = completedCurrentContent &&
+    bundle.result?.worldCompleted === true;
   const attempt = bundle.attempt;
   const section = publishedElement(
     'section',
@@ -4002,22 +4113,25 @@ function renderPublishedGateClearResult(world, rank, gate, bundle) {
   );
   section.append(
     publishedIcon(
-      rankCompleted
+      worldCompleted
+        ? 'fa-solid fa-earth-americas'
+        : (rankCompleted
         ? 'fa-solid fa-trophy'
-        : (passed ? 'fa-solid fa-flag-checkered' : 'fa-solid fa-book-open-reader')
+        : (passed ? 'fa-solid fa-flag-checkered' : 'fa-solid fa-book-open-reader'))
     ),
     publishedElement(
       'strong',
       '',
-      rankCompleted ? `اكتملت رتبة ${rank.title || ''}` :
-        (passed ? 'تم اجتياز البوابة' : 'تحتاج إلى مراجعة إضافية')
+      worldCompleted ? `اكتمل عالم ${world.title || ''}` :
+        (rankCompleted ? `اكتملت رتبة ${rank.title || ''}` :
+        (passed ? 'تم اجتياز البوابة' : 'تحتاج إلى مراجعة إضافية'))
     ),
     publishedElement(
       'p',
       '',
       passed
         ? (completedCurrentContent
-          ? 'أكملت كل المحتوى المنشور حاليًا. بقيت المراجعات والكلمات غير المتقنة متاحة دون أن تعيق إنجازك.'
+          ? 'حصلت على World Completed لكل الرتب المنشورة حاليًا. بقيت المراجعات والكلمات غير المتقنة متاحة دون أن تعيق إنجازك.'
           : (rankCompleted
             ? 'حُفظ إنجاز الرتبة وفتح resolver المركزي وجهتك التالية. الكلمات المتبقية للمراجعة لا تعيق التقدم.'
             : 'فُتحت الخطوة التالية في رحلتك، ولن تبدأ تلقائيًا.'))
@@ -4031,7 +4145,7 @@ function renderPublishedGateClearResult(world, rank, gate, bundle) {
   );
   section.append(publishedButton(
     passed
-      ? (completedCurrentContent ? 'عرض إنجاز الرحلة' : (rankCompleted ? 'متابعة الوجهة التالية' : 'متابعة الرحلة'))
+      ? (worldCompleted ? 'عرض إنجاز العالم' : (rankCompleted ? 'متابعة الوجهة التالية' : 'متابعة الرحلة'))
       : 'العودة إلى البوابة',
     'published-action-btn published-placement-primary',
     () => {
@@ -4047,7 +4161,27 @@ function renderPublishedGateClearResult(world, rank, gate, bundle) {
     'fa-solid fa-arrow-right'
   ));
   root.replaceChildren(section);
-  if (rankCompleted) {
+  if (worldCompleted && bundle.result?.worldCompletionRecorded === true) {
+    const completionId = String(bundle.result?.worldCompletionId || world.worldId || '');
+    if (!publishedContentState.shownWorldCompletionCelebrations.has(completionId)) {
+      publishedContentState.shownWorldCompletionCelebrations.add(completionId);
+      try {
+        launchConfetti();
+        showToast(
+          `اكتمل عالم ${world.title || ''}. إنجاز World Completed محفوظ، ويمكنك متابعة الكلمات غير المتقنة لاحقًا.`,
+          'success',
+          6500,
+          {
+            persist: true,
+            importance: 'achievement',
+            dedupeKey: completionId,
+          }
+        );
+      } catch (error) {
+        console.warn('[Journey] World celebration unavailable.', error?.message || error);
+      }
+    }
+  } else if (rankCompleted) {
     const celebrationKey = [
       world.worldId,
       rank.rankId,
@@ -4095,6 +4229,12 @@ function publishedTimestampMillis(value) {
   return Number.isFinite(parsed) ? parsed : 0;
 }
 
+function publishedEffectiveNow() {
+  return typeof window.LootLinguaTestClock?.effectiveNow === 'function'
+    ? window.LootLinguaTestClock.effectiveNow()
+    : Date.now();
+}
+
 function formatPublishedReadinessWait(ms) {
   const minutes = Math.max(1, Math.ceil(Math.max(0, Number(ms) || 0) / 60000));
   if (minutes < 60) return `${minutes} دقيقة`;
@@ -4111,7 +4251,7 @@ function schedulePublishedReadinessTimer(progress, statusElement) {
   }
   const update = () => {
     if (!statusElement.isConnected) return;
-    const remaining = nextAt - Date.now();
+    const remaining = nextAt - publishedEffectiveNow();
     if (remaining <= 0) {
       statusElement.textContent = 'حان موعد مراجعة جديدة.';
       statusElement.classList.add('is-due');
@@ -4123,6 +4263,13 @@ function schedulePublishedReadinessTimer(progress, statusElement) {
   };
   update();
 }
+
+window.addEventListener('lootlingua:test-clock-changed', () => {
+  const readinessCopy = document.querySelector('.published-gate-readiness-copy');
+  if (readinessCopy && publishedContentState.gateProgress) {
+    schedulePublishedReadinessTimer(publishedContentState.gateProgress, readinessCopy);
+  }
+});
 
 window.openGateReadinessInfo = function() {
   const modal = document.getElementById('gateReadinessInfoModal');
@@ -5266,6 +5413,7 @@ async function loadPublishedRouteData(route, options) {
       if (generation !== publishedContentState.generation) return;
       publishedContentState.ranks = ranks;
       publishedContentState.levelPlacementOverviews = levelPlacementOverviews;
+      publishedContentState.journeyGraph = journeyContext.graph || null;
       publishedContentState.journey = journeyContext.journey;
       publishedContentState.activeJourney = journeyContext.activeJourney;
       if (await maybeRenderPublishedLevelPlacementResume(journeyContext.journey, generation)) {
@@ -5303,6 +5451,7 @@ async function loadPublishedRouteData(route, options) {
       publishedContentState.gates = gates;
       publishedContentState.journey = journeyContext.journey;
       publishedContentState.activeJourney = journeyContext.activeJourney;
+      publishedContentState.journeyGraph = journeyContext.graph || null;
       publishedContentState.gateProgressById = gateProgressById;
       if (await maybeRenderPublishedLevelPlacementResume(journeyContext.journey, generation)) {
         return;
@@ -5342,6 +5491,7 @@ async function loadPublishedRouteData(route, options) {
     publishedContentState.gates = gates;
     publishedContentState.journey = journeyContext.journey;
     publishedContentState.activeJourney = journeyContext.activeJourney;
+    publishedContentState.journeyGraph = journeyContext.graph || null;
     publishedContentState.gateProgress = gateProgress;
     if (gateProgress) {
       publishedContentState.gateProgressById.set(String(params.gateId), gateProgress);
@@ -5925,11 +6075,21 @@ async function saveWordsToTarget(targetId, wordsToAdd, options = {}) {
   return next;
 }
 
-function showSkippedDuplicateWordsNotice(skipped, targetId = 'personal') {
+function showSkippedDuplicateWordsNotice(skipped, targetId = 'personal', operationId = '') {
   if (!skipped?.length) return;
   const names = skipped.map(word => word.word).filter(Boolean).slice(0, 5).join('، ');
   const more = skipped.length > 5 ? ` و${skipped.length - 5} غيرها` : '';
-  showToast(`لم يتم نقل ${skipped.length} كلمة لأنها موجودة مسبقاً في ${getTargetDictionaryLabel(targetId)}: ${names}${more}`, 'warning', 6200);
+  showToast(
+    `لم يتم نقل ${skipped.length} كلمة لأنها موجودة مسبقاً في ${getTargetDictionaryLabel(targetId)}: ${names}${more}`,
+    'warning',
+    6200,
+    {
+      importance: 'multi-result',
+      resultCount: skipped.length,
+      operationId,
+      dedupeKey: operationId ? `${operationId}:skipped` : '',
+    }
+  );
 }
 
 let worldManageOperationPromise = null;
@@ -6025,7 +6185,7 @@ window.applyWorldManageToTarget = function(targetId, action = pendingWorldManage
         render();
         trace?.count('rerenderCount');
       }
-    if (skipped.length) showSkippedDuplicateWordsNotice(skipped, targetId);
+    if (skipped.length) showSkippedDuplicateWordsNotice(skipped, targetId, operationId);
       operationUi?.complete('اكتملت مزامنة الكلمات.');
       operationUi?.clear();
       const linkedFromPersonal = !sourceCustomWorldId && targetId !== 'personal';
@@ -6036,7 +6196,14 @@ window.applyWorldManageToTarget = function(targetId, action = pendingWorldManage
             ? `تم نسخ ${movable.length} كلمات إلى عالم «${targetName}». بقيت الكلمات أيضًا في قاموسك الشخصي.`
             : `تم نقل ${movable.length} كلمات إلى عالم «${targetName}». لن تظهر بعد الآن في قاموسك الشخصي أو اختباراته، لكن تقدمها محفوظ.`)
           : (mode === 'copy' ? `تم نسخ ${movable.length} كلمة` : `تم نقل ${movable.length} كلمة`),
-        'success'
+        'success',
+        5600,
+        {
+          importance: 'multi-result',
+          resultCount: movable.length,
+          operationId,
+          dedupeKey: `${operationId}:success`,
+        }
       );
       trace?.stage('ui-complete');
       return true;
@@ -6047,7 +6214,16 @@ window.applyWorldManageToTarget = function(targetId, action = pendingWorldManage
         'تعذر إكمال المزامنة. الكلمات الناجحة لن تتكرر عند إعادة المحاولة.',
         () => setTimeout(() => window.applyWorldManageToTarget(targetId, mode), 0)
       );
-    showToast('ما قدرنا نكمل العملية سحابياً. الكلمات بقيت في مكانها.', 'danger', 5200);
+    showToast(
+      'ما قدرنا نكمل العملية سحابياً. الكلمات بقيت في مكانها.',
+      'danger',
+      5200,
+      {
+        importance: 'action-required',
+        operationId,
+        dedupeKey: `${operationId}:failure`,
+      }
+    );
       trace?.warn(err?.code || err?.message || 'world-manage-failed');
       return false;
     } finally {

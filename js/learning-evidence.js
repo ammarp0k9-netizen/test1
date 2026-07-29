@@ -17,6 +17,11 @@
   const ELIGIBLE_SOURCES = Object.freeze(['personal', 'private-world', 'journey', 'gate-clear']);
   const INELIGIBLE_MODES = Object.freeze(['flashcards', 'level-placement', 'placement', 'preview']);
 
+  function effectiveNow() {
+    const clock = root.LootLinguaTestClock;
+    return typeof clock?.effectiveNow === 'function' ? clock.effectiveNow() : Date.now();
+  }
+
   function resolveEvidenceConfig(config) {
     const legacyIntervals = Array.isArray(config?.minimumIntervalsMs)
       ? config.minimumIntervalsMs
@@ -89,7 +94,7 @@
   function getWordGateReadiness(word, config, now, timezoneOffsetMinutes) {
     const settings = resolveEvidenceConfig(config);
     const state = evidenceState(word);
-    const currentTime = Math.max(0, Number(now) || Date.now());
+    const currentTime = Math.max(0, Number(now) || effectiveNow());
     const offset = normalizeTimezoneOffsetMinutes(
       word?.evidenceTimezoneOffsetMinutes ?? timezoneOffsetMinutes
     );
@@ -134,7 +139,7 @@
     const readiness = getWordGateReadiness(
       word,
       config,
-      Date.now(),
+      effectiveNow(),
       word?.evidenceTimezoneOffsetMinutes
     );
     return readiness.ready ? Infinity : readiness.nextEligibleAt;
@@ -176,7 +181,7 @@
 
   function computeGateReadiness(gateWords, progress, evidenceConfig, now, timezoneOffsetMinutes) {
     const words = Array.isArray(gateWords) ? gateWords.filter(Boolean) : [];
-    const currentTime = Math.max(0, Number(now) || Date.now());
+    const currentTime = Math.max(0, Number(now) || effectiveNow());
     const readiness = words.map((word) =>
       getWordGateReadiness(word, evidenceConfig, currentTime, timezoneOffsetMinutes)
     );
@@ -218,6 +223,7 @@
     DEFAULT_EVIDENCE_CONFIG,
     ELIGIBLE_SOURCES,
     INELIGIBLE_MODES,
+    effectiveNow,
     resolveEvidenceConfig,
     evidenceEventId,
     evidenceState,

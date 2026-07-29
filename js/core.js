@@ -437,43 +437,79 @@ if (document.readyState === 'loading') {
 
 // إشعارات عصرية
 // ═══════════════════════════════════════════════════════
+const NOTIFICATION_STORAGE_PREFIX = 'lootlingua_notifications_v2_';
+const MAX_NOTIFICATION_RECORDS = 100;
+let notificationOwner = '';
 window.__notifications = [];
 let expandedNotificationIds = new Set();
 
-function pushNotification(msg, type = 'info', meta = {}) {
-  const now = Date.now();
-  const existing = window.__notifications.find(n => n.msg === msg && n.type === type);
-  if (existing) {
-    existing.count = (existing.count || 1) + 1;
-    existing.time = now;
-    existing.read = false;
-    window.__notifications = [
-      existing,
-      ...window.__notifications.filter(n => n.id !== existing.id),
-    ];
-    updateNotificationsBadge();
-    renderNotificationsPanel();
-    return existing.id;
-  } else {
-    const notification = {
-      msg,
-      type,
-      meta,
-      time: now,
-      count: 1,
-      read: false,
-      id: now + '_' + Math.random().toString(36).slice(2),
-    };
-    window.__notifications.unshift(notification);
-    updateNotificationsBadge();
-    renderNotificationsPanel();
-    return notification.id;
+function currentNotificationOwner() {
+  return String(window.auth?.currentUser?.uid || 'guest');
+}
+
+function notificationStorageKey(owner) {
+  return `${NOTIFICATION_STORAGE_PREFIX}${encodeURIComponent(String(owner || 'guest'))}`;
+}
+
+function persistNotifications() {
+  try {
+    localStorage.setItem(
+      notificationStorageKey(notificationOwner || currentNotificationOwner()),
+      JSON.stringify(window.__notifications.slice(0, MAX_NOTIFICATION_RECORDS))
+    );
+  } catch (error) {
+    console.warn('[Notifications] Persistence unavailable.', error?.message || error);
   }
 }
 
-function notificationNeedsDetails(msg) {
-  return String(msg || '').length > 82;
+function loadNotificationsForCurrentOwner() {
+  notificationOwner = currentNotificationOwner();
+  let records = [];
+  try {
+    const parsed = JSON.parse(localStorage.getItem(notificationStorageKey(notificationOwner)) || '[]');
+    if (Array.isArray(parsed)) {
+      records = parsed.filter((record) => (
+        record &&
+        typeof record.id === 'string' &&
+        typeof record.msg === 'string' &&
+        ['success', 'warning', 'danger', 'info'].includes(record.type)
+      )).slice(0, MAX_NOTIFICATION_RECORDS);
+    }
+  } catch (error) {
+    console.warn('[Notifications] Stored records were ignored.', error?.message || error);
+  }
+  window.__notifications = records;
+  expandedNotificationIds.clear();
+  updateNotificationsBadge();
+  renderNotificationsPanel();
 }
+
+function pushNotification(msg, type = 'info', meta = {}) {
+  const policy = window.LootLinguaNotificationPolicy;
+  if (!policy) return '';
+  const notification = policy.createRecord(msg, type, meta, Date.now());
+  window.__notifications = policy.mergeRecord(
+    window.__notifications,
+    notification,
+    MAX_NOTIFICATION_RECORDS
+  );
+  persistNotifications();
+  updateNotificationsBadge();
+  renderNotificationsPanel();
+  return notification.id;
+}
+
+function notificationNeedsDetails(msg) {
+  return String(msg || '').length >
+    (window.LootLinguaNotificationPolicy?.LONG_MESSAGE_THRESHOLD || 82);
+}
+
+window.pushNotification = pushNotification;
+window.recordNotificationForToast = function(msg, type, options) {
+  const policy = window.LootLinguaNotificationPolicy;
+  if (!policy?.shouldPersist(msg, options)) return '';
+  return pushNotification(msg, type, options);
+};
 
 function getUnreadNotifCount() {
   return window.__notifications
@@ -510,14 +546,14 @@ function renderNotificationsPanel() {
         <span class="notif-item-icon"><i class="fa-solid ${icon}" aria-hidden="true"></i></span>
         <span class="notif-content">
           <span class="notif-msg">${escapeHtml(n.msg)}${countBadge}</span>
-          ${notificationNeedsDetails(n.msg) ? `<button type="button" class="notif-details-btn" onclick="openNotificationDetails('${escapeHtml(String(n.id))}', event)">${isExpanded ? 'أقل' : 'التفاصيل'}</button>` : ''}
+          ${notificationNeedsDetails(n.msg) ? `<button type="button" class="notif-details-btn" onclick="toggleNotificationDetails('${escapeHtml(String(n.id))}', event)">${isExpanded ? 'أقل' : 'التفاصيل'}</button>` : ''}
         </span>
         <span class="notif-time">${formatNotifTime(n.time)}</span>
       </li>`;
     }).join('');
 }
 
-window.openNotificationDetails = function(id, ev) {
+function focusNotificationDetails(id, ev, toggle) {
   if (ev) {
     ev.preventDefault();
     ev.stopPropagation();
@@ -525,7 +561,13 @@ window.openNotificationDetails = function(id, ev) {
   const panel = document.getElementById('notificationsPanel');
   if (!panel?.classList.contains('open')) toggleNotificationsPanel(ev);
   const key = String(id);
-  if (expandedNotificationIds.has(key)) expandedNotificationIds.delete(key);
+  const notification = window.__notifications.find((record) => String(record.id) === key);
+  if (notification && !notification.read) {
+    notification.read = true;
+    persistNotifications();
+    updateNotificationsBadge();
+  }
+  if (toggle && expandedNotificationIds.has(key)) expandedNotificationIds.delete(key);
   else expandedNotificationIds.add(key);
   renderNotificationsPanel();
   requestAnimationFrame(() => {
@@ -543,6 +585,7 @@ window.openNotificationDetails = function(id, ev) {
 window.clearAllNotifications = function(ev) {
   if (ev) ev.stopPropagation();
   window.__notifications = [];
+  persistNotifications();
   updateNotificationsBadge();
   renderNotificationsPanel();
 };
@@ -590,8 +633,6 @@ function toggleNotificationsPanel(ev) {
   btn?.setAttribute('aria-expanded', opening ? 'true' : 'false');
   hub?.classList.toggle('notif-open', opening);
   if (opening) {
-    window.__notifications.forEach(n => n.read = true);
-    updateNotificationsBadge();
     renderNotificationsPanel();
     requestAnimationFrame(positionNotifPopover);
   }
@@ -622,6 +663,11 @@ function closeNotificationsPanel(silent) {
   };
   close();
 }
+
+loadNotificationsForCurrentOwner();
+window.addEventListener('lootlingua:auth-state', () => {
+  queueMicrotask(loadNotificationsForCurrentOwner);
+});
 
 document.addEventListener('click', (e) => {
   const hub = document.getElementById('notifHub');
@@ -1270,18 +1316,20 @@ window.goBackFromSubView = function() {
   }
   if (viewBackTarget === 'worlds') loadWorldsView();
   else loadPersonalDictionary();
+}
+
+window.openNotificationDetails = function(id, ev) {
+  focusNotificationDetails(id, ev, false);
+};
+
+window.toggleNotificationDetails = function(id, ev) {
+  focusNotificationDetails(id, ev, true);
 };
 
 window.toggleSidebar = function() {
   if (typeof window.toggleProfileModal === 'function') window.toggleProfileModal();
 };
 
-// استبدال showToast ليضيف إشعار أيضاً
-const __origShowToast = window.showToast;
-window.showToast = function(msg, type = 'info', duration = 2500) {
-  window.__toastDetailNotifId = pushNotification(msg, type);
-  return __origShowToast ? __origShowToast(msg, type, duration) : undefined;
-};
 // ═══════════════════════════════════════════════════════
 // تفاعل بوب لعناصر الكنز على الهاتف
 // ═══════════════════════════════════════════════════════

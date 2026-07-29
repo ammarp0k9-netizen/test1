@@ -2294,6 +2294,7 @@ body.admin-mode .admin-world-row {
   --legend-glass-border: color-mix(in srgb, var(--border) 65%, transparent);
   --legend-glass-blur: blur(20px) saturate(168%);
   --legend-glass-shadow: 0 16px 42px rgba(0, 0, 0, 0.28), inset 0 1px 0 color-mix(in srgb, var(--text-white) 10%, transparent);
+  --layer-toast: 200000;
 }
 
 *, *::before, *::after { box-sizing: border-box; }
@@ -4230,13 +4231,26 @@ body.low-end-device .voice-search-btn.is-listening i {
 .overlay.show { display: block; }
 
 /* Toast */
+.toast-host {
+  position: fixed;
+  top: calc(var(--legend-top-h, 64px) + env(safe-area-inset-top, 0px) + 16px);
+  left: 0;
+  width: 100%;
+  z-index: var(--layer-toast);
+  display: flex;
+  justify-content: center;
+  padding-inline: 12px;
+  pointer-events: none;
+  isolation: isolate;
+}
 .toast-msg {
-  position: fixed; top: -80px; left: 50%; transform: translateX(-50%);
+  position: relative;
+  transform: translateY(calc(-100% - var(--legend-top-h, 64px) - 40px));
   background: var(--accent); color: var(--text-on-accent);
   padding: 12px 18px; border-radius: 20px;
   font-weight: bold; font-size: 15px;
   transition: 0.4s cubic-bezier(0.68,-0.55,0.265,1.55);
-  z-index: 3000; pointer-events: auto;
+  pointer-events: none;
   width: max-content;
   max-width: min(560px, calc(100vw - 24px));
   display: grid;
@@ -4244,6 +4258,7 @@ body.low-end-device .voice-search-btn.is-listening i {
   text-align: center;
   box-sizing: border-box;
 }
+.toast-msg.toast-interactive { pointer-events: auto; }
 .toast-text {
   display: block;
   overflow: hidden;
@@ -4266,12 +4281,92 @@ body.low-end-device .voice-search-btn.is-listening i {
   padding: 2px 9px;
   cursor: pointer;
 }
-.toast-msg.show { top: calc(var(--legend-top-h, 64px) + 28px); }
+.toast-msg.show { transform: translateY(0); }
 .toast-msg.toast-attention-shake { animation: toastAttentionShake 0.28s ease; }
 .toast-msg.toast-success { background: var(--success); color: var(--text-on-accent); }
 .toast-msg.toast-warning { background: var(--accent2); color: var(--text-on-accent); }
 .toast-msg.toast-danger { background: var(--danger); color: var(--text-on-accent); }
 .toast-msg.toast-info { background: var(--accent); color: var(--text-on-accent); }
+
+.test-clock-banner {
+  position: fixed;
+  top: calc(var(--legend-top-h, 56px) + env(safe-area-inset-top, 0px));
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 10065;
+  width: min(760px, calc(100vw - 24px));
+  padding: 7px 12px;
+  border: 1px solid color-mix(in srgb, var(--star) 58%, var(--border));
+  border-radius: 0 0 10px 10px;
+  background: color-mix(in srgb, var(--star) 18%, var(--card-bg));
+  color: var(--text-white);
+  box-shadow: 0 8px 22px rgba(0, 0, 0, .24);
+  font-size: 11px;
+  font-weight: 800;
+  text-align: center;
+  pointer-events: none;
+}
+
+body.test-clock-active .toast-host {
+  top: calc(var(--legend-top-h, 64px) + env(safe-area-inset-top, 0px) + 52px);
+}
+
+.admin-test-clock-card {
+  display: grid;
+  gap: 12px;
+  margin-bottom: 18px;
+  padding: 16px;
+  border: 1px solid color-mix(in srgb, var(--star) 42%, var(--border));
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--star) 7%, var(--card-bg));
+}
+
+.admin-test-clock-card.is-active {
+  border-color: color-mix(in srgb, var(--star) 68%, var(--border));
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--star) 10%, transparent);
+}
+
+.admin-test-clock-marker {
+  padding: 3px 8px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--star) 18%, var(--surface-bg));
+  color: var(--star);
+  font-size: 10px;
+  font-weight: 900;
+}
+
+.admin-test-clock-copy {
+  margin: 0;
+  color: var(--text-gray);
+  font-size: 12px;
+  line-height: 1.7;
+}
+
+.admin-test-clock-values {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.admin-test-clock-value {
+  display: grid;
+  gap: 4px;
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  background: var(--surface-bg);
+}
+
+.admin-test-clock-value span { color: var(--text-gray); font-size: 10px; }
+.admin-test-clock-value strong { color: var(--text-white); font-size: 12px; overflow-wrap: anywhere; }
+.admin-test-clock-actions,
+.admin-test-clock-target { display: flex; flex-wrap: wrap; gap: 8px; }
+.admin-test-clock-target .admin-field { flex: 1 1 230px; }
+
+@media (max-width: 680px) {
+  .admin-test-clock-values { grid-template-columns: minmax(0, 1fr); }
+  .admin-test-clock-actions .admin-btn { flex: 1 1 120px; }
+}
 
 /* ══════════════════════════════════════════
    QUIZ FULL-PAGE VIEW
@@ -9471,6 +9566,27 @@ html[dir="ltr"] .worlds-tabs[data-active-tab="custom"]::before {
   border-color: color-mix(in srgb, var(--success) 38%, var(--border));
   background: color-mix(in srgb, var(--success) 7%, var(--card-bg));
 }
+
+.published-world-achievement {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 11px;
+  border: 1px solid color-mix(in srgb, var(--star) 46%, var(--border));
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--star) 9%, var(--surface-bg));
+}
+
+.published-world-achievement > i { color: var(--star); }
+.published-world-achievement > strong { color: var(--text-white); font-size: 12px; }
+.published-world-achievement > span { color: var(--text-gray); font-size: 10px; }
+.published-world-achievement.is-mastered {
+  border-color: color-mix(in srgb, var(--accent) 52%, var(--border));
+  background: color-mix(in srgb, var(--accent) 10%, var(--surface-bg));
+}
+.published-world-achievement.is-mastered > i { color: var(--accent); }
 
 .published-level-new-count {
   color: var(--accent);

@@ -16,6 +16,27 @@ service cloud.firestore {
         request.auth.token.admin == true;
     }
 
+    function canUseTestClock() {
+      return isAdmin() &&
+        'testClock' in request.auth.token &&
+        request.auth.token.testClock == true;
+    }
+
+    function validTestClock(data, uid) {
+      return data.keys().hasOnly([
+          'version', 'offsetMs', 'updatedAt', 'updatedBy'
+        ]) &&
+        data.keys().hasAll([
+          'version', 'offsetMs', 'updatedAt', 'updatedBy'
+        ]) &&
+        data.version == 1 &&
+        data.offsetMs is int &&
+        data.offsetMs >= -31536000000 &&
+        data.offsetMs <= 31536000000 &&
+        data.updatedAt == request.time &&
+        data.updatedBy == uid;
+    }
+
     function nonEmptyString(value, maxLength) {
       return value is string && value.size() > 0 && value.size() <= maxLength;
     }
@@ -865,7 +886,7 @@ service cloud.firestore {
           'passedCefrLevels', 'partialCefrLevels',
           'contentJourneyStatus', 'levelPlacementAssessmentIds',
           'levelPlacementPassedRankIds', 'levelPlacementClearedGateIds',
-          'completedRankIds', 'rankCompletionVersions'
+          'completedRankIds', 'rankCompletionVersions', 'worldCompletion'
         ]) &&
         data.keys().hasAll([
           'worldId', 'activeRankId', 'activeGateId', 'status',
@@ -908,6 +929,7 @@ service cloud.firestore {
         (!('rankCompletionVersions' in data) ||
           (data.rankCompletionVersions is map &&
             data.rankCompletionVersions.size() <= 500)) &&
+        validWorldCompletion(data, worldId) &&
         validPassedCefrLevels(data.get('passedCefrLevels', [])) &&
         validPartialCefrLevels(data.get('partialCefrLevels', [])) &&
         data.get('partialCefrLevels', []).toSet().intersection(
@@ -1320,7 +1342,7 @@ service cloud.firestore {
           'contentJourneyStatus', 'levelPlacementAssessmentIds',
           'levelPlacementPassedRankIds', 'activeLevelPlacementAssessmentId',
           'activeLevelPlacementCefrLevel', 'levelPlacementClearedGateIds',
-          'updatedAt'
+          'worldCompletion', 'updatedAt'
         ]) &&
         before.status == 'active' && after.status == 'active' &&
         nonEmptyString(assessmentId, 500) &&
@@ -1364,6 +1386,10 @@ service cloud.firestore {
           ) &&
         after.get('contentJourneyStatus', 'in-progress') ==
           (session.completedCurrentContent ? 'completed-current-content' : 'in-progress') &&
+        (session.completedCurrentContent
+          ? (worldCompletionUnchanged(before, after) ||
+            validWorldCompletionAppend(before, after, worldId, 'level-placement'))
+          : worldCompletionUnchanged(before, after)) &&
         (
           (
             session.resultStartRankId == '' &&
@@ -1475,6 +1501,59 @@ service cloud.firestore {
         );
     }
 
+    function validWorldCompletion(data, worldId) {
+      return !('worldCompletion' in data) || (
+        data.worldCompletion is map &&
+        data.worldCompletion.keys().hasOnly([
+          'version', 'status', 'worldId', 'completionId',
+          'requiredRankIds', 'rankVersions', 'completedBy', 'completedAt'
+        ]) &&
+        data.worldCompletion.keys().hasAll([
+          'version', 'status', 'worldId', 'completionId',
+          'requiredRankIds', 'rankVersions', 'completedBy', 'completedAt'
+        ]) &&
+        data.worldCompletion.version == 1 &&
+        data.worldCompletion.status == 'completed' &&
+        data.worldCompletion.worldId == worldId &&
+        nonEmptyString(data.worldCompletion.completionId, 500) &&
+        data.worldCompletion.requiredRankIds is list &&
+        data.worldCompletion.requiredRankIds.size() > 0 &&
+        data.worldCompletion.requiredRankIds.size() <= 500 &&
+        data.worldCompletion.requiredRankIds.toSet().size() ==
+          data.worldCompletion.requiredRankIds.size() &&
+        data.worldCompletion.rankVersions is map &&
+        data.worldCompletion.rankVersions.size() ==
+          data.worldCompletion.requiredRankIds.size() &&
+        data.worldCompletion.rankVersions.keys().toSet() ==
+          data.worldCompletion.requiredRankIds.toSet() &&
+        (data.worldCompletion.completedBy == 'gate-clear' ||
+          data.worldCompletion.completedBy == 'level-placement') &&
+        data.worldCompletion.completedAt is timestamp
+      );
+    }
+
+    function worldCompletionUnchanged(before, after) {
+      return after.get('worldCompletion', null) == before.get('worldCompletion', null);
+    }
+
+    function validWorldCompletionAppend(before, after, worldId, completedBy) {
+      let achievement = after.worldCompletion;
+      let coveredRanks = after.get('completedRankIds', []).toSet().union(
+        after.get('levelPlacementPassedRankIds', []).toSet()
+      );
+      return (
+          'worldCompletion' in before && worldCompletionUnchanged(before, after)
+        ) || (
+          !('worldCompletion' in before) &&
+          validWorldCompletion(after, worldId) &&
+          achievement.completedBy == completedBy &&
+          achievement.completedAt == request.time &&
+          coveredRanks.hasAll(achievement.requiredRankIds.toSet()) &&
+          after.get('contentJourneyStatus', 'in-progress') ==
+            'completed-current-content'
+        );
+    }
+
     function rankCompletionLedgerUnchanged(before, after) {
       return after.get('completedRankIds', []) == before.get('completedRankIds', []) &&
         after.get('rankCompletionVersions', {}) == before.get('rankCompletionVersions', {});
@@ -1551,7 +1630,7 @@ service cloud.firestore {
       return before.status == 'active' && after.status == 'active' &&
         after.diff(before).affectedKeys().hasOnly([
           'completedRankIds', 'rankCompletionVersions',
-          'contentJourneyStatus', 'updatedAt'
+          'contentJourneyStatus', 'worldCompletion', 'updatedAt'
         ]) &&
         after.activeRankId == before.activeRankId &&
         after.activeGateId == before.activeGateId &&
@@ -1567,6 +1646,8 @@ service cloud.firestore {
         attempt.gateId == before.activeGateId &&
         after.updatedAt == request.time &&
         validRankCompletionAppend(before, after, worldId, before.activeRankId) &&
+        (worldCompletionUnchanged(before, after) ||
+          validWorldCompletionAppend(before, after, worldId, 'gate-clear')) &&
         activeJourneyPointerAfter(uid, worldId);
     }
 
@@ -3609,6 +3690,13 @@ service cloud.firestore {
         allow create: if isOwner(uid) && metaId.matches('xp_event_.*') &&
           validXpEvent(request.resource.data, metaId);
         allow update, delete: if false;
+      }
+
+      match /testSettings/clock {
+        allow read: if isOwner(uid) && canUseTestClock();
+        allow create, update: if isOwner(uid) && canUseTestClock() &&
+          validTestClock(request.resource.data, uid);
+        allow delete: if false;
       }
 
       match /contentProgress/{worldId} {

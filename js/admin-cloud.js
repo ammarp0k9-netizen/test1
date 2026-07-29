@@ -217,6 +217,7 @@ const MAX_PERSISTED_OPERATION_IDS = 200;
 let adminState = Object.freeze({
   resolved: false,
   isAdmin: false,
+  canUseTestClock: false,
   uid: null,
   errorCode: '',
 });
@@ -225,6 +226,7 @@ function emitAdminState(next) {
   adminState = Object.freeze({
     resolved: Boolean(next.resolved),
     isAdmin: Boolean(next.isAdmin),
+    canUseTestClock: Boolean(next.isAdmin && next.canUseTestClock),
     uid: next.uid ? String(next.uid) : null,
     errorCode: next.errorCode ? String(next.errorCode) : '',
   });
@@ -242,9 +244,9 @@ async function refreshAdminAccess(options = {}) {
   const uid = user?.uid ? String(user.uid) : null;
 
   // Clear the previous account's privilege before any asynchronous token work.
-  emitAdminState({ resolved: false, isAdmin: false, uid, errorCode: '' });
+  emitAdminState({ resolved: false, isAdmin: false, canUseTestClock: false, uid, errorCode: '' });
   if (!user || !uid) {
-    return emitAdminState({ resolved: true, isAdmin: false, uid: null, errorCode: '' });
+    return emitAdminState({ resolved: true, isAdmin: false, canUseTestClock: false, uid: null, errorCode: '' });
   }
 
   try {
@@ -252,9 +254,11 @@ async function refreshAdminAccess(options = {}) {
     if (revision !== checkRevision || auth?.currentUser !== user || auth?.currentUser?.uid !== uid) {
       return { ...adminState };
     }
+    const isAdmin = token?.claims?.admin === true;
     return emitAdminState({
       resolved: true,
-      isAdmin: token?.claims?.admin === true,
+      isAdmin,
+      canUseTestClock: isAdmin && token?.claims?.testClock === true,
       uid,
       errorCode: '',
     });
@@ -265,6 +269,7 @@ async function refreshAdminAccess(options = {}) {
     return emitAdminState({
       resolved: true,
       isAdmin: false,
+      canUseTestClock: false,
       uid,
       errorCode: error?.code || 'auth/token-read-failed',
     });
