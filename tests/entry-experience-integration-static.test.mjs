@@ -58,6 +58,7 @@ function createDocument() {
 async function createBootHarness({ user = null } = {}) {
   const listeners = new Map();
   const storage = createStorage();
+  const sessionStorage = createStorage();
   const document = createDocument();
   const root = {
     __lootlinguaAuthResolved: true,
@@ -109,6 +110,7 @@ async function createBootHarness({ user = null } = {}) {
     'globalThis',
     'document',
     'localStorage',
+    'sessionStorage',
     'HTMLElement',
     'requestAnimationFrame',
     'location',
@@ -120,6 +122,7 @@ async function createBootHarness({ user = null } = {}) {
     root,
     document,
     storage,
+    sessionStorage,
     HTMLElement,
     (callback) => callback(),
     { pathname: '/app', search: '', hash: '' },

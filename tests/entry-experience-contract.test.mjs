@@ -81,26 +81,37 @@ test('legacy production fixtures classify safely and resolve the expected centra
   }
 });
 
-test('strong legacy indicators independently prevent false-new classification', () => {
-  const progressSignals = [
+test('light data is distinct from meaningful Journey progress', () => {
+  const lightSignals = [
     { words: [{ word: 'legacy', meaning: 'قديم' }] },
     { profile: { userXP: 5 } },
     { profile: { activityMap: { '2026-07-01': 1 } } },
     { srsEntryCount: 1 },
-    { activeJourney: { worldId: 'world-a' } },
     {
       activeQuizSession: {
         id: 'quiz-a', mode: 'scramble', words: [{ word: 'one' }], quizIndex: 0,
       },
     },
+  ];
+  lightSignals.forEach((signal, index) => {
+    const result = entry.classifyUser(authenticatedFresh(signal));
+    assert.equal(result.classification, 'returning-light', `light signal ${index}`);
+    assert.equal(result.signals.hasAnyData, true);
+    assert.equal(result.signals.hasMeaningfulJourneyProgress, false);
+    assert.equal(result.signals.strongProgress, false);
+  });
+
+  const progressSignals = [
+    { activeJourney: { worldId: 'world-a' } },
     { hasWorldProgress: true },
     { hasCompletionLedger: true },
   ];
 
   progressSignals.forEach((signal, index) => {
     const result = entry.classifyUser(authenticatedFresh(signal));
-    assert.equal(result.classification, 'returning-with-progress', `strong signal ${index}`);
+    assert.equal(result.classification, 'returning-with-progress', `Journey signal ${index}`);
     assert.equal(result.audience, 'returning');
+    assert.equal(result.signals.hasMeaningfulJourneyProgress, true);
   });
 
   assert.equal(
@@ -132,6 +143,13 @@ test('an old empty account is returning while a trustworthy fresh account remain
   const fresh = entry.classifyUser(legacyEntryFixtures.freshAccount.input);
   assert.equal(fresh.classification, 'brand-new');
   assert.equal(fresh.audience, 'new');
+
+  const freshWithEmptyProfile = entry.classifyUser(authenticatedFresh({
+    profileExists: true,
+    profile: {},
+  }));
+  assert.equal(freshWithEmptyProfile.classification, 'brand-new');
+  assert.equal(freshWithEmptyProfile.audience, 'new');
 });
 
 test('an account created after the build cutoff is still returning once the fresh-account window passes', () => {
@@ -163,7 +181,10 @@ test('hidden and mastered legacy words remain meaningful SRS progress', () => {
   assert.equal(classified.signals.wordCount, 2);
   assert.equal(classified.signals.hiddenOrMasteredCount, 2);
   assert.ok(classified.signals.srsCount >= 4);
-  assert.equal(classified.signals.strongProgress, true);
+  assert.equal(classified.signals.hasAnyData, true);
+  assert.equal(classified.signals.hasMeaningfulJourneyProgress, false);
+  assert.equal(classified.signals.strongProgress, false);
+  assert.equal(classified.classification, 'returning-light');
   assert.equal(entry.wordIsHiddenOrMastered(fixture.input.words[0]), true);
   assert.equal(entry.wordIsHiddenOrMastered(fixture.input.words[1]), true);
   assert.equal(entry.wordHasSrs(fixture.input.words[0]), true);
@@ -409,7 +430,7 @@ test('a legacy unlocked appearance can be preserved but cannot be selected by En
   );
 });
 
-test('interest, theme, and completion transitions persist an explicit resumable draft', () => {
+test('interest, theme, first action, and completion transitions persist an explicit resumable draft', () => {
   const classified = entry.classifyUser(legacyEntryFixtures.accountWordsAndXpNoJourney.input);
   const initial = entry.createEntryDraft(classified, {});
   const selected = entry.transitionState(initial, {
@@ -436,10 +457,35 @@ test('interest, theme, and completion transitions persist an explicit resumable 
   assert.equal(themed.themeStatus, 'selected');
   assert.equal(themed.themeExplicit, true);
 
-  const completed = entry.transitionState(themed, { type: 'complete' }, FIXED_NOW + 3000);
+  assert.throws(
+    () => entry.transitionState(themed, { type: 'complete' }, FIXED_NOW + 3000),
+    /first action/i
+  );
+  const actionStep = entry.transitionState(themed, { type: 'continue-action' }, FIXED_NOW + 3000);
+  assert.equal(actionStep.status, 'in-progress');
+  assert.equal(actionStep.currentStep, 'action');
+  assert.equal(actionStep.actionStatus, 'pending');
+  assert.equal(entry.shouldPresent(actionStep), true);
+
+  assert.throws(
+    () => entry.transitionState(actionStep, { type: 'complete' }, FIXED_NOW + 4000),
+    /completed before onboarding/i
+  );
+  const firstAction = entry.transitionState(
+    actionStep,
+    { type: 'complete-action' },
+    FIXED_NOW + 4000
+  );
+  assert.equal(firstAction.status, 'in-progress');
+  assert.equal(firstAction.actionStatus, 'completed');
+  const refreshedAction = entry.normalizeEntryState(plain(firstAction));
+  assert.equal(refreshedAction.actionStatus, 'completed');
+
+  const completed = entry.transitionState(firstAction, { type: 'complete' }, FIXED_NOW + 5000);
   assert.equal(completed.status, 'completed');
   assert.equal(completed.currentStep, 'action');
-  assert.equal(completed.completedAt, FIXED_NOW + 3000);
+  assert.equal(completed.actionStatus, 'completed');
+  assert.equal(completed.completedAt, FIXED_NOW + 5000);
   assert.equal(completed.skippedAt, 0);
   assert.equal(entry.shouldPresent(completed), false);
 
@@ -468,29 +514,25 @@ test('skipping interests reaches theme, while Back restores the interests step',
   assert.equal(back.themeId, 'ocean');
 });
 
-test('skipping the experience is terminal and preserves prior interests and theme', () => {
+test('new code cannot skip the experience, and a legacy skip resumes without first-action proof', () => {
   const raw = cloneFixture(persistedEntryStates.inProgressTheme);
-  const skipped = entry.transitionState(raw, { type: 'skip-experience' }, FIXED_NOW);
-  assert.equal(skipped.status, 'skipped');
-  assert.equal(skipped.currentStep, 'action');
-  assert.equal(skipped.skippedAt, FIXED_NOW);
-  assert.equal(skipped.completedAt, 0);
-  assert.deepEqual(Array.from(skipped.interestIds), ['games', 'travel']);
-  assert.equal(skipped.interestsStatus, 'selected');
-  assert.equal(skipped.themeId, 'ocean');
-  assert.equal(skipped.oasisMode, 'dark');
-  assert.equal(skipped.themeExplicit, false);
-  assert.equal(skipped.themeStatus, 'preserved');
-  assert.equal(entry.shouldPresent(skipped), false);
+  assert.throws(
+    () => entry.transitionState(raw, { type: 'skip-experience' }, FIXED_NOW),
+    /unsupported/i
+  );
 
-  const afterTerminalEvent = entry.transitionState(
+  const skipped = cloneFixture(persistedEntryStates.skipped);
+  assert.equal(entry.shouldPresent(skipped), true);
+  const recovered = entry.recoverUnverifiedTerminal(
     skipped,
-    { type: 'select-theme', themeId: 'lootlingua' },
+    { classification: 'returning-light' },
     FIXED_NOW + 1000
   );
-  assert.equal(afterTerminalEvent.status, 'skipped');
-  assert.equal(afterTerminalEvent.themeId, 'ocean');
-  assert.deepEqual(Array.from(afterTerminalEvent.interestIds), ['games', 'travel']);
+  assert.equal(recovered.status, 'in-progress');
+  assert.equal(recovered.currentStep, 'interests');
+  assert.equal(recovered.actionStatus, 'pending');
+  assert.equal(recovered.themeId, 'ocean');
+  assert.deepEqual(Array.from(recovered.interestIds), ['study']);
 });
 
 test('normalization restores the exact in-progress step and draft after refresh', () => {
@@ -505,7 +547,7 @@ test('normalization restores the exact in-progress step and draft after refresh'
   assert.equal(entry.shouldPresent(refreshedBoot), true);
 });
 
-test('completed and skipped v1 are once-only across refresh and login, independently per account', () => {
+test('only completed v1 with first-action proof is once-only across refresh and accounts', () => {
   const completedBootOne = entry.normalizeEntryState(persistedEntryStates.completed);
   const completedBootTwo = entry.normalizeEntryState(plain(completedBootOne));
   const skippedBootOne = entry.normalizeEntryState(persistedEntryStates.skipped);
@@ -513,8 +555,8 @@ test('completed and skipped v1 are once-only across refresh and login, independe
 
   assert.equal(entry.shouldPresent(completedBootOne), false);
   assert.equal(entry.shouldPresent(completedBootTwo), false);
-  assert.equal(entry.shouldPresent(skippedBootOne), false);
-  assert.equal(entry.shouldPresent(skippedBootTwo), false);
+  assert.equal(entry.shouldPresent(skippedBootOne), true);
+  assert.equal(entry.shouldPresent(skippedBootTwo), true);
   assert.equal(entry.shouldPresent(persistedEntryStates.inProgressTheme), true);
   assert.equal(entry.shouldPresent(null), true);
   assert.equal(entry.shouldPresent(completedBootTwo, 2), true);
@@ -529,9 +571,23 @@ test('completed and skipped v1 are once-only across refresh and login, independe
   );
   assert.equal(
     entry.shouldPresent(statesByKey.get(entry.entryStorageKey(scopedIdentities.accountB))),
-    false
+    true
   );
   assert.equal(entry.shouldPresent(statesByKey.get(entry.entryStorageKey({ uid: 'account-c' }))), true);
+
+  const legacyFalseCompletion = plain(completedBootTwo);
+  delete legacyFalseCompletion.actionStatus;
+  const normalizedLegacy = entry.normalizeEntryState(legacyFalseCompletion);
+  assert.equal(normalizedLegacy.actionStatus, 'pending');
+  assert.equal(entry.shouldPresent(normalizedLegacy), true);
+  const recoveredProgress = entry.recoverUnverifiedTerminal(
+    normalizedLegacy,
+    { classification: 'returning-with-progress' },
+    FIXED_NOW
+  );
+  assert.equal(recoveredProgress.status, 'in-progress');
+  assert.equal(recoveredProgress.currentStep, 'action');
+  assert.equal(recoveredProgress.actionStatus, 'ready');
 });
 
 test('guest-to-account merge preserves drafts, terminal completion, and account terminal authority', () => {
@@ -548,6 +604,22 @@ test('guest-to-account merge preserves drafts, terminal completion, and account 
   assert.equal(mergedDraft.state.oasisMode, 'dark');
   assert.equal(mergedDraft.state.themeExplicit, true);
   assert.equal(mergedDraft.state.source, 'guest-migration');
+
+  const mergedFirstAction = entry.mergeEntryStates(
+    {
+      ...guestMergeFixtures.accountDraft,
+      currentStep: 'action',
+      actionStatus: 'pending',
+    },
+    {
+      ...guestMergeFixtures.guestDraft,
+      currentStep: 'action',
+      actionStatus: 'completed',
+    },
+    { audience: 'returning', classification: 'returning-light' }
+  );
+  assert.equal(mergedFirstAction.state.currentStep, 'action');
+  assert.equal(mergedFirstAction.state.actionStatus, 'completed');
 
   const guestTerminal = entry.mergeEntryStates(
     guestMergeFixtures.accountDraft,
@@ -592,7 +664,10 @@ test('classification, copy, CTA, transitions, and merge do not mutate legacy inp
 
   const transitionInput = cloneFixture(persistedEntryStates.inProgressTheme);
   const transitionBefore = cloneFixture(transitionInput);
-  entry.transitionState(transitionInput, { type: 'skip-experience' }, FIXED_NOW);
+  assert.throws(
+    () => entry.transitionState(transitionInput, { type: 'skip-experience' }, FIXED_NOW),
+    /unsupported/i
+  );
   assert.deepEqual(transitionInput, transitionBefore);
 
   const account = cloneFixture(guestMergeFixtures.accountDraft);

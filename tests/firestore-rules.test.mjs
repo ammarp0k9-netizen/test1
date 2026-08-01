@@ -224,6 +224,7 @@ function entryExperienceState(overrides = {}) {
     themeId: 'ocean',
     oasisMode: 'dark',
     themeExplicit: false,
+    actionStatus: 'pending',
     source: 'app-entry',
     startedAt: serverTimestamp(),
     updatedAt: serverTimestamp(),
@@ -595,6 +596,15 @@ try {
         'users/entry-extra-field/entryExperiences/v1'),
       { ...entryExperienceState(), unexpectedField: true }
     ));
+    await assertFails(setDoc(
+      doc(environment.authenticatedContext('entry-new-skip').firestore(),
+        'users/entry-new-skip/entryExperiences/v1'),
+      entryExperienceState({
+        status: 'skipped',
+        currentStep: 'action',
+        skippedAt: serverTimestamp()
+      })
+    ));
     await assertFails(deleteDoc(doc(owner, v1Path)));
   });
 
@@ -633,6 +643,7 @@ try {
       themeId: 'ocean',
       oasisMode: 'dark',
       themeExplicit: true,
+      actionStatus: 'completed',
       completedAt: serverTimestamp(),
       skippedAt: null,
       updatedAt: serverTimestamp()
@@ -661,36 +672,68 @@ try {
     await assertFails(deleteDoc(reference));
   });
 
-  await test('a skipped Entry Experience v1 is terminal and cannot be reopened or completed', async () => {
-    const uid = 'entry-skipped-owner';
+  await test('legacy completed/skipped v1 without first-action proof can migrate once', async () => {
+    const uid = 'entry-legacy-unverified-owner';
     const db = environment.authenticatedContext(uid).firestore();
     const reference = doc(db, `users/${uid}/entryExperiences/v1`);
 
-    await assertSucceeds(setDoc(reference, entryExperienceState({
-      audience: 'returning-guest',
-      classification: 'returning-guest-with-local-data'
-    })));
+    await environment.withSecurityRulesDisabled(async (context) => {
+      const legacy = entryExperienceState({
+        status: 'completed',
+        audience: 'new',
+        classification: 'returning-with-progress',
+        currentStep: 'action',
+        completedAt: serverTimestamp()
+      });
+      delete legacy.actionStatus;
+      await setDoc(doc(context.firestore(), `users/${uid}/entryExperiences/v1`), legacy);
+    });
     await assertSucceeds(updateDoc(reference, {
-      status: 'skipped',
-      currentStep: 'action',
-      skippedAt: serverTimestamp(),
+      status: 'in-progress',
+      audience: 'returning',
+      classification: 'returning-light',
+      currentStep: 'interests',
+      actionStatus: 'pending',
       completedAt: null,
+      updatedAt: serverTimestamp()
+    }));
+    await assertSucceeds(updateDoc(reference, {
+      status: 'completed',
+      currentStep: 'action',
+      actionStatus: 'completed',
+      completedAt: serverTimestamp(),
       updatedAt: serverTimestamp()
     }));
     await assertFails(updateDoc(reference, {
       status: 'in-progress',
       currentStep: 'interests',
-      skippedAt: null,
-      updatedAt: serverTimestamp()
-    }));
-    await assertFails(updateDoc(reference, {
-      status: 'completed',
-      currentStep: 'action',
-      skippedAt: null,
-      completedAt: serverTimestamp(),
+      actionStatus: 'pending',
+      completedAt: null,
       updatedAt: serverTimestamp()
     }));
     await assertFails(deleteDoc(reference));
+
+    const skippedUid = 'entry-legacy-skipped-owner';
+    const skippedDb = environment.authenticatedContext(skippedUid).firestore();
+    const skippedReference = doc(skippedDb, `users/${skippedUid}/entryExperiences/v1`);
+    await environment.withSecurityRulesDisabled(async (context) => {
+      const legacy = entryExperienceState({
+        status: 'skipped',
+        audience: 'returning-guest',
+        classification: 'returning-guest-with-local-data',
+        currentStep: 'action',
+        skippedAt: serverTimestamp()
+      });
+      delete legacy.actionStatus;
+      await setDoc(doc(context.firestore(), `users/${skippedUid}/entryExperiences/v1`), legacy);
+    });
+    await assertSucceeds(updateDoc(skippedReference, {
+      status: 'in-progress',
+      currentStep: 'interests',
+      actionStatus: 'pending',
+      skippedAt: null,
+      updatedAt: serverTimestamp()
+    }));
   });
 
   await test('full production profile supports create and legacy merge-update without weakening fields', async () => {

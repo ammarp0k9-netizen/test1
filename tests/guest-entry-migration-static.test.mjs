@@ -427,7 +427,7 @@ test('settings edits preserve terminal once-only state and cancellation is non-d
   const actionsBlock = between(
     controllerSource,
     'async function handleAction(action)',
-    'function applyExplicitAppearance()'
+    'function applyExplicitAppearance(state)'
   );
   const cancelBlock = between(
     actionsBlock,
@@ -447,6 +447,7 @@ test('settings edits preserve terminal once-only state and cancellation is non-d
 test('explicit guest appearance is allowlisted and its marker survives failed cloud persistence', () => {
   assert.match(profileSource, /\['lootlingua', 'ocean'\]\.includes\(explicitThemeSession\?\.themeId\)/);
   assert.match(profileSource, /\['light', 'dark'\]\.includes\(explicitThemeSession\?\.oasisMode\)/);
+  assert.match(profileSource, /explicitThemeSession\?\.targetUid === user\.uid/);
   assert.match(profileSource, /shouldMergeGuestProfile \|\| hasCurrentExplicitTheme/);
   assert.match(profileSource, /const saved = await window\._saveProfileToCloudNow\(\{[\s\S]*?verify:/);
   assert.match(profileSource, /completePendingGuestProfileMigration\([\s\S]*?user,[\s\S]*?saved,[\s\S]*?hasCurrentExplicitTheme[\s\S]*?\)/);

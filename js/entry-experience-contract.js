@@ -7,8 +7,9 @@
   const NEW_ACCOUNT_WINDOW_MS = 30 * 60 * 1000;
 
   const STATUSES = Object.freeze(['in-progress', 'completed', 'skipped']);
-  const TERMINAL_STATUSES = Object.freeze(['completed', 'skipped']);
+  const TERMINAL_STATUSES = Object.freeze(['completed']);
   const STEPS = Object.freeze(['interests', 'theme', 'action']);
+  const ACTION_STATUSES = Object.freeze(['pending', 'ready', 'completed']);
   const AUDIENCES = Object.freeze(['new', 'returning', 'returning-guest']);
   const CLASSIFICATIONS = Object.freeze([
     'brand-new',
@@ -111,6 +112,11 @@
     return `lootlingua:entry-experience:v${resolvedVersion}:${storageOwner(identity)}`;
   }
 
+  function guestEntryClaimStorageKey(version) {
+    const resolvedVersion = Math.max(1, Math.floor(finiteNumber(version, EXPERIENCE_VERSION)));
+    return `lootlingua:entry-guest-claim:v${resolvedVersion}`;
+  }
+
   function pendingIntentStorageKey(identity) {
     return `lootlingua:pending-intent:v1:${storageOwner(identity)}`;
   }
@@ -164,6 +170,10 @@
     const themeId = cleanEnum(raw.themeId, PRESERVABLE_THEME_IDS, '');
     const oasisMode = cleanEnum(raw.oasisMode, OASIS_MODES, 'light');
     const themeExplicit = raw.themeExplicit === true;
+    // Documents written by the original v1 flow have no actionStatus. They are
+    // intentionally normalized as pending: that old client wrote completed at
+    // the theme button, so status alone is not proof that first action ran.
+    const actionStatus = cleanEnum(raw.actionStatus, ACTION_STATUSES, 'pending');
     const startedAt = timestampMillis(raw.startedAt);
     const updatedAt = timestampMillis(raw.updatedAt);
     const completedAt = status === 'completed' ? timestampMillis(raw.completedAt) : 0;
@@ -182,6 +192,7 @@
       themeId,
       oasisMode,
       themeExplicit,
+      actionStatus,
       source: cleanEnum(raw.source, ['app-entry', 'guest-migration', 'settings'], 'app-entry'),
       startedAt,
       updatedAt,
@@ -200,19 +211,47 @@
       status: 'in-progress',
       audience: context.audience,
       classification: context.classification,
-      currentStep: 'interests',
+      currentStep: context.classification === 'returning-with-progress' ? 'action' : 'interests',
       interestsStatus: Array.isArray(saved.interestIds) && saved.interestIds.length ? 'selected' : 'pending',
       interestIds: saved.interestIds,
       themeStatus: existingTheme ? 'preserved' : 'pending',
       themeId: existingTheme,
       oasisMode: cleanEnum(saved.oasisMode, OASIS_MODES, 'light'),
       themeExplicit: false,
+      actionStatus: context.classification === 'returning-with-progress' ? 'ready' : 'pending',
       source: 'app-entry',
     });
   }
 
   function isTerminalState(state) {
-    return Boolean(state && TERMINAL_STATUSES.includes(state.status));
+    const normalized = normalizeEntryState(state);
+    return Boolean(
+      normalized &&
+      TERMINAL_STATUSES.includes(normalized.status) &&
+      normalized.actionStatus === 'completed'
+    );
+  }
+
+  function recoverUnverifiedTerminal(state, presentation, nowValue) {
+    const normalized = normalizeEntryState(state);
+    if (!normalized || normalized.status === 'in-progress' || isTerminalState(normalized)) {
+      return normalized;
+    }
+    const classification = cleanEnum(
+      presentation && presentation.classification,
+      CLASSIFICATIONS,
+      normalized.classification
+    );
+    const hasProgress = classification === 'returning-with-progress';
+    return normalizeEntryState({
+      ...normalized,
+      status: 'in-progress',
+      currentStep: hasProgress ? 'action' : 'interests',
+      actionStatus: hasProgress ? 'ready' : 'pending',
+      completedAt: 0,
+      skippedAt: 0,
+      updatedAt: timestampMillis(nowValue) || Date.now(),
+    });
   }
 
   function shouldPresent(state, version) {
@@ -326,9 +365,15 @@
     const customWorldCount = Math.max(0, Math.floor(finiteNumber(source.customWorldCount, 0)));
     const pendingLocalDraft = Boolean(source.hasLocalLearningDraft) || resumableQuiz || Boolean(localDraft);
     const wordCount = allWords.length + Math.max(0, Math.floor(finiteNumber(source.additionalWordCount, 0)));
-    const strongProgress = wordCount > 0 || profile.meaningful || srsCount > 0 || hiddenOrMasteredCount > 0 ||
-      hasJourneyProgress || resumableQuiz || source.hasWorldProgress === true || source.hasCompletionLedger === true;
-    const lightUse = profile.personalized || customWorldCount > 0 || pendingLocalDraft || source.hasKnownLegacyUse === true;
+    const hasMeaningfulJourneyProgress = hasJourneyProgress ||
+      source.hasWorldProgress === true || source.hasCompletionLedger === true;
+    const hasAnyData = wordCount > 0 || profile.meaningful || profile.personalized || srsCount > 0 ||
+      hiddenOrMasteredCount > 0 || resumableQuiz || customWorldCount > 0 || pendingLocalDraft ||
+      source.hasKnownLegacyUse === true || hasMeaningfulJourneyProgress;
+    // Kept as a compatibility alias for callers that used the old signal name.
+    // It now means strong Journey/world progress only, never words, XP, or profile data.
+    const strongProgress = hasMeaningfulJourneyProgress;
+    const lightUse = hasAnyData && !hasMeaningfulJourneyProgress;
     const isAuthenticated = source.isAuthenticated === true || Boolean(cleanString(source.uid, 128));
     const accountCreatedAt = timestampMillis(source.accountCreatedAt);
     const accountLastSignInAt = timestampMillis(source.accountLastSignInAt);
@@ -366,6 +411,8 @@
       profileSignals: profile,
       profileExists,
       profileReadFailed,
+      hasAnyData,
+      hasMeaningfulJourneyProgress,
       strongProgress,
       lightUse,
       accountCreatedAt,
@@ -384,15 +431,19 @@
     let classification;
 
     if (!signals.isAuthenticated) {
-      if (signals.strongProgress || signals.lightUse || signals.hasLegacyMarker) {
+      if (signals.hasAnyData || signals.hasLegacyMarker) {
         classification = 'returning-guest-with-local-data';
       } else {
         classification = 'brand-new';
       }
-    } else if (signals.strongProgress) {
+    } else if (signals.hasMeaningfulJourneyProgress) {
       classification = 'returning-with-progress';
     } else if (signals.lightUse) {
       classification = 'returning-light';
+    } else if (signals.firstSignInLooksFresh && !signals.profileReadFailed) {
+      // Auth/profile creation is not product usage. A freshly-created account
+      // with no real data must receive the same full path as a fresh guest.
+      classification = 'brand-new';
     } else if (
       signals.profileExists ||
       signals.profileReadFailed ||
@@ -419,7 +470,7 @@
         return {
           eyebrow: 'تجربة LootLingua الجديدة',
           title: 'أهلًا بعودتك',
-          body: 'رحلتك وتقدّمك محفوظان كما هما. اختر اهتماماتك ومظهرك لنهيّئ لك التجربة الجديدة دون تغيير ما أنجزته.',
+          body: 'رحلتك وتقدّمك محفوظان كما هما. سنعرض لك عودة سريعة تعيدك مباشرة إلى موضعك الحالي دون تغيير ما أنجزته.',
         };
       }
       if (signals.wordCount > 0) {
@@ -442,6 +493,13 @@
         body: 'بياناتك على هذا الجهاز محفوظة. اختر اهتماماتك ومظهرك، ويمكنك المتابعة كضيف من دون فقدان كلماتك.',
       };
     }
+    if (classification === 'returning-light' && signals.wordCount > 0) {
+      return {
+        eyebrow: 'بياناتك محفوظة',
+        title: 'أهلًا بعودتك',
+        body: 'وجدنا كلماتك محفوظة، ولن تغيّر اختيارات هذه التجربة قاموسك أو تقدّم مراجعتك. اختر ما يهمك والمظهر الذي تفضّله ثم جرّب خطوة قصيرة.',
+      };
+    }
     if (classification === 'returning-light' || classification === 'existing-account-without-meaningful-progress') {
       return {
         eyebrow: 'تجربة LootLingua الجديدة',
@@ -452,7 +510,7 @@
     return {
       eyebrow: 'جهّز تجربتك',
       title: 'ما الذي تحب أن تتعلّمه؟',
-      body: 'اختر ما يهمك لنحفظ تفضيلاتك للعوالم الحالية والقادمة. يمكنك تعديلها لاحقًا من الإعدادات.',
+      body: 'LootLingua يحوّل الكلمات التي تهمّك إلى قاموس شخصي ومراجعة ذكية ورحلة واضحة. اختر اهتماماتك لنهيّئ لك البداية، ويمكنك تعديلها لاحقًا.',
     };
   }
 
@@ -506,7 +564,7 @@
         primary: true,
       };
     }
-    if (signals.strongProgress || signals.hasWorldProgress || signals.hasCompletionLedger) {
+    if (signals.hasMeaningfulJourneyProgress) {
       return {
         id: 'explore-worlds',
         label: 'اكتشف العوالم',
@@ -521,14 +579,6 @@
         hint: 'اقتراح اختياري يساعدك على معرفة نقطة مناسبة، ويمكنك الاستكشاف بدلًا منه.',
         secondaryId: 'explore-worlds',
         secondaryLabel: 'استكشف العوالم',
-        primary: true,
-      };
-    }
-    if (signals.hasPublishedWorld && !signals.isAuthenticated) {
-      return {
-        id: 'explore-worlds',
-        label: 'استكشف العوالم',
-        hint: 'يمكنك الاستكشاف كضيف، وسنطلب الحساب فقط عند بدء رحلة محفوظة.',
         primary: true,
       };
     }
@@ -548,7 +598,7 @@
       : normalizeSignals(signalsInput || {});
     const id = cleanString(action && action.id, 80);
     if (!CTA_IDS.includes(id)) return true;
-    if (id === 'new-user-start' && signals.strongProgress) return true;
+    if (id === 'new-user-start' && signals.hasMeaningfulJourneyProgress) return true;
     if (id === 'resume-journey-session' && (!signals.activeJourney || !isJourneySessionDestination(signals.journeyDestination))) return true;
     if (id === 'continue-journey' && !signals.activeJourney) return true;
     if (id === 'resume-quiz' && !signals.resumableQuiz) return true;
@@ -603,6 +653,9 @@
     const appearance = account.themeExplicit
       ? account
       : (guest.themeExplicit ? guest : (account.themeId ? account : guest));
+    const actionStatus = account.actionStatus === 'completed' || guest.actionStatus === 'completed'
+      ? 'completed'
+      : (account.actionStatus === 'ready' || guest.actionStatus === 'ready' ? 'ready' : 'pending');
     const merged = normalizeEntryState({
       ...account,
       status: 'in-progress',
@@ -613,6 +666,7 @@
       themeId: appearance.themeId,
       oasisMode: appearance.oasisMode,
       themeExplicit: appearance.themeExplicit,
+      actionStatus,
       source: 'guest-migration',
       startedAt: Math.min(
         ...[account.startedAt, guest.startedAt].filter(Boolean)
@@ -651,25 +705,33 @@
       next.oasisMode = cleanEnum(action.oasisMode, OASIS_MODES, next.oasisMode || 'light');
       next.themeStatus = 'selected';
       next.themeExplicit = true;
+    } else if (type === 'continue-action') {
+      if (next.currentStep !== 'theme') {
+        throw new RangeError('The theme step must be active before the first action.');
+      }
+      next.currentStep = 'action';
+    } else if (type === 'complete-action') {
+      if (next.currentStep !== 'action') {
+        throw new RangeError('The first action step must be active before it can be completed.');
+      }
+      next.actionStatus = 'completed';
     } else if (type === 'complete') {
+      if (next.currentStep !== 'action') {
+        throw new RangeError('The first action must be reached before completion.');
+      }
+      if (!['ready', 'completed'].includes(next.actionStatus)) {
+        throw new RangeError('The first action must be completed before onboarding completion.');
+      }
       next.status = 'completed';
       next.currentStep = 'action';
+      next.actionStatus = 'completed';
       next.completedAt = now;
       next.skippedAt = 0;
       if (next.themeStatus === 'pending') next.themeStatus = next.themeId ? 'preserved' : 'preserved';
-    } else if (type === 'skip-experience') {
-      next.status = 'skipped';
-      next.currentStep = 'action';
-      next.skippedAt = now;
-      next.completedAt = 0;
-      next.themeExplicit = false;
-      next.themeStatus = state.themeId ? 'preserved' : 'pending';
-      next.themeId = state.themeId;
-      next.oasisMode = state.oasisMode;
-      next.interestsStatus = state.interestsStatus;
-      next.interestIds = [...state.interestIds];
     } else if (type === 'back') {
-      next.currentStep = next.currentStep === 'theme' ? 'interests' : next.currentStep;
+      next.currentStep = next.currentStep === 'action'
+        ? 'theme'
+        : (next.currentStep === 'theme' ? 'interests' : next.currentStep);
     } else {
       throw new RangeError('Unsupported entry state transition.');
     }
@@ -781,6 +843,7 @@
     STATUSES,
     TERMINAL_STATUSES,
     STEPS,
+    ACTION_STATUSES,
     AUDIENCES,
     CLASSIFICATIONS,
     INTEREST_STATUSES,
@@ -793,6 +856,7 @@
     CTA_IDS,
     storageOwner,
     entryStorageKey,
+    guestEntryClaimStorageKey,
     pendingIntentStorageKey,
     profileMigrationStorageKey,
     guestMigrationReceiptStorageKey,
@@ -803,6 +867,7 @@
     normalizeEntryState,
     createEntryDraft,
     isTerminalState,
+    recoverUnverifiedTerminal,
     shouldPresent,
     wordHasSrs,
     wordIsHiddenOrMastered,

@@ -1870,7 +1870,7 @@ async function resumePendingJourneyIntent(intent, world) {
       code: nextError.code || 'journey/restore-failed',
     });
   }
-  return { restored: true, result };
+  return { restored: result != null, result };
 }
 
 Object.defineProperty(window, 'LootLinguaJourneyEntryActions', {

@@ -761,14 +761,24 @@ service cloud.firestore {
         ].toSet());
     }
 
+    function legacyEntryNeedsFirstActionProof(data) {
+      return (data.status == 'completed' || data.status == 'skipped') &&
+        !('actionStatus' in data);
+    }
+
+    function verifiedEntryCompletion(data) {
+      return data.status == 'completed' &&
+        'actionStatus' in data && data.actionStatus == 'completed';
+    }
+
     function validEntryExperience(data, versionId) {
       return versionId == 'v1' &&
         data.keys().hasOnly([
           'contractVersion', 'experienceVersion', 'status', 'audience',
           'classification', 'currentStep', 'interestsStatus', 'interestIds',
-          'themeStatus', 'themeId', 'oasisMode', 'themeExplicit', 'source',
+          'themeStatus', 'themeId', 'oasisMode', 'themeExplicit', 'actionStatus', 'source',
           'startedAt', 'updatedAt', 'completedAt', 'skippedAt'
-        ]) && data.keys().size() == 17 &&
+        ]) && data.keys().size() == 18 &&
         data.contractVersion == 1 && data.experienceVersion == 1 &&
         (data.status == 'in-progress' || data.status == 'completed' || data.status == 'skipped') &&
         (data.audience == 'new' || data.audience == 'returning' || data.audience == 'returning-guest') &&
@@ -791,11 +801,15 @@ service cloud.firestore {
         ) &&
         (data.oasisMode == 'light' || data.oasisMode == 'dark') &&
         data.themeExplicit is bool &&
+        (data.actionStatus == 'pending' || data.actionStatus == 'ready' || data.actionStatus == 'completed') &&
         (data.source == 'app-entry' || data.source == 'guest-migration' || data.source == 'settings') &&
         data.startedAt is timestamp && data.updatedAt == request.time &&
         (data.completedAt == null || data.completedAt is timestamp) &&
         (data.skippedAt == null || data.skippedAt is timestamp) &&
-        (data.status != 'completed' || (data.currentStep == 'action' && data.completedAt is timestamp && data.skippedAt == null)) &&
+        (data.status != 'completed' || (
+          data.currentStep == 'action' && data.actionStatus == 'completed' &&
+          data.completedAt is timestamp && data.skippedAt == null
+        )) &&
         (data.status != 'skipped' || (data.currentStep == 'action' && data.skippedAt is timestamp && data.completedAt == null)) &&
         (data.status == 'completed' || data.completedAt == null) &&
         (data.status == 'skipped' || data.skippedAt == null);
@@ -805,16 +819,33 @@ service cloud.firestore {
       return validEntryExperience(after, versionId) &&
         after.contractVersion == before.contractVersion &&
         after.experienceVersion == before.experienceVersion &&
-        after.audience == before.audience &&
-        after.classification == before.classification &&
+        (
+          legacyEntryNeedsFirstActionProof(before) ||
+          after.audience == before.audience
+        ) &&
+        (
+          legacyEntryNeedsFirstActionProof(before) ||
+          after.classification == before.classification
+        ) &&
         after.startedAt == before.startedAt &&
         (
-          before.status == 'in-progress' ||
-          (before.status == 'completed' && after.status == 'completed') ||
-          (before.status == 'skipped' && after.status == 'skipped')
+          (before.status == 'in-progress' && after.status != 'skipped') ||
+          (verifiedEntryCompletion(before) && after.status == 'completed') ||
+          (legacyEntryNeedsFirstActionProof(before) &&
+            (after.status == 'in-progress' || after.status == 'completed'))
         ) &&
-        (before.completedAt == null || after.completedAt == before.completedAt) &&
-        (before.skippedAt == null || after.skippedAt == before.skippedAt);
+        (
+          !('actionStatus' in before) || before.actionStatus != 'completed' ||
+          after.actionStatus == 'completed'
+        ) &&
+        (
+          legacyEntryNeedsFirstActionProof(before) ||
+          before.completedAt == null || after.completedAt == before.completedAt
+        ) &&
+        (
+          legacyEntryNeedsFirstActionProof(before) ||
+          before.skippedAt == null || after.skippedAt == before.skippedAt
+        );
     }
 
     function validWordMasteryDocument(data) {
@@ -3582,6 +3613,7 @@ service cloud.firestore {
       match /entryExperiences/{versionId} {
         allow read: if isOwner(uid);
         allow create: if isOwner(uid) &&
+          request.resource.data.status != 'skipped' &&
           validEntryExperience(request.resource.data, versionId);
         allow update: if isOwner(uid) &&
           validEntryExperienceUpdate(resource.data, request.resource.data, versionId);

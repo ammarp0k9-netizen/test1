@@ -59,6 +59,7 @@ function cloudPayload(state) {
     themeId: normalized.themeId,
     oasisMode: normalized.oasisMode,
     themeExplicit: normalized.themeExplicit,
+    actionStatus: normalized.actionStatus,
     source: normalized.source,
     startedAt: timestampOrNull(normalized.startedAt) || serverTimestamp(),
     updatedAt: serverTimestamp(),

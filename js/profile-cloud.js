@@ -220,6 +220,7 @@ window.loadProfileFromCloud = async function(user, options = {}) {
       : 'light';
     const hasCurrentExplicitTheme = Boolean(
       explicitThemeId &&
+      explicitThemeSession?.targetUid === user.uid &&
       Number(explicitThemeSession?.entryUpdatedAt) > 0 &&
       Date.now() - Number(explicitThemeSession?.at || 0) < 24 * 60 * 60 * 1000
     );

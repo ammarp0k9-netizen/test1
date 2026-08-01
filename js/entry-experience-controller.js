@@ -131,6 +131,81 @@
     writeJson(api().entryStorageKey(identityFor(user)), normalized);
   }
 
+  function recoverTerminalAsActionDraft(state) {
+    const normalized = api().normalizeEntryState(state);
+    if (!normalized || !api().isTerminalState(normalized)) return normalized;
+    return api().normalizeEntryState({
+      ...normalized,
+      status: 'in-progress',
+      currentStep: 'action',
+      completedAt: 0,
+      skippedAt: 0,
+      updatedAt: Date.now(),
+    });
+  }
+
+  function reconcileAccountDraft(cloudState, localState, cloudReadSucceeded) {
+    const account = api().normalizeEntryState(cloudState);
+    let local = api().normalizeEntryState(localState);
+    if (account && api().isTerminalState(account)) return account;
+    const accountNeedsFirstActionProof = account &&
+      account.status !== 'in-progress' && !api().isTerminalState(account);
+    if (accountNeedsFirstActionProof && local?.status === 'in-progress') return local;
+    const localNeedsFirstActionProof = local &&
+      local.status !== 'in-progress' && !api().isTerminalState(local);
+    if (accountNeedsFirstActionProof && localNeedsFirstActionProof) {
+      // Keep the legacy terminal marker intact until boot has the current
+      // learning signals. Turning two old completed caches into an in-progress
+      // merge here would lose whether recovery must restart at interests or use
+      // the real-progress shortcut.
+      return Number(local.updatedAt || 0) > Number(account.updatedAt || 0)
+        ? local
+        : account;
+    }
+    if (local && api().isTerminalState(local)) {
+      if (!cloudReadSucceeded) return local;
+      local = recoverTerminalAsActionDraft(local);
+    }
+    if (!account) return local;
+    if (!local) return account;
+    const merged = api().mergeEntryStates(account, local, {
+      audience: account.audience,
+      classification: account.classification,
+    }).state;
+    const localAppearanceIsNewer = local.themeExplicit &&
+      Number(local.updatedAt || 0) >= Number(account.updatedAt || 0);
+    return api().normalizeEntryState({
+      ...merged,
+      audience: account.audience,
+      classification: account.classification,
+      themeStatus: localAppearanceIsNewer ? local.themeStatus : merged.themeStatus,
+      themeId: localAppearanceIsNewer ? local.themeId : merged.themeId,
+      oasisMode: localAppearanceIsNewer ? local.oasisMode : merged.oasisMode,
+      themeExplicit: localAppearanceIsNewer ? local.themeExplicit : merged.themeExplicit,
+      source: account.source,
+    });
+  }
+
+  function readGuestEntryClaim() {
+    return readJson(api().guestEntryClaimStorageKey(), null);
+  }
+
+  function guestEntryCanMerge(user, guestState) {
+    const claim = readGuestEntryClaim();
+    if (!claim || Number(claim.guestUpdatedAt) !== Number(guestState?.updatedAt || 0)) return true;
+    return claim.uid === user?.uid;
+  }
+
+  function claimGuestEntry(user, guestState) {
+    if (!user?.uid || !guestState) return;
+    writeJson(api().guestEntryClaimStorageKey(), {
+      version: api().EXPERIENCE_VERSION,
+      uid: user.uid,
+      guestUpdatedAt: Number(guestState.updatedAt) || 0,
+      claimedAt: Date.now(),
+    });
+  }
+
   function announceEntryState() {
     root.dispatchEvent?.(new CustomEvent('lootlingua:entry-state-ready', {
       detail: { state: runtime.state ? { ...runtime.state, interestIds: [...runtime.state.interestIds] } : null },
@@ -203,19 +278,28 @@
     const local = localStateFor(user);
     let account = local;
     let cloudReadFailed = false;
+    let cloudReadSucceeded = false;
     if (cloud()?.load) {
       try {
         const result = await cloud().load(user);
         if (token !== runtime.bootToken) return { state: null, cloudReadFailed: true };
-        account = result.state || local;
+        cloudReadSucceeded = true;
+        account = reconcileAccountDraft(result.state, local, true);
       } catch (error) {
         if (error?.code === 'entry/auth-changed') return { state: null, cloudReadFailed: true };
         cloudReadFailed = true;
       }
     }
 
-    const guest = runtime.capturedGuest?.entryState || null;
-    if (guest) {
+    let guest = runtime.capturedGuest?.entryState || null;
+    if (guest && guest.status !== 'in-progress' && !api().isTerminalState(guest)) {
+      // Anonymous completed/skipped v1 documents came from the broken flow and
+      // carry no durable first-action proof. Migrate them as a full draft.
+      guest = api().recoverUnverifiedTerminal(guest, {
+        classification: 'returning-guest-with-local-data',
+      });
+    }
+    if (guest && guestEntryCanMerge(user, guest)) {
       const merged = api().mergeEntryStates(account, guest, {
         audience: account?.audience || 'returning-guest',
         classification: account?.classification || 'returning-guest-with-local-data',
@@ -227,13 +311,20 @@
           if (token !== runtime.bootToken) return { state: null, cloudReadFailed: true };
           account = saved || account;
           persistLocalState(account, user);
+          claimGuestEntry(user, guest);
           localStorage.removeItem(api().entryStorageKey({}));
           runtime.capturedGuest.entryState = null;
         } catch (_) {
           cloudReadFailed = true;
+          account = recoverTerminalAsActionDraft(account);
         }
+      } else if (account && api().isTerminalState(account)) {
+        // The account already owns a terminal v1. Claim this anonymous snapshot
+        // so it cannot later complete a different account on the same device.
+        claimGuestEntry(user, guest);
       }
     }
+    if (!cloudReadSucceeded && !cloud()?.load) account = reconcileAccountDraft(null, local, false);
     return { state: account, cloudReadFailed };
   }
 
@@ -286,6 +377,10 @@
     const token = ++runtime.bootToken;
     const user = root.__lootlinguaAuthUser || null;
     runtime.user = user;
+    if (user) {
+      claimGuestPendingIntentForUser(user);
+      claimGuestThemeForUser(user);
+    }
 
     if (user && typeof root.prepareGuestMigrationForUser === 'function') {
       try {
@@ -368,10 +463,21 @@
     }
     const signals = presentation.signals;
     runtime.signals = signals;
+    const terminalEntry = entryState && api().isTerminalState(entryState);
+    const staleBroadProgressClassification = entryState?.classification === 'returning-with-progress' &&
+      !signals.hasMeaningfulJourneyProgress;
     runtime.presentation = {
-      classification: entryState?.classification || presentation.classification,
-      audience: entryState?.audience || presentation.audience,
+      classification: staleBroadProgressClassification && !terminalEntry
+        ? presentation.classification
+        : (entryState?.classification || presentation.classification),
+      audience: staleBroadProgressClassification && !terminalEntry
+        ? presentation.audience
+        : (entryState?.audience || presentation.audience),
     };
+    if (entryState && entryState.status !== 'in-progress' && !terminalEntry) {
+      entryState = api().recoverUnverifiedTerminal(entryState, runtime.presentation, Date.now());
+      persistLocalState(entryState, user);
+    }
     runtime.action = api().resolveNextAction(signals);
     runtime.baselinePreferences = baselinePreferences(user, entryState, profileSnapshot);
 
@@ -388,6 +494,21 @@
     );
     announceEntryState();
     open();
+    if (user && runtime.state.currentStep === 'action') {
+      const resumed = await consumePendingJourneyIntent({ allowWhileOpen: true });
+      if (resumed && token === runtime.bootToken && runtime.state?.status === 'in-progress') {
+        try {
+          const completed = api().transitionState(runtime.state, { type: 'complete' }, Date.now());
+          await commitTerminalState(completed, 'جارٍ إكمال طلبك…', { applyAppearance: true });
+          close();
+        } catch (error) {
+          const status = document.getElementById('entryExperienceStatus');
+          if (status) status.textContent = error?.code === 'entry/profile-write-failed'
+            ? 'نُفّذ طلبك، لكن تعذّر حفظ المظهر. بقيت التجربة مفتوحة لتأكيد الإكمال.'
+            : 'نُفّذ طلبك، لكن تعذّر تأكيد اكتمال التجربة. بقيت مفتوحة للمحاولة مرة أخرى.';
+        }
+      }
+    }
   }
 
   function rootElement() {
@@ -415,8 +536,8 @@
   }
 
   function stepIndicator(step) {
-    const index = step === 'interests' ? 1 : 2;
-    return `الخطوة ${index} من 2`;
+    const index = step === 'interests' ? 1 : (step === 'theme' ? 2 : 3);
+    return `الخطوة ${index} من 3`;
   }
 
   function renderInterests() {
@@ -424,14 +545,14 @@
     if (!panel || !runtime.state) return;
     const copy = currentCopy();
     const selected = new Set(runtime.state.interestIds);
-    const canSkipExperience = runtime.settingsMode || runtime.presentation?.audience !== 'new';
+    const isSettings = Boolean(runtime.settingsMode);
     panel.innerHTML = `
       <header class="entry-header">
         <div>
           <span class="entry-eyebrow">${escapeHtml(copy.eyebrow)}</span>
           <span class="entry-step-label">${stepIndicator('interests')}</span>
         </div>
-        ${canSkipExperience ? `<button type="button" class="entry-full-skip" data-entry-action="${runtime.settingsMode ? 'cancel-settings' : 'skip-experience'}">${runtime.settingsMode ? 'إلغاء' : 'الاحتفاظ بإعداداتي الحالية'}</button>` : ''}
+        ${isSettings ? '<button type="button" class="entry-full-skip" data-entry-action="cancel-settings">إلغاء</button>' : ''}
       </header>
       <div class="entry-copy">
         <h1 id="entryExperienceTitle">${escapeHtml(copy.title)}</h1>
@@ -465,14 +586,13 @@
     const selectedTheme = runtime.state.themeId || 'lootlingua';
     const oasisMode = runtime.state.oasisMode || 'light';
     const isSettings = Boolean(runtime.settingsMode);
-    const canSkipExperience = isSettings || runtime.presentation?.audience !== 'new';
     panel.innerHTML = `
       <header class="entry-header">
         <div>
           <span class="entry-eyebrow">اختر المظهر الذي يريحك</span>
           <span class="entry-step-label">${stepIndicator('theme')}</span>
         </div>
-        ${canSkipExperience ? `<button type="button" class="entry-full-skip" data-entry-action="${isSettings ? 'cancel-settings' : 'skip-experience'}">${isSettings ? 'إلغاء' : 'الاحتفاظ بإعداداتي الحالية'}</button>` : ''}
+        ${isSettings ? '<button type="button" class="entry-full-skip" data-entry-action="cancel-settings">إلغاء</button>' : ''}
       </header>
       <div class="entry-copy entry-copy-compact">
         <h1 id="entryExperienceTitle">كيف تحب أن تبدو تجربتك؟</h1>
@@ -509,7 +629,7 @@
         <p class="entry-helper ready">${explicit ? 'سيُطبّق اختيارك عند إكمال الإعداد' : (runtime.state.themeId ? 'لن نغيّر مظهرك الحالي ما لم تختر مظهرًا آخر' : 'LootLingua هو الخيار الافتراضي ويمكن تغييره لاحقًا')}</p>
         <div class="entry-actions">
           <button type="button" class="entry-secondary" data-entry-action="back"><i class="fa-solid fa-arrow-right" aria-hidden="true"></i> رجوع</button>
-          <button type="button" class="entry-primary" data-entry-action="complete">جهّز تجربتي <i class="fa-solid fa-wand-magic-sparkles" aria-hidden="true"></i></button>
+          <button type="button" class="entry-primary" data-entry-action="continue-action">جرّب أول خطوة <i class="fa-solid fa-wand-magic-sparkles" aria-hidden="true"></i></button>
         </div>
       </footer>
     `;
@@ -520,14 +640,38 @@
     const panel = panelElement();
     if (!panel) return;
     const action = runtime.action || api().resolveNextAction(runtime.signals || {});
+    const isProgressReturn = runtime.presentation?.classification === 'returning-with-progress';
+    const firstActionCompleted = runtime.state?.actionStatus === 'completed';
+    const showDestination = isProgressReturn || firstActionCompleted;
     panel.innerHTML = `
       <div class="entry-action-screen">
-        <span class="entry-action-icon"><i class="fa-solid fa-compass" aria-hidden="true"></i></span>
-        <span class="entry-eyebrow">كل شيء جاهز</span>
-        <h1 id="entryExperienceTitle">تجربتك جاهزة</h1>
-        <p>${escapeHtml(action.hint)}</p>
-        <button type="button" class="entry-primary entry-action-primary" data-entry-cta="${action.id}">${escapeHtml(action.label)} <i class="fa-solid fa-arrow-left" aria-hidden="true"></i></button>
-        ${action.secondaryId ? `<button type="button" class="entry-secondary entry-action-secondary" data-entry-cta="${action.secondaryId}">${escapeHtml(action.secondaryLabel)}</button>` : ''}
+        <header class="entry-header entry-action-header">
+          <span class="entry-eyebrow">${isProgressReturn ? 'تقدّمك في مكانه' : 'جرّب قيمة LootLingua'}</span>
+          <span class="entry-step-label">${isProgressReturn ? 'عودة سريعة' : stepIndicator('action')}</span>
+        </header>
+        <span class="entry-action-icon"><i class="fa-solid ${isProgressReturn ? 'fa-route' : 'fa-language'}" aria-hidden="true"></i></span>
+        <h1 id="entryExperienceTitle">${isProgressReturn ? 'رحلتك جاهزة للمتابعة' : 'من كلمة إلى معرفة قابلة للمراجعة'}</h1>
+        ${isProgressReturn ? `
+          <p>${escapeHtml(action.hint)}</p>
+        ` : `
+          <p>اكشف معنى الكلمة لترى كيف يحوّل LootLingua ما تقابله إلى بطاقة واضحة يمكنك حفظها ومراجعتها لاحقًا.</p>
+          <div class="entry-first-action-card${firstActionCompleted ? ' is-revealed' : ''}">
+            <span class="entry-first-action-label">كلمة تجريبية</span>
+            <strong lang="en" dir="ltr">Adventure</strong>
+            <span class="entry-first-action-meaning" ${firstActionCompleted ? '' : 'hidden'}>مغامرة · تجربة مليئة بالاكتشاف</span>
+            ${firstActionCompleted
+              ? '<span class="entry-first-action-success"><i class="fa-solid fa-circle-check" aria-hidden="true"></i> هكذا تبدأ بطاقتك، من دون إنشاء حساب.</span>'
+              : '<button type="button" class="entry-primary entry-reveal-action" data-entry-action="reveal-value">اكشف المعنى</button>'}
+          </div>
+          ${showDestination ? `<p class="entry-action-destination-hint">${escapeHtml(action.hint)}</p>` : ''}
+        `}
+        ${showDestination ? `
+          <div class="entry-action-destinations">
+            ${isProgressReturn ? '' : '<button type="button" class="entry-secondary" data-entry-action="back"><i class="fa-solid fa-arrow-right" aria-hidden="true"></i> رجوع</button>'}
+            <button type="button" class="entry-primary entry-action-primary" data-entry-cta="${action.id}">${escapeHtml(action.label)} <i class="fa-solid fa-arrow-left" aria-hidden="true"></i></button>
+            ${action.secondaryId ? `<button type="button" class="entry-secondary entry-action-secondary" data-entry-cta="${action.secondaryId}">${escapeHtml(action.secondaryLabel)}</button>` : ''}
+          </div>
+        ` : ''}
       </div>
     `;
     bindPanelActions();
@@ -636,6 +780,53 @@
     }
   }
 
+  async function commitTerminalState(candidate, label, options) {
+    const previous = runtime.state;
+    const normalized = api().normalizeEntryState(candidate);
+    if (!normalized || !api().isTerminalState(normalized)) {
+      throw new TypeError('A terminal Entry Experience state is required.');
+    }
+    setBusy(true, label);
+    try {
+      if (options?.applyAppearance) {
+        applyExplicitAppearance(normalized);
+        if (runtime.user && normalized.themeExplicit) {
+          if (typeof root._saveProfileToCloudNow !== 'function') {
+            throw Object.assign(new Error('Profile persistence is unavailable.'), {
+              code: 'entry/profile-write-failed',
+            });
+          }
+          const profileSaved = await root._saveProfileToCloudNow({ verify: true });
+          if (profileSaved !== true) {
+            throw Object.assign(new Error('The selected appearance was not saved to the account.'), {
+              code: 'entry/profile-write-failed',
+            });
+          }
+        }
+      }
+
+      let committed = normalized;
+      if (runtime.user) {
+        if (!cloud()?.save) {
+          throw Object.assign(new Error('Entry persistence is unavailable.'), {
+            code: 'entry/write-failed',
+          });
+        }
+        committed = await cloud().save(normalized, runtime.user) || normalized;
+      }
+      runtime.state = committed;
+      persistLocalState(committed, runtime.user);
+      announceEntryState();
+      return committed;
+    } catch (error) {
+      runtime.state = previous;
+      if (previous) persistLocalState(previous, runtime.user);
+      throw error;
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function handleAction(action) {
     if (!runtime.state) return;
     if (action === 'cancel-settings') {
@@ -672,19 +863,10 @@
         }
       }
       else if (action === 'skip-interests') transition({ type: 'skip-interests' });
-      else if (action === 'skip-experience') {
-        const skipped = api().transitionState(runtime.state, { type: 'skip-experience' }, Date.now());
-        const baseline = runtime.baselinePreferences || {};
-        runtime.state = api().normalizeEntryState({
-          ...skipped,
-          interestsStatus: baseline.interestsStatus || 'pending',
-          interestIds: baseline.interestIds || [],
-          themeStatus: baseline.themeId ? 'preserved' : 'pending',
-          themeId: baseline.themeId || '',
-          oasisMode: baseline.oasisMode || 'light',
-          themeExplicit: false,
-        });
+      else if (action === 'continue-action') {
+        transition({ type: 'continue-action' });
       }
+      else if (action === 'reveal-value') transition({ type: 'complete-action' });
       else if (action === 'complete') {
         if (runtime.settingsMode === 'theme') {
           const draft = runtime.state;
@@ -705,57 +887,48 @@
           close();
           return;
         }
-        transition({ type: 'complete' });
+        return;
       }
       else return;
 
-      await saveCheckpoint(action === 'complete' ? 'جارٍ تجهيز تجربتك…' : 'جارٍ حفظ خطوتك…');
-      if (action === 'complete') {
-        applyExplicitAppearance();
-        const resumed = await consumePendingJourneyIntent({ allowWhileOpen: true });
-        if (resumed) close();
-        else {
-          renderAction();
-          focusEntryHeading();
-        }
-      } else if (action === 'skip-experience') {
-        close();
-        await consumePendingJourneyIntent();
-      } else {
+      await saveCheckpoint('جارٍ حفظ خطوتك…');
+      render();
+      focusEntryHeading();
+    } catch (error) {
+      setBusy(false);
+      if (runtime.state && runtime.state.status === 'in-progress') {
         render();
         focusEntryHeading();
       }
-    } catch (error) {
-      setBusy(false);
       const status = document.getElementById('entryExperienceStatus');
       if (status) status.textContent = error?.code === 'entry/write-failed'
-        ? 'تعذّر حفظ الخطوة في الحساب. اختياراتك ما زالت محفوظة على هذا الجهاز؛ حاول مرة أخرى.'
-        : 'تعذّر إكمال الخطوة. راجع اختيارك وحاول مرة أخرى.';
+        ? 'تعذّر حفظ الخطوة في الحساب. بقيت التجربة مفتوحة واختياراتك محفوظة على هذا الجهاز؛ حاول مرة أخرى.'
+        : (error?.code === 'entry/profile-write-failed'
+          ? 'تعذّر حفظ المظهر في حسابك. بقيت التجربة مفتوحة ولم نعتبرها مكتملة.'
+          : 'تعذّر إكمال الخطوة. راجع اختيارك وحاول مرة أخرى.');
     }
   }
 
-  function applyExplicitAppearance() {
-    if (!runtime.state?.themeExplicit) return;
-    const themeId = runtime.state.themeId;
+  function applyExplicitAppearance(state) {
+    const selected = state || runtime.state;
+    if (!selected?.themeExplicit) return;
+    const themeId = selected.themeId;
     if (typeof root.setTheme === 'function') root.setTheme(themeId);
     localStorage.setItem(api().themeStorageKey(identityFor(runtime.user)), themeId);
     if (themeId === 'ocean') {
       if (typeof root.setProfileOasisMode === 'function') {
-        root.setProfileOasisMode(runtime.state.oasisMode || 'light');
+        root.setProfileOasisMode(selected.oasisMode || 'light');
       } else {
-        setOasisMode(runtime.state.oasisMode || 'light', { persist: true, user: runtime.user });
+        setOasisMode(selected.oasisMode || 'light', { persist: true, user: runtime.user });
       }
     }
     if (!runtime.user) {
       sessionStorage.setItem('lootlingua:guest-theme-explicit:v1', JSON.stringify({
         themeId,
-        oasisMode: runtime.state.oasisMode || 'light',
-        entryUpdatedAt: runtime.state.updatedAt || Date.now(),
+        oasisMode: selected.oasisMode || 'light',
+        entryUpdatedAt: selected.updatedAt || Date.now(),
         at: Date.now(),
       }));
-    }
-    if (runtime.user && typeof root._saveProfileToCloudNow === 'function') {
-      root._saveProfileToCloudNow().catch(() => {});
     }
   }
 
@@ -781,6 +954,7 @@
     document.documentElement.classList.remove('journey-auth-active');
     document.body.classList.remove('journey-auth-active');
     setBackgroundInert(false);
+    if (runtime.opened) setBackgroundInert(true);
     const authPromptFocus = runtime.authPromptFocus;
     if (!options?.silent && authPromptFocus?.isConnected) {
       requestAnimationFrame(() => authPromptFocus.focus?.({ preventScroll: true }));
@@ -788,9 +962,34 @@
     runtime.authPromptFocus = null;
   }
 
-  function cancelPendingJourneyIntent() {
-    localStorage.removeItem(api().pendingIntentStorageKey({}));
+  function dismissJourneyAuthPrompt() {
     closeJourneyAuthPrompt();
+  }
+
+  function claimGuestPendingIntentForUser(user) {
+    if (!user?.uid) return null;
+    const guestKey = api().pendingIntentStorageKey({});
+    const accountKey = api().pendingIntentStorageKey(identityFor(user));
+    const guestRaw = readJson(guestKey, null);
+    if (!guestRaw) return null;
+    const selection = api().resolvePendingIntentCandidate(
+      readJson(accountKey, null),
+      guestRaw,
+      Date.now()
+    );
+    if (!selection.intent) return null;
+    writeJson(accountKey, selection.intent);
+    localStorage.removeItem(guestKey);
+    return selection.intent;
+  }
+
+  function claimGuestThemeForUser(user) {
+    if (!user?.uid) return;
+    const key = 'lootlingua:guest-theme-explicit:v1';
+    const marker = safeParse(sessionStorage.getItem(key), null);
+    if (!marker || marker.targetUid === user.uid) return;
+    if (marker.targetUid) return;
+    sessionStorage.setItem(key, JSON.stringify({ ...marker, targetUid: user.uid }));
   }
 
   function onJourneyAuthPromptKeydown(event) {
@@ -798,7 +997,7 @@
     if (!prompt) return;
     if (event.key === 'Escape') {
       event.preventDefault();
-      cancelPendingJourneyIntent();
+      dismissJourneyAuthPrompt();
       return;
     }
     if (event.key !== 'Tab') return;
@@ -830,14 +1029,14 @@
         <p class="journey-auth-status" id="journeyAuthStatus" role="status" aria-live="polite"></p>
         <div class="journey-auth-actions">
           <button type="button" class="entry-primary" data-journey-auth="login">المتابعة بحساب Google</button>
-          <button type="button" class="entry-secondary" data-journey-auth="guest">المتابعة كضيف الآن</button>
+          <button type="button" class="entry-secondary" data-journey-auth="guest">استكشف كضيف الآن</button>
         </div>
       </section>`;
     document.body.appendChild(prompt);
     document.documentElement.classList.add('journey-auth-active');
     document.body.classList.add('journey-auth-active');
     setBackgroundInert(true);
-    prompt.querySelector('[data-journey-auth="guest"]')?.addEventListener('click', cancelPendingJourneyIntent);
+    prompt.querySelector('[data-journey-auth="guest"]')?.addEventListener('click', dismissJourneyAuthPrompt);
     prompt.querySelector('[data-journey-auth="login"]')?.addEventListener('click', async (event) => {
       const button = event.currentTarget;
       const status = prompt.querySelector('#journeyAuthStatus');
@@ -934,6 +1133,9 @@
         if (!published?.getPublishedWorld || !actions?.resumePendingIntent) {
           throw Object.assign(new Error('Journey entry is not ready.'), { retryable: true });
         }
+        if (intent.returnTo && root.history?.replaceState) {
+          try { root.history.replaceState(root.history.state, '', intent.returnTo); } catch (_) {}
+        }
         const world = await published.getPublishedWorld(intent.worldId);
         if (!world) {
           const cancelled = api().sanitizePendingIntent({
@@ -947,7 +1149,13 @@
           root.loadWorldsView?.();
           return false;
         }
-        await actions.resumePendingIntent(intent, world);
+        const restoration = await actions.resumePendingIntent(intent, world);
+        if (restoration?.restored !== true) {
+          throw Object.assign(new Error('The requested Journey action did not complete.'), {
+            code: 'journey/intent-not-completed',
+            retryable: true,
+          });
+        }
         const consumed = api().sanitizePendingIntent({
           ...intent,
           status: 'consumed',
@@ -981,28 +1189,65 @@
     return run();
   }
 
-  async function runCta(id) {
-    const expected = runtime.action;
-    if (expected && id === expected.id && api().ctaContradictsSignals(expected, runtime.signals)) return;
-    close();
+  async function openEntryDestination(id, expected) {
     if (id === 'resume-quiz') {
-      root.loadQuizView?.();
-      return;
+      if (typeof root.loadQuizView !== 'function') throw new Error('Quiz destination is unavailable.');
+      root.loadQuizView();
+      return { type: 'quiz' };
     }
     if (id === 'continue-journey' || id === 'resume-journey-session') {
-      root.loadWorldsView?.();
       const worldId = expected?.worldId || runtime.signals?.activeJourney?.worldId;
-      if (worldId) {
-        setTimeout(() => root.openPublishedWorld?.(worldId), 0);
+      if (!worldId || typeof root.loadWorldsView !== 'function' || typeof root.openPublishedWorld !== 'function') {
+        throw new Error('Journey destination is unavailable.');
       }
-      return;
+      root.loadWorldsView();
+      root.openPublishedWorld(worldId);
+      return { type: 'world', worldId };
     }
     if (id === 'review-words' || id === 'new-user-start') {
-      root.loadPersonalDictionary?.();
-      if (id === 'new-user-start') setTimeout(() => document.getElementById('wordInput')?.focus(), 0);
-      return;
+      if (typeof root.loadPersonalDictionary !== 'function') {
+        throw new Error('Dictionary destination is unavailable.');
+      }
+      root.loadPersonalDictionary();
+      return { type: 'dictionary', focusWordInput: id === 'new-user-start' };
     }
-    root.loadWorldsView?.();
+    if (id === 'explore-worlds' || id === 'suggest-placement') {
+      if (typeof root.loadWorldsView !== 'function') throw new Error('Worlds destination is unavailable.');
+      root.loadWorldsView();
+      return { type: 'worlds' };
+    }
+    throw new Error('Unsupported Entry destination.');
+  }
+
+  async function runCta(id) {
+    if (!runtime.state || runtime.state.status !== 'in-progress' || runtime.state.currentStep !== 'action') return;
+    const expected = runtime.action || api().resolveNextAction(runtime.signals || {});
+    if (![expected?.id, expected?.secondaryId].filter(Boolean).includes(id)) return;
+    const actionReady = runtime.state.actionStatus === 'completed' || (
+      runtime.presentation?.classification === 'returning-with-progress' &&
+      runtime.state.actionStatus === 'ready'
+    );
+    if (!actionReady) return;
+    if (api().ctaContradictsSignals({ ...expected, id }, runtime.signals)) return;
+
+    setBusy(true, 'جارٍ فتح وجهتك…');
+    try {
+      const destination = await openEntryDestination(id, expected);
+      const completed = api().transitionState(runtime.state, { type: 'complete' }, Date.now());
+      await commitTerminalState(completed, 'جارٍ حفظ اكتمال التجربة…', { applyAppearance: true });
+      close();
+      if (destination.focusWordInput) {
+        setTimeout(() => document.getElementById('wordInput')?.focus(), 0);
+      }
+    } catch (error) {
+      setBusy(false);
+      const status = document.getElementById('entryExperienceStatus');
+      if (status) status.textContent = error?.code === 'entry/write-failed'
+        ? 'وصلنا إلى وجهتك، لكن تعذّر تأكيد اكتمال التجربة في حسابك. أبقيناها مفتوحة للمحاولة مرة أخرى.'
+        : (error?.code === 'entry/profile-write-failed'
+          ? 'تعذّر حفظ المظهر في حسابك. لم نغلق التجربة ولم نعتبرها مكتملة.'
+          : 'تعذّر فتح الوجهة المطلوبة. بقيت التجربة مفتوحة ولم تُعتبر مكتملة.');
+    }
   }
 
   function setBackgroundInert(active) {
@@ -1041,7 +1286,7 @@
     if (!runtime.opened) return;
     if (event.key === 'Escape') {
       event.preventDefault();
-      panelElement()?.querySelector('[data-entry-action="skip-experience"], [data-entry-action="cancel-settings"], [data-entry-action="skip-interests"], [data-entry-action="back"]')?.focus();
+      panelElement()?.querySelector('[data-entry-action="cancel-settings"], [data-entry-action="skip-interests"], [data-entry-action="back"]')?.focus();
       return;
     }
     if (['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(event.key)) {
@@ -1121,9 +1366,11 @@
       runtime.bootToken += 1;
       if (event.detail?.user) {
         captureGuestSnapshot();
+        claimGuestPendingIntentForUser(event.detail.user);
+        claimGuestThemeForUser(event.detail.user);
         closeJourneyAuthPrompt({ silent: true });
       }
-      close({ silent: true });
+      if (runtime.opened) setBusy(true, 'جارٍ ربط حسابك ومتابعة خطوتك…');
       queueMicrotask(boot);
     });
     root.addEventListener('lootlingua:profile-snapshot', () => queueMicrotask(boot));

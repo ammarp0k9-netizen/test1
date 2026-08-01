@@ -77,6 +77,7 @@ function entryState(overrides = {}) {
     themeId: '',
     oasisMode: 'light',
     themeExplicit: false,
+    actionStatus: 'pending',
     source: 'app-entry',
     startedAt: Date.UTC(2026, 7, 1, 10, 0, 0),
     updatedAt: Date.UTC(2026, 7, 1, 10, 0, 0),
@@ -111,7 +112,7 @@ export const legacyEntryFixtures = deepFreeze({
       ],
     },
     expected: {
-      classification: 'returning-with-progress',
+      classification: 'returning-light',
       audience: 'returning',
       actionId: 'review-words',
     },
@@ -185,7 +186,7 @@ export const legacyEntryFixtures = deepFreeze({
       srsEntryCount: 2,
     },
     expected: {
-      classification: 'returning-with-progress',
+      classification: 'returning-light',
       audience: 'returning',
       actionId: 'review-words',
     },
@@ -323,7 +324,7 @@ export const legacyEntryFixtures = deepFreeze({
     expected: {
       classification: 'returning-guest-with-local-data',
       audience: 'returning-guest',
-      actionId: 'explore-worlds',
+      actionId: 'new-user-start',
     },
   },
 
@@ -374,7 +375,7 @@ export const legacyEntryFixtures = deepFreeze({
     expected: {
       classification: 'brand-new',
       audience: 'new',
-      actionId: 'explore-worlds',
+      actionId: 'new-user-start',
     },
   },
 });
@@ -390,6 +391,7 @@ export const persistedEntryStates = deepFreeze({
   }),
   completed: entryState({
     status: 'completed',
+    actionStatus: 'completed',
     currentStep: 'action',
     interestsStatus: 'selected',
     interestIds: ['games'],
@@ -440,6 +442,7 @@ export const guestMergeFixtures = deepFreeze({
   }),
   guestCompleted: entryState({
     status: 'completed',
+    actionStatus: 'completed',
     audience: 'returning-guest',
     classification: 'returning-guest-with-local-data',
     currentStep: 'action',
@@ -462,4 +465,3 @@ export const scopedIdentities = deepFreeze({
 export function cloneFixture(value) {
   return structuredClone(value);
 }
-

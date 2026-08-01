@@ -1,0 +1,584 @@
+{
+  "generatedAt": "2026-08-01T20:21:21.606Z",
+  "browser": "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",
+  "appUrl": "http://127.0.0.1:9197/app",
+  "harness": "real Chrome DOM/input/reload with Firebase replaced by an in-page deterministic adapter",
+  "passed": true,
+  "caseCount": 16,
+  "failures": [],
+  "runtimeExceptions": [],
+  "errorLogs": [],
+  "cases": [
+    {
+      "id": "guest-new-desktop",
+      "classification": "brand-new",
+      "visibleSteps": [
+        "interests",
+        "theme",
+        "action"
+      ],
+      "firstAction": {
+        "visible": true,
+        "revealed": true,
+        "statusBefore": "in-progress"
+      },
+      "auth": "not shown during Product Entry",
+      "completion": {
+        "at": "after destination CTA",
+        "status": "completed"
+      },
+      "destination": "personalView",
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "layout": {
+        "noHorizontalOverflow": true,
+        "panelInsideViewport": true
+      },
+      "images": [
+        "reports/product-entry-evidence/guest-new-desktop-interests.png",
+        "reports/product-entry-evidence/guest-new-desktop-first-action.png",
+        "reports/product-entry-evidence/guest-new-desktop-destination.png"
+      ],
+      "failures": [],
+      "passed": true
+    },
+    {
+      "id": "guest-new-390",
+      "classification": "brand-new",
+      "visibleSteps": [
+        "interests",
+        "theme",
+        "action"
+      ],
+      "firstAction": {
+        "visible": true,
+        "revealed": true,
+        "statusBefore": "in-progress"
+      },
+      "auth": "not shown during Product Entry",
+      "completion": {
+        "at": "after destination CTA",
+        "status": "completed"
+      },
+      "destination": "personalView",
+      "viewport": {
+        "width": 390,
+        "height": 844
+      },
+      "layout": {
+        "noHorizontalOverflow": true,
+        "panelInsideViewport": true
+      },
+      "images": [
+        "reports/product-entry-evidence/guest-new-390-interests.png",
+        "reports/product-entry-evidence/guest-new-390-first-action.png",
+        "reports/product-entry-evidence/guest-new-390-destination.png"
+      ],
+      "failures": [],
+      "passed": true
+    },
+    {
+      "id": "guest-new-320",
+      "classification": "brand-new",
+      "visibleSteps": [
+        "interests",
+        "theme",
+        "action"
+      ],
+      "firstAction": {
+        "visible": true,
+        "revealed": true,
+        "statusBefore": "in-progress"
+      },
+      "auth": "not shown during Product Entry",
+      "completion": {
+        "at": "after destination CTA",
+        "status": "completed"
+      },
+      "destination": "personalView",
+      "viewport": {
+        "width": 320,
+        "height": 568
+      },
+      "layout": {
+        "noHorizontalOverflow": true,
+        "panelInsideViewport": true
+      },
+      "images": [
+        "reports/product-entry-evidence/guest-new-320-interests.png",
+        "reports/product-entry-evidence/guest-new-320-first-action.png",
+        "reports/product-entry-evidence/guest-new-320-destination.png"
+      ],
+      "failures": [],
+      "passed": true
+    },
+    {
+      "id": "guest-words",
+      "classification": "returning-guest-with-local-data",
+      "visibleSteps": [
+        "interests",
+        "theme",
+        "action"
+      ],
+      "firstAction": {
+        "visible": true,
+        "revealed": true,
+        "statusBefore": "in-progress"
+      },
+      "auth": "not shown during Product Entry",
+      "completion": {
+        "at": "after destination CTA",
+        "status": "completed"
+      },
+      "destination": "personalView",
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "layout": {
+        "noHorizontalOverflow": true,
+        "panelInsideViewport": true
+      },
+      "images": [
+        "reports/product-entry-evidence/guest-words-interests.png",
+        "reports/product-entry-evidence/guest-words-first-action.png",
+        "reports/product-entry-evidence/guest-words-destination.png"
+      ],
+      "failures": [],
+      "passed": true
+    },
+    {
+      "id": "guest-xp-light",
+      "classification": "returning-guest-with-local-data",
+      "visibleSteps": [
+        "interests",
+        "theme",
+        "action"
+      ],
+      "firstAction": {
+        "visible": true,
+        "revealed": true,
+        "statusBefore": "in-progress"
+      },
+      "auth": "not shown during Product Entry",
+      "completion": {
+        "at": "after destination CTA",
+        "status": "completed"
+      },
+      "destination": "personalView",
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "layout": {
+        "noHorizontalOverflow": true,
+        "panelInsideViewport": true
+      },
+      "images": [
+        "reports/product-entry-evidence/guest-xp-light-interests.png",
+        "reports/product-entry-evidence/guest-xp-light-first-action.png",
+        "reports/product-entry-evidence/guest-xp-light-destination.png"
+      ],
+      "failures": [],
+      "passed": true
+    },
+    {
+      "id": "account-new",
+      "classification": "brand-new",
+      "visibleSteps": [
+        "interests",
+        "theme",
+        "action"
+      ],
+      "firstAction": {
+        "visible": true,
+        "revealed": true,
+        "statusBefore": "in-progress"
+      },
+      "auth": "not shown during Product Entry",
+      "completion": {
+        "at": "after destination CTA",
+        "status": "completed"
+      },
+      "destination": "personalView",
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "layout": {
+        "noHorizontalOverflow": true,
+        "panelInsideViewport": true
+      },
+      "images": [
+        "reports/product-entry-evidence/account-new-interests.png",
+        "reports/product-entry-evidence/account-new-first-action.png",
+        "reports/product-entry-evidence/account-new-destination.png"
+      ],
+      "failures": [],
+      "passed": true
+    },
+    {
+      "id": "account-words",
+      "classification": "returning-light",
+      "visibleSteps": [
+        "interests",
+        "theme",
+        "action"
+      ],
+      "firstAction": {
+        "visible": true,
+        "revealed": true,
+        "statusBefore": "in-progress"
+      },
+      "auth": "not shown during Product Entry",
+      "completion": {
+        "at": "after destination CTA",
+        "status": "completed"
+      },
+      "destination": "personalView",
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "layout": {
+        "noHorizontalOverflow": true,
+        "panelInsideViewport": true
+      },
+      "images": [
+        "reports/product-entry-evidence/account-words-interests.png",
+        "reports/product-entry-evidence/account-words-first-action.png",
+        "reports/product-entry-evidence/account-words-destination.png"
+      ],
+      "failures": [],
+      "passed": true
+    },
+    {
+      "id": "account-journey",
+      "classification": "returning-with-progress",
+      "visibleSteps": [
+        "action"
+      ],
+      "firstAction": {
+        "visible": true,
+        "kind": "shortened return CTA",
+        "statusBefore": "in-progress"
+      },
+      "auth": "not required",
+      "completion": {
+        "at": "after Journey destination",
+        "status": "completed"
+      },
+      "destination": "worldsView:smoke-world",
+      "images": [
+        "reports/product-entry-evidence/account-journey-short-return.png"
+      ],
+      "failures": [],
+      "passed": true
+    },
+    {
+      "id": "account-completed",
+      "classification": "brand-new",
+      "visibleSteps": [],
+      "firstAction": {
+        "visible": false,
+        "reason": "v1 already completed"
+      },
+      "auth": "not shown",
+      "completion": {
+        "at": "pre-existing version document",
+        "status": "completed"
+      },
+      "destination": "homeView",
+      "images": [
+        "reports/product-entry-evidence/account-completed-hidden-app.png"
+      ],
+      "failures": [],
+      "passed": true
+    },
+    {
+      "id": "auth-close",
+      "classification": "brand-new",
+      "visibleSteps": [
+        "interests",
+        "theme",
+        "action"
+      ],
+      "firstAction": {
+        "visible": true,
+        "revealed": true
+      },
+      "auth": "shown only after Start Journey; dismissed with real Escape key",
+      "pendingIntent": [
+        "pending"
+      ],
+      "completion": {
+        "at": "guest exploration destination before cloud-only action",
+        "status": "completed"
+      },
+      "destination": "worldsView",
+      "images": [
+        "reports/product-entry-evidence/auth-close-prompt.png",
+        "reports/product-entry-evidence/auth-close-guest-exploration.png"
+      ],
+      "failures": [],
+      "passed": true
+    },
+    {
+      "id": "auth-success",
+      "classification": "brand-new",
+      "visibleSteps": [
+        "interests",
+        "theme",
+        "action"
+      ],
+      "firstAction": {
+        "visible": true,
+        "revealed": true
+      },
+      "auth": "real DOM prompt → login button → auth-state callback",
+      "pendingIntent": "consumed",
+      "completion": {
+        "at": "guest first-action destination; intent consumed only after execution",
+        "status": "completed"
+      },
+      "destination": "worldsView:smoke-world",
+      "images": [
+        "reports/product-entry-evidence/auth-success-prompt.png",
+        "reports/product-entry-evidence/auth-success-resumed-intent.png"
+      ],
+      "failures": [],
+      "passed": true
+    },
+    {
+      "id": "refresh-guest",
+      "classification": "brand-new",
+      "visibleSteps": [
+        "interests",
+        "theme",
+        "action"
+      ],
+      "refresh": {
+        "interests": {
+          "before": [
+            "technology"
+          ],
+          "after": [
+            "technology"
+          ]
+        },
+        "theme": {
+          "before": "ocean",
+          "after": "ocean"
+        },
+        "action": {
+          "before": "action/in-progress",
+          "after": "action/in-progress"
+        }
+      },
+      "firstAction": {
+        "visible": true
+      },
+      "auth": "not shown",
+      "completion": {
+        "at": "not yet complete",
+        "status": "in-progress"
+      },
+      "destination": "homeView",
+      "images": [
+        "reports/product-entry-evidence/refresh-guest-interests-after-refresh.png",
+        "reports/product-entry-evidence/refresh-guest-theme-after-refresh.png",
+        "reports/product-entry-evidence/refresh-guest-action-after-refresh.png"
+      ],
+      "failures": [],
+      "passed": true
+    },
+    {
+      "id": "refresh-account-theme",
+      "classification": "brand-new",
+      "visibleSteps": [
+        "interests",
+        "theme"
+      ],
+      "refresh": {
+        "theme": {
+          "before": "ocean",
+          "after": "ocean",
+          "explicit": true
+        }
+      },
+      "firstAction": {
+        "visible": false,
+        "reason": "refresh probe stopped at theme"
+      },
+      "auth": "account already authenticated",
+      "completion": {
+        "at": "not complete",
+        "status": "in-progress"
+      },
+      "destination": "homeView",
+      "images": [
+        "reports/product-entry-evidence/refresh-account-theme-theme-preserved.png"
+      ],
+      "failures": [],
+      "passed": true
+    },
+    {
+      "id": "entry-cloud-failure",
+      "classification": "brand-new",
+      "visibleSteps": [
+        "interests",
+        "theme",
+        "action"
+      ],
+      "firstAction": {
+        "visible": true,
+        "revealed": true
+      },
+      "auth": "account already authenticated",
+      "failure": {
+        "kind": "entry",
+        "statusText": "وصلنا إلى وجهتك، لكن تعذّر تأكيد اكتمال التجربة في حسابك. أبقيناها مفتوحة للمحاولة مرة أخرى.",
+        "saveCalls": [
+          {
+            "uid": "account-entry-failure",
+            "status": "in-progress",
+            "step": "theme"
+          },
+          {
+            "uid": "account-entry-failure",
+            "status": "in-progress",
+            "step": "action"
+          },
+          {
+            "uid": "account-entry-failure",
+            "status": "in-progress",
+            "step": "action"
+          },
+          {
+            "uid": "account-entry-failure",
+            "status": "completed",
+            "step": "action"
+          }
+        ],
+        "profileCalls": [
+          {
+            "uid": "account-entry-failure",
+            "verify": true
+          }
+        ]
+      },
+      "completion": {
+        "at": "not complete because persistence failed",
+        "status": "in-progress"
+      },
+      "destination": "personalView",
+      "refresh": {
+        "stage": "action",
+        "status": "in-progress"
+      },
+      "images": [
+        "reports/product-entry-evidence/entry-cloud-failure-kept-open.png",
+        "reports/product-entry-evidence/entry-cloud-failure-after-refresh.png"
+      ],
+      "failures": [],
+      "passed": true
+    },
+    {
+      "id": "profile-cloud-failure",
+      "classification": "brand-new",
+      "visibleSteps": [
+        "interests",
+        "theme",
+        "action"
+      ],
+      "firstAction": {
+        "visible": true,
+        "revealed": true
+      },
+      "auth": "account already authenticated",
+      "failure": {
+        "kind": "profile",
+        "statusText": "تعذّر حفظ المظهر في حسابك. لم نغلق التجربة ولم نعتبرها مكتملة.",
+        "saveCalls": [
+          {
+            "uid": "account-profile-failure",
+            "status": "in-progress",
+            "step": "theme"
+          },
+          {
+            "uid": "account-profile-failure",
+            "status": "in-progress",
+            "step": "action"
+          },
+          {
+            "uid": "account-profile-failure",
+            "status": "in-progress",
+            "step": "action"
+          }
+        ],
+        "profileCalls": [
+          {
+            "uid": "account-profile-failure",
+            "verify": true
+          }
+        ]
+      },
+      "completion": {
+        "at": "not complete because persistence failed",
+        "status": "in-progress"
+      },
+      "destination": "personalView",
+      "refresh": {
+        "stage": "action",
+        "status": "in-progress"
+      },
+      "images": [
+        "reports/product-entry-evidence/profile-cloud-failure-kept-open.png",
+        "reports/product-entry-evidence/profile-cloud-failure-after-refresh.png"
+      ],
+      "failures": [],
+      "passed": true
+    },
+    {
+      "id": "account-switch",
+      "classification": {
+        "accountA": "brand-new",
+        "accountB": "brand-new"
+      },
+      "visibleSteps": {
+        "accountA": [
+          "interests",
+          "theme",
+          "action"
+        ],
+        "accountB": [
+          "interests",
+          "theme",
+          "action"
+        ]
+      },
+      "firstAction": {
+        "accountA": true,
+        "accountB": true
+      },
+      "auth": "two real auth-state callbacks on one browser profile",
+      "completion": {
+        "accountA": "completed",
+        "accountB": "completed"
+      },
+      "destination": {
+        "accountA": "personalView",
+        "accountB": "personalView"
+      },
+      "accountAReturnVisible": false,
+      "images": [
+        "reports/product-entry-evidence/account-switch-account-b-entry.png",
+        "reports/product-entry-evidence/account-switch-account-a-return.png"
+      ],
+      "failures": [],
+      "passed": true
+    }
+  ]
+}
