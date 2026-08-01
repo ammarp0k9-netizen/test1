@@ -68,6 +68,31 @@ assert.match(source, /createdAt: existing\.createdAt/, 'World updates do not pre
 assert.match(source, /rankCount: existing\.rankCount/, 'World updates do not preserve counters.');
 assert.match(source, /cleanWorld\(candidate, \{ worldId \}\)/, 'World writes do not use the canonical schema.');
 assert.match(source, /compactForStorage/, 'World writes are not compacted for storage.');
+assert.match(
+  source,
+  /WORLD_EDITABLE_FIELDS[\s\S]*?'primaryInterest'[\s\S]*?'interestTags'/,
+  'World interest fields do not pass through the Admin cloud write contract.'
+);
+assert.match(
+  source,
+  /primaryInterest:\s*schema\.normalizeWorldInterest\(data\.primaryInterest\)/,
+  'Admin world reads do not normalize legacy primary interests.'
+);
+assert.match(
+  source,
+  /interestTags:\s*schema\.normalizeWorldInterestTags\(data\.interestTags\)/,
+  'Admin world reads do not normalize legacy interest tags.'
+);
+assert.match(
+  source,
+  /world\.primaryInterest === schema\.WORLD_INTEREST_UNKNOWN[\s\S]*?delete world\.primaryInterest/,
+  'The derived legacy unknown sentinel must not be persisted.'
+);
+assert.match(
+  source,
+  /'content\/world-interest-required'/,
+  'New worlds may bypass primary-interest classification.'
+);
 assert.match(source, /content\/publish-requires-slug/, 'Published worlds are not required to have a slug.');
 assert.match(source, /\['draft', 'published', 'archived'\]/, 'World status values are not explicitly constrained.');
 assert.match(source, /httpsCallable\(functions, 'deleteContentWorld'\)/, 'World deletion does not use the backend callable.');

@@ -79,6 +79,13 @@
   }
 
   onAuthStateChanged(auth, (user) => {
+    window.__lootlinguaAuthResolved = true;
+    window.__lootlinguaAuthUser = user || null;
+    window.__lootlinguaAuthGeneration = (Number(window.__lootlinguaAuthGeneration) || 0) + 1;
+    window.__lootlinguaProfileSnapshot = null;
+    window.__lootlinguaMasterySnapshot = null;
+    window.__lootlinguaInitialDataReady = false;
+    window._profileLoaded = false;
     window.dispatchEvent(new CustomEvent('lootlingua:auth-state', { detail: { user: user || null } }));
     // Notify Smart Loading Overlay that auth state is resolved
     if (window.SmartLoadingOverlay && window.SmartLoadingOverlay.onAuthResolved) {
@@ -112,7 +119,7 @@
     }
     if (user) {
       if (typeof window.beginInitialFeatureLoad === "function") {
-        window.beginInitialFeatureLoad(["words", "profile"]);
+        window.beginInitialFeatureLoad(["words", "profile", "mastery"]);
       } else {
         window.__suppressUnlockNotices = true;
       }
@@ -165,15 +172,22 @@
       if (isIOSDevice()) {
         sessionStorage.setItem(LOGIN_REDIRECT_PENDING_KEY, '1');
         await signInWithRedirect(auth, provider);
-        return;
+        return true;
       }
       await signInWithPopup(auth, provider);
       setLoginLoading(false);
+      return true;
     } catch (e) {
       console.error(e.code, e.message);
       sessionStorage.removeItem(LOGIN_REDIRECT_PENDING_KEY);
       setLoginLoading(false);
-      if (e.code === 'auth/popup-blocked') alert("الـ popup اتعطل من المتصفح. جرب تسمح لـ popups للموقع.");
+      const message = e.code === 'auth/popup-blocked'
+        ? 'منع المتصفح نافذة تسجيل الدخول. اسمح بالنوافذ المنبثقة ثم حاول مرة أخرى.'
+        : (e.code === 'auth/popup-closed-by-user' || e.code === 'auth/cancelled-popup-request')
+          ? 'تم إغلاق تسجيل الدخول. لم نفقد أيًا من اختياراتك.'
+          : 'لم يكتمل تسجيل الدخول. يمكنك المحاولة مرة أخرى.';
+      window.showToast?.(message, e.code === 'auth/popup-blocked' ? 'danger' : 'info', 4600, { critical: true });
+      return false;
     }
   };
 
@@ -1017,13 +1031,37 @@
     wordMasteryUnsubscribe = onSnapshot(
       doc(db, "users", user.uid, "meta", "word_mastery"),
       (snapshot) => {
-        if (auth.currentUser?.uid !== listenerUid || !snapshot.exists()) return;
-        const entries = snapshot.data()?.entries;
+        if (auth.currentUser?.uid !== listenerUid) return;
+        const entries = snapshot.exists() ? snapshot.data()?.entries : null;
+        window.__lootlinguaMasterySnapshot = {
+          uid: listenerUid,
+          exists: snapshot.exists(),
+          entryCount: entries && typeof entries === 'object' ? Object.keys(entries).length : 0,
+          readFailed: false,
+        };
         if (entries && typeof window.applyGlobalWordMasterySnapshot === 'function') {
           window.applyGlobalWordMasterySnapshot(entries);
+        } else {
+          window.dispatchEvent(new CustomEvent('lootlingua:word-mastery-snapshot', {
+            detail: { wordKeys: [], uid: listenerUid },
+          }));
         }
+        window.markInitialFeatureLoadPartDone?.('mastery');
       },
-      (error) => console.warn('loadGlobalWordMasteryFromCloud:', error.code || error.message)
+      (error) => {
+        if (auth.currentUser?.uid !== listenerUid) return;
+        window.__lootlinguaMasterySnapshot = {
+          uid: listenerUid,
+          exists: false,
+          entryCount: 0,
+          readFailed: true,
+        };
+        window.dispatchEvent(new CustomEvent('lootlingua:word-mastery-snapshot', {
+          detail: { wordKeys: [], uid: listenerUid, readFailed: true },
+        }));
+        window.markInitialFeatureLoadPartDone?.('mastery');
+        console.warn('loadGlobalWordMasteryFromCloud:', error.code || error.message);
+      }
     );
   }
 
@@ -1432,13 +1470,18 @@
 
   window.saveActiveQuizSessionToCloud = async function(session) {
     const user = auth.currentUser;
-    if (!user || !session) return;
+    if (!user || !session) return false;
     activeQuizSessionWriteChain = activeQuizSessionWriteChain
       .catch(() => {})
       .then(async () => {
-        if (auth.currentUser?.uid !== user.uid) return;
-        try { await setDoc(doc(db, "users", user.uid, "meta", "active_quiz_session"), session, { merge: false }); }
-        catch (e) { console.warn("activeQuizSession save:", e.message); }
+        if (auth.currentUser?.uid !== user.uid) return false;
+        try {
+          await setDoc(doc(db, "users", user.uid, "meta", "active_quiz_session"), session, { merge: false });
+          return true;
+        } catch (e) {
+          console.warn("activeQuizSession save:", e.message);
+          return false;
+        }
       });
     return activeQuizSessionWriteChain;
   };

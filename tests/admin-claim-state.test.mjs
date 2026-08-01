@@ -244,6 +244,7 @@ const realmObject = (value) => vm.runInContext(`(${JSON.stringify(value)})`, con
 const created = await api.createWorld(realmObject({
   title: 'Test World',
   slug: 'test-world',
+  primaryInterest: 'general',
   status: 'draft',
   order: 3,
   rankCount: 999,
@@ -288,7 +289,11 @@ await assert.rejects(
 assert.equal(worldStore.get(created.worldId).title, 'Updated World');
 
 await assert.rejects(
-  () => api.createWorld(realmObject({ title: 'Missing slug', status: 'published' })),
+  () => api.createWorld(realmObject({
+    title: 'Missing slug',
+    primaryInterest: 'general',
+    status: 'published'
+  })),
   (error) => error?.code === 'content/publish-requires-slug'
 );
 

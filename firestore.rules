@@ -149,6 +149,28 @@ service cloud.firestore {
       return !('cefrLevel' in data) || validCefrLevelValue(data.cefrLevel);
     }
 
+    function validWorldInterestValue(interest) {
+      return interest == 'games' || interest == 'movies' ||
+        interest == 'study' || interest == 'general' ||
+        interest == 'technology' || interest == 'travel';
+    }
+
+    function validOptionalWorldInterest(data) {
+      return !('primaryInterest' in data) ||
+        validWorldInterestValue(data.primaryInterest);
+    }
+
+    function validOptionalWorldInterestTags(data) {
+      return !('interestTags' in data) || (
+        data.interestTags is list &&
+        data.interestTags.size() <= 6 &&
+        data.interestTags.toSet().size() == data.interestTags.size() &&
+        data.interestTags.toSet().hasOnly([
+          'games', 'movies', 'study', 'general', 'technology', 'travel'
+        ].toSet())
+      );
+    }
+
     function validClassifiedCefrLevel(level) {
       return level == 'A1' || level == 'A2' || level == 'B1' ||
         level == 'B2' || level == 'C1' || level == 'C2';
@@ -240,15 +262,6 @@ service cloud.firestore {
           get(/databases/$(database)/documents/content_worlds/$(worldId)/ranks/$(rankId)).data);
     }
 
-    function gateAllowsWordMutation(worldId, rankId, gateId) {
-      return rankAllowsChildMutation(worldId, rankId) &&
-        exists(/databases/$(database)/documents/content_worlds/$(worldId)/ranks/$(rankId)/gates/$(gateId)) &&
-        !('_adminGateOperation' in
-          get(/databases/$(database)/documents/content_worlds/$(worldId)/ranks/$(rankId)/gates/$(gateId)).data) &&
-        !('_adminGateCopyOperation' in
-          get(/databases/$(database)/documents/content_worlds/$(worldId)/ranks/$(rankId)/gates/$(gateId)).data);
-    }
-
     function gatePublished(worldId, rankId, gateId) {
       return exists(/databases/$(database)/documents/content_worlds/$(worldId)/ranks/$(rankId)/gates/$(gateId)) &&
         get(/databases/$(database)/documents/content_worlds/$(worldId)/ranks/$(rankId)/gates/$(gateId)).data.status == 'published';
@@ -332,28 +345,11 @@ service cloud.firestore {
         after.wordCount == before.wordCount + 1;
     }
 
-    function wordCreateUpdatesAncestorCounts(worldId, rankId, gateId) {
-      let gateBefore = get(/databases/$(database)/documents/content_worlds/$(worldId)/ranks/$(rankId)/gates/$(gateId)).data;
-      let gateAfter = getAfter(/databases/$(database)/documents/content_worlds/$(worldId)/ranks/$(rankId)/gates/$(gateId)).data;
-      let rankBefore = get(/databases/$(database)/documents/content_worlds/$(worldId)/ranks/$(rankId)).data;
-      let rankAfter = getAfter(/databases/$(database)/documents/content_worlds/$(worldId)/ranks/$(rankId)).data;
-      let worldBefore = get(/databases/$(database)/documents/content_worlds/$(worldId)).data;
-      let worldAfter = getAfter(/databases/$(database)/documents/content_worlds/$(worldId)).data;
-      return gateAfter.wordCount == gateBefore.wordCount + 1 &&
-        gateAfter.version == gateBefore.version &&
-        rankAfter.gateCount == rankBefore.gateCount &&
-        rankAfter.wordCount == rankBefore.wordCount + 1 &&
-        rankAfter.version == rankBefore.version &&
-        worldAfter.rankCount == worldBefore.rankCount &&
-        worldAfter.gateCount == worldBefore.gateCount &&
-        worldAfter.wordCount == worldBefore.wordCount + 1 &&
-        worldAfter.version == worldBefore.version;
-    }
-
     function validWorld(data, worldId) {
       return data.keys().hasOnly([
           'worldId', 'slug', 'title', 'subtitle', 'description', 'icon', 'cover',
-          'theme', 'category', 'difficulty', 'languageFrom', 'languageTo',
+          'theme', 'category', 'primaryInterest', 'interestTags',
+          'difficulty', 'languageFrom', 'languageTo',
           'status', 'version', 'schemaVersion', 'rankCount', 'gateCount',
           'wordCount', 'order', 'isFeatured', 'createdAt', 'updatedAt',
           'createdBy', 'updatedBy'
@@ -372,6 +368,8 @@ service cloud.firestore {
         optionalString(data, 'cover', 2048) &&
         (!('theme' in data) || data.theme is string || data.theme is map) &&
         optionalString(data, 'category', 100) &&
+        validOptionalWorldInterest(data) &&
+        validOptionalWorldInterestTags(data) &&
         optionalString(data, 'difficulty', 80) &&
         optionalString(data, 'languageFrom', 40) &&
         optionalString(data, 'languageTo', 40) &&
@@ -737,6 +735,7 @@ service cloud.firestore {
       return data.keys().hasOnly([
           'userXP', 'xpEconomyVersion', 'dailyStreak', 'maxStreak',
           'lastActivityDate', 'activityMap', 'quizExposureHistory', 'theme',
+          'oasisMode', 'themeIntroSeen',
           'displayName', 'addedGameWords', 'dailyLootState', 'titlesState',
           'activeTitleId', 'dailyQuestDate', 'dailyQuestState',
           'streakFreezes', 'freezeSaves', 'gameDictAdds', 'perfectQuizzes',
@@ -751,6 +750,9 @@ service cloud.firestore {
         optionalMap(data, 'activityMap', 5000) &&
         optionalList(data, 'quizExposureHistory', 3) &&
         optionalString(data, 'theme', 80) &&
+        optionalString(data, 'oasisMode', 20) &&
+        (!('oasisMode' in data) || data.oasisMode == 'light' || data.oasisMode == 'dark') &&
+        optionalList(data, 'themeIntroSeen', 12) &&
         optionalString(data, 'displayName', 120) &&
         optionalList(data, 'addedGameWords', 5000) &&
         optionalMap(data, 'dailyLootState', 100) &&
@@ -763,7 +765,77 @@ service cloud.firestore {
         optionalNonNegativeInt(data, 'gameDictAdds') &&
         optionalNonNegativeInt(data, 'perfectQuizzes') &&
         optionalList(data, 'extraChests', 500) &&
-        optionalTime(data, 'updatedAt');
+         optionalTime(data, 'updatedAt');
+    }
+
+    function validEntryExperienceInterestIds(ids) {
+      return ids is list && ids.size() <= 6 &&
+        ids.toSet().size() == ids.size() &&
+        ids.toSet().hasOnly([
+          'games', 'movies', 'study', 'general', 'technology', 'travel'
+        ].toSet());
+    }
+
+    function validEntryExperience(data, versionId) {
+      return versionId == 'v1' &&
+        data.keys().hasOnly([
+          'contractVersion', 'experienceVersion', 'status', 'audience',
+          'classification', 'currentStep', 'interestsStatus', 'interestIds',
+          'themeStatus', 'themeId', 'oasisMode', 'themeExplicit', 'source',
+          'startedAt', 'updatedAt', 'completedAt', 'skippedAt'
+        ]) &&
+        data.keys().hasAll([
+          'contractVersion', 'experienceVersion', 'status', 'audience',
+          'classification', 'currentStep', 'interestsStatus', 'interestIds',
+          'themeStatus', 'themeId', 'oasisMode', 'themeExplicit', 'source',
+          'startedAt', 'updatedAt', 'completedAt', 'skippedAt'
+        ]) &&
+        data.contractVersion == 1 && data.experienceVersion == 1 &&
+        (data.status == 'in-progress' || data.status == 'completed' || data.status == 'skipped') &&
+        (data.audience == 'new' || data.audience == 'returning' || data.audience == 'returning-guest') &&
+        (
+          data.classification == 'brand-new' ||
+          data.classification == 'returning-with-progress' ||
+          data.classification == 'returning-light' ||
+          data.classification == 'returning-guest-with-local-data' ||
+          data.classification == 'existing-account-without-meaningful-progress'
+        ) &&
+        (data.currentStep == 'interests' || data.currentStep == 'theme' || data.currentStep == 'action') &&
+        (data.interestsStatus == 'pending' || data.interestsStatus == 'selected' || data.interestsStatus == 'skipped') &&
+        validEntryExperienceInterestIds(data.interestIds) &&
+        (data.interestsStatus != 'selected' || data.interestIds.size() > 0) &&
+        (data.interestsStatus == 'selected' || data.interestIds.size() == 0) &&
+        (data.themeStatus == 'pending' || data.themeStatus == 'selected' || data.themeStatus == 'preserved') &&
+        (
+          data.themeId == '' || data.themeId == 'lootlingua' || data.themeId == 'ocean' ||
+          data.themeId == 'golden' || data.themeId == 'scroll' || data.themeId == 'glass'
+        ) &&
+        (data.oasisMode == 'light' || data.oasisMode == 'dark') &&
+        data.themeExplicit is bool &&
+        (data.source == 'app-entry' || data.source == 'guest-migration' || data.source == 'settings') &&
+        data.startedAt is timestamp && data.updatedAt == request.time &&
+        (data.completedAt == null || data.completedAt is timestamp) &&
+        (data.skippedAt == null || data.skippedAt is timestamp) &&
+        (data.status != 'completed' || (data.currentStep == 'action' && data.completedAt is timestamp && data.skippedAt == null)) &&
+        (data.status != 'skipped' || (data.currentStep == 'action' && data.skippedAt is timestamp && data.completedAt == null)) &&
+        (data.status == 'completed' || data.completedAt == null) &&
+        (data.status == 'skipped' || data.skippedAt == null);
+    }
+
+    function validEntryExperienceUpdate(before, after, versionId) {
+      return validEntryExperience(after, versionId) &&
+        after.contractVersion == before.contractVersion &&
+        after.experienceVersion == before.experienceVersion &&
+        after.audience == before.audience &&
+        after.classification == before.classification &&
+        after.startedAt == before.startedAt &&
+        (
+          before.status == 'in-progress' ||
+          (before.status == 'completed' && after.status == 'completed') ||
+          (before.status == 'skipped' && after.status == 'skipped')
+        ) &&
+        (before.completedAt == null || after.completedAt == before.completedAt) &&
+        (before.skippedAt == null || after.skippedAt == before.skippedAt);
     }
 
     function validWordMasteryDocument(data) {
@@ -2294,7 +2366,7 @@ service cloud.firestore {
         levelPlacementSessionIsCurrent(uid, worldId, after, assessmentId);
     }
 
-    function validLevelPlacementResultApply(before, after, uid, worldId, assessmentId) {
+    function validLevelPlacementResultApply(before, after, uid, worldId) {
       let resumesCompletedResult = before.status == 'paused' &&
         before.currentQuestionIndex == before.orderedQuestionIds.size() &&
         before.answers.size() == before.orderedQuestionIds.size() &&
@@ -2381,7 +2453,7 @@ service cloud.firestore {
         journey.get('levelPlacementAssessmentIds', {})[after.cefrLevel] == assessmentId;
     }
 
-    function validLevelPlacementSaveUpdate(before, after, worldId, assessmentId) {
+    function validLevelPlacementSaveUpdate(before, after) {
       return (before.status == 'awaiting-decision' || before.status == 'paused' ||
           before.status == 'completed') &&
         after.status == before.status &&
@@ -2401,7 +2473,7 @@ service cloud.firestore {
         after.updatedAt == request.time;
     }
 
-    function validLevelPlacementClose(before, after, uid, worldId, assessmentId) {
+    function validLevelPlacementClose(before, after, uid, worldId) {
       return after.diff(before).affectedKeys().hasOnly([
           'status', 'pausedAt', 'resumedAt', 'completedAt', 'abandonedAt', 'updatedAt'
         ]) &&
@@ -3664,6 +3736,15 @@ service cloud.firestore {
         allow delete: if false;
       }
 
+      match /entryExperiences/{versionId} {
+        allow read: if isOwner(uid);
+        allow create: if isOwner(uid) &&
+          validEntryExperience(request.resource.data, versionId);
+        allow update: if isOwner(uid) &&
+          validEntryExperienceUpdate(resource.data, request.resource.data, versionId);
+        allow delete: if false;
+      }
+
       match /meta/word_mastery {
         allow read: if isOwner(uid);
         allow create, update: if isOwner(uid) && validWordMasteryDocument(request.resource.data);
@@ -3799,8 +3880,7 @@ service cloud.firestore {
               resource.data,
               request.resource.data,
               uid,
-              worldId,
-              assessmentId
+              worldId
             );
           allow update: if isOwner(uid) &&
             !(
@@ -3823,22 +3903,18 @@ service cloud.firestore {
                 resource.data,
                 request.resource.data,
                 uid,
-                worldId,
-                assessmentId
+                worldId
                 )
                 : (request.resource.data.status != resource.data.status
                   ? validLevelPlacementClose(
                     resource.data,
                     request.resource.data,
                     uid,
-                    worldId,
-                    assessmentId
+                    worldId
                   )
                   : validLevelPlacementSaveUpdate(
                 resource.data,
-                request.resource.data,
-                worldId,
-                assessmentId
+                request.resource.data
                   )
                 )
               )

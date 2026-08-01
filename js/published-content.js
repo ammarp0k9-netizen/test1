@@ -61,6 +61,20 @@ function record(snapshot, idField, parents) {
   };
 }
 
+function worldRecord(snapshot) {
+  const item = record(snapshot, 'worldId');
+  const schema = window.LootLinguaContentSchema;
+  return {
+    ...item,
+    primaryInterest: typeof schema?.normalizeWorldInterest === 'function'
+      ? schema.normalizeWorldInterest(item.primaryInterest)
+      : 'unknown',
+    interestTags: typeof schema?.normalizeWorldInterestTags === 'function'
+      ? schema.normalizeWorldInterestTags(item.interestTags)
+      : [],
+  };
+}
+
 function recordKey(...parts) {
   return parts.map((part) => String(part || '')).join('/');
 }
@@ -112,7 +126,7 @@ async function listPublishedWorlds(options) {
   if (!force && cache.worlds) return cache.worlds.slice();
   try {
     const snapshot = await getDocs(orderedPublishedQuery(contentWorldsCollection()));
-    const items = snapshot.docs.map((item) => record(item, 'worldId'));
+    const items = snapshot.docs.map(worldRecord);
     cache.worlds = items;
     items.forEach((item) => cache.records.worlds.set(item.worldId, item));
     return items.slice();
@@ -129,7 +143,7 @@ async function getPublishedWorld(worldId) {
     if (!snapshot.exists() || snapshot.data().status !== PUBLISHED) {
       throw publishedError('published/not-found', 'Published world was not found.');
     }
-    const item = record(snapshot, 'worldId');
+    const item = worldRecord(snapshot);
     cache.records.worlds.set(id, item);
     return item;
   } catch (error) {

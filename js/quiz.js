@@ -94,12 +94,23 @@ function saveActiveQuizSession() {
     window.saveActiveQuizSessionToCloud?.(session);
   } else {
     localStorage.setItem(ACTIVE_QUIZ_SESSION_KEY, JSON.stringify(session));
+    if (typeof markGuestDataDirty === 'function') markGuestDataDirty();
   }
 }
 
 async function loadStoredActiveQuizSession() {
   if (hasSignedInUser() && typeof window.loadActiveQuizSessionFromCloud === 'function') {
-    return await window.loadActiveQuizSessionFromCloud();
+    const cloudSession = await window.loadActiveQuizSessionFromCloud();
+    if (cloudSession) return cloudSession;
+    const uid = window.auth?.currentUser?.uid;
+    const backupKey = uid ? `lootlingua:migrated-quiz-draft:${uid}` : '';
+    const migratedGuestSession = backupKey ? loadJSON(backupKey, null) : null;
+    if (isResumableQuizSession(migratedGuestSession)) {
+      const saved = await window.saveActiveQuizSessionToCloud?.(migratedGuestSession);
+      if (saved) localStorage.removeItem(backupKey);
+      return migratedGuestSession;
+    }
+    return null;
   }
   return loadJSON(ACTIVE_QUIZ_SESSION_KEY, null);
 }

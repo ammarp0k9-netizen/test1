@@ -40,6 +40,18 @@ test('world mutations use the central cloud facade and optimistic versions', () 
   assert.match(source, /await getCloudApi\(\)\.requestDeleteWorld\([\s\S]*expectedVersion:\s*expectedVersion\(modalState\.world\)/);
 });
 
+test('world interest editing uses the central fixed contract for create and edit', () => {
+  assert.match(source, /schema\?\.WORLD_INTEREST_IDS/);
+  assert.match(source, /schema\?\.WORLD_INTEREST_META/);
+  assert.match(source, /name:\s*'primaryInterest'[\s\S]*worldInterestOptions\(mode === 'edit'\)/);
+  assert.match(source, /checkbox\.name = 'interestTags'/);
+  assert.match(source, /data\.getAll\('interestTags'\)/);
+  assert.match(source, /normalizeWorldInterest\(data\.primaryInterest\)/);
+  assert.match(source, /normalizeWorldInterestTags\(data\.interestTags\)/);
+  assert.match(source, /ids\.includes\('general'\)/);
+  assert.doesNotMatch(source, /const\s+WORLD_INTEREST_IDS\s*=/);
+});
+
 test('rank management exposes a real world-to-ranks list and editor breadcrumb', () => {
   assert.match(source, /makeButton\('إدارة الرتب',\s*'open-ranks'/);
   assert.match(source, /function renderRanks\(\)/);

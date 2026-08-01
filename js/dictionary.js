@@ -109,8 +109,6 @@ function saveAndRender() {
   renderLimit = 20; // العودة للحد الأول عند الحفظ
   render();
   if (isJsonImportBatchActive()) return;
-  if (typeof tryStartEmptyOnboarding === 'function') tryStartEmptyOnboarding();
-  if (typeof notifyDictionaryWordAdded === 'function') notifyDictionaryWordAdded();
 }
 window.saveAndRender = saveAndRender;
 
@@ -1224,7 +1222,6 @@ async function addAiMeaningCore({ word, ar, pos, ex, game }, btn) {
       btn.innerHTML = '<i class="fa-solid fa-check" aria-hidden="true"></i><span>تمت الإضافة</span>';
       btn.classList.add('sug-added');
     }
-    if (added && typeof notifyDictionaryWordAdded === 'function') notifyDictionaryWordAdded();
   } catch (err) {
     console.error('addAiMeaningCore:', err);
     pushNotification('ما قدرنا نضيف الكلمة. جرّب مرة ثانية.', 'danger');
@@ -1477,10 +1474,6 @@ window.fetchSuggestions = async function() {
     loadingTimers.forEach(clearTimeout);
     btn.disabled  = false;
     syncAddFormExpanded();
-    if (isIntroQuestMode()) {
-      updateDailyQuestsBadge();
-      if (document.getElementById('dailyQuestsSheet')?.classList.contains('open')) renderDailyQuests();
-    }
   }
 };
 
@@ -2191,16 +2184,6 @@ async function uploadImportedWordsToCloud(words) {
   return result;
 }
 
-function settleOnboardingAfterJsonImport(wordsBefore, addedCount) {
-  if (wordsBefore > 0 || addedCount < 1 || hasCompletedEmptyOnboarding()) return;
-  hideAllEmptyOnboardingTooltips();
-  emptyOnboardingState.active = false;
-  emptyOnboardingState.phase = 0;
-  localStorage.setItem(EMPTY_ONBOARDING_STORAGE_KEY, 'true');
-  updateDailyQuestsBadge();
-  if (document.getElementById('dailyQuestsSheet')?.classList.contains('open')) renderDailyQuests();
-}
-
 function finalizeJsonImport(ctx, uploadResult) {
   const added = ctx.added || 0;
   const skipped = ctx.skipped || 0;
@@ -2255,8 +2238,6 @@ function finalizeJsonImport(ctx, uploadResult) {
   if (dailyBefore < DAILY_GOAL && dailyAfter >= DAILY_GOAL) {
     setTimeout(launchConfetti, 1100);
   }
-
-  settleOnboardingAfterJsonImport(ctx.wordsBefore, added);
 
   window.__suppressCloudWordsSnapshot = false;
   if (typeof window.writeWordsToStorage === 'function') {

@@ -8,7 +8,8 @@
   });
   const EDITABLE_WORLD_FIELDS = Object.freeze([
     'slug', 'title', 'subtitle', 'description', 'icon', 'cover', 'theme',
-    'category', 'difficulty', 'languageFrom', 'languageTo', 'order', 'isFeatured'
+    'category', 'primaryInterest', 'interestTags', 'difficulty',
+    'languageFrom', 'languageTo', 'order', 'isFeatured'
   ]);
   const EDITABLE_RANK_FIELDS = Object.freeze([
     'title', 'subtitle', 'description', 'order', 'difficulty', 'cefrLevel', 'unlockConfig'
@@ -223,12 +224,20 @@
     const normalized = {};
     [
       'schemaVersion', 'worldId', 'slug', 'title', 'subtitle', 'description',
-      'icon', 'cover', 'theme', 'category', 'difficulty', 'languageFrom',
+      'icon', 'cover', 'theme', 'category', 'primaryInterest', 'interestTags',
+      'difficulty', 'languageFrom',
       'languageTo', 'status', 'version', 'rankCount', 'gateCount', 'wordCount',
       'order', 'isFeatured', 'createdAt', 'updatedAt', 'createdBy', 'updatedBy'
     ].forEach((field) => {
       if (Object.prototype.hasOwnProperty.call(data, field)) normalized[field] = data[field];
     });
+    const schema = root.LootLinguaContentSchema;
+    normalized.primaryInterest = typeof schema?.normalizeWorldInterest === 'function'
+      ? schema.normalizeWorldInterest(data.primaryInterest)
+      : 'unknown';
+    normalized.interestTags = typeof schema?.normalizeWorldInterestTags === 'function'
+      ? schema.normalizeWorldInterestTags(data.interestTags)
+      : [];
     return normalized;
   }
 
@@ -2589,8 +2598,38 @@
     return { wrapper, input: select };
   }
 
+  function worldInterestContract() {
+    const schema = root.LootLinguaContentSchema;
+    const ids = Array.isArray(schema?.WORLD_INTEREST_IDS)
+      ? schema.WORLD_INTEREST_IDS
+      : [];
+    const unknown = String(schema?.WORLD_INTEREST_UNKNOWN || 'unknown');
+    return { schema, ids, unknown };
+  }
+
+  function worldInterestOptions(includeUnknown) {
+    const { schema, ids, unknown } = worldInterestContract();
+    const values = includeUnknown ? [unknown, ...ids] : ids;
+    return values.map((value) => ({
+      value,
+      label: String(schema?.WORLD_INTEREST_META?.[value]?.label || value)
+    }));
+  }
+
+  function defaultWorldInterest() {
+    const { ids, unknown } = worldInterestContract();
+    return ids.includes('general') ? 'general' : (ids[0] || unknown);
+  }
+
   function editorSeed(source, mode) {
     const world = source || {};
+    const { schema, unknown } = worldInterestContract();
+    const normalizedInterest = typeof schema?.normalizeWorldInterest === 'function'
+      ? schema.normalizeWorldInterest(world.primaryInterest)
+      : unknown;
+    const normalizedTags = typeof schema?.normalizeWorldInterestTags === 'function'
+      ? schema.normalizeWorldInterestTags(world.interestTags)
+      : [];
     return {
       slug: mode === 'duplicate' ? '' : String(world.slug || ''),
       title: mode === 'duplicate' ? `نسخة من ${String(world.title || 'عالم')}` : String(world.title || ''),
@@ -2600,6 +2639,10 @@
       cover: String(world.cover || ''),
       theme: String(world.theme || ''),
       category: String(world.category || ''),
+      primaryInterest: mode === 'edit' || normalizedInterest !== unknown
+        ? normalizedInterest
+        : defaultWorldInterest(),
+      interestTags: normalizedTags,
       difficulty: String(world.difficulty || ''),
       languageFrom: String(world.languageFrom || ''),
       languageTo: String(world.languageTo || ''),
@@ -2619,6 +2662,8 @@
       cover: String(data.get('cover') || '').trim(),
       theme: String(data.get('theme') || '').trim(),
       category: String(data.get('category') || '').trim(),
+      primaryInterest: String(data.get('primaryInterest') || 'unknown').trim(),
+      interestTags: data.getAll('interestTags').map((value) => String(value).trim()),
       difficulty: String(data.get('difficulty') || '').trim(),
       languageFrom: String(data.get('languageFrom') || '').trim(),
       languageTo: String(data.get('languageTo') || '').trim(),
@@ -3306,6 +3351,46 @@
       { name: 'languageTo', label: 'لغة الترجمة', value: seed.languageTo, maxLength: 35, placeholder: 'ar' }
     ];
     fields.forEach((definition) => grid.append(makeField(definition).wrapper));
+
+    const primaryInterest = makeSelectField({
+      name: 'primaryInterest',
+      label: 'الاهتمام الأساسي',
+      value: seed.primaryInterest,
+      required: true,
+      wide: true,
+      options: worldInterestOptions(mode === 'edit'),
+      help: 'يُستخدم لتصنيف العالم واقتراح المحتوى الملائم، ولا يغيّر تقدّم المتعلّم.'
+    });
+    grid.append(primaryInterest.wrapper);
+
+    const interestTags = makeElement('div', 'admin-field admin-field-wide');
+    const interestTagsLabel = makeElement('span', 'admin-field-label', 'اهتمامات إضافية');
+    interestTagsLabel.id = 'adminWorldInterestTagsLabel';
+    interestTags.setAttribute('role', 'group');
+    interestTags.setAttribute('aria-labelledby', interestTagsLabel.id);
+    interestTags.append(interestTagsLabel);
+    const interestChoices = makeElement('div', 'admin-interest-options');
+    const interestMeta = root.LootLinguaContentSchema?.WORLD_INTEREST_META || {};
+    worldInterestContract().ids.forEach((interestId) => {
+      const option = makeElement('label', 'admin-check-field');
+      const checkbox = makeElement('input', 'admin-checkbox');
+      checkbox.type = 'checkbox';
+      checkbox.name = 'interestTags';
+      checkbox.value = interestId;
+      checkbox.checked = seed.interestTags.includes(interestId);
+      appendChildren(option, [
+        checkbox,
+        makeElement('span', 'admin-check-label', String(interestMeta[interestId]?.label || interestId))
+      ]);
+      interestChoices.append(option);
+    });
+    interestTags.append(interestChoices);
+    interestTags.append(makeElement(
+      'small',
+      'admin-field-help',
+      'اختر أي وسوم إضافية تنطبق على هذا العالم.'
+    ));
+    grid.append(interestTags);
 
     const featured = makeElement('label', 'admin-check-field admin-field-wide');
     const featuredInput = makeElement('input', 'admin-checkbox');

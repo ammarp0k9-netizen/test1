@@ -53,6 +53,8 @@ const WORLD_EDITABLE_FIELDS = Object.freeze([
   'cover',
   'theme',
   'category',
+  'primaryInterest',
+  'interestTags',
   'difficulty',
   'languageFrom',
   'languageTo',
@@ -410,6 +412,8 @@ function getContentSchema() {
     typeof schema.cleanWord !== 'function' ||
     typeof schema.normalizeWord !== 'function' ||
     typeof schema.normalizeWordIdentity !== 'function' ||
+    typeof schema.normalizeWorldInterest !== 'function' ||
+    typeof schema.normalizeWorldInterestTags !== 'function' ||
     typeof schema.compactForStorage !== 'function'
   ) {
     throw adminCloudError('admin/schema-unavailable', 'The content schema is not available.');
@@ -1022,9 +1026,13 @@ function requireOptions(value, allowedFields, message, optional = false) {
 }
 
 function worldRecord(snapshot) {
+  const data = snapshot.data() || {};
+  const schema = getContentSchema();
   return {
-    ...(snapshot.data() || {}),
+    ...data,
     worldId: snapshot.id,
+    primaryInterest: schema.normalizeWorldInterest(data.primaryInterest),
+    interestTags: schema.normalizeWorldInterestTags(data.interestTags),
   };
 }
 
@@ -1132,6 +1140,9 @@ function cleanWorldForStorage(candidate, worldId) {
     throw adminCloudError('content/publish-requires-slug', 'A published world requires a slug.');
   }
   const world = schema.compactForStorage(schema.cleanWorld(candidate, { worldId }));
+  if (world.primaryInterest === schema.WORLD_INTEREST_UNKNOWN) {
+    delete world.primaryInterest;
+  }
   if (!CONTENT_STATUSES.includes(world.status)) {
     throw adminCloudError('content/invalid-status', 'World status is invalid.');
   }
@@ -1143,6 +1154,13 @@ function cleanWorldForStorage(candidate, worldId) {
 
 function buildCreateCandidate(payload, worldId, uid) {
   const source = requireWorldInput(payload);
+  const schema = getContentSchema();
+  if (schema.normalizeWorldInterest(source.primaryInterest) === schema.WORLD_INTEREST_UNKNOWN) {
+    throw adminCloudError(
+      'content/world-interest-required',
+      'New worlds require a primary interest.'
+    );
+  }
   const candidate = { ...source };
   delete candidate.id;
   delete candidate.createdAt;

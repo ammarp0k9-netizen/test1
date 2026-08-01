@@ -142,6 +142,7 @@ function readSharedWordMasteryStore(uid) {
 
 function writeSharedWordMasteryStore(entries, uid) {
   localStorage.setItem(getWordMasteryStorageKey(uid), JSON.stringify(entries && typeof entries === 'object' ? entries : {}));
+  if (!hasSignedInUser() && typeof markGuestDataDirty === 'function') markGuestDataDirty();
 }
 
 function getWordMasteryKey(wordOrText) {

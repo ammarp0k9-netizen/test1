@@ -828,6 +828,7 @@ window.setLootlinguaDisplayName = function(name) {
 };
 
 document.addEventListener('keydown', (e) => {
+  if (window.__entryExperienceActive || document.getElementById('journeyAuthPrompt')) return;
   if (e.key !== 'Escape') return;
   if (handleEscapeShortcut(e)) return;
   closeNotificationsPanel();
@@ -849,32 +850,6 @@ const DAILY_QUEST_DEFS = [
   { id: 'openLoot', label: 'افتح صندوق اللوت اليومي', reward: 0, icon: 'fa-box-open' },
 ];
 
-const ONBOARDING_INTRO_QUEST_DEFS = [
-  { id: 'introSearch', label: 'ابحث عن أول كلمة إلك في صندوق البحث.', reward: 0, icon: 'fa-magnifying-glass', introOnly: true },
-  { id: 'introAdd', label: 'ضيف الكلمة لقاموسك عشان تفتح أولى ميزات الموقع.', reward: 0, icon: 'fa-plus', introOnly: true },
-];
-
-const EMPTY_ONBOARDING_STORAGE_KEY = 'hasCompletedOnboarding';
-
-const EMPTY_ONBOARDING_COPY = {
-  questTip: '🎯 ابدأ من هون! عندك مهام ترحيبية بسيطة بتستناك.',
-  searchTip: '💡 محتار بأول كلمة؟ جرب اكتب Sword أو Book وشوف شو بيصير! ⚔️',
-  firstWordToast: 'دخلت أول كلمة في رحلتك! راجعها باختبار موثوق، ولما يتطور حفظك إلها رح تكسب XP وتفتح مكافآت جديدة.',
-  treasureUnlock: '🔓 انفتحت لك ميزة الصندوق! روح شوف خانة المكافآت بالأسفل وافتح صندوقك اليومي لتكسب مكافآت جديدة وتثبت حماسلك!',
-};
-
-let emptyOnboardingState = {
-  active: false,
-  phase: 0,
-  questTip: null,
-  searchTip: null,
-  repositionHandler: null,
-};
-
-function hasCompletedEmptyOnboarding() {
-  return localStorage.getItem(EMPTY_ONBOARDING_STORAGE_KEY) === 'true';
-}
-
 function getPersonalDictionaryWordsSnapshot() {
   if (typeof readWordsFromStorage === 'function') {
     try {
@@ -887,27 +862,6 @@ function getPersonalDictionaryWordsSnapshot() {
 
 function getDictionaryWordCount() {
   return getPersonalDictionaryWordsSnapshot().length;
-}
-
-function shouldRunEmptyOnboarding() {
-  if (hasCompletedEmptyOnboarding()) return false;
-  if (getDictionaryWordCount() > 0) return false;
-  if (document.documentElement.classList.contains('onboarding-active')) return false;
-  return true;
-}
-
-function isIntroQuestMode() {
-  return shouldRunEmptyOnboarding();
-}
-
-function getActiveQuestDefs() {
-  return isIntroQuestMode() ? ONBOARDING_INTRO_QUEST_DEFS : DAILY_QUEST_DEFS;
-}
-
-function canStartEmptyOnboardingNow() {
-  if (isInitialLoad || window.isInitialLoad) return false;
-  if (window.__initialFeatureLoadPending instanceof Set && window.__initialFeatureLoadPending.has('words')) return false;
-  return true;
 }
 
 function getDailyQuestState() {
@@ -925,14 +879,6 @@ function saveDailyQuestState(state) {
 }
 
 function isDailyQuestDone(id) {
-  if (id === 'introSearch') {
-    const wordInput = document.getElementById('wordInput');
-    const suggestions = document.getElementById('suggestionsList');
-    const hasInput = Boolean(wordInput?.value.trim());
-    const hasSuggestions = Boolean(suggestions?.querySelector('.sug-item, .suggestion-item, li, button'));
-    return hasInput || hasSuggestions;
-  }
-  if (id === 'introAdd') return getDictionaryWordCount() >= 1;
   const s = getDailyQuestState();
   if (id === 'add3') return getDailyCount() >= 3;
   if (id === 'perfectQuiz') return Boolean(s.flags.perfectQuiz);
@@ -949,8 +895,8 @@ function markDailyQuestFlag(flag) {
 }
 
 function claimDailyQuest(id) {
-  const def = getActiveQuestDefs().find(q => q.id === id);
-  if (!def || def.introOnly || !isDailyQuestDone(id)) return;
+  const def = DAILY_QUEST_DEFS.find(q => q.id === id);
+  if (!def || !isDailyQuestDone(id)) return;
   const s = getDailyQuestState();
   if (s.claimed[id]) return;
   s.claimed[id] = true;
@@ -982,7 +928,6 @@ window.toggleDailyQuestsSheet = function() {
 
 window.closeDailyQuestsSheet = function(silent) {
   const sheet = document.getElementById('dailyQuestsSheet');
-  const wasOpen = sheet?.classList.contains('open');
   const close = () => {
     const backdrop = document.getElementById('dailyQuestsBackdrop');
     const btn = document.getElementById('dailyQuestsBtn');
@@ -992,9 +937,6 @@ window.closeDailyQuestsSheet = function(silent) {
     sheet.setAttribute('aria-hidden', 'true');
     btn?.setAttribute('aria-expanded', 'false');
     document.body.classList.remove('daily-quests-open');
-    if (wasOpen && emptyOnboardingState.active && emptyOnboardingState.phase === 1) {
-      startEmptyOnboardingPhase2();
-    }
   };
   if (silent) close();
   else closeRouteEntry('overlay', 'quests', close);
@@ -1003,7 +945,7 @@ window.closeDailyQuestsSheet = function(silent) {
 function updateDailyQuestsBadge() {
   const badge = document.getElementById('dailyQuestsBadge');
   if (!badge) return;
-  const defs = getActiveQuestDefs();
+  const defs = DAILY_QUEST_DEFS;
   const done = defs.filter(q => isDailyQuestDone(q.id)).length;
   badge.textContent = done + '/' + defs.length;
   const btn = document.getElementById('dailyQuestsBtn');
@@ -1014,13 +956,9 @@ function renderDailyQuests() {
   const list = document.getElementById('dailyQuestsList');
   if (!list) return;
   updateDailyQuestsBadge();
-  const defs = getActiveQuestDefs();
+  const defs = DAILY_QUEST_DEFS;
   const hint = document.getElementById('dailyQuestsResetHint');
-  if (hint) {
-    hint.textContent = isIntroQuestMode()
-      ? 'مهام ترحيبية بسيطة — ابدأ من أول خطوة وكمّل على مزاجك'
-      : 'تتجدد كل يوم — أنجزها لمتابعة تقدّمك اليومي';
-  }
+  if (hint) hint.textContent = 'تتجدد كل يوم — أنجزها لمتابعة تقدّمك اليومي';
   const state = getDailyQuestState();
   list.innerHTML = defs.map(q => {
     const done = isDailyQuestDone(q.id);
@@ -1037,8 +975,6 @@ function renderDailyQuests() {
   }).join('');
   list.querySelectorAll('.daily-quest-item.done').forEach(el => {
     const id = el.dataset.quest;
-    const def = defs.find((q) => q.id === id);
-    if (def?.introOnly) return;
     const st = getDailyQuestState();
     if (!st.claimed[id]) {
       el.style.cursor = 'pointer';
@@ -1046,248 +982,6 @@ function renderDailyQuests() {
     }
   });
 }
-
-function unbindEmptyOnboardingReposition() {
-  if (!emptyOnboardingState.repositionHandler) return;
-  window.removeEventListener('resize', emptyOnboardingState.repositionHandler);
-  window.removeEventListener('scroll', emptyOnboardingState.repositionHandler, true);
-  emptyOnboardingState.repositionHandler = null;
-}
-
-function positionEmptyOnboardingTooltip(tip, anchor, placement = 'above') {
-  if (!tip || !anchor) return;
-  tip.classList.remove('placement-above', 'placement-below', 'placement-below-bar');
-  const width = tip.offsetWidth || 280;
-  const height = tip.offsetHeight || 72;
-
-  if (placement === 'below-bar') {
-    const topBar = document.getElementById('legendTopBar') || anchor.closest('.legend-top-bar');
-    const barRect = topBar?.getBoundingClientRect();
-    const btnRect = anchor.getBoundingClientRect();
-    if (!barRect) return;
-    tip.classList.add('placement-below-bar');
-    let top = barRect.bottom + 10;
-    let left = btnRect.left + btnRect.width / 2 - width / 2;
-    left = Math.max(12, Math.min(left, window.innerWidth - width - 12));
-    top = Math.max(barRect.bottom + 8, Math.min(top, window.innerHeight - height - 12));
-    tip.style.top = `${top}px`;
-    tip.style.left = `${left}px`;
-    const arrowLeft = btnRect.left + btnRect.width / 2 - left;
-    tip.style.setProperty('--tip-arrow-left', `${arrowLeft}px`);
-    return;
-  }
-
-  tip.classList.add(placement === 'below' ? 'placement-below' : 'placement-above');
-  const rect = anchor.getBoundingClientRect();
-  let top = placement === 'below' ? rect.bottom + 14 : rect.top - height - 14;
-  let left = rect.left + rect.width / 2 - width / 2;
-  left = Math.max(12, Math.min(left, window.innerWidth - width - 12));
-  top = Math.max(12, Math.min(top, window.innerHeight - height - 12));
-  tip.style.top = `${top}px`;
-  tip.style.left = `${left}px`;
-}
-
-function bindEmptyOnboardingReposition(tip, anchor, placement) {
-  unbindEmptyOnboardingReposition();
-  const handler = () => positionEmptyOnboardingTooltip(tip, anchor, placement);
-  emptyOnboardingState.repositionHandler = handler;
-  window.addEventListener('resize', handler);
-  window.addEventListener('scroll', handler, true);
-}
-
-function createEmptyOnboardingTooltip(text, anchor, placement = 'above') {
-  const tip = document.createElement('div');
-  tip.className = 'empty-onboarding-tip';
-  tip.setAttribute('role', 'tooltip');
-  tip.innerHTML = `<span class="empty-onboarding-tip-inner">${text}</span>`;
-  document.body.appendChild(tip);
-  positionEmptyOnboardingTooltip(tip, anchor, placement);
-  requestAnimationFrame(() => {
-    positionEmptyOnboardingTooltip(tip, anchor, placement);
-    tip.classList.add('visible');
-  });
-  bindEmptyOnboardingReposition(tip, anchor, placement);
-  return tip;
-}
-
-function removeEmptyOnboardingTooltip(tip, onDone) {
-  if (!tip) {
-    onDone?.();
-    return;
-  }
-  tip.classList.remove('visible');
-  tip.classList.add('fade-out');
-  const finish = () => {
-    tip.remove();
-    onDone?.();
-  };
-  tip.addEventListener('transitionend', finish, { once: true });
-  setTimeout(finish, 380);
-}
-
-function hideEmptyOnboardingQuestTooltip(onDone) {
-  if (!emptyOnboardingState.questTip) {
-    onDone?.();
-    return;
-  }
-  const tip = emptyOnboardingState.questTip;
-  emptyOnboardingState.questTip = null;
-  removeEmptyOnboardingTooltip(tip, onDone);
-}
-
-function removeOrphanEmptyOnboardingTips() {
-  document.querySelectorAll('.empty-onboarding-tip').forEach((tip) => {
-    if (tip !== emptyOnboardingState.questTip && tip !== emptyOnboardingState.searchTip) {
-      tip.remove();
-    }
-  });
-}
-
-function hideEmptyOnboardingSearchTooltip() {
-  unbindEmptyOnboardingSearchDismiss();
-  if (emptyOnboardingState.searchTip) {
-    const tip = emptyOnboardingState.searchTip;
-    emptyOnboardingState.searchTip = null;
-    removeEmptyOnboardingTooltip(tip);
-  }
-  document.querySelectorAll('.empty-onboarding-tip').forEach((tip) => {
-    if (tip !== emptyOnboardingState.questTip) tip.remove();
-  });
-}
-
-function hideAllEmptyOnboardingTooltips() {
-  hideEmptyOnboardingQuestTooltip();
-  hideEmptyOnboardingSearchTooltip();
-  removeOrphanEmptyOnboardingTips();
-  unbindEmptyOnboardingReposition();
-}
-
-function unbindEmptyOnboardingSearchDismiss() {
-  const wordInput = document.getElementById('wordInput');
-  if (!wordInput?.__emptyOnboardingDismiss) return;
-  const dismiss = wordInput.__emptyOnboardingDismiss;
-  wordInput.removeEventListener('input', dismiss);
-  wordInput.removeEventListener('focus', dismiss);
-  wordInput.removeEventListener('keydown', dismiss);
-  wordInput.removeEventListener('pointerdown', dismiss);
-  wordInput.removeEventListener('click', dismiss);
-  wordInput.__emptyOnboardingDismiss = null;
-}
-
-function bindEmptyOnboardingSearchDismiss() {
-  const wordInput = document.getElementById('wordInput');
-  if (!wordInput) return;
-  unbindEmptyOnboardingSearchDismiss();
-  const dismiss = () => {
-    hideEmptyOnboardingSearchTooltip();
-    removeOrphanEmptyOnboardingTips();
-  };
-  wordInput.__emptyOnboardingDismiss = dismiss;
-  wordInput.addEventListener('input', dismiss);
-  wordInput.addEventListener('focus', dismiss);
-  wordInput.addEventListener('keydown', dismiss);
-  wordInput.addEventListener('pointerdown', dismiss);
-  wordInput.addEventListener('click', dismiss);
-}
-
-function initEmptyOnboardingInputWatcher() {
-  if (window.__emptyOnboardingInputWatcher) return;
-  window.__emptyOnboardingInputWatcher = true;
-  const isPersonalSearchTarget = (el) => {
-    if (!el) return false;
-    if (el.id === 'wordInput') return true;
-    return Boolean(el.closest?.('#normalSearchZone'));
-  };
-  const dismissIfTyping = (e) => {
-    if (!emptyOnboardingState.searchTip && !document.querySelector('.empty-onboarding-tip')) return;
-    if (!isPersonalSearchTarget(e.target)) return;
-    hideEmptyOnboardingSearchTooltip();
-  };
-  document.addEventListener('input', dismissIfTyping, true);
-  document.addEventListener('keydown', dismissIfTyping, true);
-  document.addEventListener('beforeinput', dismissIfTyping, true);
-  document.addEventListener('compositionstart', dismissIfTyping, true);
-}
-
-function startEmptyOnboardingPhase1() {
-  if (!shouldRunEmptyOnboarding() || emptyOnboardingState.active) return;
-  initEmptyOnboardingInputWatcher();
-  const btn = document.getElementById('dailyQuestsBtn');
-  if (!btn) return;
-  emptyOnboardingState.active = true;
-  emptyOnboardingState.phase = 1;
-  emptyOnboardingState.questTip = createEmptyOnboardingTooltip(EMPTY_ONBOARDING_COPY.questTip, btn, 'below-bar');
-  updateDailyQuestsBadge();
-}
-
-function startEmptyOnboardingPhase2() {
-  if (!emptyOnboardingState.active || emptyOnboardingState.phase !== 1) return;
-  emptyOnboardingState.phase = 2;
-  const wordInput = document.getElementById('wordInput');
-  if (!wordInput) return;
-  hideEmptyOnboardingQuestTooltip(() => {
-    if (!shouldRunEmptyOnboarding()) {
-      hideAllEmptyOnboardingTooltips();
-      emptyOnboardingState.active = false;
-      emptyOnboardingState.phase = 0;
-      return;
-    }
-    removeOrphanEmptyOnboardingTips();
-    if (emptyOnboardingState.searchTip) {
-      removeEmptyOnboardingTooltip(emptyOnboardingState.searchTip);
-      emptyOnboardingState.searchTip = null;
-    }
-    emptyOnboardingState.searchTip = createEmptyOnboardingTooltip(
-      EMPTY_ONBOARDING_COPY.searchTip,
-      wordInput,
-      'below'
-    );
-    bindEmptyOnboardingSearchDismiss();
-  });
-}
-
-function highlightTreasureDockForOnboarding() {
-  const btn = document.querySelector('.legend-dock-btn[data-dock-view="treasure"]');
-  if (!btn) return;
-  btn.classList.remove('pulse-onboarding-highlight');
-  void btn.offsetWidth;
-  btn.classList.add('pulse-onboarding-highlight');
-  setTimeout(() => btn.classList.remove('pulse-onboarding-highlight'), 4200);
-}
-
-function completeEmptyOnboardingFirstWord() {
-  if (hasCompletedEmptyOnboarding()) return;
-  hideAllEmptyOnboardingTooltips();
-  emptyOnboardingState.active = false;
-  emptyOnboardingState.phase = 3;
-  showToast(EMPTY_ONBOARDING_COPY.firstWordToast, 'success', 5000);
-  setTimeout(() => {
-    pushNotification(EMPTY_ONBOARDING_COPY.treasureUnlock, 'success');
-    refreshFeatureUnlockUI();
-    highlightTreasureDockForOnboarding();
-    localStorage.setItem(EMPTY_ONBOARDING_STORAGE_KEY, 'true');
-    emptyOnboardingState.phase = 0;
-    updateDailyQuestsBadge();
-    if (document.getElementById('dailyQuestsSheet')?.classList.contains('open')) renderDailyQuests();
-  }, 5200);
-}
-
-function notifyDictionaryWordAdded() {
-  if (getDictionaryWordCount() !== 1) return;
-  if (hasCompletedEmptyOnboarding()) return;
-  completeEmptyOnboardingFirstWord();
-}
-
-window.tryStartEmptyOnboarding = function() {
-  if (!canStartEmptyOnboardingNow() || !shouldRunEmptyOnboarding()) return;
-  if (emptyOnboardingState.active) return;
-  requestAnimationFrame(() => {
-    requestAnimationFrame(() => {
-      if (!canStartEmptyOnboardingNow() || !shouldRunEmptyOnboarding() || emptyOnboardingState.active) return;
-      startEmptyOnboardingPhase1();
-    });
-  });
-};
 
 // ── زر الرجوع (عوالم ← كلمات صعبة / قواميس) ──
 let viewBackTarget = 'worlds';

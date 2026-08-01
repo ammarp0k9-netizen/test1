@@ -2484,32 +2484,6 @@ body.view-transitioning .sidebar.open {
   transform: scale(1.03);
 }
 
-.onboarding-only {
-  display: none;
-}
-
-.onboarding-backdrop {
-  position: fixed;
-  inset: 0;
-  background: rgba(0, 0, 0, 0.48);
-  z-index: 100000; 
-  opacity: 0;
-  pointer-events: none; 
-  transition: opacity 0.2s ease;
-}
-.onboarding-backdrop.visible {
-  opacity: 1;
-  pointer-events: none; /* Changed to none - backdrop itself doesn't block */
-}
-/* When onboarding is active, block clicks everywhere EXCEPT on active targets */
-body.onboarding-active .main-content,
-body.onboarding-active .sidebar,
-body.onboarding-active .menu-btn,
-body.onboarding-active .legend-top-bar,
-body.onboarding-active .legend-dock {
-  pointer-events: none;
-}
-
 .legend-top-bar,
 .treasure-dock,
 .legend-dock {
@@ -2556,269 +2530,6 @@ body.quiz-active .main-content {
 .quiz-source-selector {
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
-body.onboarding-active .profile-modal:not(:has(.onboarding-active-target)) {
-  pointer-events: none;
-}
-/* Allow clicks on onboarding target elements even when backdrop is visible */
-body.onboarding-active .onboarding-active-target,
-body.onboarding-active .onboarding-active-target * {
-  pointer-events: auto !important;
-  z-index: 100006 !important;
-}
-/* Allow clicks on onboarding box and tooltip */
-.onboarding-box, .onboarding-tooltip {
-  pointer-events: auto !important;
-  z-index: 100010 !important;
-}
-
-
-.onboarding-box {
-  position: fixed;
-  top: 50%;
-  left: 50%;
-  transform: translate(-50%, -50%);
-  max-width: 420px;
-  width: min(94vw, 420px);
-  background: var(--card-bg);
-  border: 2px solid var(--accent);
-  border-radius: 18px;
-  box-shadow: 0 24px 60px rgba(0,0,0,0.6);
-  padding: 24px;
-  z-index: 100010; /* فوق طبقة الحجب */
-  color: var(--text-white);
-  display: grid;
-  gap: 14px;
-  text-align: center;
-  pointer-events: auto !important; /* ضمان قابلية الضغط */
-}
-.onboarding-box.hidden {
-  display: none;
-}
-.onboarding-content h2 {
-  margin: 0;
-  font-size: 18px;
-}
-.onboarding-content p {
-  margin: 0;
-  line-height: 1.6;
-  color: var(--text-gray);
-}
-.onboarding-extras {
-  display: grid;
-  gap: 10px;
-}
-.onboarding-buttons {
-  display: flex;
-  justify-content: flex-end;
-  gap: 10px;
-  flex-wrap: wrap;
-}
-.onboarding-tooltip {
-  position: fixed;
-  min-width: 220px;
-  max-width: 280px;
-  background: var(--card-bg);
-  border: 2px solid var(--accent);
-  border-radius: 14px;
-  padding: 14px 16px;
-  color: var(--text-white);
-  box-shadow: 0 20px 50px rgba(0,0,0,0.4);
-  z-index: 100005; /* أعلى من العنصر المحدد والـ backdrop */
-  display: none;
-  line-height: 1.6;
-  pointer-events: none;
-}
-.onboarding-next-btn {
-  background: rgba(255, 255, 255, 0.08); /* خلفية شفافة عصرية */
-  color: var(--accent); /* نص بلون مميز */
-  border: 1px solid var(--accent); /* حدود بلون مميز */
-  padding: 8px 16px; /* تصغير قليل */
-  margin-top: 10px;
-  border-radius: 10px;
-  cursor: pointer;
-  font-weight: 700;
-  width: 100%;
-  transition: all 0.3s ease;
-}
-.onboarding-next-btn:hover {
-  background: var(--accent); /* يتلون بالكامل عند التمرير */
-  color: #fff;
-  transform: translateY(-1px);
-}
-
-.onboarding-tooltip.visible {
-  display: block;
-}
-.onboarding-tooltip::after {
-  content: '';
-  position: absolute;
-  width: 0;
-  height: 0;
-  border: 8px solid transparent;
-  pointer-events: none; /* Ensure arrow doesn't block target clicks */
-}
-.onboarding-tooltip.arrow-bottom::after {
-  top: -16px;
-  left: calc(50% - 8px);
-  border-bottom-color: var(--card-bg);
-}
-.onboarding-tooltip.arrow-top::after {
-  bottom: -16px;
-  left: calc(50% - 8px);
-  border-top-color: var(--card-bg);
-}
-.onboarding-tooltip.arrow-left::after {
-  right: -16px;
-  top: calc(50% - 8px);
-  border-left-color: var(--card-bg);
-}
-.onboarding-tooltip.arrow-right::after {
-  left: -16px;
-  top: calc(50% - 8px);
-  border-right-color: var(--card-bg);
-}
-
-/* تأثير ظهور الـ tooltip الأخير */
-@keyframes tooltipPopIn {
-  0% {
-    opacity: 0;
-    transform: scale(0.5) translateY(20px);
-  }
-  50% {
-    transform: scale(1.1) translateY(-5px);
-  }
-  100% {
-    opacity: 1;
-    transform: scale(1) translateY(0);
-  }
-}
-
-/* جعل الـ tooltip الأخير أكبر وأكثر وضوحاً */
-#onboardingTooltip[style*="top"]:not(.arrow-top):not(.arrow-bottom):not(.arrow-left):not(.arrow-right) {
-  min-width: 300px;
-  max-width: 400px;
-  font-size: 16px;
-  font-weight: bold;
-  text-align: center;
-  padding: 20px 24px;
-}
-
-.onboarding-examples {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 10px;
-}
-.onboarding-example-chip {
-  padding: 8px 12px;
-  background: var(--surface-bg);
-  border: 1px solid var(--border);
-  border-radius: 999px;
-  cursor: pointer;
-  transition: background 0.2s, transform 0.2s;
-}
-.onboarding-example-chip:hover,
-.onboarding-example-chip.active {
-  background: var(--accent);
-  color: #fff;
-  transform: translateY(-1px);
-}
-.onboarding-highlight-ring {
-  position: fixed;
-  z-index: 100005;
-  pointer-events: none;
-  box-shadow: 0 0 0 max(120vh, 120vw) rgba(0, 0, 0, 0.84);
-  transition: top 0.2s ease, left 0.2s ease, width 0.2s ease, height 0.2s ease;
-}
-.onboarding-active-target {
-  position: relative;
-  z-index: 100007 !important;
-  pointer-events: auto !important;
-  isolation: isolate;
-}
-.legend-dock .onboarding-active-target,
-.legend-top-bar .onboarding-active-target,
-.treasure-dock-btn.onboarding-active-target,
-#heroAvatarBtn.onboarding-active-target,
-.profile-modal .onboarding-active-target {
-  z-index: 100008 !important;
-}
-body.onboarding-active .profile-modal.open {
-  pointer-events: auto !important;
-}
-body.onboarding-active .profile-modal.open .profile-modal-backdrop {
-  pointer-events: none !important;
-}
-.onboarding-nav-row {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  justify-content: center;
-  margin-top: 10px;
-}
-.onboarding-back-btn,
-.onboarding-skip-btn {
-  border: 1px solid var(--border);
-  background: rgba(255, 255, 255, 0.06);
-  color: var(--text-gray);
-  padding: 8px 14px;
-  border-radius: 10px;
-  cursor: pointer;
-  font-weight: 700;
-  font-size: 13px;
-  font-family: inherit;
-  transition: background 0.2s, color 0.2s;
-}
-.onboarding-back-btn:hover {
-  color: var(--text-white);
-  background: var(--accent-soft);
-}
-.onboarding-skip-btn:hover {
-  color: var(--danger);
-  border-color: color-mix(in srgb, var(--danger) 50%, var(--border));
-}
-.onboarding-tip-text {
-  line-height: 1.55;
-  font-size: 14px;
-}
-@media (max-width: 768px) {
-  #onboardingTooltip.mobile-sheet.dock-step {
-    bottom: calc(96px + env(safe-area-inset-bottom)) !important;
-    border-radius: 1.2rem !important;
-    max-height: 38vh !important;
-    overflow-y: auto !important;
-  }
-  #onboardingTooltip.mobile-sheet.profile-step {
-    bottom: 12px !important;
-    max-height: 44vh !important;
-  }
-  #onboardingTooltip.mobile-sheet.finish-step {
-    bottom: auto !important;
-    top: 50% !important;
-    left: 12px !important;
-    right: 12px !important;
-    width: auto !important;
-    transform: translateY(-50%) !important;
-    border-radius: 1.2rem !important;
-    border: 1px solid var(--border) !important;
-    border-top: 3px solid var(--accent) !important;
-    max-height: 55vh !important;
-  }
-}
-.onboarding-action-target {
-  position: relative;
-  z-index: 2005 !important;
-}
-.onboarding-step-buttons .btn-secondary {
-  background: rgba(255,255,255,0.04);
-  border: 1px solid rgba(255,255,255,0.15);
-  color: var(--text-white);
-  padding: 10px 14px;
-  border-radius: 12px;
-}
-.onboarding-step-buttons .btn-secondary:hover {
-  background: rgba(255,255,255,0.08);
-}
-
 /* ── Main ─────────────────────────────────── */
 .main-content {
   /* على الكمبيوتر: نترك مسافة للـ rail دائماً */
@@ -6555,37 +6266,6 @@ body.game-bg-active .page-header h1 {
   position: relative;
 }
 
-.onboarding-buttons .btn-secondary,
-#onboardingSecondaryBtn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-height: 42px;
-  padding: 10px 18px;
-  border-radius: 999px;
-  border: 1px solid color-mix(in srgb, var(--accent) 38%, transparent);
-  background: color-mix(in srgb, var(--surface-bg) 72%, transparent);
-  color: var(--text-white);
-  font-weight: 700;
-  cursor: pointer;
-  box-shadow: inset 0 1px 0 rgba(255,255,255,0.08), 0 10px 24px rgba(0,0,0,0.18);
-  transition: transform 0.18s ease, border-color 0.18s ease, background 0.18s ease, color 0.18s ease;
-}
-
-.onboarding-buttons .btn-secondary:hover,
-#onboardingSecondaryBtn:hover {
-  transform: translateY(-1px);
-  border-color: var(--accent);
-  background: var(--accent-soft);
-  color: var(--text-white);
-}
-
-.onboarding-buttons .btn-secondary:active,
-#onboardingSecondaryBtn:active {
-  transform: translateY(0) scale(0.98);
-}
-
-
 /* Backup tools polish and sidebar scrollbar side - added by Codex */
 body.sidebar-open .sidebar.open,
 body.sidebar-open .sidebar.open nav {
@@ -7111,8 +6791,7 @@ body.treasure-mode .main-content {
   }
 }
 
-body.sidebar-open .treasure-dock,
-body.onboarding-active .treasure-dock {
+body.sidebar-open .treasure-dock {
   opacity: 0;
   pointer-events: none;
 }
@@ -7358,8 +7037,7 @@ body.treasure-side-back-visible .view-edge-arrow-right {
   display: grid;
 }
 
-body.sidebar-open .view-edge-arrow,
-body.onboarding-active .view-edge-arrow {
+body.sidebar-open .view-edge-arrow {
   display: none !important;
 }
 
@@ -8439,18 +8117,11 @@ body.low-end-device *::after {
   scroll-behavior: auto !important;
 }
 
-/* Keep essential loading/onboarding motion in turbo — global * rule disables them otherwise */
+/* Keep essential loading motion in turbo — global * rule disables it otherwise */
 body.perf-turbo .smart-loading-overlay .smart-loading-spinner,
 body.perf-stable .smart-loading-overlay .smart-loading-spinner,
 body.low-end-device .smart-loading-overlay .smart-loading-spinner {
   animation: smartLoadingSpin 0.85s linear infinite !important;
-  animation-iteration-count: infinite !important;
-}
-
-body.perf-turbo .empty-onboarding-tip.visible,
-body.perf-stable .empty-onboarding-tip.visible,
-body.low-end-device .empty-onboarding-tip.visible {
-  animation: emptyOnboardingFloat 1.85s ease-in-out infinite !important;
   animation-iteration-count: infinite !important;
 }
 
@@ -8474,8 +8145,6 @@ body.perf-balanced .treasure-stage,
 body.perf-balanced .quiz-card,
 body.perf-balanced .world-card,
 body.perf-balanced .backup-zone,
-body.perf-balanced .onboarding-box,
-body.perf-balanced .onboarding-tooltip,
 body.perf-stable .legend-top-bar,
 body.perf-stable .sidebar,
 body.perf-stable .legend-dock,
@@ -8496,8 +8165,6 @@ body.perf-stable .treasure-stage,
 body.perf-stable .quiz-card,
 body.perf-stable .world-card,
 body.perf-stable .backup-zone,
-body.perf-stable .onboarding-box,
-body.perf-stable .onboarding-tooltip,
 body.perf-turbo .legend-top-bar,
 body.perf-turbo .sidebar,
 body.perf-turbo .legend-dock,
@@ -8518,8 +8185,6 @@ body.perf-turbo .treasure-stage,
 body.perf-turbo .quiz-card,
 body.perf-turbo .world-card,
 body.perf-turbo .backup-zone,
-body.perf-turbo .onboarding-box,
-body.perf-turbo .onboarding-tooltip,
 body.low-end-device .legend-top-bar,
 body.low-end-device .sidebar,
 body.low-end-device .legend-dock,
@@ -8539,9 +8204,7 @@ body.low-end-device .treasure-card,
 body.low-end-device .treasure-stage,
 body.low-end-device .quiz-card,
 body.low-end-device .world-card,
-body.low-end-device .backup-zone,
-body.low-end-device .onboarding-box,
-body.low-end-device .onboarding-tooltip {
+body.low-end-device .backup-zone {
   background: var(--card-bg) !important;
   box-shadow: 0 4px 14px rgba(0, 0, 0, 0.22) !important;
 }
@@ -8565,8 +8228,6 @@ body.perf-stable .treasure-stage,
 body.perf-stable .quiz-card,
 body.perf-stable .world-card,
 body.perf-stable .backup-zone,
-body.perf-stable .onboarding-box,
-body.perf-stable .onboarding-tooltip,
 body.perf-turbo .legend-top-bar,
 body.perf-turbo .sidebar,
 body.perf-turbo .legend-dock,
@@ -8586,31 +8247,25 @@ body.perf-turbo .treasure-card,
 body.perf-turbo .treasure-stage,
 body.perf-turbo .quiz-card,
 body.perf-turbo .world-card,
-body.perf-turbo .backup-zone,
-body.perf-turbo .onboarding-box,
-body.perf-turbo .onboarding-tooltip {
+body.perf-turbo .backup-zone {
   box-shadow: none !important;
 }
 body.perf-balanced .profile-modal-backdrop,
 body.perf-balanced .custom-modal,
 body.perf-balanced .stats-overlay,
 body.perf-balanced .overlay,
-body.perf-balanced .onboarding-backdrop,
 body.perf-stable .profile-modal-backdrop,
 body.perf-stable .custom-modal,
 body.perf-stable .stats-overlay,
 body.perf-stable .overlay,
-body.perf-stable .onboarding-backdrop,
 body.perf-turbo .profile-modal-backdrop,
 body.perf-turbo .custom-modal,
 body.perf-turbo .stats-overlay,
 body.perf-turbo .overlay,
-body.perf-turbo .onboarding-backdrop,
 body.low-end-device .profile-modal-backdrop,
 body.low-end-device .custom-modal,
 body.low-end-device .stats-overlay,
-body.low-end-device .overlay,
-body.low-end-device .onboarding-backdrop {
+body.low-end-device .overlay {
   background: rgba(0, 0, 0, 0.62) !important;
 }
 body.perf-stable .treasure-chest-main,
@@ -8716,52 +8371,6 @@ body.low-end-device .game-card img {
 }
 .profile-theme-selector .theme-display-name {
   font-size: 12px;
-}
-
-/* ترحيب أول زيارة */
-.welcome-modal.show {
-  opacity: 1;
-}
-.welcome-modal-content {
-  max-width: 420px;
-  text-align: center;
-}
-.welcome-modal-icon {
-  color: var(--star);
-}
-.welcome-modal-lead {
-  font-size: 14px;
-  line-height: 1.65;
-  color: var(--text-white);
-  margin: 0 0 10px;
-}
-.welcome-modal-sub {
-  font-size: 13px;
-  line-height: 1.6;
-  color: var(--text-gray);
-  margin: 0 0 18px;
-}
-
-/* ميزات قريباً (شرح تفاعلي، إلخ) */
-.feature-coming-soon,
-.profile-settings-btn.feature-coming-soon {
-  filter: grayscale(1);
-  opacity: 0.55;
-  cursor: not-allowed;
-  pointer-events: auto;
-  transition: filter 0.35s ease, opacity 0.35s ease;
-}
-.feature-coming-soon:hover,
-.profile-settings-btn.feature-coming-soon:hover {
-  transform: none;
-  background: var(--surface-bg);
-}
-.feature-soon-badge {
-  font-size: 10px;
-  font-weight: 700;
-  color: var(--text-gray);
-  opacity: 0.95;
-  margin-inline-start: 4px;
 }
 
 /* Daily quests sheet */
@@ -9301,6 +8910,20 @@ html[dir="ltr"] .worlds-tabs[data-active-tab="custom"]::before {
 
 .published-meta-chip i {
   color: var(--star);
+}
+
+.published-meta-chip-recommendation {
+  border-color: color-mix(in srgb, var(--accent) 46%, var(--border));
+  background: color-mix(in srgb, var(--accent) 12%, var(--surface-bg));
+  color: var(--accent);
+}
+
+.published-meta-chip-recommendation i {
+  color: currentColor;
+}
+
+.published-meta-chip-availability {
+  color: var(--text-gray);
 }
 
 .published-card-action {
@@ -11187,104 +10810,6 @@ body.published-placement-mode .main-content {
   display: flex;
 }
 
-.legend-dock-btn.pulse-onboarding-highlight {
-  animation: pulseOnboardingHighlight 1.15s ease-in-out 3;
-  z-index: 4;
-  border-radius: 14px;
-}
-
-@keyframes pulseOnboardingHighlight {
-  0%, 100% {
-    box-shadow: 0 0 0 0 color-mix(in srgb, var(--accent) 55%, transparent);
-    transform: scale(1);
-  }
-  50% {
-    box-shadow: 0 0 0 14px color-mix(in srgb, var(--accent) 0%, transparent);
-    transform: scale(1.07);
-  }
-}
-
-.empty-onboarding-tip {
-  position: fixed;
-  z-index: 100006;
-  max-width: min(300px, calc(100vw - 24px));
-  padding: 14px 16px;
-  background: var(--card-bg);
-  border: 2px solid var(--accent);
-  border-radius: 16px;
-  color: var(--text-white);
-  box-shadow: 0 18px 44px rgba(0, 0, 0, 0.38);
-  font-size: 14px;
-  line-height: 1.65;
-  font-weight: 600;
-  opacity: 0;
-  transition: opacity 0.3s ease;
-  pointer-events: none;
-}
-
-.empty-onboarding-tip.visible {
-  opacity: 1;
-  animation: emptyOnboardingFloat 1.85s ease-in-out infinite;
-}
-
-.empty-onboarding-tip.fade-out {
-  opacity: 0;
-  animation: none;
-}
-
-.empty-onboarding-tip-inner {
-  display: block;
-}
-
-.empty-onboarding-tip.placement-above::after,
-.empty-onboarding-tip.placement-below::after,
-.empty-onboarding-tip.placement-below-bar::after {
-  content: '';
-  position: absolute;
-  width: 12px;
-  height: 12px;
-  background: var(--card-bg);
-  border: 2px solid var(--accent);
-  transform: rotate(45deg);
-  pointer-events: none;
-}
-
-.empty-onboarding-tip.placement-above::after {
-  bottom: -7px;
-  left: 50%;
-  margin-left: -6px;
-  border-top: none;
-  border-left: none;
-}
-
-.empty-onboarding-tip.placement-below::after {
-  top: -7px;
-  left: 50%;
-  margin-left: -6px;
-  border-bottom: none;
-  border-right: none;
-}
-
-.empty-onboarding-tip.placement-below-bar::after {
-  top: -7px;
-  left: var(--tip-arrow-left, 50%);
-  margin-left: -6px;
-  border-bottom: none;
-  border-right: none;
-}
-
-@keyframes emptyOnboardingFloat {
-  0%, 100% { transform: translateY(0); }
-  50% { transform: translateY(-8px); }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .legend-dock-btn.pulse-onboarding-highlight,
-  .empty-onboarding-tip.visible {
-    animation: none;
-  }
-}
-
 /* Legend dock — 4 tabs */
 .legend-dock.treasure-dock {
   gap: 4px;
@@ -11322,14 +10847,6 @@ body.modal-scroll-locked {
 .word-hunter-sheet {
   -webkit-overflow-scrolling: touch;
   overscroll-behavior: contain;
-}
-
-body.onboarding-active .legend-top-bar,
-body.onboarding-active .legend-dock {
-  pointer-events: none;
-}
-body.onboarding-active .onboarding-active-target {
-  opacity: 1 !important;
 }
 
 /* على اللمس: النيمتاج يظهر بالضغط المطوّل فقط */

@@ -259,13 +259,20 @@ window.beginInitialFeatureLoad = function(parts = []) {
   window.isInitialLoad = true;
   window.__suppressUnlockNotices = true;
   window.__initialFeatureLoadPending = new Set(Array.isArray(parts) ? parts : []);
+  window.__lootlinguaInitialDataReady = false;
 };
 window.finishInitialFeatureLoad = function() {
   isInitialLoad = false;
   window.isInitialLoad = false;
   window.__suppressUnlockNotices = false;
   window.__initialFeatureLoadPending?.clear?.();
-  if (typeof tryStartEmptyOnboarding === 'function') tryStartEmptyOnboarding();
+  window.__lootlinguaInitialDataReady = true;
+  window.dispatchEvent(new CustomEvent('lootlingua:initial-data-ready', {
+    detail: {
+      uid: window.auth?.currentUser?.uid || '',
+      generation: Number(window.__lootlinguaAuthGeneration) || 0,
+    },
+  }));
 };
 window.markInitialFeatureLoadPartDone = function(part) {
   if (part && window.__initialFeatureLoadPending instanceof Set) {
@@ -704,10 +711,6 @@ function syncSelectedIndicesFromBulkSelection() {
   document.addEventListener('touchmove', () => clearTimeout(dockTimer), { passive: true });
 })();
 
-// Global variables for scroll lock during onboarding
-let mainContentScrollArea = null;
-let originalMainContentScrollAreaOverflow = '';
-
 function setActiveNavLink(key) {
   // key: 'personal' | 'minecraft' | 'pubg'
   document.querySelectorAll('.nav-link[data-view]').forEach(l => {
@@ -1054,25 +1057,52 @@ const THEME_UNLOCK_MESSAGES = {
   glass: 'فتحت Liquid Glass. وصلت للستايل الثقيل.',
 };
 
+function currentThemeIdentity() {
+  return window.auth?.currentUser?.uid ? { uid: window.auth.currentUser.uid } : {};
+}
+
+function currentThemeOwner() {
+  return window.LootLinguaEntryExperience?.storageOwner(currentThemeIdentity()) ||
+    (window.auth?.currentUser?.uid ? `user:${window.auth.currentUser.uid}` : 'guest');
+}
+
+function currentThemePreferenceKey() {
+  return window.LootLinguaEntryExperience?.themeStorageKey(currentThemeIdentity()) ||
+    `lootlingua:theme:${currentThemeOwner()}`;
+}
+
+function currentOasisModePreferenceKey() {
+  return window.LootLinguaEntryExperience?.oasisModeStorageKey(currentThemeIdentity()) ||
+    `lootlingua:oasis-mode:${currentThemeOwner()}`;
+}
+
 function themeSeenKey(type, theme) {
-  return `lootlingua:${type}:theme:${theme}`;
+  return `lootlingua:${type}:theme:${currentThemeOwner()}:${theme}`;
+}
+
+function getThemeIntroSeenList() {
+  return Object.keys(THEME_USE_MESSAGES).filter((theme) =>
+    localStorage.getItem(themeSeenKey('used', theme)) === '1'
+  );
 }
 
 function showThemeUseMessageOnce(theme) {
   if (!THEME_USE_MESSAGES[theme]) return;
+  const intro = window.LootLinguaEntryExperience?.resolveThemeIntro?.(
+    getThemeIntroSeenList(),
+    theme
+  );
+  if (intro && !intro.shouldAnnounce) return;
   const key = themeSeenKey('used', theme);
   if (localStorage.getItem(key) === '1') return;
   localStorage.setItem(key, '1');
+  requestProfileCloudSave();
   setTimeout(() => showToast(THEME_USE_MESSAGES[theme], 'success', 5200), 2400);
 }
 
 function bootstrapThemeNotificationKeysOnce() {
-  const bootKey = 'lootlingua:themeNotifyBootstrapped';
+  const bootKey = `lootlingua:themeNotifyBootstrapped:${currentThemeOwner()}`;
   if (localStorage.getItem(bootKey) === '1') return;
-  Object.keys(THEME_UNLOCK_LEVELS).forEach((theme) => {
-    if (isThemeComingSoon(theme) || !isThemeUnlocked(theme)) return;
-    localStorage.setItem(themeSeenKey('unlocked', theme), '1');
-  });
   const activeTheme = localStorage.getItem('theme') || document.documentElement.getAttribute('data-theme') || 'lootlingua';
   if (THEME_USE_MESSAGES[activeTheme] && isThemeUnlocked(activeTheme)) {
     localStorage.setItem(themeSeenKey('used', activeTheme), '1');
@@ -1112,7 +1142,7 @@ function checkThemeRelocksAfterXP(prevXP, nextXP) {
 }
 
 window.setTheme = function(theme, skipLockCheck = false) {
-  const previousTheme = localStorage.getItem('theme') || document.documentElement.getAttribute('data-theme') || 'lootlingua';
+  const previousTheme = document.documentElement.getAttribute('data-theme') || localStorage.getItem('theme') || 'lootlingua';
   if (!skipLockCheck && isThemeComingSoon(theme)) {
     showGlassThemeComingSoonMessage();
     return false;
@@ -1123,22 +1153,59 @@ window.setTheme = function(theme, skipLockCheck = false) {
   }
   document.documentElement.setAttribute('data-theme', theme);
   localStorage.setItem('theme', theme);
+  localStorage.setItem(currentThemePreferenceKey(), theme);
   document.querySelectorAll('.theme-option').forEach(opt => {
     opt.classList.toggle('active', opt.dataset.theme === theme);
   });
   refreshThemeLockUI();
+  syncOasisAppearanceControls();
   if (!skipLockCheck && theme !== previousTheme) showThemeUseMessageOnce(theme);
   if (!skipLockCheck) requestProfileCloudSave();
   return true;
 };
 
 function loadTheme() {
-  const saved = localStorage.getItem('theme') || 'lootlingua';
+  const saved = localStorage.getItem(currentThemePreferenceKey()) ||
+    (!window.auth?.currentUser ? localStorage.getItem('theme') : '') ||
+    'lootlingua';
   let candidate = saved;
   if (isThemeComingSoon(candidate) || !isThemeUnlocked(candidate)) candidate = 'lootlingua';
   setTheme(candidate, true);
   refreshThemeLockUI();
+  const savedMode = localStorage.getItem(currentOasisModePreferenceKey()) ||
+    localStorage.getItem('lootlinguaOasisMode') || 'light';
+  applyOasisMode(savedMode, false);
 }
+
+function applyOasisMode(mode, persist = true) {
+  const next = mode === 'dark' ? 'dark' : 'light';
+  document.documentElement.setAttribute('data-oasis-mode', next);
+  if (persist) {
+    localStorage.setItem(currentOasisModePreferenceKey(), next);
+    localStorage.setItem('lootlinguaOasisMode', next);
+  }
+  syncOasisAppearanceControls();
+  return next;
+}
+
+function syncOasisAppearanceControls() {
+  const theme = document.documentElement.getAttribute('data-theme') || 'lootlingua';
+  const mode = document.documentElement.getAttribute('data-oasis-mode') || 'light';
+  const setting = document.getElementById('profileOasisModeSetting');
+  if (setting) setting.hidden = theme !== 'ocean';
+  document.querySelectorAll('[data-profile-oasis-mode]').forEach((button) => {
+    const selected = button.dataset.profileOasisMode === mode;
+    button.classList.toggle('selected', selected);
+    button.setAttribute('aria-checked', selected ? 'true' : 'false');
+  });
+}
+
+window.setProfileOasisMode = function(mode) {
+  if ((document.documentElement.getAttribute('data-theme') || '') !== 'ocean') return false;
+  applyOasisMode(mode, true);
+  requestProfileCloudSave();
+  return true;
+};
 
 // ═══════════════════════════════════════════════════════
 // Modal & Toast
@@ -1160,7 +1227,6 @@ const APP_MODAL_ROUTES = {
   guestMigrationModal: 'guest-loot-transfer',
   performanceModeInfoModal: 'performance',
   keyboardShortcutsModal: 'keyboard-shortcuts',
-  welcomeModal: 'welcome',
 };
 const APP_OVERLAY_ROUTES = {
   profile: 'profile',
@@ -1172,15 +1238,14 @@ const APP_ROUTE_TO_VIEW = Object.fromEntries(Object.entries(APP_VIEW_ROUTES).map
 const APP_ROUTE_TO_MODAL = Object.fromEntries(Object.entries(APP_MODAL_ROUTES).map(([k, v]) => [v, k]));
 const APP_ROUTE_TO_OVERLAY = Object.fromEntries(Object.entries(APP_OVERLAY_ROUTES).map(([k, v]) => [v, k]));
 const APP_PROJECT_BASE_PATH = (() => {
-  if (!location.hostname.endsWith('.github.io')) {
-    return '';
-  }
-
   const segments = location.pathname
     .split('/')
     .filter(Boolean);
-
-  return segments.length ? `/${segments[0]}` : '';
+  if (location.hostname.endsWith('.github.io')) {
+    if (!segments.length) return '';
+    return segments[1] === 'app' ? `/${segments[0]}/app` : `/${segments[0]}`;
+  }
+  return segments[0] === 'app' ? '/app' : '';
 })();
 let appRouteSyncing = false;
 let appRoutingReady = false;
@@ -1555,846 +1620,36 @@ function showToast(msg, type = 'info', duration = 2500, options = {}) {
     settings
   ) || '';
   const preview = window.LootLinguaNotificationPolicy?.toastPreview(fullText) || fullText;
-  const queue = window.__toastQueue || (window.__toastQueue = []);
-  queue.push({
+  const queuedEntry = {
     preview,
     type,
     duration: Math.min(12000, Math.max(1200, displayDuration || 2500)),
     notificationId,
-  });
+  };
+  if (window.__entryExperienceActive && type !== 'danger' && settings.critical !== true) {
+    const deferred = window.__entryDeferredToastQueue || (window.__entryDeferredToastQueue = []);
+    deferred.push(queuedEntry);
+    if (deferred.length > 12) deferred.splice(0, deferred.length - 12);
+    return notificationId;
+  }
+  const queue = window.__toastQueue || (window.__toastQueue = []);
+  queue.push(queuedEntry);
   if (queue.length > 20) queue.splice(0, queue.length - 20);
   displayNextToast();
   return notificationId;
 }
 
-// ═══════════════════════════════════════════════════════
-// ONBOARDING — Event-driven, simple, step-based
-// ═══════════════════════════════════════════════════════
-const ONBOARDING_STORAGE_KEY = 'lootlinguaOnboarding';
-
-const ONBOARDING_STEPS = [
-  { id: 'welcome', type: 'modal', title: 'مرحباً في LootLingua', text: 'LootLingua هو قاموسك الشخصي (إنجليزي - عربي).' },
-  { id: 'wordInput', target: '#wordInput', text: '✍️ هنا تكتب الكلمة بالإنجليزي. سنستخدم كلمة جاهزة لتسهيل البداية.', action: 'fill' },
-  { id: 'searchBtn', target: '#searchBtn', text: '🔍 اضغط هنا لجلب معنى الكلمة وجملة عليها.' },
-  { id: 'selectSug', target: '#suggestionsBox', text: '✨ اختر أحد المعاني المقترحة لتعبئة البيانات.', preferredSide: 'left' },
-  { id: 'addBtn', target: '#addBtn', text: '⭐ اضغط هنا لإضافة الكلمة إلى القاموس.' },
-  { id: 'sound', target: '#list .word-card:first-child .sound-btn', text: '🔊 اضغط هنا لتسمع نطق الكلمة.' },
-  { id: 'starBtn', target: '#list .word-card:first-child .star-btn', text: '⭐ هاي النجمة بتخليك تضيف الكلمة لقائمة "الكلمات الصعبة" عشان ترجع تراجعها' },
-  { id: 'dictSearch', target: '#searchInput', text: '🔎 من هون تقدر تبحث داخل قاموسك بسهولة' },
-  { id: 'legendDock', target: '#legendDock', text: '👇 هذا شريط التنقل الرئيسي — من هون تتحكم بكل أقسام التطبيق', dockStep: true },
-  { id: 'worldsBtn', target: '#legendDock [data-dock-view="worlds"]', text: '🌍 ادخل على "العوالم" عشان تستكشف قواميس الألعاب أو تراجع الكلمات الصعبة', dockStep: true, openOnNext: 'worlds' },
-  { id: 'quizBtn', target: '#legendDock [data-dock-view="quiz"]', text: '🎮 جرب "الاختبار" واختبر نفسك بالكلمات اللي تعلمتها', dockStep: true, openOnNext: 'quiz' },
-  { id: 'treasureBtn', target: '#legendDock [data-dock-view="treasure"]', text: '💎 افتح "الكنز" يوميًا وخذ مكافآت و XP', dockStep: true, openOnNext: 'treasure' },
-  { id: 'treasureTitles', target: '#treasureView .treasure-title-strip', text: 'هون بتقدر تتثبت إنك ما كنت قاعد بتتفرج، هون بتفتح ألقاب حسب تعبك 🔥', view: 'treasure' },
-  { id: 'streak', target: '#streakWrap', text: '🔥 هذا الـ Streak — استخدم التطبيق كل يوم وخليه يزيد', topBarStep: true },
-  { id: 'dailyQuests', target: '#dailyQuestsBtn', text: '🎯 عندك مهام يومية تساعدك تتابع تعلّمك', topBarStep: true },
-  { id: 'notifBtn', target: '#notifBtn', text: '🔔 هون بتشوف كل الإشعارات والأحداث اللي صارت معك', topBarStep: true },
-  { id: 'profileAvatar', target: '#heroAvatarBtn', text: '👤 هذا ملفك الشخصي — فيه مستواك، XP، وإحصائياتك', topBarStep: true, openOnNext: 'profile' },
-  { id: 'profileThemes', target: '.profile-theme-selector', text: '🎨 تقدر تغير شكل التطبيق من الثيمات حسب ذوقك', view: 'profile' },
-  { id: 'profileLogin', target: '#loginBtn', text: '☁️ سجل دخولك عشان تحفظ كلماتك على كل أجهزتك', view: 'profile' },
-  { id: 'finish', type: 'finish', text: '🎉 خلصنا!\nضيف كلمات، جرب الكويز، واصير Legend 👑', requiresPersonal: true }
-];
-
-const ONBOARDING_SKIP_AFTER = 6;
-
-let onboardState = {
-  active: false,
-  stepIndex: -1,
-  currentStep: null,
-  _cleanups: []
+window.flushDeferredEntryToasts = function() {
+  const deferred = window.__entryDeferredToastQueue || [];
+  if (!deferred.length) return;
+  const queue = window.__toastQueue || (window.__toastQueue = []);
+  // The full messages already live in Notification Center. Surface only one
+  // low-priority preview after Entry so completion never releases a toast storm.
+  const [first] = deferred.splice(0, deferred.length);
+  if (first) queue.push(first);
+  if (queue.length > 20) queue.splice(0, queue.length - 20);
+  displayNextToast();
 };
-
-let onboardingHighlightRing = null;
-let onboardingRingTarget = null;
-
-function getSafeWord() {
-  const options = ['book', 'go', 'learn', 'run', 'jump', 'play', 'see', 'look'];
-  const existing = new Set(window.words.map(w => (w.word || '').toLowerCase().trim()));
-  return options.find(w => !existing.has(w.toLowerCase())) || 'go';
-}
-
-let currentHighlightedElement = null; // Track the currently highlighted element
-
-function onboardingCleanup() {
-  onboardState._cleanups.forEach(fn => { try { fn(); } catch (_) {} });
-  onboardState._cleanups = [];
-}
-
-function clearOnboardingHighlight() {
-  if (currentHighlightedElement) {
-    currentHighlightedElement.classList.remove('onboarding-active-target');
-    currentHighlightedElement = null;
-  }
-  onboardingRingTarget = null;
-  if (onboardingHighlightRing) {
-    onboardingHighlightRing.remove();
-    onboardingHighlightRing = null;
-  }
-}
-
-function updateOnboardingHighlightRing(target, pad = 8) {
-  if (!onboardingHighlightRing || !target) return;
-  const rect = target.getBoundingClientRect();
-  if (!rect.width && !rect.height) return;
-  const radius = Math.min(20, Math.max(10, Math.min(rect.width, rect.height) * 0.2));
-  onboardingHighlightRing.style.top = `${Math.max(0, rect.top - pad)}px`;
-  onboardingHighlightRing.style.left = `${Math.max(0, rect.left - pad)}px`;
-  onboardingHighlightRing.style.width = `${rect.width + pad * 2}px`;
-  onboardingHighlightRing.style.height = `${rect.height + pad * 2}px`;
-  onboardingHighlightRing.style.borderRadius = `${radius}px`;
-}
-
-function applyOnboardingHighlight(target, step = {}) {
-  clearOnboardingHighlight();
-  if (!target) return;
-  const pad = step.highlightPad ?? (target.closest('.legend-dock') ? 6 : 8);
-  target.classList.add('onboarding-active-target');
-  currentHighlightedElement = target;
-  onboardingRingTarget = target;
-
-  onboardingHighlightRing = document.createElement('div');
-  onboardingHighlightRing.id = 'onboardingHighlightRing';
-  onboardingHighlightRing.className = 'onboarding-highlight-ring';
-  onboardingHighlightRing.setAttribute('aria-hidden', 'true');
-  document.body.appendChild(onboardingHighlightRing);
-  updateOnboardingHighlightRing(target, pad);
-
-  const reposition = () => {
-    if (onboardingRingTarget) updateOnboardingHighlightRing(onboardingRingTarget, pad);
-  };
-  window.addEventListener('scroll', reposition, true);
-  window.addEventListener('resize', reposition);
-  onboardState._cleanups.push(() => {
-    window.removeEventListener('scroll', reposition, true);
-    window.removeEventListener('resize', reposition);
-  });
-}
-
-function onboardingWaitLayout(step = {}) {
-  const delay = step.dockStep ? 300 : step.view === 'profile' ? 380 : step.view === 'treasure' ? 320 : step.topBarStep ? 120 : 200;
-  return new Promise(resolve => {
-    requestAnimationFrame(() => requestAnimationFrame(() => setTimeout(resolve, delay)));
-  });
-}
-
-function executeOnboardingOpen(openKey) {
-  if (openKey === 'worlds' && typeof loadWorldsView === 'function') loadWorldsView();
-  else if (openKey === 'quiz' && typeof loadQuizView === 'function') loadQuizView();
-  else if (openKey === 'treasure' && typeof loadTreasureView === 'function') loadTreasureView();
-  else if (openKey === 'profile' && typeof toggleProfileModal === 'function') {
-    const modal = document.getElementById('profileModal');
-    if (modal && !modal.classList.contains('open')) toggleProfileModal();
-  }
-}
-
-function scrollOnboardingTarget(el, step) {
-  if (!el) return;
-  if (step.topBarStep) {
-    window.scrollTo({ top: 0, behavior: 'smooth' });
-    return;
-  }
-  if (step.dockStep) {
-    window.scrollTo({ top: document.documentElement.scrollHeight, behavior: 'smooth' });
-    return;
-  }
-  if (step.view === 'profile') {
-    const body = document.querySelector('.profile-modal-body');
-    if (body && el) body.scrollTo({ top: Math.max(0, el.offsetTop - 28), behavior: 'smooth' });
-    return;
-  }
-  if (step.view === 'treasure') {
-    window.scrollTo({ top: 0, behavior: 'auto' });
-    el.scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'nearest' });
-    return;
-  }
-  el.scrollIntoView({ behavior: 'smooth', block: step.scrollBlock || 'center', inline: 'nearest' });
-}
-
-function ensureOnboardingBackdrop() {
-  const backdrop = document.getElementById('onboardingBackdrop');
-  if (backdrop) backdrop.classList.add('visible');
-}
-
-function prepareOnboardingView(step) {
-  if (!step) return;
-  const dockIds = ['legendDock', 'worldsBtn', 'quizBtn', 'treasureBtn'];
-  const topBarIds = ['streak', 'dailyQuests', 'notifBtn', 'profileAvatar'];
-  const profileSteps = ['profileThemes', 'profileLogin'];
-
-  if (typeof closeDailyQuestsSheet === 'function') closeDailyQuestsSheet();
-  if (typeof closeNotificationsPanel === 'function') closeNotificationsPanel();
-
-  if (step.view === 'treasure' && typeof loadTreasureView === 'function') {
-    loadTreasureView();
-    return;
-  }
-
-  if (profileSteps.includes(step.id)) {
-    if (typeof toggleProfileModal === 'function') {
-      const modal = document.getElementById('profileModal');
-      if (modal && !modal.classList.contains('open')) toggleProfileModal();
-    }
-    return;
-  }
-
-  if (typeof closeProfileModal === 'function') closeProfileModal();
-
-  if (step.requiresPersonal || step.id === 'finish' || topBarIds.includes(step.id) || dockIds.includes(step.id)) {
-    if (currentView !== 'personal' && typeof loadPersonalDictionary === 'function') {
-      loadPersonalDictionary();
-    }
-    if (typeof setTreasureEntryVisible === 'function') setTreasureEntryVisible(true);
-  }
-}
-
-function appendOnboardingNav(container, step) {
-  const row = document.createElement('div');
-  row.className = 'onboarding-nav-row';
-
-  if (onboardState.stepIndex > 0) {
-    const back = document.createElement('button');
-    back.type = 'button';
-    back.className = 'onboarding-back-btn';
-    back.textContent = 'السابق';
-    back.addEventListener('click', (e) => {
-      e.preventDefault();
-      e.stopPropagation();
-      prevStep();
-    });
-    row.appendChild(back);
-  }
-
-  if (onboardState.stepIndex >= ONBOARDING_SKIP_AFTER) {
-    const skip = document.createElement('button');
-    skip.type = 'button';
-    skip.className = 'onboarding-skip-btn';
-    skip.textContent = 'تخطي الشرح';
-    skip.addEventListener('click', (e) => {
-      e.preventDefault();
-      e.stopPropagation();
-      setOnboardingStatus('skipped');
-      endOnboarding();
-    });
-    row.appendChild(skip);
-  }
-
-  const next = document.createElement('button');
-  next.type = 'button';
-  next.className = 'onboarding-next-btn';
-  next.textContent = 'التالي';
-  next.addEventListener('click', async (e) => {
-    e.preventDefault();
-    e.stopPropagation();
-    if (step?.openOnNext) {
-      executeOnboardingOpen(step.openOnNext);
-      await onboardingWaitLayout({ view: step.openOnNext === 'profile' ? 'profile' : step.openOnNext, dockStep: step.dockStep });
-    }
-    nextStep();
-  }, { once: true });
-  row.appendChild(next);
-
-  if (row.children.length) container.appendChild(row);
-}
-
-function showTooltip(target, text, options = {}) {
-  const { preferredSide, dockStep, step } = options;
-  const tooltip = document.getElementById('onboardingTooltip');
-  if (!tooltip || !target) return;
-
-  ensureOnboardingBackdrop();
-  const isMobile = window.innerWidth <= 768;
-
-  applyOnboardingHighlight(target, step || onboardState.currentStep);
-
-  const displayText = text;
-
-  tooltip.style.opacity = '0';
-  tooltip.style.pointerEvents = 'none';
-  tooltip.style.left = '-9999px';
-  tooltip.style.top = '0px';
-  tooltip.style.right = 'auto';
-  tooltip.style.bottom = 'auto';
-  tooltip.style.transform = '';
-  const body = document.createElement('div');
-  body.className = 'onboarding-tip-text';
-  body.innerHTML = displayText.replace(/\n/g, '<br>');
-  tooltip.innerHTML = '';
-  tooltip.appendChild(body);
-  appendOnboardingNav(tooltip, step || onboardState.currentStep);
-  tooltip.classList.remove('arrow-top', 'arrow-bottom', 'arrow-left', 'arrow-right', 'mobile-sheet', 'kb-active', 'dock-step', 'profile-step');
-  tooltip.classList.add('visible');
-
-  void tooltip.offsetWidth;
-
-  if (isMobile) {
-    tooltip.classList.add('mobile-sheet');
-    if (dockStep) tooltip.classList.add('dock-step');
-    if (step?.view === 'profile') tooltip.classList.add('profile-step');
-    const activeEl = document.activeElement;
-    if ((activeEl.tagName === 'INPUT' || activeEl.tagName === 'TEXTAREA') && activeEl.type !== 'button') {
-      tooltip.classList.add('kb-active');
-    }
-    tooltip.style.left = '';
-    tooltip.style.top = '';
-    tooltip.style.opacity = '1';
-    tooltip.style.pointerEvents = 'auto';
-    requestAnimationFrame(() => updateOnboardingHighlightRing(target, step?.highlightPad ?? 8));
-    return;
-  }
-
-  const targetRect = target.getBoundingClientRect();
-  const tooltipRect = tooltip.getBoundingClientRect();
-  let tipW = tooltipRect.width || tooltip.offsetWidth;
-  let tipH = tooltipRect.height || tooltip.offsetHeight;
-  const margin = 15;
-
-  // Guard against stale/zero layout readings without waiting on timers.
-  if (!tipW || tipW < 1) tipW = Math.min(280, window.innerWidth - margin * 2);
-  if (!tipH || tipH < 1) tipH = 80;
-
-  let top = 0, left = 0, arrowClass = '';
-  const isRTL = document.dir === 'rtl' || getComputedStyle(document.body).direction === 'rtl';
-
-  if (preferredSide === 'viewport-right') {
-    top = targetRect.bottom + margin;
-    left = window.innerWidth - tipW - margin;
-    arrowClass = 'arrow-top';
-  } else if (target.id === 'sidebar' || target.id === 'menuBtn') {
-    left = isRTL ? (targetRect.left - tipW - margin) : (targetRect.right + margin);
-    top = targetRect.top + Math.min(40, Math.max(0, targetRect.height / 2 - tipH / 2));
-    arrowClass = isRTL ? 'arrow-left' : 'arrow-right';
-  } else if (preferredSide) {
-    top = targetRect.top + (targetRect.height / 2) - (tipH / 2);
-    left = (preferredSide === 'left') ? (targetRect.left - tipW - margin) : (targetRect.right + margin);
-    arrowClass = (preferredSide === 'left') ? 'arrow-left' : 'arrow-right';
-  } else if (dockStep || target.closest('.legend-dock')) {
-    top = Math.max(margin, targetRect.top - tipH - margin);
-    left = targetRect.left + (targetRect.width / 2) - (tipW / 2);
-    arrowClass = 'arrow-top';
-  } else if (target.closest('.legend-top-bar') || step?.topBarStep) {
-    top = targetRect.bottom + margin;
-    left = targetRect.left + (targetRect.width / 2) - (tipW / 2);
-    arrowClass = 'arrow-bottom';
-  } else if (targetRect.bottom + tipH + margin < window.innerHeight) {
-    top = targetRect.bottom + margin;
-    left = targetRect.left + (targetRect.width / 2) - (tipW / 2);
-    arrowClass = 'arrow-bottom';
-  } else {
-    top = targetRect.top - tipH - margin;
-    left = targetRect.left + (targetRect.width / 2) - (tipW / 2);
-    arrowClass = 'arrow-top';
-  }
-
-  left = Math.max(margin, Math.min(left, window.innerWidth - tipW - margin));
-  top = Math.max(margin, Math.min(top, window.innerHeight - tipH - margin));
-
-  tooltip.style.top = `${top}px`;
-  tooltip.style.left = `${left}px`;
-  tooltip.classList.remove('arrow-top', 'arrow-bottom', 'arrow-left', 'arrow-right');
-  if (arrowClass) tooltip.classList.add(arrowClass);
-  tooltip.style.opacity = '1';
-  tooltip.style.pointerEvents = 'auto';
-}
-function hideTooltip() {
-  const tooltip = document.getElementById('onboardingTooltip');
-  if (tooltip) {
-    tooltip.classList.remove('visible');
-    tooltip.classList.remove('arrow-top', 'arrow-bottom', 'arrow-left', 'arrow-right');
-    tooltip.innerHTML = '';
-  }
-  clearOnboardingHighlight();
-}
-
-// دالة مخصصة لعرض التلميح على يسار الزر (داخل الصفحة)
-function setOnboardingStatus(status) {
-  localStorage.setItem(ONBOARDING_STORAGE_KEY, status);
-}
-
-function getOnboardingStatus() {
-  return localStorage.getItem(ONBOARDING_STORAGE_KEY);
-}
-
-function hasOnboardingState() {
-  return ['completed', 'skipped'].includes(getOnboardingStatus());
-}
-
-let isProcessingNextStep = false; // لمنع تكرار الخطوات على الهاتف
-let onboardingStepAdvanceTimer = null;
-
-window.startOnboarding = function(force = false) {
-  if (isOnboardingComingSoon()) {
-    showOnboardingComingSoonMessage();
-    return;
-  }
-  if (force) setOnboardingStatus('new');
-
-  hideAllEmptyOnboardingTooltips();
-  emptyOnboardingState.active = false;
-  emptyOnboardingState.phase = 0;
-
-  if (typeof closeProfileModal === 'function') closeProfileModal();
-  if (typeof closeSidebarIfOpen === 'function') closeSidebarIfOpen();
-  if (typeof loadPersonalDictionary === 'function') loadPersonalDictionary();
-
-  onboardingCleanup();
-  onboardState.active = true;
-  onboardState.stepIndex = 0;
-  document.documentElement.classList.add('onboarding-active');
-  document.body.classList.add('onboarding-active');
-  if (mainContentScrollArea) mainContentScrollArea.style.overflow = 'hidden';
-
-  window.addEventListener('wheel', preventScroll, { passive: false });
-  window.addEventListener('touchmove', preventScroll, { passive: false });
-
-  runStep();
-};
-
-function prevStep() {
-  if (!onboardState.active || onboardState.stepIndex <= 0) return;
-  if (isProcessingNextStep) return;
-  isProcessingNextStep = true;
-  onboardingCleanup();
-  onboardState.stepIndex--;
-  runStep();
-  setTimeout(() => { isProcessingNextStep = false; }, 500);
-}
-
-function nextStep(expectedStepIndex = null) {
-  expectedStepIndex = Number.isInteger(expectedStepIndex) ? expectedStepIndex : null;
-  if (expectedStepIndex !== null && onboardState.stepIndex !== expectedStepIndex) return;
-  if (isProcessingNextStep) return;
-  isProcessingNextStep = true;
-
-  if (onboardingStepAdvanceTimer) {
-    clearTimeout(onboardingStepAdvanceTimer);
-    onboardingStepAdvanceTimer = null;
-  }
-
-  onboardingCleanup();
-  onboardState.stepIndex++;
-  runStep();
-
-  setTimeout(() => { isProcessingNextStep = false; }, 700);
-}
-
-window.onboardingEvent = function(eventName) {
-  if (!onboardState.active || !onboardState.currentStep) return;
-  if (onboardState.currentStep.waitFor === eventName) {
-    const expectedStepIndex = onboardState.stepIndex;
-    onboardState.waitingFor = null;
-    if (onboardingStepAdvanceTimer) clearTimeout(onboardingStepAdvanceTimer);
-    onboardingStepAdvanceTimer = setTimeout(() => {
-      onboardingStepAdvanceTimer = null;
-      nextStep(expectedStepIndex);
-    }, 100);
-  }
-};
-
-async function runStep() {
-  hideTooltip();
-  onboardingCleanup();
-
-  const step = ONBOARDING_STEPS[onboardState.stepIndex];
-  if (!step) {
-    endOnboarding();
-    return;
-  }
-
-  onboardState.currentStep = step;
-  prepareOnboardingView(step);
-  await onboardingWaitLayout(step);
-
-  if (step.type === 'modal') {
-    showOnboardingBox(step);
-    return;
-  }
-
-  if (step.type === 'finish') {
-    const box = document.getElementById('onboardingBox');
-    if (box) { box.classList.add('hidden'); box.style.display = 'none'; }
-    if (typeof closeProfileModal === 'function') closeProfileModal();
-    if (typeof loadPersonalDictionary === 'function') loadPersonalDictionary();
-    setTimeout(() => showFinishTooltip(step.text), 320);
-    return;
-  }
-
-  const box = document.getElementById('onboardingBox');
-  const backdrop = document.getElementById('onboardingBackdrop');
-  if (backdrop) backdrop.classList.remove('modal-backdrop');
-  if (box) { box.classList.add('hidden'); box.style.display = 'none'; }
-
-  let el = document.querySelector(step.target);
-  if (!el) {
-    setTimeout(() => runStep(), 150);
-    return;
-  }
-
-  scrollOnboardingTarget(el, step);
-  await onboardingWaitLayout(step);
-  el = document.querySelector(step.target);
-  if (!el) {
-    setTimeout(() => runStep(), 150);
-    return;
-  }
-
-  if (step.action === 'fill') {
-    applyOnboardingHighlight(el, step);
-    el.value = getSafeWord();
-    el.dispatchEvent(new Event('input', { bubbles: true }));
-    setTimeout(nextStep, 1500);
-    return;
-  }
-
-  showTooltip(el, step.text, { preferredSide: step.preferredSide, step, dockStep: step.dockStep });
-}
-
-function showOnboardingBox(step) {
-  const box = document.getElementById('onboardingBox');
-  const backdrop = document.getElementById('onboardingBackdrop');
-  const title = document.getElementById('onboardingTitle');
-  const text = document.getElementById('onboardingText');
-  const primary = document.getElementById('onboardingPrimaryBtn');
-  const secondary = document.getElementById('onboardingSecondaryBtn');
-
-  title.textContent = step.title;
-  text.innerHTML = step.text;
-  backdrop.classList.toggle('modal-backdrop', step.id === 'welcome');
-  
-  if (step.id === 'welcome') {
-    primary.textContent = 'ابدأ الشرح';
-    primary.addEventListener('click', () => nextStep(), { once: true });
-    secondary.textContent = 'لاحقًا';
-    secondary.style.display = 'inline-flex';
-    secondary.addEventListener('click', () => {
-      endOnboarding();
-      setOnboardingStatus('skipped');
-    }, { once: true });
-  } else {
-    primary.textContent = 'تمام';
-    primary.addEventListener('click', () => {
-      setOnboardingStatus('completed');
-      hideOnboarding();
-      showToast('الشرح انتهى بنجاح!', 'success');
-    }, { once: true });
-    secondary.style.display = 'none';
-  }
-
-  primary.style.display = 'inline-flex';
-  box.classList.remove('hidden');
-  backdrop.classList.add('visible');
-}
-
-function initOnboarding() {
-  // حقن تنسيقات الاحترافية للموبايل والـ Spotlight
-  const style = document.createElement('style');
-  style.textContent = `
-    .onboarding-highlight-ring {
-      position: fixed;
-      z-index: 100005;
-      pointer-events: none;
-      box-shadow: 0 0 0 max(120vh, 120vw) rgba(0, 0, 0, 0.84);
-    }
-    .onboarding-active-target {
-      z-index: 100007 !important;
-      pointer-events: auto !important;
-      isolation: isolate;
-    }
-    .legend-dock .onboarding-active-target,
-    .legend-top-bar .onboarding-active-target,
-    #heroAvatarBtn.onboarding-active-target,
-    .treasure-dock-btn.onboarding-active-target,
-    .profile-modal .onboarding-active-target {
-      z-index: 100008 !important;
-    }
-    body.onboarding-active .profile-modal.open {
-      pointer-events: auto !important;
-    }
-    #onboardingTooltip {
-      z-index: 100020 !important; /* فوق الـ backdrop والسايدبار وأي overlay داخلي */
-    }
-    #onboardingBackdrop.visible {
-      background: rgba(0, 0, 0, 0.64) !important;
-      backdrop-filter: none !important;
-      -webkit-backdrop-filter: none !important;
-    }
-    #onboardingBackdrop.visible.modal-backdrop {
-      background: rgba(0, 0, 0, 0.68) !important;
-      backdrop-filter: blur(4px) saturate(0.85) !important;
-      -webkit-backdrop-filter: blur(4px) saturate(0.85) !important;
-    }
-    #onboardingBox {
-      z-index: 100030 !important;
-      filter: none !important;
-      backdrop-filter: none !important;
-      -webkit-backdrop-filter: none !important;
-    }
-    body.onboarding-active .main-content,
-    body.onboarding-active .sidebar,
-    body.onboarding-active .menu-btn,
-    body.onboarding-active .legend-top-bar,
-    body.onboarding-active .legend-dock {
-      pointer-events: none;
-    }
-    body.onboarding-active .profile-modal:not(.open) {
-      pointer-events: none !important;
-    }
-    body.onboarding-active .onboarding-active-target,
-    body.onboarding-active #onboardingTooltip,
-    body.onboarding-active #onboardingBox,
-    body.onboarding-active #onboardingBackdrop {
-      pointer-events: auto !important;
-    }
-    body.onboarding-active #sidebar:has(.onboarding-active-target),
-    body.onboarding-active #sidebar.onboarding-active-target {
-      z-index: 100006 !important;
-    }
-    body.onboarding-active .word-card:has(.sound-btn.onboarding-active-target) .edit-btn,
-    body.onboarding-active .word-card:has(.sound-btn.onboarding-active-target) .del-btn,
-    body.onboarding-active .word-card:has(.sound-btn.onboarding-active-target) .star-btn {
-      position: relative !important;
-      z-index: 1 !important;
-    }
-    /* تجميد محتوى السايدبار أثناء خطوة الشرح لمنع العجقة */
-    body.onboarding-active #overlay.show {
-      opacity: 0 !important;
-      pointer-events: none !important;
-    }
-    #sidebar.onboarding-active-target * {
-      pointer-events: none !important;
-    }
-
-    /* القفل الحديدي للسكرول */
-    html.onboarding-active, body.onboarding-active {
-      overflow: hidden !important;
-      overscroll-behavior: none !important; /* يمنع الارتداد في الموبايل */
-    }
-    /* تأثير انتقالي ناعم للنص عند تغير الخطوات */
-    #onboardingTooltip div {
-      animation: onboardingTextFade 0.4s ease-out forwards;
-    }
-    @keyframes onboardingTextFade {
-      from { opacity: 0; transform: translateY(5px); }
-      to { opacity: 1; transform: translateY(0); }
-    }
-
-    @media (max-width: 768px) {
-      #onboardingTooltip.mobile-sheet {
-        position: fixed !important;
-        left: 0 !important;
-        right: 0 !important;
-        bottom: 0 !important;
-        top: auto !important;
-        width: 100% !important;
-        max-width: none !important;
-        border-radius: 1.5rem 1.5rem 0 0 !important;
-        padding: 0.8rem 1rem !important; /* تقليل الحشو ليكون الصندوق أصغر */
-        background: var(--card-bg) !important;
-        border: none !important;
-        border-top: 3px solid var(--accent) !important;
-        box-shadow: 0 -10px 30px rgba(0,0,0,0.5) !important;
-        transform: translateY(0) !important;
-        margin: 0 !important;
-        text-align: center !important;
-        z-index: 100020 !important;
-      }
-      #onboardingTooltip.mobile-sheet div {
-        font-size: 0.95rem !important; /* تصغير حجم الخط */
-        line-height: 1.4 !important; /* تحسين تباعد الأسطر للحجم الجديد */
-      }
-      #onboardingTooltip.mobile-sheet.kb-active {
-        bottom: auto !important;
-        top: 0 !important;
-        border-top: none !important;
-        border-bottom: 3px solid var(--accent) !important;
-        border-radius: 0 0 1.5rem 1.5rem !important;
-      }
-      .onboarding-next-btn,
-      .onboarding-back-btn,
-      .onboarding-skip-btn {
-        width: auto !important;
-        min-width: 88px !important;
-        margin-top: 0.55rem !important;
-        padding: 0.65rem 0.9rem !important;
-        font-size: 0.88rem !important;
-      }
-      .onboarding-nav-row {
-        display: flex !important;
-        flex-wrap: wrap !important;
-        gap: 8px !important;
-        justify-content: center !important;
-        margin-top: 0.65rem !important;
-      }
-      #onboardingTooltip.mobile-sheet.dock-step {
-        bottom: calc(96px + env(safe-area-inset-bottom)) !important;
-        border-radius: 1.2rem !important;
-        max-height: 38vh !important;
-        overflow-y: auto !important;
-      }
-      #onboardingTooltip.mobile-sheet.profile-step {
-        bottom: 12px !important;
-        max-height: 42vh !important;
-      }
-      #onboardingTooltip.mobile-sheet.finish-step {
-        bottom: auto !important;
-        top: 50% !important;
-        left: 12px !important;
-        right: 12px !important;
-        width: auto !important;
-        transform: translateY(-50%) !important;
-        border-radius: 1.2rem !important;
-        max-height: 55vh !important;
-      }
-    }
-  `;
-  document.head.appendChild(style);
-
-  // مراقبة لوحة المفاتيح لتحديث مكان التلميح
-  // تحديد العنصر الرئيسي القابل للتمرير بعد تحميل DOM
-  // **هام:** يجب تغيير 'app-main-scroll-area' إلى الـ ID الفعلي للعنصر الذي يحتوي على المحتوى القابل للتمرير في صفحتك.
-  // إذا كان الـ body هو العنصر الوحيد القابل للتمرير، اتركه كما هو (document.body).
-  mainContentScrollArea = document.getElementById('app-main-scroll-area') || document.body;
-  originalMainContentScrollAreaOverflow = mainContentScrollArea.style.overflow;
-
-
-  window.addEventListener('focusin', (e) => {
-    if (!onboardState.active || window.innerWidth > 768) return;
-    const activeEl = document.activeElement;
-    const tip = document.getElementById('onboardingTooltip');
-    if (tip && tip.classList.contains('mobile-sheet') && (activeEl.tagName === 'INPUT' || activeEl.tagName === 'TEXTAREA')) {
-      tip.classList.add('kb-active');
-    }
-  });
-  window.addEventListener('focusout', (e) => {
-    const tip = document.getElementById('onboardingTooltip');
-    if (tip) tip.classList.remove('kb-active');
-  });
-
-  // ترحيب أول زيارة فقط — لا شرح تفاعلي تلقائي
-  scheduleWelcomeModalIfNeeded();
-}
-
-function hasSeenWelcomeModal() {
-  return localStorage.getItem(WELCOME_STORAGE_KEY) === '1';
-}
-
-function markWelcomeModalSeen() {
-  localStorage.setItem(WELCOME_STORAGE_KEY, '1');
-  if (!getOnboardingStatus() || getOnboardingStatus() === 'new') {
-    setOnboardingStatus('skipped');
-  }
-}
-
-function scheduleWelcomeModalIfNeeded() {
-  if (hasSeenWelcomeModal()) return;
-  setTimeout(() => showWelcomeModalOnce(), 1400);
-}
-
-function showWelcomeModalOnce() {
-  if (hasSeenWelcomeModal()) return;
-  showModal('welcomeModal');
-}
-
-window.dismissWelcomeModal = function() {
-  markWelcomeModalSeen();
-  hideModal('welcomeModal');
-};
-
-function preventScroll(e) {
-  if (onboardState.active) e.preventDefault();
-}
-
-function endOnboarding() {
-  onboardState.active = false;
-  hideOnboarding();
-}
-
-function hideOnboarding() {
-  onboardingCleanup();
-  hideTooltip();
-  const box = document.getElementById('onboardingBox');
-  const backdrop = document.getElementById('onboardingBackdrop');
-  const tooltip = document.getElementById('onboardingTooltip');
-
-  if (box) box.classList.add('hidden');
-  if (backdrop) backdrop.classList.remove('visible', 'modal-backdrop');
-  if (tooltip) {
-    tooltip.classList.remove('visible', 'mobile-sheet', 'dock-step', 'profile-step', 'finish-step');
-    tooltip.style.animation = '';
-    tooltip.innerHTML = '';
-  }
-
-  document.documentElement.classList.remove('onboarding-active');
-  document.body.classList.remove('onboarding-active');
-  if (mainContentScrollArea) mainContentScrollArea.style.overflow = originalMainContentScrollAreaOverflow;
-
-  window.removeEventListener('wheel', preventScroll);
-  window.removeEventListener('touchmove', preventScroll);
-  if (typeof closeProfileModal === 'function') closeProfileModal();
-}
-
-// دالة لعرض tooltip في منتصف الشاشة للخطوة الأخيرة
-function showFinishTooltip(text) {
-  const tooltip = document.getElementById('onboardingTooltip');
-  const backdrop = document.getElementById('onboardingBackdrop');
-  if (!tooltip) return;
-  if (backdrop) backdrop.classList.add('visible', 'modal-backdrop');
-
-  if (currentHighlightedElement) {
-    currentHighlightedElement.classList.remove('onboarding-active-target');
-    currentHighlightedElement = null;
-  }
-
-  const isMobile = window.innerWidth <= 768;
-  const body = document.createElement('div');
-  body.className = 'onboarding-tip-text finish-tip';
-  body.innerHTML = text.replace(/\n/g, '<br>');
-  tooltip.innerHTML = '';
-  tooltip.appendChild(body);
-
-  const nav = document.createElement('div');
-  nav.className = 'onboarding-nav-row';
-  const btn = document.createElement('button');
-  btn.type = 'button';
-  btn.className = 'onboarding-next-btn';
-  btn.textContent = 'تمام';
-  btn.addEventListener('click', (e) => {
-    e.stopPropagation();
-    setOnboardingStatus('completed');
-    endOnboarding();
-    showToast('الشرح انتهى بنجاح! 🎉', 'success');
-    if (typeof launchConfetti === 'function') launchConfetti();
-  }, { once: true });
-  nav.appendChild(btn);
-  tooltip.appendChild(nav);
-
-  tooltip.classList.remove('arrow-top', 'arrow-bottom', 'arrow-left', 'arrow-right', 'dock-step', 'profile-step', 'kb-active');
-  tooltip.style.opacity = '0';
-  tooltip.style.pointerEvents = 'none';
-
-  if (isMobile) {
-    tooltip.classList.add('mobile-sheet', 'finish-step');
-    tooltip.style.left = '';
-    tooltip.style.top = '';
-    tooltip.style.right = '';
-    tooltip.style.bottom = '';
-    tooltip.style.transform = '';
-  } else {
-    tooltip.classList.remove('mobile-sheet', 'finish-step');
-    void tooltip.offsetWidth;
-    const tooltipRect = tooltip.getBoundingClientRect();
-    const tipW = tooltipRect.width || 280;
-    const tipH = tooltipRect.height || 120;
-    const left = Math.max(12, (window.innerWidth - tipW) / 2);
-    const top = Math.max(12, (window.innerHeight - tipH) / 2 - 40);
-    tooltip.style.top = `${top}px`;
-    tooltip.style.left = `${left}px`;
-  }
-
-  tooltip.classList.add('visible');
-  tooltip.style.opacity = '1';
-  tooltip.style.pointerEvents = 'auto';
-  tooltip.style.animation = 'tooltipPopIn 0.5s ease-out';
-}
 
 // ═══════════════════════════════════════════════════════
 // PERSISTENCE HELPERS
@@ -2428,7 +1683,9 @@ window.getLootlinguaProfilePayload = function() {
     lastActivityDate: lastActivity,
     activityMap:      loadJSON('activityMap', {}),
     quizExposureHistory: typeof readQuizExposureHistory === 'function' ? readQuizExposureHistory() : [],
-    theme:            localStorage.getItem('theme') || document.documentElement.getAttribute('data-theme') || 'lootlingua',
+    theme:            document.documentElement.getAttribute('data-theme') || localStorage.getItem('theme') || 'lootlingua',
+    oasisMode:        document.documentElement.getAttribute('data-oasis-mode') || 'light',
+    themeIntroSeen:   getThemeIntroSeenList(),
     displayName:      localStorage.getItem('lootlinguaDisplayName') || '',
     addedGameWords:   loadJSON('addedGameWords', []),
     dailyLootState:   typeof getLootState === 'function' ? getLootState() : loadJSON('lootlinguaDailyLootState', {}),
@@ -2472,16 +1729,11 @@ window.resetLootlinguaProfileState = function(options = {}) {
     'lootlinguaExtraChests',
   ].forEach((key) => localStorage.removeItem(key));
   clearDailyQuestStorage();
-  Object.keys(localStorage).forEach((key) => {
-    if (key.startsWith('lootlingua:used:theme:') || key.startsWith('lootlingua:unlocked:theme:')) {
-      localStorage.removeItem(key);
-    }
-  });
   if (clearDisplayName) localStorage.removeItem('lootlinguaDisplayName');
   if (resetTheme) {
     localStorage.setItem('theme', 'lootlingua');
-    if (typeof setTheme === 'function') setTheme('lootlingua', true);
-    else document.documentElement.setAttribute('data-theme', 'lootlingua');
+    document.documentElement.setAttribute('data-theme', 'lootlingua');
+    syncOasisAppearanceControls();
   }
   if (typeof renderStreak === 'function') renderStreak();
   if (typeof renderDailyGoal === 'function') renderDailyGoal();
@@ -2608,12 +1860,20 @@ window.mergeLootlinguaProfileFromCloud = function(d) {
   }
   if (d.displayName) localStorage.setItem('lootlinguaDisplayName', d.displayName);
   if (d.activeTitleId) localStorage.setItem('lootlinguaActiveTitleId', String(d.activeTitleId));
+  if (Array.isArray(d.themeIntroSeen)) {
+    d.themeIntroSeen.slice(0, 12).forEach((theme) => {
+      if (Object.prototype.hasOwnProperty.call(THEME_USE_MESSAGES, theme)) {
+        localStorage.setItem(themeSeenKey('used', theme), '1');
+      }
+    });
+  }
   if (d.theme) {
     const nextTheme = isThemeComingSoon(d.theme) || !isThemeUnlocked(d.theme) ? 'lootlingua' : d.theme;
     if (typeof setTheme === 'function') setTheme(nextTheme, true);
   } else if (typeof refreshThemeLockUI === 'function') {
     refreshThemeLockUI();
   }
+  if (d.oasisMode) applyOasisMode(d.oasisMode, true);
   if (typeof evaluateTitleUnlocks === 'function') evaluateTitleUnlocks(false);
   renderStreak();
   renderDailyGoal();
@@ -2638,12 +1898,19 @@ function normalizeMigrationWordKey(word) {
 function getGuestMigrationWords() {
   const normal = readWordsFromStorage('normal', 'guest');
   const gamer = readWordsFromStorage('gamer', 'guest');
+  const mastery = typeof readSharedWordMasteryStore === 'function'
+    ? readSharedWordMasteryStore('guest')
+    : {};
   const seen = new Set();
   return [...normal, ...gamer].filter((word) => {
     const key = normalizeMigrationWordKey(word);
     if (!key || seen.has(key)) return false;
     seen.add(key);
     return true;
+  }).map((word) => {
+    if (typeof getWordMasteryKey !== 'function' || typeof mergePermanentWordMasteryState !== 'function') return word;
+    const key = getWordMasteryKey(word);
+    return mastery[key] ? { ...word, ...mergePermanentWordMasteryState(word, mastery[key]) } : word;
   });
 }
 
@@ -2731,8 +1998,11 @@ window.prepareGuestMigrationForUser = function(user) {
   const words = loot.words;
   const profile = loot.profile;
   const hasGuestData = hasMeaningfulGuestLoot(loot);
-  const shouldPrompt = hasGuestData && (hasDirtyGuestData() || !hasHandledGuestMigrationForUser(user.uid));
-  window.__guestMigrationSummary = { words, profile, user };
+  // Presence of meaningful guest data is the authoritative signal. Legacy
+  // releases could create it without invalidating handled/completed markers,
+  // so reusing those markers here could silently purge a newer snapshot.
+  const shouldPrompt = hasGuestData;
+  window.__guestMigrationSummary = { ...loot, words, profile, user };
 
   if (!shouldPrompt) {
     if (hasMeaningfulGuestLoot(loot)) {
@@ -2799,7 +2069,10 @@ window.confirmGuestMigration = async function() {
       uploaded++;
     }
 
-    const guestWorlds = readCustomWorldsFromStorage('guest');
+    const guestWorlds = dedupeCustomWorlds([
+      ...readCustomWorldsFromStorage('guest'),
+      ...(Array.isArray(summary.pendingCustomWorlds) ? summary.pendingCustomWorlds : []),
+    ]);
     const migratedWorlds = [];
     for (const world of guestWorlds) {
       const normalizedWorld = normalizeCustomWorldPayload({
@@ -2830,10 +2103,71 @@ window.confirmGuestMigration = async function() {
       renderCustomWorldCards();
     }
 
+    const guestMastery = summary.wordMastery && typeof summary.wordMastery === 'object'
+      ? summary.wordMastery
+      : {};
+    for (const [wordKey, state] of Object.entries(guestMastery)) {
+      if (!wordKey || !state || typeof window.saveGlobalWordMasteryToCloud !== 'function') continue;
+      const saved = await window.saveGlobalWordMasteryToCloud(wordKey, state);
+      if (!saved) throw new Error('word-mastery-upload-failed');
+    }
+    if (Object.keys(guestMastery).length && typeof window.applyGlobalWordMasterySnapshot === 'function') {
+      window.applyGlobalWordMasterySnapshot(guestMastery);
+    }
+
+    const guestQuizSession = summary.activeQuizSession || loadJSON('active_quiz_session', null);
+    if (
+      guestQuizSession &&
+      typeof isResumableQuizSession === 'function' &&
+      isResumableQuizSession(guestQuizSession) &&
+      typeof window.saveActiveQuizSessionToCloud === 'function'
+    ) {
+      const accountQuizSession = typeof window.loadActiveQuizSessionFromCloud === 'function'
+        ? await window.loadActiveQuizSessionFromCloud()
+        : null;
+      if (accountQuizSession && isResumableQuizSession(accountQuizSession)) {
+        localStorage.setItem(
+          `lootlingua:migrated-quiz-draft:${user.uid}`,
+          JSON.stringify(guestQuizSession)
+        );
+      } else {
+        const saved = await window.saveActiveQuizSessionToCloud(guestQuizSession);
+        if (!saved) throw new Error('quiz-session-upload-failed');
+      }
+    }
+
     writeWordsToStorage(window.words, 'normal', user.uid);
+    const profileMigrationKey = window.LootLinguaEntryExperience?.profileMigrationStorageKey({ uid: user.uid }) ||
+      `lootlingua:guest-profile-migration:v1:user:${user.uid}`;
+    let previousProfileMigration = null;
+    try {
+      previousProfileMigration = JSON.parse(localStorage.getItem(profileMigrationKey) || 'null');
+    } catch (_) {}
+    const previousProfiles = previousProfileMigration?.uid === user.uid
+      ? (
+        Array.isArray(previousProfileMigration.profiles)
+          ? previousProfileMigration.profiles
+          : [previousProfileMigration.profile]
+      ).filter((profile) => profile && typeof profile === 'object' && !Array.isArray(profile))
+      : [];
+    const currentGuestProfile = summary.profile && typeof summary.profile === 'object'
+      ? summary.profile
+      : {};
+    const acceptedProfileMigration = {
+      version: 1,
+      uid: user.uid,
+      profile: currentGuestProfile,
+      profiles: [...previousProfiles, currentGuestProfile],
+      createdAt: Number(previousProfileMigration?.createdAt) || Date.now(),
+      updatedAt: Date.now(),
+    };
+    // The learning uploads above and this account-scoped recovery record must
+    // both exist before the guest namespace is purged. profile-cloud removes
+    // the recovery record only after the merged profile is durably saved.
+    localStorage.setItem(profileMigrationKey, JSON.stringify(acceptedProfileMigration));
+    window.__acceptedGuestProfileMigration = acceptedProfileMigration;
     markGuestMigrationCompleteFlag(user, 'accepted');
     purgeStaleGuestLocalData();
-    window.__acceptedGuestProfileMigration = { uid: user.uid, profile: summary.profile };
     saveAndRender();
     hideModal('guestMigrationModal');
     showToast(uploaded > 0 ? `تم نقل ${uploaded} كلمات لحسابك` : 'ما في كلمات جديدة للنقل، وتم حفظ تقدمك', 'success', 4200);

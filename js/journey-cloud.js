@@ -6,7 +6,9 @@ import {
   getDoc,
   getDocs,
   getFirestore,
+  limit,
   onSnapshot,
+  query,
   runTransaction,
   serverTimestamp,
   setDoc,
@@ -330,6 +332,15 @@ async function getActiveJourney(options) {
   const journey = await getJourney(worldId, options);
   cache.active = journey?.status === 'active' ? journey : null;
   return cache.active;
+}
+
+async function hasAnyJourneyProgress() {
+  const user = requireUser();
+  const snapshot = await getDocs(query(
+    collection(db, 'users', user.uid, 'contentProgress'),
+    limit(1)
+  ));
+  return !snapshot.empty;
 }
 
 async function getGateProgress(worldId, rankId, gateId, options) {
@@ -4279,6 +4290,7 @@ function installQuizEvidenceBeforeRewardHook() {
 
 const API = Object.freeze({
   getActiveJourney,
+  hasAnyJourneyProgress,
   getJourney,
   startJourney,
   switchActiveJourney,

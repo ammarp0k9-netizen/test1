@@ -63,13 +63,9 @@ function closeOpenModalByShortcut() {
     .reverse()
     .find(modal => getComputedStyle(modal).display !== 'none');
   if (visibleCustomModal) {
-    if (visibleCustomModal.id === 'welcomeModal' && typeof dismissWelcomeModal === 'function') {
-      dismissWelcomeModal();
-    } else {
-      hideModal(visibleCustomModal.id);
-      if (visibleCustomModal.id === 'deleteModal') {
-        document.querySelector('#deleteModal .xp-delete-warn')?.remove();
-      }
+    hideModal(visibleCustomModal.id);
+    if (visibleCustomModal.id === 'deleteModal') {
+      document.querySelector('#deleteModal .xp-delete-warn')?.remove();
     }
     return true;
   }
@@ -108,6 +104,7 @@ function handleEscapeShortcut(e) {
 }
 
 document.addEventListener('keydown', function(e) {
+  if (e.defaultPrevented || window.__entryExperienceActive || document.getElementById('journeyAuthPrompt')) return;
   if (currentView === 'admin' && e.altKey && (e.key === 'ArrowRight' || e.key === 'ArrowLeft')) {
     e.preventDefault();
     return;
@@ -165,7 +162,7 @@ window.onload = function() {
   renderProfileModalStats();
   render();
   updateDailyQuestsBadge();
-  initOnboarding();
+  window.LootLinguaEntryExperienceController?.init();
   handleInitialRouting();
   // استدعيها بعد تأخير 0 عشان تعطي Firebase فرصة
   // لو المستخدم مش مسجل دخول، ستشتغل مباشرة

@@ -14,6 +14,28 @@
   ]);
   var UNLOCK_MODES = Object.freeze(['manual_placeholder']);
 
+  var WORLD_INTEREST_IDS = Object.freeze([
+    'games',
+    'movies',
+    'study',
+    'general',
+    'technology',
+    'travel'
+  ]);
+  var WORLD_INTEREST_UNKNOWN = 'unknown';
+  var WORLD_INTEREST_VALUES = Object.freeze([
+    WORLD_INTEREST_UNKNOWN
+  ].concat(WORLD_INTEREST_IDS));
+  var WORLD_INTEREST_META = deepFreeze({
+    games: { label: 'الألعاب' },
+    movies: { label: 'الأفلام والمسلسلات' },
+    study: { label: 'الدراسة والتعلّم' },
+    general: { label: 'اهتمامات عامة' },
+    technology: { label: 'التقنية' },
+    travel: { label: 'السفر' },
+    unknown: { label: 'غير مصنّف' }
+  });
+
   var DEFAULT_UNLOCK_CONFIG = deepFreeze({
     mode: 'manual_placeholder',
     initialStatus: 'locked',
@@ -409,6 +431,25 @@
     return output;
   }
 
+  function cleanWorldInterestTags(raw, context, path) {
+    var tags = cleanStringArray(raw, {
+      maxItems: WORLD_INTEREST_IDS.length,
+      maxLength: LIMITS.token,
+      identity: function interestIdentity(value) { return value; }
+    }, context, path);
+    return tags.filter(function keepKnownInterest(tag, index) {
+      if (WORLD_INTEREST_IDS.indexOf(tag) >= 0) return true;
+      addIssue(
+        context,
+        'error',
+        path + '[' + index + ']',
+        'invalid_world_interest',
+        'World interests must use a central interest ID.'
+      );
+      return false;
+    });
+  }
+
   function cleanTimestamp(raw, context, path) {
     if (raw === undefined || raw === null || raw === '') return null;
     if (typeof raw !== 'string') {
@@ -452,6 +493,27 @@
   function normalizeCefrLevel(value) {
     var level = String(value || '').trim();
     return CEFR_LEVELS.indexOf(level) >= 0 ? level : 'unclassified';
+  }
+
+  function normalizeWorldInterest(value) {
+    var interest = typeof value === 'string' ? value.trim() : '';
+    return WORLD_INTEREST_IDS.indexOf(interest) >= 0
+      ? interest
+      : WORLD_INTEREST_UNKNOWN;
+  }
+
+  function normalizeWorldInterestTags(value) {
+    if (!Array.isArray(value)) return [];
+    var seen = new Set();
+    var output = [];
+    value.some(function collectInterestTag(item) {
+      var interest = normalizeWorldInterest(item);
+      if (interest === WORLD_INTEREST_UNKNOWN || seen.has(interest)) return false;
+      seen.add(interest);
+      output.push(interest);
+      return output.length >= WORLD_INTEREST_IDS.length;
+    });
+    return output;
   }
 
   function getCefrLevelOrder(value) {
@@ -609,7 +671,8 @@
     var source = getObjectInput(input, context, path);
     checkUnknownFields(source, new Set([
       'schemaVersion', 'worldId', 'id', 'slug', 'title', 'subtitle', 'description',
-      'icon', 'cover', 'theme', 'category', 'difficulty', 'languageFrom',
+      'icon', 'cover', 'theme', 'category', 'primaryInterest', 'interestTags',
+      'difficulty', 'languageFrom',
       'languageTo', 'status', 'version', 'rankCount', 'gateCount', 'wordCount',
       'order', 'isFeatured', 'createdAt', 'updatedAt', 'createdBy', 'updatedBy'
     ]), context, path);
@@ -626,6 +689,14 @@
       cover: cleanUrl(source.cover, context, path + '.cover'),
       theme: cleanString(source.theme, { max: LIMITS.token, singleLine: true }, context, path + '.theme'),
       category: cleanString(source.category, { max: LIMITS.token, singleLine: true }, context, path + '.category'),
+      primaryInterest: cleanEnum(
+        source.primaryInterest,
+        WORLD_INTEREST_VALUES,
+        WORLD_INTEREST_UNKNOWN,
+        context,
+        path + '.primaryInterest'
+      ),
+      interestTags: cleanWorldInterestTags(source.interestTags, context, path + '.interestTags'),
       difficulty: cleanString(source.difficulty, { max: LIMITS.token, singleLine: true }, context, path + '.difficulty'),
       languageFrom: cleanLanguage(source.languageFrom, context, path + '.languageFrom'),
       languageTo: cleanLanguage(source.languageTo, context, path + '.languageTo'),
@@ -1326,6 +1397,9 @@
     UNLOCK_MODES: UNLOCK_MODES,
     DEFAULT_UNLOCK_CONFIG: DEFAULT_UNLOCK_CONFIG,
     ENTRY_ASSESSMENT_DEFAULTS: ENTRY_ASSESSMENT_DEFAULTS,
+    WORLD_INTEREST_IDS: WORLD_INTEREST_IDS,
+    WORLD_INTEREST_UNKNOWN: WORLD_INTEREST_UNKNOWN,
+    WORLD_INTEREST_META: WORLD_INTEREST_META,
     CEFR_LEVELS: CEFR_LEVELS,
     CEFR_LEVEL_META: CEFR_LEVEL_META,
     START_RANK_COPY: START_RANK_COPY,
@@ -1334,6 +1408,8 @@
     normalizeWord: normalizeWord,
     getWordMasteryKey: getWordMasteryKey,
     normalizeWordIdentity: normalizeWordIdentity,
+    normalizeWorldInterest: normalizeWorldInterest,
+    normalizeWorldInterestTags: normalizeWorldInterestTags,
     normalizeCefrLevel: normalizeCefrLevel,
     getCefrLevelOrder: getCefrLevelOrder,
     comparePublishedRanks: comparePublishedRanks,

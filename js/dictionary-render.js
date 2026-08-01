@@ -399,7 +399,6 @@ document.addEventListener('click', (e) => {
 
 // ── Centralized Click Handling (Event Delegation) ───────
 document.addEventListener('DOMContentLoaded', () => {
-  initEmptyOnboardingInputWatcher();
   initAppDropdowns();
   syncAppDropdownLabels();
   bindSearchLockOverlays();

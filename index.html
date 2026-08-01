@@ -36,6 +36,20 @@
       );
     })(window.location, document);
   </script>
+  <script>
+    // Paint the last confirmed local appearance before CSS loads. Auth-scoped
+    // preferences replace this cache after Firebase resolves, behind Smart Loading.
+    try {
+      var earlyTheme = localStorage.getItem('theme');
+      var earlyOasisMode = localStorage.getItem('lootlinguaOasisMode');
+      if (['lootlingua', 'golden', 'scroll', 'ocean', 'glass'].includes(earlyTheme)) {
+        document.documentElement.setAttribute('data-theme', earlyTheme);
+      }
+      if (earlyOasisMode === 'light' || earlyOasisMode === 'dark') {
+        document.documentElement.setAttribute('data-oasis-mode', earlyOasisMode);
+      }
+    } catch (_) {}
+  </script>
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <!-- Google Analytics -->
   <script async src="https://www.googletagmanager.com/gtag/js?id=G-C06S6C7JYT"></script>
@@ -61,6 +75,7 @@
   <!-- Dictionary API on Render: POST /api/dictionary (عادي) + POST /api/gamer-dictionary (جيمر→جيمر). Backend: dictionary-server/index.js -->
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
   <link rel="stylesheet" href="style.css?v=20260729-3">
+  <link rel="stylesheet" href="entry-experience.css?v=20260730-1">
 </head>
 <body class="legend-dock-visible">
 
@@ -186,7 +201,6 @@
       <i class="fa-solid fa-chevron-down" aria-hidden="true"></i>
       <span class="sr-only">إظهار الحقول الإضافية</span>
     </button>
-    <div id="onboardingExampleChips" class="onboarding-examples" style="display:none;"></div>
     <div id="suggestionsBox">
       <p style="font-size:13px; color:var(--accent); font-weight:bold; margin:0; padding:10px 14px 4px;">اختر المعنى الأنسب:</p>
       <div id="suggestionsList"></div>
@@ -684,7 +698,7 @@
         <h3><i class="fa-solid fa-medal"></i> ألقابك المفتوحة</h3>
         <div id="profileTitlePicker" class="profile-title-picker" aria-label="الألقاب المفتوحة"></div>
       </section>
-      <section class="profile-section">
+      <section class="profile-section" id="profileAppearanceSection">
         <h3><i class="fa-solid fa-palette"></i> الثيمات</h3>
         <div class="theme-selector profile-theme-selector">
           <div class="theme-option active" data-theme="lootlingua" data-unlock-level="1" onclick="setTheme('lootlingua')">
@@ -711,6 +725,16 @@
             <div class="theme-preview preview-glass"></div>
             <span class="theme-display-name">الثيم الزجاجي</span>
             <span class="theme-status-label theme-status-label--soon">قريباً</span>
+          </div>
+        </div>
+        <div id="profileOasisModeSetting" class="profile-oasis-mode-setting" hidden>
+          <div>
+            <strong><i class="fa-solid fa-circle-half-stroke" aria-hidden="true"></i> إضاءة واحة الهدوء</strong>
+            <small>يظهر هذا الخيار عند استخدام واحة الهدوء فقط</small>
+          </div>
+          <div class="profile-oasis-mode-actions" role="radiogroup" aria-label="إضاءة واحة الهدوء">
+            <button type="button" data-profile-oasis-mode="light" role="radio" onclick="setProfileOasisMode('light')"><i class="fa-solid fa-sun" aria-hidden="true"></i> فاتح</button>
+            <button type="button" data-profile-oasis-mode="dark" role="radio" onclick="setProfileOasisMode('dark')"><i class="fa-solid fa-moon" aria-hidden="true"></i> داكن</button>
           </div>
         </div>
       </section>
@@ -747,8 +771,10 @@
           <span>اختصارات لوحة المفاتيح</span>
           <small>دليل سريع</small>
         </button>
-        <button type="button" id="replayOnboardingBtn" class="auth-btn profile-auth-btn profile-settings-btn feature-coming-soon" onclick="handleOnboardingReplayClick(event)" aria-disabled="true" title="الشرح التفاعلي قريباً">
-          <i class="fa-solid fa-redo" aria-hidden="true"></i> إعادة الشرح التفاعلي <span class="feature-soon-badge">(قريباً)</span>
+        <button type="button" id="editInterestsBtn" class="auth-btn profile-auth-btn profile-settings-btn" onclick="LootLinguaEntryExperienceController.openSettings('interests')">
+          <i class="fa-solid fa-wand-magic-sparkles" aria-hidden="true"></i>
+          <span>تعديل اهتماماتي</span>
+          <small>للعوالم الحالية والقادمة</small>
         </button>
       </section>
     </div>
@@ -756,18 +782,11 @@
 </div>
 
 
-<!-- ══ Onboarding Overlay & Guide ══ -->
-<div id="onboardingBackdrop" class="onboarding-backdrop hidden"></div>
-<div id="onboardingBox" class="onboarding-box hidden" aria-live="polite" role="dialog" aria-modal="true">
-  <div class="onboarding-content">
-    <h2 id="onboardingTitle">مرحباً في LootLingua</h2>
-    <p id="onboardingText"></p>
-    <div id="onboardingExtras" class="onboarding-extras"></div>
-    <div class="onboarding-buttons">
-      <button id="onboardingPrimaryBtn" class="btn-main"></button>
-      <button id="onboardingSecondaryBtn" class="btn-secondary"></button>
-    </div>
-  </div>
+<!-- ══ Product Entry Experience v1 ══ -->
+<div id="entryExperienceRoot" class="entry-experience-root" hidden aria-hidden="true">
+  <div class="entry-experience-backdrop" aria-hidden="true"></div>
+  <section id="entryExperiencePanel" class="entry-experience-panel" role="dialog" aria-modal="true" aria-labelledby="entryExperienceTitle"></section>
+  <p id="entryExperienceStatus" class="entry-experience-status" role="status" aria-live="polite"></p>
 </div>
 
 <!-- ══ MODAL: صائد الكلمات الذكي ══ -->
@@ -797,7 +816,6 @@
     </div>
   </div>
 </div>
-<div id="onboardingTooltip" class="onboarding-tooltip hidden"></div>
 
 <!-- مهام اليوم — ورقة منبثقة -->
 <div id="dailyQuestsBackdrop" class="daily-quests-backdrop" onclick="closeDailyQuestsSheet()"></div>
@@ -820,19 +838,6 @@
     <div class="modal-buttons">
       <button id="deleteConfirmBtn" class="btn-confirm">نعم، احذف</button>
       <button id="deleteCancelBtn" onclick="hideModal('deleteModal')" class="btn-cancel">إلغاء</button>
-    </div>
-  </div>
-</div>
-
-<!-- ══ MODAL: ترحيب أول زيارة (مرة واحدة) ══ -->
-<div id="welcomeModal" class="custom-modal welcome-modal" role="dialog" aria-modal="true" aria-labelledby="welcomeModalTitle" onclick="if (event.target === this) dismissWelcomeModal()">
-  <div class="modal-content welcome-modal-content" onclick="event.stopPropagation()">
-    <div class="modal-icon welcome-modal-icon"><i class="fa-solid fa-hand-sparkles" aria-hidden="true"></i></div>
-    <h2 id="welcomeModalTitle">مرحباً في LootLingua</h2>
-    <p class="welcome-modal-lead">قاموسك الشخصي للإنجليزية والعربية — مع عوالم ألعاب، بحث ذكي، وكنز XP ينمو معك.</p>
-    <p class="welcome-modal-sub">استمتع باستكشاف الموقع على راحتك يا بطل. أضف كلماتك، جرّب عوالم الأساطير، وخلّي رحلتك مع اللغة ممتعة.</p>
-    <div class="modal-buttons">
-      <button type="button" class="btn-confirm" onclick="dismissWelcomeModal()">يلا نستكشف! 🚀</button>
     </div>
   </div>
 </div>
@@ -1047,7 +1052,10 @@
 </div>
 
 <!-- ══ FIREBASE ══ -->
+<script src="js/entry-experience-contract.js?v=20260730-1"></script>
+<script src="js/entry-experience-controller.js?v=20260730-1"></script>
 <script type="module" src="js/cloud.js?v=20260729-2"></script>
+<script type="module" src="js/entry-experience-cloud.js?v=20260730-1"></script>
 
 <!-- ══ STATS PANEL ══ -->
 <div id="statsPanel" class="stats-overlay" style="display:none;">

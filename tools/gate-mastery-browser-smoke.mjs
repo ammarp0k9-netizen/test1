@@ -15,7 +15,7 @@ if (!browserPath) throw new Error('Chrome/Edge not found');
 const offset = (process.pid + 311) % 500;
 const serverPort = 8900 + offset;
 const debugPort = 9900 + offset;
-const appUrl = `http://127.0.0.1:${serverPort}/`;
+const appUrl = `http://127.0.0.1:${serverPort}/app`;
 const profileDir = fs.mkdtempSync(path.join(os.tmpdir(), 'lootlingua-gate-mastery-smoke-'));
 const server = spawn(process.execPath, [path.join(root, 'tools', 'static-server.mjs'), String(serverPort)], {
   cwd: root,

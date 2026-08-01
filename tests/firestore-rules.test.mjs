@@ -210,6 +210,29 @@ function journey(worldId, rankId, gateId) {
   };
 }
 
+function entryExperienceState(overrides = {}) {
+  return {
+    contractVersion: 1,
+    experienceVersion: 1,
+    status: 'in-progress',
+    audience: 'returning',
+    classification: 'returning-light',
+    currentStep: 'interests',
+    interestsStatus: 'pending',
+    interestIds: [],
+    themeStatus: 'preserved',
+    themeId: 'ocean',
+    oasisMode: 'dark',
+    themeExplicit: false,
+    source: 'app-entry',
+    startedAt: serverTimestamp(),
+    updatedAt: serverTimestamp(),
+    completedAt: null,
+    skippedAt: null,
+    ...overrides
+  };
+}
+
 function placementSession(
   assessmentId = 'placement_v1_journey-rank~journey-gate',
   overrides = {}
@@ -510,6 +533,160 @@ try {
     admin: true,
     testClock: true
   }).firestore();
+
+  await test('Entry Experience v1 is owner-bound, version-bound, and non-deletable', async () => {
+    const uid = 'entry-owner';
+    const owner = environment.authenticatedContext(uid).firestore();
+    const other = environment.authenticatedContext('entry-other').firestore();
+    const v1Path = `users/${uid}/entryExperiences/v1`;
+
+    await assertSucceeds(setDoc(doc(owner, v1Path), entryExperienceState()));
+    await assertSucceeds(getDoc(doc(owner, v1Path)));
+    await assertFails(getDoc(doc(other, v1Path)));
+    await assertFails(getDoc(doc(anonymous, v1Path)));
+    await assertFails(setDoc(doc(other, v1Path), entryExperienceState()));
+    await assertFails(setDoc(
+      doc(owner, `users/${uid}/entryExperiences/v2`),
+      entryExperienceState({ experienceVersion: 2 })
+    ));
+    await assertFails(setDoc(
+      doc(environment.authenticatedContext('entry-invalid-version').firestore(),
+        'users/entry-invalid-version/entryExperiences/v1'),
+      entryExperienceState({ contractVersion: 2 })
+    ));
+    await assertFails(deleteDoc(doc(owner, v1Path)));
+  });
+
+  await test('Entry Experience completion is monotonic and preserves immutable identity fields', async () => {
+    const uid = 'entry-completed-owner';
+    const db = environment.authenticatedContext(uid).firestore();
+    const reference = doc(db, `users/${uid}/entryExperiences/v1`);
+
+    await assertSucceeds(setDoc(reference, entryExperienceState({
+      audience: 'returning',
+      classification: 'returning-with-progress'
+    })));
+    await assertSucceeds(updateDoc(reference, {
+      currentStep: 'theme',
+      interestsStatus: 'selected',
+      interestIds: ['games', 'study'],
+      updatedAt: serverTimestamp()
+    }));
+    await assertFails(updateDoc(reference, {
+      audience: 'new',
+      updatedAt: serverTimestamp()
+    }));
+    await assertFails(updateDoc(reference, {
+      classification: 'brand-new',
+      updatedAt: serverTimestamp()
+    }));
+    await assertFails(updateDoc(reference, {
+      startedAt: serverTimestamp(),
+      updatedAt: serverTimestamp()
+    }));
+
+    await assertSucceeds(updateDoc(reference, {
+      status: 'completed',
+      currentStep: 'action',
+      themeStatus: 'selected',
+      themeId: 'ocean',
+      oasisMode: 'dark',
+      themeExplicit: true,
+      completedAt: serverTimestamp(),
+      skippedAt: null,
+      updatedAt: serverTimestamp()
+    }));
+    await assertSucceeds(updateDoc(reference, {
+      source: 'settings',
+      updatedAt: serverTimestamp()
+    }));
+    await assertFails(updateDoc(reference, {
+      status: 'in-progress',
+      currentStep: 'theme',
+      completedAt: null,
+      updatedAt: serverTimestamp()
+    }));
+    await assertFails(updateDoc(reference, {
+      status: 'skipped',
+      currentStep: 'action',
+      completedAt: null,
+      skippedAt: serverTimestamp(),
+      updatedAt: serverTimestamp()
+    }));
+    await assertFails(updateDoc(reference, {
+      completedAt: serverTimestamp(),
+      updatedAt: serverTimestamp()
+    }));
+    await assertFails(deleteDoc(reference));
+  });
+
+  await test('a skipped Entry Experience v1 is terminal and cannot be reopened or completed', async () => {
+    const uid = 'entry-skipped-owner';
+    const db = environment.authenticatedContext(uid).firestore();
+    const reference = doc(db, `users/${uid}/entryExperiences/v1`);
+
+    await assertSucceeds(setDoc(reference, entryExperienceState({
+      audience: 'returning-guest',
+      classification: 'returning-guest-with-local-data'
+    })));
+    await assertSucceeds(updateDoc(reference, {
+      status: 'skipped',
+      currentStep: 'action',
+      skippedAt: serverTimestamp(),
+      completedAt: null,
+      updatedAt: serverTimestamp()
+    }));
+    await assertFails(updateDoc(reference, {
+      status: 'in-progress',
+      currentStep: 'interests',
+      skippedAt: null,
+      updatedAt: serverTimestamp()
+    }));
+    await assertFails(updateDoc(reference, {
+      status: 'completed',
+      currentStep: 'action',
+      skippedAt: null,
+      completedAt: serverTimestamp(),
+      updatedAt: serverTimestamp()
+    }));
+    await assertFails(deleteDoc(reference));
+  });
+
+  await test('profile accepts bounded Oasis preferences and rejects malformed values', async () => {
+    const uid = 'entry-profile-owner';
+    const owner = environment.authenticatedContext(uid).firestore();
+    const other = environment.authenticatedContext('entry-profile-other').firestore();
+    const reference = doc(owner, `users/${uid}/meta/profile`);
+    const profile = {
+      userXP: 0,
+      xpEconomyVersion: 2,
+      theme: 'ocean',
+      oasisMode: 'dark',
+      themeIntroSeen: ['lootlingua', 'ocean'],
+      updatedAt: serverTimestamp()
+    };
+
+    await assertSucceeds(setDoc(reference, profile));
+    await assertSucceeds(getDoc(reference));
+    await assertFails(getDoc(doc(other, `users/${uid}/meta/profile`)));
+    await assertSucceeds(updateDoc(reference, {
+      oasisMode: 'light',
+      themeIntroSeen: ['ocean'],
+      updatedAt: serverTimestamp()
+    }));
+    await assertFails(updateDoc(reference, {
+      oasisMode: 'sepia',
+      updatedAt: serverTimestamp()
+    }));
+    await assertFails(updateDoc(reference, {
+      themeIntroSeen: Array.from({ length: 13 }, (_, index) => `theme-${index}`),
+      updatedAt: serverTimestamp()
+    }));
+    await assertFails(updateDoc(reference, {
+      entryExperienceStatus: 'completed',
+      updatedAt: serverTimestamp()
+    }));
+  });
 
   await test('anonymous reads a published world but not a draft', async () => {
     await assertSucceeds(getDoc(doc(anonymous, paths.publishedWorld)));
@@ -2349,6 +2526,8 @@ try {
   await test('an admin can create a valid draft and malformed identity is rejected', async () => {
     const valid = {
       ...world('admin-draft', 'draft'),
+      primaryInterest: 'games',
+      interestTags: ['movies', 'technology'],
       createdAt: serverTimestamp(),
       updatedAt: serverTimestamp(),
       createdBy: 'admin-a',
@@ -2358,6 +2537,44 @@ try {
     await assertFails(setDoc(doc(admin, 'content_worlds/path-id'), {
       ...valid,
       worldId: 'different-id'
+    }));
+
+    const legacyInterestPath = 'content_worlds/legacy-interest-world';
+    await assertSucceeds(setDoc(doc(admin, legacyInterestPath), {
+      ...world('legacy-interest-world', 'draft'),
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+      createdBy: 'admin-a',
+      updatedBy: 'admin-a'
+    }));
+    await assertSucceeds(updateDoc(doc(admin, legacyInterestPath), {
+      primaryInterest: 'study',
+      interestTags: ['general', 'travel'],
+      version: 2,
+      updatedAt: serverTimestamp(),
+      updatedBy: 'admin-a'
+    }));
+
+    for (const [worldId, interestPatch] of [
+      ['invalid-primary-interest', { primaryInterest: 'sports' }],
+      ['invalid-interest-tag', { primaryInterest: 'general', interestTags: ['sports'] }],
+      ['duplicate-interest-tag', { primaryInterest: 'travel', interestTags: ['travel', 'travel'] }],
+      ['stored-unknown-interest', { primaryInterest: 'unknown' }]
+    ]) {
+      await assertFails(setDoc(doc(admin, `content_worlds/${worldId}`), {
+        ...world(worldId, 'draft'),
+        ...interestPatch,
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+        createdBy: 'admin-a',
+        updatedBy: 'admin-a'
+      }));
+    }
+    await assertFails(updateDoc(doc(userA, legacyInterestPath), {
+      primaryInterest: 'movies',
+      version: 3,
+      updatedAt: serverTimestamp(),
+      updatedBy: 'user-a'
     }));
   });
 
@@ -5190,7 +5407,7 @@ try {
   });
 
   if (testFilter) assert.ok(selected > 0, `No Rules test matched "${testFilter}"`);
-  assert.equal(passed, testFilter ? selected : 73);
+  assert.equal(passed, testFilter ? selected : 77);
   console.log(`# ${passed} Firestore Rules emulator tests passed`);
 } finally {
   await environment.cleanup();

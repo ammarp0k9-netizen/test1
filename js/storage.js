@@ -35,6 +35,14 @@ function markGuestDataDirty() {
   if (hasSignedInUser()) return;
   localStorage.setItem(GUEST_DATA_DIRTY_KEY, '1');
   localStorage.removeItem(GUEST_MIGRATION_HANDLED_KEY);
+  localStorage.removeItem(GUEST_MIGRATION_COMPLETE_KEY);
+  // A completed migration belongs to the previous guest snapshot. If the
+  // signed-out user creates fresh local learning data, the next sign-in must
+  // make a new, account-scoped migration decision instead of reusing the old
+  // resolved promise/session flag.
+  window.__guestMigrationSessionComplete = false;
+  window.__guestMigrationPromise = null;
+  window.__guestMigrationUid = '';
 }
 
 function markGuestProfileDataDirty(key) {
@@ -97,7 +105,10 @@ function purgeStaleGuestLocalData() {
   localStorage.removeItem(getWordsStorageKey('normal', 'guest'));
   localStorage.removeItem(getWordsStorageKey('gamer', 'guest'));
   localStorage.removeItem(getCustomWorldsStorageKey('guest'));
+  localStorage.removeItem(getPendingCustomWorldsStorageKey('guest'));
   localStorage.removeItem('lootlinguaQuizExposureHistory_guest');
+  localStorage.removeItem('lootlinguaWordMastery_guest');
+  localStorage.removeItem('active_quiz_session');
   localStorage.removeItem(LEGACY_DICTIONARY_KEY);
   localStorage.removeItem(GUEST_DATA_DIRTY_KEY);
   GUEST_PROFILE_DIRTY_KEYS.forEach((key) => localStorage.removeItem(key));
@@ -117,6 +128,9 @@ function getGuestLootSnapshot() {
   return {
     words: getGuestMigrationWords(),
     profile: getGuestProgressSnapshot(),
+    wordMastery: loadJSON('lootlinguaWordMastery_guest', {}),
+    activeQuizSession: loadJSON('active_quiz_session', null),
+    pendingCustomWorlds: loadJSON(getPendingCustomWorldsStorageKey('guest'), []),
   };
 }
 
@@ -125,9 +139,18 @@ function hasMeaningfulGuestLoot(snapshot) {
   const words = loot.words || [];
   const p = loot.profile || {};
   const guestWorlds = readCustomWorldsFromStorage('guest');
+  const wordMastery = loot.wordMastery && typeof loot.wordMastery === 'object'
+    ? loot.wordMastery
+    : {};
+  const activeQuizSession = loot.activeQuizSession;
+  const pendingCustomWorlds = Array.isArray(loot.pendingCustomWorlds)
+    ? loot.pendingCustomWorlds
+    : [];
   const xp = Math.max(Number(p.userXP) || 0, hasSignedInUser() ? 0 : (Number(userXP) || 0));
   if (guestWorlds.length > 0) return true;
-  if (words.length === 0 && xp === 0) return false;
+  if (pendingCustomWorlds.length > 0) return true;
+  if (Object.keys(wordMastery).length > 0) return true;
+  if (activeQuizSession && typeof activeQuizSession === 'object') return true;
   if (words.length > 0) return true;
   if (xp > 0) return true;
   if ((Number(p.dailyStreak) || 0) > 0) return true;
@@ -158,34 +181,18 @@ function reconcileEmptyGuestSessionState() {
 window.reconcileEmptyGuestSessionState = reconcileEmptyGuestSessionState;
 window.hasMeaningfulGuestLoot = hasMeaningfulGuestLoot;
 
-function hasUserWordsCache(uid) {
-  if (!uid) return false;
-  return localStorage.getItem(getWordsStorageKey('normal', uid)) !== null;
-}
-
 function shouldSkipGuestMigrationPrompt(user) {
   if (!user?.uid) return true;
   if (!hasMeaningfulGuestLoot()) {
     reconcileEmptyGuestSessionState();
     return true;
   }
-  if (window.__guestMigrationSessionComplete) return true;
-  if (isGuestMigrationComplete(user.uid)) {
-    purgeStaleGuestLocalData();
-    return true;
-  }
-  if (hasHandledGuestMigrationForUser(user.uid)) {
-    purgeStaleGuestLocalData();
-    return true;
-  }
-  if (window._profileLoaded) {
-    purgeStaleGuestLocalData();
-    return true;
-  }
-  if (hasSignedInUser() && hasUserWordsCache(user.uid) && !hasDirtyGuestData()) {
-    purgeStaleGuestLocalData();
-    return true;
-  }
+  // A handled/completed marker describes a previous guest snapshot, not the
+  // meaningful data currently present. Older production versions did not set
+  // GUEST_DATA_DIRTY_KEY, so neither those markers, an account cache, nor an
+  // already-loaded profile may silently discard a later legacy guest snapshot.
+  // A successful accept/decline purges that exact snapshot; any meaningful
+  // data that still exists therefore needs an explicit new decision.
   return false;
 }
 

@@ -196,6 +196,45 @@ function assertNoUndefined(value) {
 auth.currentUser = firebaseUser('rank-admin', true);
 await windowObject.refreshLootLinguaAdminAccess({ forceRefresh: true });
 const api = windowObject.LootLinguaAdminCloud;
+const legacyInterestWorldPath = 'content_worlds/legacy-interest-world';
+store.set(legacyInterestWorldPath, {
+  schemaVersion: 1,
+  worldId: 'legacy-interest-world',
+  slug: 'legacy-interest-world',
+  title: 'Legacy Interest World',
+  status: 'draft',
+  version: 1,
+  rankCount: 0,
+  gateCount: 0,
+  wordCount: 0,
+  order: 0,
+  createdAt: serverTime,
+  updatedAt: serverTime,
+  createdBy: 'first-admin',
+  updatedBy: 'first-admin'
+});
+const legacyInterestWorld = await api.getWorld('legacy-interest-world');
+assert.equal(legacyInterestWorld.primaryInterest, 'unknown');
+assert.deepEqual(Array.from(legacyInterestWorld.interestTags), []);
+
+const classifiedInterestWorld = await api.updateWorld(
+  'legacy-interest-world',
+  realmObject({
+    primaryInterest: 'study',
+    interestTags: ['technology', 'travel']
+  }),
+  1
+);
+assert.equal(classifiedInterestWorld.primaryInterest, 'study');
+assert.deepEqual(Array.from(classifiedInterestWorld.interestTags), ['technology', 'travel']);
+assert.equal(store.get(legacyInterestWorldPath).version, 2);
+await assert.rejects(() => api.updateWorld(
+  'legacy-interest-world',
+  realmObject({ primaryInterest: 'sports' }),
+  2
+));
+assert.equal(store.get(legacyInterestWorldPath).primaryInterest, 'study');
+
 const worldPath = 'content_worlds/world_1';
 store.set(worldPath, {
   schemaVersion: 1,

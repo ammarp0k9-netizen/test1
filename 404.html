@@ -27,10 +27,12 @@
         params.set('q', location.search.slice(1));
       }
 
+      // GitHub Pages cannot define rewrites. Send app/deep links directly to
+      // the app document so the public landing page never consumes `p`.
       location.replace(
         location.origin +
         projectBase +
-        '/?' +
+        '/index.html?' +
         params.toString() +
         location.hash
       );

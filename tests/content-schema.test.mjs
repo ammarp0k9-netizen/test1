@@ -112,6 +112,48 @@ test('uses the required content and progress statuses', () => {
   );
 });
 
+test('centralizes the fixed world-interest contract and keeps legacy worlds readable', () => {
+  assert.deepEqual(schema.WORLD_INTEREST_IDS, [
+    'games', 'movies', 'study', 'general', 'technology', 'travel'
+  ]);
+  assert.equal(schema.WORLD_INTEREST_UNKNOWN, 'unknown');
+  assert.equal(Object.isFrozen(schema.WORLD_INTEREST_IDS), true);
+  assert.equal(Object.isFrozen(schema.WORLD_INTEREST_META), true);
+
+  const legacy = schema.cleanWorld(baseWorld());
+  assert.equal(legacy.primaryInterest, 'unknown');
+  assert.deepEqual(legacy.interestTags, []);
+  assert.equal(schema.normalizeWorldInterest(), 'unknown');
+  assert.equal(schema.normalizeWorldInterest('unrecognized'), 'unknown');
+  assert.deepEqual(
+    schema.normalizeWorldInterestTags(['technology', 'invalid', 'technology', 'travel']),
+    ['technology', 'travel']
+  );
+});
+
+test('validates primaryInterest and interestTags against the central IDs', () => {
+  const classified = schema.cleanWorld(baseWorld({
+    primaryInterest: 'games',
+    interestTags: ['movies', 'technology', 'movies']
+  }));
+  assert.equal(classified.primaryInterest, 'games');
+  assert.deepEqual(classified.interestTags, ['movies', 'technology']);
+
+  const invalidPrimary = schema.validateWorld(baseWorld({ primaryInterest: 'sports' }));
+  assert.equal(invalidPrimary.ok, false);
+  assert.equal(hasCode(invalidPrimary, 'invalid_enum'), true);
+
+  const invalidTags = schema.validateWorld(baseWorld({ interestTags: ['travel', 'sports'] }));
+  assert.equal(invalidTags.ok, false);
+  assert.equal(hasCode(invalidTags, 'invalid_world_interest'), true);
+
+  const tooManyTags = schema.validateWorld(baseWorld({
+    interestTags: [...schema.WORLD_INTEREST_IDS, 'games']
+  }));
+  assert.equal(tooManyTags.ok, false);
+  assert.equal(hasCode(tooManyTags, 'array_too_long'), true);
+});
+
 test('centralizes the official CEFR rank field and keeps old ranks unclassified', () => {
   assert.deepEqual(schema.CEFR_LEVELS, [
     'A1', 'A2', 'B1', 'B2', 'C1', 'C2', 'unclassified'

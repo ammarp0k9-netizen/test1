@@ -11,9 +11,10 @@ const browserCandidates = [
 const browserPath = browserCandidates.find(candidate => fs.existsSync(candidate));
 if (!browserPath) throw new Error('Chrome/Edge not found');
 
-const serverPort = 8765;
-const debugPort = 9223;
-const appUrl = `http://127.0.0.1:${serverPort}/`;
+const portOffset = (process.pid + 71) % 500;
+const serverPort = 8700 + portOffset;
+const debugPort = 9700 + portOffset;
+const appUrl = `http://127.0.0.1:${serverPort}/app`;
 const profileDir = fs.mkdtempSync(path.join(os.tmpdir(), 'lootlingua-smoke-'));
 const baseline = JSON.parse(fs.readFileSync(path.join(root, 'reports', 'refactor-baseline.json'), 'utf8'));
 const requiredGlobals = baseline.inlineHandlers.requiredGlobals;

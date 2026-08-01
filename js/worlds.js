@@ -1022,8 +1022,6 @@ function isSwipeBlockedTarget(target) {
     '.custom-modal',
     '.profile-modal.open',
     '.sidebar.open',
-    '.onboarding-box',
-    '.onboarding-tooltip',
     '.notif-hub',
     '.daily-quests-sheet.open',
     '.sound-btn',
@@ -1301,6 +1299,7 @@ function hideAllViewElements() {
 const publishedContentState = {
   tab: 'published',
   route: { key: 'worlds', params: {} },
+  worlds: [],
   world: null,
   rank: null,
   gate: null,
@@ -1712,7 +1711,9 @@ function canRevealPublishedGateWords(gateState, journey) {
 
 function rerenderPublishedRoute() {
   const routeKey = publishedContentState.route?.key;
-  if (routeKey === 'world' && publishedContentState.world) {
+  if (routeKey === 'worlds' && publishedContentState.worlds.length) {
+    renderPublishedWorlds(publishedContentState.worlds, publishedContentState.activeJourney);
+  } else if (routeKey === 'world' && publishedContentState.world) {
     renderPublishedRanks(
       publishedContentState.world,
       publishedContentState.ranks,
@@ -1743,6 +1744,12 @@ function rerenderPublishedRoute() {
     );
   }
 }
+
+window.addEventListener('lootlingua:entry-state-ready', () => {
+  if (currentView === 'worlds' && publishedContentState.tab === 'published') {
+    rerenderPublishedRoute();
+  }
+});
 
 function isCurrentPublishedGate(worldId, rankId, gateId, generation) {
   const params = publishedContentState.route?.params || {};
@@ -1824,7 +1831,12 @@ function watchPublishedGateProgress(worldId, rankId, gateId, initialProgress, ge
   }
 }
 
-function requestJourneySignIn() {
+function requestJourneySignIn(intent) {
+  const entryController = window.LootLinguaEntryExperienceController;
+  if (entryController?.requestJourneyAuth) {
+    const pending = entryController.requestJourneyAuth(intent);
+    if (pending) return pending;
+  }
   showToast('سجّل دخولك أولًا لبدء رحلة المحتوى الجاهز.', 'info', 4200);
   const profileModal = document.getElementById('profileModal');
   if (
@@ -1834,7 +1846,39 @@ function requestJourneySignIn() {
   ) {
     window.toggleProfileModal();
   }
+  return null;
 }
+
+async function resumePendingJourneyIntent(intent, world) {
+  const action = String(intent?.action || '');
+  if (!world || String(world.worldId || '') !== String(intent?.worldId || '')) {
+    throw new Error('Pending Journey intent no longer matches the published world.');
+  }
+  const previousError = publishedContentState.journeyError;
+  let result;
+  if (action === 'start-journey') result = await startOrResumePublishedJourney(world);
+  else if (action === 'begin-journey-from-start') result = await beginPublishedJourneyFromStart(world);
+  else if (action === 'start-placement') result = await beginPublishedPlacement(world);
+  if (action === 'start-level-placement') {
+    result = await beginPublishedLevelPlacement(world, intent.cefrLevel);
+  } else if (!['start-journey', 'begin-journey-from-start', 'start-placement'].includes(action)) {
+    throw new Error('Unsupported pending Journey intent.');
+  }
+  const nextError = publishedContentState.journeyError;
+  if (nextError && nextError !== previousError) {
+    throw nextError.error || Object.assign(new Error(nextError.text || 'Journey restore failed.'), {
+      code: nextError.code || 'journey/restore-failed',
+    });
+  }
+  return { restored: true, result };
+}
+
+Object.defineProperty(window, 'LootLinguaJourneyEntryActions', {
+  value: Object.freeze({ resumePendingIntent: resumePendingJourneyIntent }),
+  configurable: false,
+  enumerable: true,
+  writable: false,
+});
 
 function publishedJourneyErrorText(error) {
   const code = String(error?.code || '');
@@ -1996,7 +2040,7 @@ async function openPublishedJourneyDestination(worldId, options) {
 
 async function startOrResumePublishedJourney(world) {
   if (!window.auth?.currentUser) {
-    requestJourneySignIn();
+    requestJourneySignIn({ action: 'start-journey', worldId: world?.worldId, source: 'world' });
     return null;
   }
   const activeJourney = publishedContentState.activeJourney ||
@@ -2055,7 +2099,7 @@ async function startOrResumePublishedJourney(world) {
 
 async function beginPublishedJourneyFromStart(world) {
   if (!window.auth?.currentUser) {
-    requestJourneySignIn();
+    requestJourneySignIn({ action: 'begin-journey-from-start', worldId: world?.worldId, source: 'world' });
     return null;
   }
   const activeJourney = publishedContentState.activeJourney ||
@@ -2101,7 +2145,7 @@ async function beginPublishedJourneyFromStart(world) {
 
 async function beginPublishedPlacement(world) {
   if (!window.auth?.currentUser) {
-    requestJourneySignIn();
+    requestJourneySignIn({ action: 'start-placement', worldId: world?.worldId, source: 'placement' });
     return null;
   }
   const activeJourney = publishedContentState.activeJourney ||
@@ -2158,7 +2202,12 @@ function publishedLevelState(cefrLevel, journey) {
 
 async function beginPublishedLevelPlacement(world, cefrLevel) {
   if (!window.auth?.currentUser) {
-    requestJourneySignIn();
+    requestJourneySignIn({
+      action: 'start-level-placement',
+      worldId: world?.worldId,
+      cefrLevel,
+      source: 'placement',
+    });
     return null;
   }
   if (publishedContentState.levelPlacementPending) return null;
@@ -2893,7 +2942,7 @@ async function runPublishedGateLoad(syncOnly) {
   const { world, rank, gate } = publishedContentState;
   if (!world || !rank || !gate) return;
   if (!window.auth?.currentUser) {
-    requestJourneySignIn();
+    requestJourneySignIn({ action: 'start-journey', worldId: world?.worldId, source: 'world' });
     return;
   }
   const activeForWorld = String(publishedContentState.activeJourney?.worldId || '') ===
@@ -3662,9 +3711,64 @@ function renderPublishedEmpty(message, iconClass) {
   return state;
 }
 
-function appendMetaChip(container, text, iconClass) {
+const PUBLISHED_WORLD_RECOMMENDATION_COPY = Object.freeze({
+  matched: 'مقترح حسب اهتماماتك',
+  available: 'متاح حاليًا',
+});
+
+function normalizePublishedInterestIds(values) {
+  const schema = window.LootLinguaContentSchema;
+  if (
+    !Array.isArray(schema?.WORLD_INTEREST_IDS) ||
+    typeof schema.normalizeWorldInterestTags !== 'function'
+  ) return [];
+  const allowed = new Set(schema.WORLD_INTEREST_IDS);
+  return schema.normalizeWorldInterestTags(values).filter((interestId) => allowed.has(interestId));
+}
+
+function getPublishedViewerInterestIds() {
+  try {
+    const state = window.LootLinguaEntryExperienceController?.getState?.();
+    if (state?.interestsStatus !== 'selected') return [];
+    return normalizePublishedInterestIds(state.interestIds);
+  } catch (_) {
+    return [];
+  }
+}
+
+function getPublishedWorldRecommendation(world, viewerInterestIds) {
+  const schema = window.LootLinguaContentSchema;
+  const selected = normalizePublishedInterestIds(viewerInterestIds);
+  const primaryInterest = typeof schema?.normalizeWorldInterest === 'function'
+    ? schema.normalizeWorldInterest(world?.primaryInterest)
+    : 'unknown';
+  const interestTags = normalizePublishedInterestIds(world?.interestTags);
+  const matchedInterestId = selected.find((interestId) => (
+    interestId === primaryInterest || interestTags.includes(interestId)
+  ));
+  if (matchedInterestId) {
+    return {
+      kind: 'interest-match',
+      label: PUBLISHED_WORLD_RECOMMENDATION_COPY.matched,
+      matchedInterestId,
+    };
+  }
+  if (world?.comingSoon === true || world?.isComingSoon === true) {
+    return { kind: 'upcoming', label: '', matchedInterestId: '' };
+  }
+  return {
+    kind: 'available',
+    label: PUBLISHED_WORLD_RECOMMENDATION_COPY.available,
+    matchedInterestId: '',
+  };
+}
+
+function appendMetaChip(container, text, iconClass, className) {
   if (text === undefined || text === null || text === '') return;
-  const chip = publishedElement('span', 'published-meta-chip');
+  const chip = publishedElement(
+    'span',
+    ['published-meta-chip', String(className || '').trim()].filter(Boolean).join(' ')
+  );
   if (iconClass) chip.append(publishedIcon(iconClass));
   chip.append(document.createTextNode(String(text)));
   container.append(chip);
@@ -3765,6 +3869,20 @@ function makePublishedHierarchyCard(kind, item, onClick, options) {
   const description = item.description || item.subtitle;
   if (description) body.append(publishedElement('span', 'published-card-description', description));
   const meta = publishedElement('span', 'published-card-meta');
+  const recommendation = kind === 'world' ? options?.recommendation : null;
+  if (recommendation?.label) {
+    appendMetaChip(
+      meta,
+      recommendation.label,
+      recommendation.kind === 'interest-match'
+        ? 'fa-solid fa-wand-magic-sparkles'
+        : 'fa-solid fa-circle-check',
+      recommendation.kind === 'interest-match'
+        ? 'published-meta-chip-recommendation'
+        : 'published-meta-chip-availability'
+    );
+    card.dataset.recommendation = recommendation.kind;
+  }
   if (item.difficulty) appendMetaChip(meta, item.difficulty, 'fa-solid fa-signal');
   if (item.category) appendMetaChip(meta, item.category, 'fa-solid fa-tag');
   if (kind === 'world' && Number.isFinite(Number(item.rankCount))) {
@@ -4603,11 +4721,13 @@ function renderPublishedWorlds(items, activeJourney) {
     );
     content.append(intro);
     const grid = publishedElement('div', 'published-card-grid');
+    const viewerInterestIds = getPublishedViewerInterestIds();
     items.forEach((world) => {
       grid.append(makePublishedHierarchyCard(
         'world',
         world,
-        () => window.openPublishedWorld(world.worldId)
+        () => window.openPublishedWorld(world.worldId),
+        { recommendation: getPublishedWorldRecommendation(world, viewerInterestIds) }
       ));
     });
     content.append(grid);
@@ -5325,6 +5445,7 @@ async function loadPublishedWorlds(options) {
     ]);
     if (generation !== publishedContentState.generation) return;
     publishedContentState.activeJourney = activeJourney;
+    publishedContentState.worlds = items;
     renderPublishedWorlds(items, activeJourney);
   } catch (error) {
     if (generation !== publishedContentState.generation) return;

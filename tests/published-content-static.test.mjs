@@ -41,6 +41,17 @@ test('published records preserve Admin unlock configuration for journey access c
   assert.match(worldsSource, /published-card-journey-\$\{journeyState\}/);
 });
 
+test('published world reads expose the central interest contract with a legacy fallback', () => {
+  const worldRecord = sourceSection(apiSource, 'function worldRecord', 'function recordKey');
+  assert.match(worldRecord, /LootLinguaContentSchema/);
+  assert.match(worldRecord, /normalizeWorldInterest\(item\.primaryInterest\)/);
+  assert.match(worldRecord, /normalizeWorldInterestTags\(item\.interestTags\)/);
+  assert.match(worldRecord, /:\s*'unknown'/);
+  assert.match(worldRecord, /:\s*\[\]/);
+  assert.match(apiSource, /snapshot\.docs\.map\(worldRecord\)/);
+  assert.match(apiSource, /const item = worldRecord\(snapshot\)/);
+});
+
 test('published word reads use real 25-item bidirectional pagination', () => {
   assert.match(apiSource, /const PAGE_SIZE = 25/);
   assert.match(apiSource, /limitToLast\(settings\.pageSize \+ 1\)/);
@@ -71,7 +82,8 @@ test('published UI is separate from the existing custom-world panel', () => {
 
 test('router recognizes every published-content route with dynamic project base path', () => {
   assert.match(routerSource, /location\.hostname\.endsWith\('\.github\.io'\)/);
-  assert.match(routerSource, /return segments\.length \? `\/\$\{segments\[0\]\}` : ''/);
+  assert.match(routerSource, /segments\[1\] === 'app' \? `\/\$\{segments\[0\]\}\/app`/);
+  assert.match(routerSource, /return segments\[0\] === 'app' \? '\/app' : ''/);
   assert.match(routerSource, /parts\.length === 2/);
   assert.match(routerSource, /parts\.length === 4 && parts\[2\] === 'ranks'/);
   assert.match(

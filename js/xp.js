@@ -23,7 +23,8 @@ const THEME_UNLOCK_LEVELS = {
   lootlingua: 1,
   golden: 2,
   scroll: 3,
-  ocean: 4,
+  // Oasis is a core appearance choice in Product Entry, not an XP reward.
+  ocean: 1,
   glass: 5,
 };
 
@@ -37,15 +38,9 @@ const THEME_DISPLAY_NAMES = {
 
 /** ثيمات/ميزات معطّلة مؤقتاً — تظهر باهتة مع «قريباً» */
 const THEMES_COMING_SOON = new Set(['glass']);
-const ONBOARDING_COMING_SOON = true;
-const WELCOME_STORAGE_KEY = 'lootlingua_welcome_v1_seen';
 
 function isThemeComingSoon(theme) {
   return THEMES_COMING_SOON.has(theme);
-}
-
-function isOnboardingComingSoon() {
-  return ONBOARDING_COMING_SOON;
 }
 
 function getThemeDisplayName(theme) {
@@ -92,20 +87,6 @@ function updateThemeOptionLabels(opt, theme, comingSoon, unlocked) {
   }
 }
 
-function showOnboardingComingSoonMessage() {
-  pushNotification('الشرح التفاعلي قريباً! لسه بنحكيه أحلى — ترقب التحديث 🛠️', 'warning');
-}
-
-window.handleOnboardingReplayClick = function(ev) {
-  if (ev) { ev.preventDefault(); ev.stopPropagation(); }
-  if (isOnboardingComingSoon()) {
-    showOnboardingComingSoonMessage();
-    return;
-  }
-  if (typeof closeProfileModal === 'function') closeProfileModal();
-  startOnboarding(true);
-};
-
 function getLevelFromXP(xp) {
   const level = XP_RANKS.filter(r => xp >= r.min).length;
   return Math.max(1, level);
@@ -143,13 +124,6 @@ function refreshThemeLockUI() {
     else if (unlocked) opt.removeAttribute('title');
     if (theme === activeTheme && (!unlocked || comingSoon)) activeThemeLocked = true;
   });
-
-  const replayBtn = document.getElementById('replayOnboardingBtn');
-  if (replayBtn) {
-    replayBtn.classList.toggle('feature-coming-soon', isOnboardingComingSoon());
-    replayBtn.setAttribute('aria-disabled', isOnboardingComingSoon() ? 'true' : 'false');
-    replayBtn.title = isOnboardingComingSoon() ? 'الشرح التفاعلي قريباً' : '';
-  }
 
   if (activeThemeLocked) {
     document.documentElement.setAttribute('data-theme', 'lootlingua');
