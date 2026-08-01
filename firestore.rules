@@ -25,10 +25,7 @@ service cloud.firestore {
     function validTestClock(data, uid) {
       return data.keys().hasOnly([
           'version', 'offsetMs', 'updatedAt', 'updatedBy'
-        ]) &&
-        data.keys().hasAll([
-          'version', 'offsetMs', 'updatedAt', 'updatedBy'
-        ]) &&
+        ]) && data.keys().size() == 4 &&
         data.version == 1 &&
         data.offsetMs is int &&
         data.offsetMs >= -31536000000 &&
@@ -447,6 +444,26 @@ service cloud.firestore {
         data.createdBy is string && data.updatedBy is string;
     }
 
+    function validWordLexicalDetails(data) {
+      return optionalString(data, 'definition', 4000) &&
+        optionalString(data, 'definition_ar', 4000) &&
+        optionalString(data, 'example', 4000) &&
+        optionalString(data, 'exampleTranslation', 4000) &&
+        optionalString(data, 'partOfSpeech', 120) &&
+        optionalString(data, 'level', 80) &&
+        optionalList(data, 'tags', 50) &&
+        optionalList(data, 'synonyms', 50) &&
+        optionalString(data, 'pronunciation', 500) &&
+        optionalString(data, 'notes', 4000);
+    }
+
+    function validPreparedWordDetails(data) {
+      return validWordLexicalDetails(data) &&
+        optionalString(data, 'category', 120) &&
+        optionalString(data, 'audioUrl', 2048) &&
+        optionalString(data, 'imageUrl', 2048);
+    }
+
     function validContentWord(data, worldId, rankId, gateId, contentWordId) {
       return data.keys().hasAll([
           'normalizationVersion', 'worldId', 'rankId', 'gateId',
@@ -463,19 +480,7 @@ service cloud.firestore {
         nonEmptyString(data.normalizedWord, 240) &&
         nonEmptyString(data.wordKey, 240) &&
         nonEmptyString(data.translation, 1000) &&
-        optionalString(data, 'definition', 4000) &&
-        optionalString(data, 'definition_ar', 4000) &&
-        optionalString(data, 'example', 4000) &&
-        optionalString(data, 'exampleTranslation', 4000) &&
-        optionalString(data, 'category', 120) &&
-        optionalString(data, 'partOfSpeech', 120) &&
-        optionalString(data, 'level', 80) &&
-        optionalList(data, 'tags', 50) &&
-        optionalList(data, 'synonyms', 50) &&
-        optionalString(data, 'pronunciation', 500) &&
-        optionalString(data, 'audioUrl', 2048) &&
-        optionalString(data, 'imageUrl', 2048) &&
-        optionalString(data, 'notes', 4000) &&
+        validPreparedWordDetails(data) &&
         data.order is int && data.order >= 0 &&
         validContentStatus(data.status) &&
         data.version is int && data.version >= 1 &&
@@ -526,19 +531,7 @@ service cloud.firestore {
         nonEmptyString(data.normalizedWord, 240) &&
         nonEmptyString(data.wordKey, 240) &&
         nonEmptyString(data.translation, 1000) &&
-        optionalString(data, 'definition', 4000) &&
-        optionalString(data, 'definition_ar', 4000) &&
-        optionalString(data, 'example', 4000) &&
-        optionalString(data, 'exampleTranslation', 4000) &&
-        optionalString(data, 'category', 120) &&
-        optionalString(data, 'partOfSpeech', 120) &&
-        optionalString(data, 'level', 80) &&
-        optionalList(data, 'tags', 50) &&
-        optionalList(data, 'synonyms', 50) &&
-        optionalString(data, 'pronunciation', 500) &&
-        optionalString(data, 'audioUrl', 2048) &&
-        optionalString(data, 'imageUrl', 2048) &&
-        optionalString(data, 'notes', 4000) &&
+        validPreparedWordDetails(data) &&
         data.order is int && data.order >= 0 &&
         validStagingStatus(data.stagingStatus) &&
         validDistributionTarget(data) &&
@@ -599,23 +592,27 @@ service cloud.firestore {
         optionalString(data, 'normalizedWord', 240) &&
         optionalString(data, 'wordKey', 240) &&
         optionalString(data, 'translation', 1000) &&
-        optionalString(data, 'definition', 4000) &&
-        optionalString(data, 'definition_ar', 4000) &&
-        optionalString(data, 'example', 4000) &&
-        optionalString(data, 'exampleTranslation', 4000) &&
-        optionalString(data, 'partOfSpeech', 120) &&
-        optionalString(data, 'level', 80) &&
-        optionalList(data, 'tags', 50) &&
-        optionalList(data, 'synonyms', 50) &&
-        optionalString(data, 'pronunciation', 500) &&
-        optionalString(data, 'notes', 4000) &&
+        validWordLexicalDetails(data) &&
         optionalBool(data, 'starred') &&
-        optionalNonNegativeInt(data, 'forgetCount') &&
-        (!('forgetCount' in data) || data.forgetCount <= 100000) &&
+        validLegacySrsFields(data) &&
+        optionalBool(data, 'hiddenFromDictionary') &&
+        optionalTime(data, 'hiddenFromDictionaryAt') &&
+        (!data.get('hiddenFromDictionary', false) ||
+          data.get('hiddenFromDictionaryAt', null) is timestamp) &&
+        (!('personalDictionaryState' in data) ||
+          validPersonalDictionaryState(data.personalDictionaryState)) &&
+        optionalNonNegativeInt(data, 'order') &&
+        optionalTime(data, 'createdAt');
+    }
+
+    function validLegacySrsFields(data) {
+      return optionalNonNegativeInt(data, 'forgetCount') &&
+        data.get('forgetCount', 0) <= 100000 &&
         optionalNumber(data, 'xpValue') &&
         (!('mastery_status' in data) || validSrsStatus(data.mastery_status)) &&
         (!('mastery_streak' in data) ||
-          (data.mastery_streak is int && data.mastery_streak >= 0 && data.mastery_streak <= 3)) &&
+          (data.mastery_streak is int && data.mastery_streak >= 0 &&
+            data.mastery_streak <= 3)) &&
         optionalTime(data, 'last_recalled_at') &&
         optionalTime(data, 'first_recalled_at') &&
         optionalString(data, 'last_recall_day', 20) &&
@@ -627,15 +624,7 @@ service cloud.firestore {
         optionalBool(data, 'hasEarnedMasteryXP') &&
         optionalList(data, 'earnedTransitions', 8) &&
         optionalNonNegativeInt(data, 'remasteryAwardCount') &&
-        optionalNonNegativeInt(data, 'xpEconomyVersion') &&
-        optionalBool(data, 'hiddenFromDictionary') &&
-        optionalTime(data, 'hiddenFromDictionaryAt') &&
-        (!data.get('hiddenFromDictionary', false) ||
-          data.get('hiddenFromDictionaryAt', null) is timestamp) &&
-        (!('personalDictionaryState' in data) ||
-          validPersonalDictionaryState(data.personalDictionaryState)) &&
-        optionalNonNegativeInt(data, 'order') &&
-        optionalTime(data, 'createdAt');
+        optionalNonNegativeInt(data, 'xpEconomyVersion');
     }
 
     function validLegacyWordUpdate(before, after, uid) {
@@ -679,25 +668,7 @@ service cloud.firestore {
           'mastered_once', 'firstMasteredAt', 'hasEarnedMasteryXP',
           'earnedTransitions', 'remasteryAwardCount', 'xpEconomyVersion'
         ]) &&
-        optionalNonNegativeInt(after, 'forgetCount') &&
-        after.get('forgetCount', 0) <= 100000 &&
-        optionalNumber(after, 'xpValue') &&
-        (!('mastery_status' in after) || validSrsStatus(after.mastery_status)) &&
-        (!('mastery_streak' in after) ||
-          (after.mastery_streak is int && after.mastery_streak >= 0 &&
-            after.mastery_streak <= 3)) &&
-        optionalTime(after, 'last_recalled_at') &&
-        optionalTime(after, 'first_recalled_at') &&
-        optionalString(after, 'last_recall_day', 20) &&
-        optionalString(after, 'last_recall_session_id', 180) &&
-        optionalTime(after, 'last_quizzed_at') &&
-        optionalNonNegativeInt(after, 'quiz_seen_count') &&
-        optionalBool(after, 'mastered_once') &&
-        optionalTime(after, 'firstMasteredAt') &&
-        optionalBool(after, 'hasEarnedMasteryXP') &&
-        optionalList(after, 'earnedTransitions', 8) &&
-        optionalNonNegativeInt(after, 'remasteryAwardCount') &&
-        optionalNonNegativeInt(after, 'xpEconomyVersion');
+        validLegacySrsFields(after);
       return validMembershipOnly ||
         validVisibilityOnly ||
         validSrsOnly ||
@@ -722,8 +693,7 @@ service cloud.firestore {
     function validCustomWorld(data, uid) {
       return data.keys().hasOnly([
           'name', 'description', 'emoji', 'userId', 'createdAt', 'updatedAt'
-        ]) &&
-        data.keys().hasAll(['name', 'description', 'emoji', 'userId', 'createdAt', 'updatedAt']) &&
+        ]) && data.keys().size() == 6 &&
         data.userId == uid &&
         nonEmptyString(data.name, 40) &&
         data.description is string && data.description.size() <= 140 &&
@@ -798,13 +768,7 @@ service cloud.firestore {
           'classification', 'currentStep', 'interestsStatus', 'interestIds',
           'themeStatus', 'themeId', 'oasisMode', 'themeExplicit', 'source',
           'startedAt', 'updatedAt', 'completedAt', 'skippedAt'
-        ]) &&
-        data.keys().hasAll([
-          'contractVersion', 'experienceVersion', 'status', 'audience',
-          'classification', 'currentStep', 'interestsStatus', 'interestIds',
-          'themeStatus', 'themeId', 'oasisMode', 'themeExplicit', 'source',
-          'startedAt', 'updatedAt', 'completedAt', 'skippedAt'
-        ]) &&
+        ]) && data.keys().size() == 17 &&
         data.contractVersion == 1 && data.experienceVersion == 1 &&
         (data.status == 'in-progress' || data.status == 'completed' || data.status == 'skipped') &&
         (data.audience == 'new' || data.audience == 'returning' || data.audience == 'returning-guest') &&
@@ -886,7 +850,7 @@ service cloud.firestore {
 
     function validXpEvent(data, metaId) {
       return data.keys().hasOnly(['amount', 'reason', 'xpEconomyVersion', 'createdAt']) &&
-        data.keys().hasAll(['amount', 'reason', 'xpEconomyVersion', 'createdAt']) &&
+        data.keys().size() == 4 &&
         data.amount is int && data.amount > 0 && data.amount <= 50 &&
         data.xpEconomyVersion is int && data.xpEconomyVersion >= 2 &&
         data.createdAt is timestamp &&
@@ -929,18 +893,9 @@ service cloud.firestore {
         nonEmptyString(data.word, 240) &&
         optionalString(data, 'wordKey', 240) &&
         optionalString(data, 'translation', 1000) &&
-        optionalString(data, 'definition', 4000) &&
-        optionalString(data, 'definition_ar', 4000) &&
+        validWordLexicalDetails(data) &&
         optionalString(data, 'meaning', 1000) &&
-        optionalString(data, 'example', 4000) &&
-        optionalString(data, 'exampleTranslation', 4000) &&
-        optionalString(data, 'partOfSpeech', 120) &&
         optionalString(data, 'category', 120) &&
-        optionalString(data, 'level', 80) &&
-        optionalList(data, 'tags', 50) &&
-        optionalList(data, 'synonyms', 50) &&
-        optionalString(data, 'pronunciation', 500) &&
-        optionalString(data, 'notes', 4000) &&
         optionalString(data, 'difficulty', 80) &&
         data.forgetCount is int && data.forgetCount >= 0 && data.forgetCount <= 100000 &&
         optionalString(data, 'contentRefPath', 1000) &&
@@ -1328,29 +1283,82 @@ service cloud.firestore {
         activeJourneyPointerAfter(uid, worldId);
     }
 
-    function validJourneyLevelPlacementResult(before, after, uid, worldId) {
+    function validJourneyLevelPlacementDecision(before, after, uid, worldId, decisionKind) {
       let assessmentId = before.activeLevelPlacementAssessmentId;
       let session = getAfter(
         /databases/$(database)/documents/users/$(uid)/contentProgress/$(worldId)/levelPlacementSessions/$(assessmentId)
       ).data;
-      return after.diff(before).affectedKeys().hasOnly([
-          'activeRankId', 'activeGateId', 'unlockedRankIds', 'unlockedGateIds',
-          'passedCefrLevels', 'partialCefrLevels', 'levelPlacementStatus',
-          'contentJourneyStatus', 'levelPlacementAssessmentIds',
-          'levelPlacementPassedRankIds',
-          'updatedAt'
-        ]) &&
-        before.status == 'active' &&
-        after.status == 'active' &&
+      return (
+        (
+          decisionKind == 'result' &&
+          after.diff(before).affectedKeys().hasOnly([
+            'activeRankId', 'activeGateId', 'unlockedRankIds', 'unlockedGateIds',
+            'passedCefrLevels', 'partialCefrLevels', 'levelPlacementStatus',
+            'contentJourneyStatus', 'levelPlacementAssessmentIds',
+            'levelPlacementPassedRankIds', 'updatedAt'
+          ]) &&
+          after.activeLevelPlacementAssessmentId == assessmentId &&
+          after.activeLevelPlacementCefrLevel == before.activeLevelPlacementCefrLevel &&
+          after.levelPlacementStatus == 'awaiting-decision' &&
+          session.status == 'awaiting-decision' &&
+          (
+            session.placementVersion == 1 ||
+            (
+              after.get('levelPlacementAssessmentIds', {})[session.cefrLevel] == assessmentId &&
+              after.get('levelPlacementPassedRankIds', []).hasAll(
+                before.get('levelPlacementPassedRankIds', [])
+              ) &&
+              after.get('levelPlacementPassedRankIds', []).hasAll(session.passedRankIds) &&
+              after.get('contentJourneyStatus', 'in-progress') ==
+                (session.completedCurrentContent
+                  ? 'completed-current-content'
+                  : 'in-progress')
+            )
+          )
+        ) ||
+        (
+          decisionKind == 'outcome' &&
+          after.diff(before).affectedKeys().hasOnly([
+            'activeRankId', 'activeGateId', 'unlockedRankIds', 'unlockedGateIds',
+            'passedCefrLevels', 'partialCefrLevels', 'levelPlacementStatus',
+            'contentJourneyStatus', 'levelPlacementAssessmentIds',
+            'levelPlacementPassedRankIds', 'activeLevelPlacementAssessmentId',
+            'activeLevelPlacementCefrLevel', 'levelPlacementClearedGateIds',
+            'worldCompletion', 'updatedAt'
+          ]) &&
+          after.activeLevelPlacementAssessmentId == '' &&
+          after.activeLevelPlacementCefrLevel == '' &&
+          after.levelPlacementStatus == 'completed' &&
+          session.status == 'completed' &&
+          session.completedAt == request.time &&
+          session.assessedAt == request.time &&
+          after.get('levelPlacementAssessmentIds', {})[session.cefrLevel] == assessmentId &&
+          after.get('levelPlacementPassedRankIds', []).toSet() ==
+            before.get('levelPlacementPassedRankIds', []).toSet().union(
+              session.passedRankIds.toSet()
+            ) &&
+          after.get('levelPlacementClearedGateIds', []) is list &&
+          after.get('levelPlacementClearedGateIds', []).size() <= 2000 &&
+          after.get('levelPlacementClearedGateIds', []).toSet().size() ==
+            after.get('levelPlacementClearedGateIds', []).size() &&
+          after.get('levelPlacementClearedGateIds', []).toSet() ==
+            before.get('levelPlacementClearedGateIds', []).toSet().union(
+              session.resultClearedGateIds.toSet()
+            ) &&
+          after.get('contentJourneyStatus', 'in-progress') ==
+            (session.completedCurrentContent ? 'completed-current-content' : 'in-progress') &&
+          (session.completedCurrentContent
+            ? (worldCompletionUnchanged(before, after) ||
+              validWorldCompletionAppend(before, after, worldId, 'level-placement'))
+            : worldCompletionUnchanged(before, after))
+        )
+        ) &&
+        before.status == 'active' && after.status == 'active' &&
         nonEmptyString(assessmentId, 500) &&
-        after.activeLevelPlacementAssessmentId == assessmentId &&
-        after.activeLevelPlacementCefrLevel == before.activeLevelPlacementCefrLevel &&
-        after.levelPlacementStatus == 'awaiting-decision' &&
         after.updatedAt == request.time &&
         existsAfter(
           /databases/$(database)/documents/users/$(uid)/contentProgress/$(worldId)/levelPlacementSessions/$(assessmentId)
         ) &&
-        session.status == 'awaiting-decision' &&
         session.resultApplied == true &&
         session.worldId == worldId &&
         session.cefrLevel == before.activeLevelPlacementCefrLevel &&
@@ -1369,120 +1377,9 @@ service cloud.firestore {
         rankPublished(worldId, after.activeRankId) &&
         gatePublished(worldId, after.activeRankId, after.activeGateId) &&
         (
-          session.placementVersion == 1 ||
-          (
-            after.get('levelPlacementAssessmentIds', {})[session.cefrLevel] == assessmentId &&
-            after.get('levelPlacementPassedRankIds', []).hasAll(
-              before.get('levelPlacementPassedRankIds', [])
-            ) &&
-            after.get('levelPlacementPassedRankIds', []).hasAll(session.passedRankIds) &&
-            after.get('contentJourneyStatus', 'in-progress') ==
-              (session.completedCurrentContent
-                ? 'completed-current-content'
-                : 'in-progress')
-          )
-        ) &&
-        (
-          (
-            session.resultStartRankId == '' &&
+          (session.resultStartRankId == '' &&
             after.activeRankId == before.activeRankId &&
-            after.activeGateId == before.activeGateId
-          ) ||
-          (
-            nonEmptyString(session.resultStartRankId, 128) &&
-            nonEmptyString(session.resultStartGateId, 128) &&
-            after.activeRankId == session.resultStartRankId &&
-            after.activeGateId == session.resultStartGateId
-          )
-        ) &&
-        (
-          (
-            session.passedLevel == true &&
-            after.passedCefrLevels.hasAll(before.get('passedCefrLevels', [])) &&
-            session.cefrLevel in after.passedCefrLevels &&
-            after.passedCefrLevels.size() >= before.get('passedCefrLevels', []).size() &&
-            after.passedCefrLevels.size() <=
-              before.get('passedCefrLevels', []).size() + 1
-          ) ||
-          (
-            session.passedLevel == false &&
-            after.passedCefrLevels == before.get('passedCefrLevels', [])
-          )
-        ) &&
-        after.partialCefrLevels.toSet().difference(
-          before.get('partialCefrLevels', []).toSet()
-        ).hasOnly([session.cefrLevel].toSet()) &&
-        before.get('partialCefrLevels', []).toSet().difference(
-          after.partialCefrLevels.toSet()
-        ).hasOnly([session.cefrLevel].toSet()) &&
-        activeJourneyPointerAfter(uid, worldId);
-    }
-
-    function validJourneyLevelPlacementOutcome(before, after, uid, worldId) {
-      let assessmentId = before.activeLevelPlacementAssessmentId;
-      let session = getAfter(
-        /databases/$(database)/documents/users/$(uid)/contentProgress/$(worldId)/levelPlacementSessions/$(assessmentId)
-      ).data;
-      return after.diff(before).affectedKeys().hasOnly([
-          'activeRankId', 'activeGateId', 'unlockedRankIds', 'unlockedGateIds',
-          'passedCefrLevels', 'partialCefrLevels', 'levelPlacementStatus',
-          'contentJourneyStatus', 'levelPlacementAssessmentIds',
-          'levelPlacementPassedRankIds', 'activeLevelPlacementAssessmentId',
-          'activeLevelPlacementCefrLevel', 'levelPlacementClearedGateIds',
-          'worldCompletion', 'updatedAt'
-        ]) &&
-        before.status == 'active' && after.status == 'active' &&
-        nonEmptyString(assessmentId, 500) &&
-        after.activeLevelPlacementAssessmentId == '' &&
-        after.activeLevelPlacementCefrLevel == '' &&
-        after.levelPlacementStatus == 'completed' &&
-        after.updatedAt == request.time &&
-        existsAfter(
-          /databases/$(database)/documents/users/$(uid)/contentProgress/$(worldId)/levelPlacementSessions/$(assessmentId)
-        ) &&
-        session.status == 'completed' && session.resultApplied == true &&
-        session.completedAt == request.time && session.assessedAt == request.time &&
-        session.worldId == worldId &&
-        session.cefrLevel == before.activeLevelPlacementCefrLevel &&
-        session.resultUnlockedRankIds is list &&
-        session.resultUnlockedGateIds is list &&
-        after.unlockedRankIds.hasAll(before.unlockedRankIds) &&
-        after.unlockedRankIds.hasAll(session.resultUnlockedRankIds) &&
-        after.unlockedRankIds.size() <=
-          before.unlockedRankIds.size() + session.resultUnlockedRankIds.size() &&
-        after.unlockedGateIds.hasAll(before.unlockedGateIds) &&
-        after.unlockedGateIds.hasAll(session.resultUnlockedGateIds) &&
-        after.unlockedGateIds.size() <=
-          before.unlockedGateIds.size() + session.resultUnlockedGateIds.size() &&
-        after.activeRankId in after.unlockedRankIds &&
-        after.activeGateId in after.unlockedGateIds &&
-        rankPublished(worldId, after.activeRankId) &&
-        gatePublished(worldId, after.activeRankId, after.activeGateId) &&
-        after.get('levelPlacementAssessmentIds', {})[session.cefrLevel] == assessmentId &&
-        after.get('levelPlacementPassedRankIds', []).toSet() ==
-          before.get('levelPlacementPassedRankIds', []).toSet().union(
-            session.passedRankIds.toSet()
-          ) &&
-        after.get('levelPlacementClearedGateIds', []) is list &&
-        after.get('levelPlacementClearedGateIds', []).size() <= 2000 &&
-        after.get('levelPlacementClearedGateIds', []).toSet().size() ==
-          after.get('levelPlacementClearedGateIds', []).size() &&
-        after.get('levelPlacementClearedGateIds', []).toSet() ==
-          before.get('levelPlacementClearedGateIds', []).toSet().union(
-            session.resultClearedGateIds.toSet()
-          ) &&
-        after.get('contentJourneyStatus', 'in-progress') ==
-          (session.completedCurrentContent ? 'completed-current-content' : 'in-progress') &&
-        (session.completedCurrentContent
-          ? (worldCompletionUnchanged(before, after) ||
-            validWorldCompletionAppend(before, after, worldId, 'level-placement'))
-          : worldCompletionUnchanged(before, after)) &&
-        (
-          (
-            session.resultStartRankId == '' &&
-            after.activeRankId == before.activeRankId &&
-            after.activeGateId == before.activeGateId
-          ) ||
+            after.activeGateId == before.activeGateId) ||
           (
             nonEmptyString(session.resultStartRankId, 128) &&
             nonEmptyString(session.resultStartGateId, 128) &&
@@ -1749,7 +1646,13 @@ service cloud.firestore {
               (
                 after.get('levelPlacementStatus', '') == 'awaiting-decision' &&
                   before.get('levelPlacementStatus', '') != 'awaiting-decision'
-                  ? validJourneyLevelPlacementResult(before, after, uid, worldId)
+                  ? validJourneyLevelPlacementDecision(
+                    before,
+                    after,
+                    uid,
+                    worldId,
+                    'result'
+                  )
                   : validJourneyLevelPlacementFinish(before, after, uid, worldId)
               )
             )
@@ -1804,7 +1707,7 @@ service cloud.firestore {
 
     function validActiveJourneyPointer(data, uid) {
       return data.keys().hasOnly(['worldId', 'journeyVersion', 'updatedAt']) &&
-        data.keys().hasAll(['worldId', 'journeyVersion', 'updatedAt']) &&
+        data.keys().size() == 3 &&
         nonEmptyString(data.worldId, 128) &&
         data.journeyVersion == 1 &&
         data.updatedAt == request.time &&
@@ -2381,55 +2284,7 @@ service cloud.firestore {
         levelPlacementSessionIsCurrent(uid, worldId, after, assessmentId);
     }
 
-    function validLevelPlacementResultApply(before, after, uid, worldId) {
-      let resumesCompletedResult = before.status == 'paused' &&
-        before.currentQuestionIndex == before.orderedQuestionIds.size() &&
-        before.answers.size() == before.orderedQuestionIds.size() &&
-        before.answersCompletedAt is timestamp;
-      return (before.status == 'awaiting-decision' || resumesCompletedResult) &&
-        after.status == 'awaiting-decision' &&
-        before.get('resultApplied', false) == false &&
-        after.diff(before).affectedKeys().hasOnly([
-          'status', 'resumedAt',
-          'resultApplied', 'nextCefrLevel', 'resultStartRankId',
-          'resultStartGateId', 'resultUnlockedRankIds',
-          'resultUnlockedGateIds', 'resultClearedGateIds',
-          'completedCurrentContent', 'assessedAt', 'updatedAt'
-        ]) &&
-        after.resultApplied == true &&
-        (!resumesCompletedResult || after.resumedAt == request.time) &&
-        (after.nextCefrLevel == '' || validClassifiedCefrLevel(after.nextCefrLevel)) &&
-        after.resultUnlockedRankIds is list &&
-        after.resultUnlockedRankIds.toSet().size() == after.resultUnlockedRankIds.size() &&
-        after.resultUnlockedRankIds.hasAll(after.passedRankIds) &&
-        after.resultUnlockedRankIds.size() <= after.passedRankIds.size() + 1 &&
-        after.resultUnlockedGateIds is list &&
-        after.resultUnlockedGateIds.toSet().size() == after.resultUnlockedGateIds.size() &&
-        (
-          after.placementVersion == 1 ||
-          (
-            after.resultClearedGateIds is list &&
-            after.resultClearedGateIds.toSet().size() == after.resultClearedGateIds.size() &&
-            after.resultUnlockedGateIds.toSet().hasAll(after.resultClearedGateIds.toSet()) &&
-            after.completedCurrentContent is bool &&
-            after.assessedAt == request.time
-          )
-        ) &&
-        (
-          after.resultStartRankId == '' ||
-          after.resultStartRankId in after.resultUnlockedRankIds
-        ) &&
-        (
-          after.resultStartGateId == '' ||
-          after.resultStartGateId in after.resultUnlockedGateIds
-        ) &&
-        after.updatedAt == request.time &&
-        getAfter(
-          /databases/$(database)/documents/users/$(uid)/contentProgress/$(worldId)
-        ).data.levelPlacementStatus == 'awaiting-decision';
-    }
-
-    function validLevelPlacementOutcomeApply(before, after, uid, worldId, assessmentId) {
+    function validLevelPlacementDecisionApply(before, after, uid, worldId, assessmentId, decisionKind) {
       let resumesCompletedResult = before.status == 'paused' &&
         before.currentQuestionIndex == before.orderedQuestionIds.size() &&
         before.answers.size() == before.orderedQuestionIds.size() &&
@@ -2437,17 +2292,52 @@ service cloud.firestore {
       let journey = getAfter(
         /databases/$(database)/documents/users/$(uid)/contentProgress/$(worldId)
       ).data;
-      return (before.status == 'awaiting-decision' || resumesCompletedResult) &&
-        after.status == 'completed' &&
+      return (
+        (
+          decisionKind == 'result' &&
+          after.status == 'awaiting-decision' &&
+          after.diff(before).affectedKeys().hasOnly([
+            'status', 'resumedAt', 'resultApplied', 'nextCefrLevel',
+            'resultStartRankId', 'resultStartGateId', 'resultUnlockedRankIds',
+            'resultUnlockedGateIds', 'resultClearedGateIds',
+            'completedCurrentContent', 'assessedAt', 'updatedAt'
+          ]) &&
+          (!resumesCompletedResult || after.resumedAt == request.time) &&
+          (
+            after.placementVersion == 1 ||
+            (
+              after.resultClearedGateIds is list &&
+              after.resultClearedGateIds.toSet().size() == after.resultClearedGateIds.size() &&
+              after.resultUnlockedGateIds.toSet().hasAll(after.resultClearedGateIds.toSet()) &&
+              after.completedCurrentContent is bool &&
+              after.assessedAt == request.time
+            )
+          ) &&
+          journey.levelPlacementStatus == 'awaiting-decision'
+        ) ||
+        (
+          decisionKind == 'outcome' &&
+          after.status == 'completed' &&
+          after.diff(before).affectedKeys().hasOnly([
+            'status', 'resultApplied', 'nextCefrLevel', 'resultStartRankId',
+            'resultStartGateId', 'resultUnlockedRankIds',
+            'resultUnlockedGateIds', 'resultClearedGateIds',
+            'completedCurrentContent', 'assessedAt', 'completedAt', 'updatedAt'
+          ]) &&
+          after.completedAt == request.time && after.assessedAt == request.time &&
+          after.resultClearedGateIds is list &&
+          after.resultClearedGateIds.toSet().size() == after.resultClearedGateIds.size() &&
+          after.resultUnlockedGateIds.toSet().hasAll(after.resultClearedGateIds.toSet()) &&
+          after.completedCurrentContent is bool &&
+          journey.levelPlacementStatus == 'completed' &&
+          journey.activeLevelPlacementAssessmentId == '' &&
+          journey.activeLevelPlacementCefrLevel == '' &&
+          journey.get('levelPlacementAssessmentIds', {})[after.cefrLevel] == assessmentId
+        )
+        ) &&
+        (before.status == 'awaiting-decision' || resumesCompletedResult) &&
         before.get('resultApplied', false) == false &&
-        after.diff(before).affectedKeys().hasOnly([
-          'status', 'resultApplied', 'nextCefrLevel', 'resultStartRankId',
-          'resultStartGateId', 'resultUnlockedRankIds',
-          'resultUnlockedGateIds', 'resultClearedGateIds',
-          'completedCurrentContent', 'assessedAt', 'completedAt', 'updatedAt'
-        ]) &&
         after.resultApplied == true &&
-        after.completedAt == request.time && after.assessedAt == request.time &&
         (after.nextCefrLevel == '' || validClassifiedCefrLevel(after.nextCefrLevel)) &&
         after.resultUnlockedRankIds is list &&
         after.resultUnlockedRankIds.toSet().size() == after.resultUnlockedRankIds.size() &&
@@ -2455,17 +2345,9 @@ service cloud.firestore {
         after.resultUnlockedRankIds.size() <= after.passedRankIds.size() + 1 &&
         after.resultUnlockedGateIds is list &&
         after.resultUnlockedGateIds.toSet().size() == after.resultUnlockedGateIds.size() &&
-        after.resultClearedGateIds is list &&
-        after.resultClearedGateIds.toSet().size() == after.resultClearedGateIds.size() &&
-        after.resultUnlockedGateIds.toSet().hasAll(after.resultClearedGateIds.toSet()) &&
-        after.completedCurrentContent is bool &&
         (after.resultStartRankId == '' || after.resultStartRankId in after.resultUnlockedRankIds) &&
         (after.resultStartGateId == '' || after.resultStartGateId in after.resultUnlockedGateIds) &&
-        after.updatedAt == request.time &&
-        journey.levelPlacementStatus == 'completed' &&
-        journey.activeLevelPlacementAssessmentId == '' &&
-        journey.activeLevelPlacementCefrLevel == '' &&
-        journey.get('levelPlacementAssessmentIds', {})[after.cefrLevel] == assessmentId;
+        after.updatedAt == request.time;
     }
 
     function validLevelPlacementSaveUpdate(before, after) {
@@ -2523,12 +2405,7 @@ service cloud.firestore {
           'sessionId', 'status', 'mode', 'sourceType', 'privateWorldId',
           'wordKeys', 'correctWordKeys', 'totalCount', 'correctCount',
           'evidenceVersion', 'completedAt'
-        ]) &&
-        data.keys().hasAll([
-          'sessionId', 'status', 'mode', 'sourceType', 'privateWorldId',
-          'wordKeys', 'correctWordKeys', 'totalCount', 'correctCount',
-          'evidenceVersion', 'completedAt'
-        ]) &&
+        ]) && data.keys().size() == 11 &&
         data.sessionId == sessionId &&
         nonEmptyString(data.sessionId, 220) &&
         data.status == 'completed' &&
@@ -2705,6 +2582,35 @@ service cloud.firestore {
         ).data.get('levelPlacementClearedGateIds', []));
     }
 
+    function validLoadedGateSnapshot(data) {
+      return data.loadedAt is timestamp &&
+        data.wordCountAtLoad is int &&
+        data.wordCountAtLoad >= 0 && data.wordCountAtLoad <= 2000 &&
+        data.contentVersion is int && data.contentVersion >= 1 &&
+        data.snapshotVersion is int && data.snapshotVersion >= 1 &&
+        data.loadedContentWordIds is list && data.loadedContentWordIds.size() <= 2000 &&
+        data.loadedWordKeys is list && data.loadedWordKeys.size() <= 2000 &&
+        data.nextRankId is string && data.nextRankId.size() <= 128 &&
+        data.nextGateId is string && data.nextGateId.size() <= 128 &&
+        data.loadStrategy == 'deterministic-source-docs-v1' &&
+        nonEmptyString(data.operationId, 180);
+    }
+
+    function validPlacementGateScore(data) {
+      return nonEmptyString(data.placementAssessmentId, 500) &&
+        data.placementScore is number &&
+        data.placementCorrect is int && data.placementTotal is int &&
+        data.placementTotal > 0 && data.placementCorrect >= 0 &&
+        data.placementCorrect <= data.placementTotal &&
+        data.placementScore * data.placementTotal == data.placementCorrect;
+    }
+
+    function validLevelPlacementGateScore(data) {
+      return nonEmptyString(data.levelPlacementAssessmentId, 500) &&
+        data.levelPlacementScore is number &&
+        data.levelPlacementScore >= 0 && data.levelPlacementScore <= 1;
+    }
+
     function validGateProgress(data, worldId, rankId, gateId) {
       return data.keys().hasOnly([
           'worldId', 'rankId', 'gateId', 'status', 'journeyVersion',
@@ -2775,9 +2681,7 @@ service cloud.firestore {
             data.status == 'cleared' &&
             data.clearedBy == 'level-placement' &&
             data.clearedAt is timestamp &&
-            nonEmptyString(data.levelPlacementAssessmentId, 500) &&
-            data.levelPlacementScore is number &&
-            data.levelPlacementScore >= 0 && data.levelPlacementScore <= 1 &&
+            validLevelPlacementGateScore(data) &&
             data.placementClearedWithoutLoad == true &&
             !('loadedAt' in data) && !('wordCountAtLoad' in data) &&
             !('loadedContentWordIds' in data) && !('loadedWordKeys' in data)
@@ -2789,20 +2693,7 @@ service cloud.firestore {
               'loadedContentWordIds', 'loadedWordKeys', 'nextRankId',
               'nextGateId', 'loadStrategy', 'operationId'
             ]) &&
-            data.loadedAt is timestamp &&
-            data.wordCountAtLoad is int &&
-            data.wordCountAtLoad >= 0 &&
-            data.wordCountAtLoad <= 2000 &&
-            data.contentVersion is int && data.contentVersion >= 1 &&
-            data.snapshotVersion is int && data.snapshotVersion >= 1 &&
-            data.loadedContentWordIds is list &&
-            data.loadedContentWordIds.size() <= 2000 &&
-            data.loadedWordKeys is list &&
-            data.loadedWordKeys.size() <= 2000 &&
-            data.nextRankId is string && data.nextRankId.size() <= 128 &&
-            data.nextGateId is string && data.nextGateId.size() <= 128 &&
-            data.loadStrategy == 'deterministic-source-docs-v1' &&
-            nonEmptyString(data.operationId, 180) &&
+            validLoadedGateSnapshot(data) &&
             data.readyEvidenceCount <= data.wordCountAtLoad &&
             (!('readyWordCount' in data) ||
               data.readyWordCount == data.readyEvidenceCount) &&
@@ -2819,17 +2710,7 @@ service cloud.firestore {
                 !('clearedBy' in data) &&
                 (
                   !('placementAssessmentId' in data) ||
-                  (
-                    nonEmptyString(data.placementAssessmentId, 500) &&
-                    data.placementScore is number &&
-                    data.placementCorrect is int &&
-                    data.placementTotal is int &&
-                    data.placementTotal > 0 &&
-                    data.placementCorrect >= 0 &&
-                    data.placementCorrect <= data.placementTotal &&
-                    data.placementScore * data.placementTotal ==
-                      data.placementCorrect
-                  )
+                  validPlacementGateScore(data)
                 )
               ) ||
               (
@@ -2850,22 +2731,12 @@ service cloud.firestore {
                   (
                     data.clearedBy == 'placement' &&
                     data.clearedAt is timestamp &&
-                    nonEmptyString(data.placementAssessmentId, 500) &&
-                    data.placementScore is number &&
-                    data.placementCorrect is int &&
-                    data.placementTotal is int &&
-                    data.placementTotal > 0 &&
-                    data.placementCorrect >= 0 &&
-                    data.placementCorrect <= data.placementTotal &&
-                    data.placementScore * data.placementTotal ==
-                      data.placementCorrect
+                    validPlacementGateScore(data)
                   ) ||
                   (
                     data.clearedBy == 'level-placement' &&
                     data.clearedAt is timestamp &&
-                    nonEmptyString(data.levelPlacementAssessmentId, 500) &&
-                    data.levelPlacementScore is number &&
-                    data.levelPlacementScore >= 0 && data.levelPlacementScore <= 1 &&
+                    validLevelPlacementGateScore(data) &&
                     data.placementClearedWithoutLoad == false
                   )
                 )
@@ -2882,11 +2753,7 @@ service cloud.firestore {
       return data.keys().hasOnly([
           'worldId', 'rankId', 'gateId', 'status', 'journeyVersion',
           'lastActivityAt', 'readyEvidenceCount', 'clearAttempts'
-        ]) &&
-        data.keys().hasAll([
-          'worldId', 'rankId', 'gateId', 'status', 'journeyVersion',
-          'lastActivityAt', 'readyEvidenceCount', 'clearAttempts'
-        ]) &&
+        ]) && data.keys().size() == 8 &&
         data.worldId == worldId && data.rankId == rankId && data.gateId == gateId &&
         data.status == 'available' && data.journeyVersion == 1 &&
         data.lastActivityAt == request.time &&
@@ -2900,14 +2767,12 @@ service cloud.firestore {
         /databases/$(database)/documents/users/$(uid)/contentProgress/$(worldId)/levelPlacementSessions/$(data.levelPlacementAssessmentId)
       ).data;
       return data.status == 'cleared' && data.clearedBy == 'level-placement' &&
-        nonEmptyString(data.levelPlacementAssessmentId, 500) &&
         data.clearedAt == request.time &&
         data.worldId == worldId && data.rankId == rankId && data.gateId == gateId &&
         data.journeyVersion == 1 && data.lastActivityAt == request.time &&
         data.readyEvidenceCount is int && data.readyEvidenceCount >= 0 &&
         data.clearAttempts is int && data.clearAttempts >= 0 &&
-        data.levelPlacementScore is number &&
-        data.levelPlacementScore >= 0 && data.levelPlacementScore <= 1 &&
+        validLevelPlacementGateScore(data) &&
         data.placementClearedWithoutLoad is bool &&
         worldPublished(worldId) && rankPublished(worldId, rankId) &&
         gatePublished(worldId, rankId, gateId) &&
@@ -2923,13 +2788,7 @@ service cloud.firestore {
           'lastActivityAt', 'readyEvidenceCount', 'clearAttempts',
           'clearedAt', 'clearedBy', 'levelPlacementAssessmentId',
           'levelPlacementScore', 'placementClearedWithoutLoad'
-        ]) &&
-        data.keys().hasAll([
-          'worldId', 'rankId', 'gateId', 'status', 'journeyVersion',
-          'lastActivityAt', 'readyEvidenceCount', 'clearAttempts',
-          'clearedAt', 'clearedBy', 'levelPlacementAssessmentId',
-          'levelPlacementScore', 'placementClearedWithoutLoad'
-        ]) &&
+        ]) && data.keys().size() == 13 &&
         data.placementClearedWithoutLoad == true &&
         validLevelPlacementClearedResult(data, uid, worldId, rankId, gateId);
     }
@@ -2980,14 +2839,7 @@ service cloud.firestore {
         after.rankId == before.rankId &&
         after.gateId == before.gateId &&
         after.lastActivityAt == request.time &&
-        nonEmptyString(after.placementAssessmentId, 500) &&
-        after.placementScore is number &&
-        after.placementCorrect is int &&
-        after.placementTotal is int &&
-        after.placementTotal > 0 &&
-        after.placementCorrect >= 0 &&
-        after.placementCorrect <= after.placementTotal &&
-        after.placementScore * after.placementTotal == after.placementCorrect &&
+        validPlacementGateScore(after) &&
         session.status == 'submitting' &&
         session.currentQuestionIndex == session.totalQuestions &&
         session.answersComplete == true &&
@@ -3039,24 +2891,7 @@ service cloud.firestore {
         after.lastActivityAt == request.time &&
         after.get('readyEvidenceCount', 0) == after.get('readyWordCount', 0) &&
         after.clearAttempts == before.clearAttempts &&
-        after.loadedAt is timestamp &&
-        after.wordCountAtLoad is int &&
-        after.wordCountAtLoad >= 0 &&
-        after.wordCountAtLoad <= 2000 &&
-        after.contentVersion is int &&
-        after.contentVersion >= 1 &&
-        after.snapshotVersion is int &&
-        after.snapshotVersion >= 1 &&
-        after.loadedContentWordIds is list &&
-        after.loadedContentWordIds.size() <= 2000 &&
-        after.loadedWordKeys is list &&
-        after.loadedWordKeys.size() <= 2000 &&
-        after.nextRankId is string &&
-        after.nextRankId.size() <= 128 &&
-        after.nextGateId is string &&
-        after.nextGateId.size() <= 128 &&
-        after.loadStrategy == 'deterministic-source-docs-v1' &&
-        nonEmptyString(after.operationId, 180) &&
+        validLoadedGateSnapshot(after) &&
         after.get('readyWordCount', 0) >= 0 &&
         after.get('readyWordCount', 0) <= after.loadedWordKeys.size() &&
         after.get('requiredWordCount', after.loadedWordKeys.size()) ==
@@ -3157,13 +2992,7 @@ service cloud.firestore {
           'answers', 'currentQuestionIndex', 'correctCount', 'totalCount',
           'passRatio', 'requiredCorrect', 'status', 'gateClearVersion',
           'startedAt', 'updatedAt'
-        ]) &&
-        data.keys().hasAll([
-          'attemptId', 'worldId', 'rankId', 'gateId', 'questionOrder',
-          'answers', 'currentQuestionIndex', 'correctCount', 'totalCount',
-          'passRatio', 'requiredCorrect', 'status', 'gateClearVersion',
-          'startedAt', 'updatedAt'
-        ]) &&
+        ]) && data.keys().size() == 15 &&
         data.attemptId == attemptId && data.worldId == worldId &&
         nonEmptyString(data.rankId, 128) && nonEmptyString(data.gateId, 128) &&
         data.questionOrder is list && data.questionOrder.size() > 0 &&
@@ -3598,10 +3427,7 @@ service cloud.firestore {
     function validSuggestion(data) {
       return data.keys().hasOnly([
           'word', 'ar', 'game', 'timestamp', 'userId', 'userEmail'
-        ]) &&
-        data.keys().hasAll([
-          'word', 'ar', 'game', 'timestamp', 'userId', 'userEmail'
-        ]) &&
+        ]) && data.keys().size() == 6 &&
         data.userId == request.auth.uid &&
         nonEmptyString(data.word, 500) &&
         nonEmptyString(data.ar, 2000) &&
@@ -3801,42 +3627,41 @@ service cloud.firestore {
         allow read: if isOwner(uid);
         allow create: if isOwner(uid) &&
           validJourneyCreate(request.resource.data, uid, worldId);
-        allow update: if isOwner(uid) &&
-          resource.data.get('activeLevelPlacementAssessmentId', '') != '' &&
-          request.resource.data.get('activeLevelPlacementAssessmentId', '') == '' &&
-          request.resource.data.get('levelPlacementStatus', '') == 'completed' &&
-          request.resource.data.get('levelPlacementAssessmentIds', {}) !=
-            resource.data.get('levelPlacementAssessmentIds', {}) &&
-          validJourneyLevelPlacementOutcome(
-            resource.data,
-            request.resource.data,
-            uid,
-            worldId
-          );
-        allow update: if isOwner(uid) &&
-          resource.data.get('activeLevelPlacementAssessmentId', '') != '' &&
-          request.resource.data.get('levelPlacementStatus', '') == 'awaiting-decision' &&
-          resource.data.get('levelPlacementStatus', '') != 'awaiting-decision' &&
-          validJourneyLevelPlacementResult(
-            resource.data,
-            request.resource.data,
-            uid,
-            worldId
-          );
-        allow update: if isOwner(uid) &&
-          !(
-            resource.data.get('activeLevelPlacementAssessmentId', '') != '' &&
-            request.resource.data.get('levelPlacementStatus', '') == 'awaiting-decision' &&
-            resource.data.get('levelPlacementStatus', '') != 'awaiting-decision'
-          ) &&
-          !(
+        allow update: if isOwner(uid) && (
+          (
             resource.data.get('activeLevelPlacementAssessmentId', '') != '' &&
             request.resource.data.get('activeLevelPlacementAssessmentId', '') == '' &&
             request.resource.data.get('levelPlacementStatus', '') == 'completed' &&
             request.resource.data.get('levelPlacementAssessmentIds', {}) !=
-              resource.data.get('levelPlacementAssessmentIds', {})
-          ) &&
-          validJourneyUpdate(resource.data, request.resource.data, uid, worldId);
+              resource.data.get('levelPlacementAssessmentIds', {}) &&
+            validJourneyLevelPlacementDecision(
+              resource.data, request.resource.data, uid, worldId, 'outcome'
+            )
+          ) ||
+          (
+            resource.data.get('activeLevelPlacementAssessmentId', '') != '' &&
+            request.resource.data.get('levelPlacementStatus', '') == 'awaiting-decision' &&
+            resource.data.get('levelPlacementStatus', '') != 'awaiting-decision' &&
+            validJourneyLevelPlacementDecision(
+              resource.data, request.resource.data, uid, worldId, 'result'
+            )
+          ) ||
+          (
+            !(
+              resource.data.get('activeLevelPlacementAssessmentId', '') != '' &&
+              request.resource.data.get('levelPlacementStatus', '') == 'awaiting-decision' &&
+              resource.data.get('levelPlacementStatus', '') != 'awaiting-decision'
+            ) &&
+            !(
+              resource.data.get('activeLevelPlacementAssessmentId', '') != '' &&
+              request.resource.data.get('activeLevelPlacementAssessmentId', '') == '' &&
+              request.resource.data.get('levelPlacementStatus', '') == 'completed' &&
+              request.resource.data.get('levelPlacementAssessmentIds', {}) !=
+                resource.data.get('levelPlacementAssessmentIds', {})
+            ) &&
+            validJourneyUpdate(resource.data, request.resource.data, uid, worldId)
+          )
+        );
         allow delete: if false;
 
         match /placementSessions/{assessmentId} {
@@ -3848,24 +3673,20 @@ service cloud.firestore {
               worldId,
               assessmentId
             );
-          allow update: if isOwner(uid) &&
-            resource.data.status == 'submitting' &&
-            validPlacementSessionCompletion(
-              resource.data,
-              request.resource.data,
-              uid,
-              worldId,
-              assessmentId
-            );
-          allow update: if isOwner(uid) &&
-            resource.data.status == 'active' &&
-            validActivePlacementSessionUpdate(
-              resource.data,
-              request.resource.data,
-              uid,
-              worldId,
-              assessmentId
-            );
+          allow update: if isOwner(uid) && (
+            (
+              resource.data.status == 'submitting' &&
+              validPlacementSessionCompletion(
+                resource.data, request.resource.data, uid, worldId, assessmentId
+              )
+            ) ||
+            (
+              resource.data.status == 'active' &&
+              validActivePlacementSessionUpdate(
+                resource.data, request.resource.data, uid, worldId, assessmentId
+              )
+            )
+          );
           allow delete: if false;
         }
 
@@ -3878,64 +3699,44 @@ service cloud.firestore {
               worldId,
               assessmentId
             );
-          allow update: if isOwner(uid) &&
-            resource.data.get('resultApplied', false) == false &&
-            request.resource.data.get('resultApplied', false) == true &&
-            request.resource.data.status == 'completed' &&
-            validLevelPlacementOutcomeApply(
-              resource.data,
-              request.resource.data,
-              uid,
-              worldId,
-              assessmentId
-            );
-          allow update: if isOwner(uid) &&
-            resource.data.get('resultApplied', false) == false &&
-            request.resource.data.get('resultApplied', false) == true &&
-            request.resource.data.status != 'completed' &&
-            validLevelPlacementResultApply(
-              resource.data,
-              request.resource.data,
-              uid,
-              worldId
-            );
-          allow update: if isOwner(uid) &&
-            !(
+          allow update: if isOwner(uid) && (
+            (
               resource.data.get('resultApplied', false) == false &&
-              request.resource.data.get('resultApplied', false) == true
-            ) &&
-            (request.resource.data.currentQuestionIndex ==
-                resource.data.currentQuestionIndex + 1
-              ? validLevelPlacementAnswerUpdate(
-                resource.data,
-                request.resource.data,
-                uid,
-                worldId,
-                assessmentId
+              request.resource.data.get('resultApplied', false) == true &&
+              request.resource.data.status == 'completed' &&
+              validLevelPlacementDecisionApply(
+                resource.data, request.resource.data, uid, worldId,
+                assessmentId, 'outcome'
               )
-              : (
+            ) ||
+            (
+              resource.data.get('resultApplied', false) == false &&
+              request.resource.data.get('resultApplied', false) == true &&
+              request.resource.data.status != 'completed' &&
+              validLevelPlacementDecisionApply(
+                resource.data, request.resource.data, uid, worldId,
+                assessmentId, 'result'
+              )
+            ) ||
+            (
+              !(
                 resource.data.get('resultApplied', false) == false &&
-                  request.resource.data.get('resultApplied', false) == true
-                ? validLevelPlacementResultApply(
-                resource.data,
-                request.resource.data,
-                uid,
-                worldId
+                request.resource.data.get('resultApplied', false) == true
+              ) &&
+              (request.resource.data.currentQuestionIndex ==
+                  resource.data.currentQuestionIndex + 1
+                ? validLevelPlacementAnswerUpdate(
+                  resource.data, request.resource.data, uid, worldId, assessmentId
                 )
                 : (request.resource.data.status != resource.data.status
                   ? validLevelPlacementClose(
-                    resource.data,
-                    request.resource.data,
-                    uid,
-                    worldId
+                    resource.data, request.resource.data, uid, worldId
                   )
-                  : validLevelPlacementSaveUpdate(
-                resource.data,
-                request.resource.data
-                  )
+                  : validLevelPlacementSaveUpdate(resource.data, request.resource.data)
                 )
               )
-            );
+            )
+          );
           allow delete: if false;
         }
 
@@ -3958,121 +3759,74 @@ service cloud.firestore {
 
           match /gates/{gateId} {
             allow read: if isOwner(uid);
-            allow create: if isOwner(uid) &&
-              request.resource.data.status == 'available' &&
-              journeyAllowsGate(uid, worldId, rankId, gateId) &&
-              validAvailableGateProgress(
-                request.resource.data,
-                worldId,
-                rankId,
-                gateId
-              );
-            allow create: if isOwner(uid) &&
-              request.resource.data.status == 'cleared' &&
-              request.resource.data.get('clearedBy', '') == 'level-placement' &&
-              validLevelPlacementClearedProgress(
-                request.resource.data,
-                uid,
-                worldId,
-                rankId,
-                gateId
-              );
-            allow create: if isOwner(uid) &&
-              request.resource.data.status != 'available' &&
-              request.resource.data.get('masteryComplete', false) == false &&
-              !(
+            allow create: if isOwner(uid) && (
+              (
+                request.resource.data.status == 'available' &&
+                journeyAllowsGate(uid, worldId, rankId, gateId) &&
+                validAvailableGateProgress(
+                  request.resource.data, worldId, rankId, gateId
+                )
+              ) ||
+              (
                 request.resource.data.status == 'cleared' &&
-                request.resource.data.get('clearedBy', '') == 'level-placement'
-              ) &&
-              journeyAllowsGate(uid, worldId, rankId, gateId) &&
+                request.resource.data.get('clearedBy', '') == 'level-placement' &&
+                validLevelPlacementClearedProgress(
+                  request.resource.data, uid, worldId, rankId, gateId
+                )
+              ) ||
+              (
+                request.resource.data.status != 'available' &&
+                request.resource.data.get('masteryComplete', false) == false &&
+                !(request.resource.data.status == 'cleared' &&
+                  request.resource.data.get('clearedBy', '') == 'level-placement') &&
+                journeyAllowsGate(uid, worldId, rankId, gateId) &&
+                request.resource.data.status != 'cleared' &&
+                validGateProgress(request.resource.data, worldId, rankId, gateId)
+              )
+            );
+            // masteryComplete is a frozen legacy field. Crown is derived from SRS.
+            allow update: if isOwner(uid) &&
+              request.resource.data.get('masteryComplete', false) ==
+                resource.data.get('masteryComplete', false) &&
               (
                 (
-                  request.resource.data.status != 'cleared' &&
-                  validGateProgress(request.resource.data, worldId, rankId, gateId)
-                )
-              );
-            allow update: if isOwner(uid) &&
-              // masteryComplete is a frozen legacy field. Crown is derived from SRS.
-              request.resource.data.get('masteryComplete', false) ==
-                resource.data.get('masteryComplete', false) &&
-              request.resource.data.status == 'cleared' &&
-              request.resource.data.get('clearedBy', '') == 'level-placement' &&
-              validLevelPlacementClearedUpdate(
-                resource.data,
-                request.resource.data,
-                uid,
-                worldId,
-                rankId,
-                gateId
-              );
-            allow update: if isOwner(uid) &&
-              request.resource.data.get('masteryComplete', false) ==
-                resource.data.get('masteryComplete', false) &&
-              'placementAssessmentId' in request.resource.data &&
-              validPlacementGateResultUpdate(
-                resource.data,
-                request.resource.data,
-                uid,
-                worldId,
-                rankId,
-                gateId
-              );
-            allow update: if isOwner(uid) &&
-              request.resource.data.get('masteryComplete', false) ==
-                resource.data.get('masteryComplete', false) &&
-              journeyAllowsGate(uid, worldId, rankId, gateId) &&
-              (
-                validLearningGateProgressUpdate(
-                  resource.data,
-                  request.resource.data,
-                  worldId,
-                  rankId,
-                  gateId
+                  request.resource.data.status == 'cleared' &&
+                  request.resource.data.get('clearedBy', '') == 'level-placement' &&
+                  validLevelPlacementClearedUpdate(
+                    resource.data, request.resource.data, uid, worldId, rankId, gateId
+                  )
                 ) ||
-                validGateReadinessUpdate(
-                  resource.data,
-                  request.resource.data,
-                  uid,
-                  worldId,
-                  rankId,
-                  gateId
+                (
+                  'placementAssessmentId' in request.resource.data &&
+                  validPlacementGateResultUpdate(
+                    resource.data, request.resource.data, uid, worldId, rankId, gateId
+                  )
                 ) ||
-                validGateClearStartProgressUpdate(
-                  resource.data,
-                  request.resource.data,
-                  uid,
-                  worldId,
-                  rankId,
-                  gateId
-                ) ||
-                validGateClearProgressResult(
-                  resource.data,
-                  request.resource.data,
-                  uid,
-                  worldId,
-                  rankId,
-                  gateId
-                ) ||
-                validGateClearAbandonProgress(
-                  resource.data,
-                  request.resource.data,
-                  uid,
-                  worldId
-                ) ||
-                validOptionalLevelPlacementGateLoad(
-                  resource.data,
-                  request.resource.data,
-                  worldId,
-                  rankId,
-                  gateId
-                ) ||
-                validPlacementGateReset(
-                  resource.data,
-                  request.resource.data,
-                  uid,
-                  worldId,
-                  rankId,
-                  gateId
+                (
+                  journeyAllowsGate(uid, worldId, rankId, gateId) &&
+                  (
+                    validLearningGateProgressUpdate(
+                      resource.data, request.resource.data, worldId, rankId, gateId
+                    ) ||
+                    validGateReadinessUpdate(
+                      resource.data, request.resource.data, uid, worldId, rankId, gateId
+                    ) ||
+                    validGateClearStartProgressUpdate(
+                      resource.data, request.resource.data, uid, worldId, rankId, gateId
+                    ) ||
+                    validGateClearProgressResult(
+                      resource.data, request.resource.data, uid, worldId, rankId, gateId
+                    ) ||
+                    validGateClearAbandonProgress(
+                      resource.data, request.resource.data, uid, worldId
+                    ) ||
+                    validOptionalLevelPlacementGateLoad(
+                      resource.data, request.resource.data, worldId, rankId, gateId
+                    ) ||
+                    validPlacementGateReset(
+                      resource.data, request.resource.data, uid, worldId, rankId, gateId
+                    )
+                  )
                 )
               );
             allow delete: if false;

@@ -583,6 +583,18 @@ try {
         'users/entry-invalid-version/entryExperiences/v1'),
       entryExperienceState({ contractVersion: 2 })
     ));
+    const missingTerminalTimestamp = entryExperienceState();
+    delete missingTerminalTimestamp.skippedAt;
+    await assertFails(setDoc(
+      doc(environment.authenticatedContext('entry-missing-field').firestore(),
+        'users/entry-missing-field/entryExperiences/v1'),
+      missingTerminalTimestamp
+    ));
+    await assertFails(setDoc(
+      doc(environment.authenticatedContext('entry-extra-field').firestore(),
+        'users/entry-extra-field/entryExperiences/v1'),
+      { ...entryExperienceState(), unexpectedField: true }
+    ));
     await assertFails(deleteDoc(doc(owner, v1Path)));
   });
 
@@ -1319,6 +1331,15 @@ try {
   await test('available gate progress can become learning but cannot become mastered', async () => {
     const progressPath =
       'users/user-a/contentProgress/journey-world/ranks/journey-rank/gates/journey-gate';
+    await assertFails(setDoc(doc(userA, progressPath), {
+      ...learningGateProgress(
+        'journey-world',
+        'journey-rank',
+        'journey-gate',
+        ['journey-word']
+      ),
+      snapshotVersion: 0
+    }));
     await assertSucceeds(setDoc(
       doc(userA, progressPath),
       learningGateProgress(
@@ -1458,6 +1479,17 @@ try {
       answersComplete: true,
       completionStep: 'answers-saved',
       updatedAt: serverTimestamp()
+    }));
+
+    await assertFails(updateDoc(doc(userA, currentPath), {
+      status: 'cleared',
+      clearedAt: serverTimestamp(),
+      clearedBy: 'placement',
+      placementScore: 0.5,
+      placementCorrect: 1,
+      placementTotal: 1,
+      placementAssessmentId: assessmentId,
+      lastActivityAt: serverTimestamp()
     }));
 
     await assertSucceeds(updateDoc(doc(userA, currentPath), {
@@ -2995,6 +3027,56 @@ try {
     await assertFails(getDoc(doc(anonymous, path)));
   });
 
+  await test('shared word details and legacy SRS limits remain collection-strict', async () => {
+    const preparedPath =
+      'content_worlds/published-world/ranks/published-rank/gates/published-gate/words/shared-details-invalid';
+    await assertFails(setDoc(doc(admin, preparedPath), {
+      ...word(
+        'published-world',
+        'published-rank',
+        'published-gate',
+        'shared-details-invalid',
+        'draft'
+      ),
+      definition: 'x'.repeat(4001),
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+      createdBy: 'admin-a',
+      updatedBy: 'admin-a'
+    }));
+
+    const stagingWordId = `staging_${'f'.repeat(64)}`;
+    await assertFails(setDoc(
+      doc(admin, `content_word_import_staging/${stagingWordId}`),
+      { ...stagingWord(stagingWordId), tags: 'not-a-list' }
+    ));
+
+    const legacyPath = 'users/user-a/words/shared-details-invalid';
+    const legacyBase = {
+      text: 'strict',
+      meaning: 'strict meaning',
+      category: 'general',
+      userId: 'user-a',
+      createdAt: serverTimestamp()
+    };
+    await assertFails(setDoc(doc(userA, legacyPath), {
+      ...legacyBase,
+      notes: 'x'.repeat(4001)
+    }));
+
+    await environment.withSecurityRulesDisabled(async (context) => {
+      await setDoc(doc(context.firestore(), legacyPath), {
+        ...legacyBase,
+        createdAt: timestamp,
+        mastery_status: 'Learning',
+        mastery_streak: 1
+      });
+    });
+    await assertFails(updateDoc(doc(userA, legacyPath), {
+      mastery_streak: 4
+    }));
+  });
+
   const levelUser = environment.authenticatedContext('level-user').firestore();
   const levelAssessmentId = 'level_placement_v1_A1_rules_test';
   const levelJourneyPath = 'users/level-user/contentProgress/level-world';
@@ -3196,6 +3278,36 @@ try {
       updatedAt: serverTimestamp()
     }));
 
+    const crossPhase = writeBatch(db);
+    crossPhase.update(doc(db, sessionPath), {
+      status: 'completed',
+      resultApplied: true,
+      assessedAt: serverTimestamp(),
+      completedAt: serverTimestamp(),
+      nextCefrLevel: 'A2',
+      resultStartRankId: 'level-rank-a2',
+      resultStartGateId: 'level-gate-a2',
+      resultUnlockedRankIds: ['level-rank-a1', 'level-rank-a2'],
+      resultUnlockedGateIds: ['level-gate-a1', 'level-gate-a2'],
+      resultClearedGateIds: ['level-gate-a1'],
+      completedCurrentContent: false,
+      updatedAt: serverTimestamp()
+    });
+    crossPhase.update(doc(db, journeyPath), {
+      activeRankId: 'level-rank-a2',
+      activeGateId: 'level-gate-a2',
+      unlockedRankIds: ['level-rank-a1', 'level-rank-a2'],
+      unlockedGateIds: ['level-gate-a1', 'level-gate-a2'],
+      passedCefrLevels: ['A1'],
+      partialCefrLevels: [],
+      levelPlacementStatus: 'awaiting-decision',
+      contentJourneyStatus: 'in-progress',
+      levelPlacementAssessmentIds: { A1: assessmentId },
+      levelPlacementPassedRankIds: ['level-rank-a1'],
+      updatedAt: serverTimestamp()
+    });
+    await assertFails(crossPhase.commit());
+
     const result = writeBatch(db);
     result.update(doc(db, sessionPath), {
       status: 'completed',
@@ -3237,6 +3349,16 @@ try {
       ['level-gate-a1']
     );
     assert.equal(unprojectedNextGate.exists(), false);
+
+    await assertFails(updateDoc(doc(db, firstGatePath), {
+      status: 'cleared',
+      clearedAt: serverTimestamp(),
+      clearedBy: 'level-placement',
+      levelPlacementAssessmentId: assessmentId,
+      levelPlacementScore: 1.1,
+      placementClearedWithoutLoad: true,
+      lastActivityAt: serverTimestamp()
+    }));
 
     const projection = writeBatch(db);
     projection.update(doc(db, firstGatePath), {
@@ -5463,7 +5585,7 @@ try {
   });
 
   if (testFilter) assert.ok(selected > 0, `No Rules test matched "${testFilter}"`);
-  assert.equal(passed, testFilter ? selected : 77);
+  assert.equal(passed, testFilter ? selected : 78);
   console.log(`# ${passed} Firestore Rules emulator tests passed`);
 } finally {
   await environment.cleanup();

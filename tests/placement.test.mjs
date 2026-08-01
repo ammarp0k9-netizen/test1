@@ -270,8 +270,9 @@ test('Rules structurally bind owner sessions and placement-cleared gates without
   assert.match(rulesSource, /suppressRewards == true/);
   assert.match(
     rulesSource,
-    /after\.placementScore \* after\.placementTotal == after\.placementCorrect/
+    /data\.placementScore \* data\.placementTotal == data\.placementCorrect/
   );
+  assert.match(rulesSource, /validPlacementGateScore\(after\)/);
   assert.doesNotMatch(rulesSource, /placementScore ==[\s\S]{0,80}placementCorrect \/ placementTotal/);
   assert.doesNotMatch(
     rulesSource.slice(
