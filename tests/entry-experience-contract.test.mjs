@@ -300,11 +300,12 @@ test('Level Placement is suggestion-only and never outranks preserved progress',
   assert.equal(entry.resolveNextAction(withJourney.signals).id, 'continue-journey');
 });
 
-test('entry, intent, theme, Oasis, and intro storage keys are scoped per account', () => {
+test('entry, migration receipt, intent, theme, Oasis, and intro storage keys are scoped per account', () => {
   const keyFactories = [
     (identity) => entry.entryStorageKey(identity),
     (identity) => entry.pendingIntentStorageKey(identity),
     (identity) => entry.profileMigrationStorageKey(identity),
+    (identity) => entry.guestMigrationReceiptStorageKey(identity),
     (identity) => entry.themeStorageKey(identity),
     (identity) => entry.oasisModeStorageKey(identity),
     (identity) => entry.themeIntroStorageKey(identity),

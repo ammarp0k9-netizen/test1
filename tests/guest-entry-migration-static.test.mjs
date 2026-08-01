@@ -11,6 +11,7 @@ const [
   quizSource,
   worldsSource,
   cloudSource,
+  rulesSource,
 ] = await Promise.all([
   readFile(new URL('../js/entry-experience-contract.js', import.meta.url), 'utf8'),
   readFile(new URL('../js/entry-experience-controller.js', import.meta.url), 'utf8'),
@@ -20,6 +21,7 @@ const [
   readFile(new URL('../js/quiz.js', import.meta.url), 'utf8'),
   readFile(new URL('../js/worlds.js', import.meta.url), 'utf8'),
   readFile(new URL('../js/cloud.js', import.meta.url), 'utf8'),
+  readFile(new URL('../firestore.rules', import.meta.url), 'utf8'),
 ]);
 
 function between(source, start, end) {
@@ -65,24 +67,22 @@ test('legacy guest learning state is meaningful without a modern dirty marker', 
   // Neither an account cache nor a marker for an older snapshot proves that
   // currently meaningful, unmarked legacy guest data was migrated.
   assert.doesNotMatch(skipBlock, /hasUserWordsCache|words_normal_[^\n]*purgeStaleGuestLocalData/);
-  assert.doesNotMatch(skipBlock, /isGuestMigrationComplete|hasHandledGuestMigration|_profileLoaded|__guestMigrationSessionComplete/);
+  assert.doesNotMatch(skipBlock, /isGuestMigrationComplete|hasHandledGuestMigration|_profileLoaded/);
 
   let purgeCalls = 0;
   const buildDecision = new Function(
     'hasMeaningfulGuestLoot',
     'reconcileEmptyGuestSessionState',
-    'isGuestMigrationComplete',
-    'purgeStaleGuestLocalData',
-    'hasHandledGuestMigrationForUser',
+    'ensureGuestMigrationSnapshotId',
+    'readGuestMigrationReceipt',
     'window',
     `${skipBlock}\nreturn shouldSkipGuestMigrationPrompt;`
   );
   const shouldSkip = buildDecision(
     () => true,
     () => assert.fail('meaningful legacy data must not be reconciled as empty'),
-    () => false,
-    () => { purgeCalls += 1; },
-    () => false,
+    () => 'legacy-snapshot-a',
+    () => null,
     { __guestMigrationSessionComplete: false, _profileLoaded: false }
   );
   assert.equal(shouldSkip({ uid: 'legacy-account-with-cache' }), false);
@@ -91,13 +91,24 @@ test('legacy guest learning state is meaningful without a modern dirty marker', 
   const staleMarkerDecision = buildDecision(
     () => true,
     () => assert.fail('meaningful legacy data must not be reconciled as empty'),
-    () => true,
-    () => { purgeCalls += 1; },
-    () => true,
+    () => 'legacy-snapshot-b',
+    () => null,
     { __guestMigrationSessionComplete: true, _profileLoaded: true }
   );
   assert.equal(staleMarkerDecision({ uid: 'legacy-account-with-old-markers' }), false);
   assert.equal(purgeCalls, 0);
+
+  const matchingReceiptDecision = buildDecision(
+    () => true,
+    () => assert.fail('declined guest data must be preserved'),
+    () => 'legacy-snapshot-b',
+    (user, snapshotId) => user.uid === 'account-a' && snapshotId === 'legacy-snapshot-b'
+      ? { version: 1, uid: user.uid, guestSnapshotId: snapshotId, status: 'declined' }
+      : null,
+    {}
+  );
+  assert.equal(matchingReceiptDecision({ uid: 'account-a' }), true);
+  assert.equal(matchingReceiptDecision({ uid: 'account-b' }), false);
 });
 
 test('new guest data invalidates a previous migration session and resolved promise', () => {
@@ -111,6 +122,7 @@ test('new guest data invalidates a previous migration session and resolved promi
   assert.match(dirtyBlock, /window\.__guestMigrationUid = ''/);
   assert.match(dirtyBlock, /localStorage\.removeItem\(GUEST_MIGRATION_HANDLED_KEY\)/);
   assert.match(dirtyBlock, /localStorage\.removeItem\(GUEST_MIGRATION_COMPLETE_KEY\)/);
+  assert.match(dirtyBlock, /localStorage\.removeItem\(GUEST_MIGRATION_SNAPSHOT_KEY\)/);
 
   const removed = [];
   const values = new Map();
@@ -125,6 +137,7 @@ test('new guest data invalidates a previous migration session and resolved promi
     'GUEST_DATA_DIRTY_KEY',
     'GUEST_MIGRATION_HANDLED_KEY',
     'GUEST_MIGRATION_COMPLETE_KEY',
+    'GUEST_MIGRATION_SNAPSHOT_KEY',
     'hasSignedInUser',
     `${dirtyBlock}\nreturn markGuestDataDirty;`
   );
@@ -137,14 +150,16 @@ test('new guest data invalidates a previous migration session and resolved promi
     'dirty',
     'handled',
     'complete',
+    'snapshot',
     () => false
   );
   markDirty();
   assert.equal(values.get('dirty'), '1');
-  assert.deepEqual(removed.sort(), ['complete', 'handled']);
+  assert.deepEqual(removed.sort(), ['complete', 'handled', 'snapshot']);
   assert.equal(root.__guestMigrationSessionComplete, false);
   assert.equal(root.__guestMigrationPromise, null);
   assert.equal(root.__guestMigrationUid, '');
+  assert.equal(root.__guestMigrationSessionDecision, null);
 });
 
 test('accepted migration commits learning state before purging the guest namespace', () => {
@@ -158,12 +173,15 @@ test('accepted migration commits learning state before purging the guest namespa
     'window.confirmGuestMigration = async function()',
     'window.declineGuestMigration = function()'
   );
-  const completionIndex = acceptBlock.indexOf("markGuestMigrationCompleteFlag(user, 'accepted')");
+  const completionIndex = acceptBlock.indexOf("markGuestMigrationCompleteFlag(user, 'accepted', summary.guestSnapshotId)");
   const purgeIndex = acceptBlock.indexOf('purgeStaleGuestLocalData()', completionIndex);
   const recoveryWriteIndex = acceptBlock.indexOf('localStorage.setItem(profileMigrationKey');
+  const verifiedProfileCommitIndex = acceptBlock.indexOf('await window.commitPendingGuestProfileMigration(user)');
   assert.ok(completionIndex > 0);
   assert.ok(recoveryWriteIndex > 0);
   assert.ok(recoveryWriteIndex < completionIndex);
+  assert.ok(verifiedProfileCommitIndex > recoveryWriteIndex);
+  assert.ok(verifiedProfileCommitIndex < completionIndex);
   assert.ok(purgeIndex > completionIndex);
   assert.ok(acceptBlock.indexOf('await window.saveWordToCloud') < completionIndex);
   assert.ok(acceptBlock.indexOf('await window.saveGlobalWordMasteryToCloud') < completionIndex);
@@ -178,6 +196,134 @@ test('accepted migration commits learning state before purging the guest namespa
   assert.match(cloudSource, /window\.saveActiveQuizSessionToCloud = async function\(session\)[\s\S]*?return true;[\s\S]*?return false;/);
   assert.match(prepareBlock, /const shouldPrompt = hasGuestData/);
   assert.doesNotMatch(prepareBlock, /const shouldPrompt[\s\S]*?hasHandledGuestMigrationForUser/);
+  assert.match(acceptBlock, /if \(!profileCommitted\)[\s\S]*?throw profileError/);
+});
+
+test('decline is account-scoped and keeps the guest namespace intact', () => {
+  const declineBlock = between(
+    migrationSource,
+    'window.declineGuestMigration = function()',
+    'function beginViewSwitch()'
+  );
+  assert.match(declineBlock, /markGuestMigrationCompleteFlag\(user, 'declined', summary\.guestSnapshotId\)/);
+  assert.doesNotMatch(declineBlock, /purgeStaleGuestLocalData|resetGuestProgressState|removeItem/);
+  assert.match(storageSource, /guest-migration-receipt:v1:user:/);
+  assert.match(storageSource, /receipt\?\.uid !== user\.uid/);
+  assert.match(storageSource, /receipt\?\.guestSnapshotId !== snapshotId/);
+});
+
+test('versioned guest migration receipts bind one decision to one account and snapshot', () => {
+  const receiptBlock = between(
+    storageSource,
+    'function guestMigrationReceiptStorageKey(user)',
+    'function purgeStaleGuestLocalData()'
+  );
+  const values = new Map([
+    ['words_normal_guest', JSON.stringify([{ word: 'legacy' }])],
+  ]);
+  const localStorage = {
+    getItem(key) { return values.has(key) ? values.get(key) : null; },
+    setItem(key, value) { values.set(key, String(value)); },
+    removeItem(key) { values.delete(key); },
+  };
+  const root = { LootLinguaEntryExperience: entry };
+  const buildReceiptApi = new Function(
+    'window',
+    'localStorage',
+    'GUEST_MIGRATION_RECEIPT_VERSION',
+    'GUEST_MIGRATION_SNAPSHOT_KEY',
+    `${receiptBlock}\nreturn { ensureGuestMigrationSnapshotId, readGuestMigrationReceipt, writeGuestMigrationReceipt };`
+  );
+  const api = buildReceiptApi(root, localStorage, 1, 'guest-snapshot');
+  const guestSnapshot = {
+    words: [{ word: 'legacy' }],
+    customWorlds: [],
+    pendingCustomWorlds: [],
+    wordMastery: {},
+    activeQuizSession: null,
+    profile: { userXP: 30 },
+  };
+  const snapshotId = api.ensureGuestMigrationSnapshotId(guestSnapshot);
+  const accountA = { uid: 'account-a' };
+  const accountB = { uid: 'account-b' };
+  const receipt = api.writeGuestMigrationReceipt(accountA, 'declined', snapshotId);
+
+  assert.equal(receipt.version, 1);
+  assert.equal(api.readGuestMigrationReceipt(accountA, snapshotId)?.status, 'declined');
+  assert.equal(api.readGuestMigrationReceipt(accountB, snapshotId), null);
+  assert.equal(api.readGuestMigrationReceipt(accountA, 'new-snapshot'), null);
+  assert.ok(values.has('words_normal_guest'), 'a decline must not delete guest learning data');
+  assert.notEqual(
+    api.ensureGuestMigrationSnapshotId({ ...guestSnapshot, profile: { userXP: 31 } }),
+    snapshotId,
+    'a changed guest snapshot must not inherit a previous receipt'
+  );
+});
+
+test('profile persistence exposes the exact failed write and verifies migration writes before cleanup', () => {
+  assert.match(profileSource, /const referencePath = `users\/\$\{user\.uid\}\/meta\/profile`/);
+  assert.match(profileSource, /await setDoc\(reference, data, \{ merge: true \}\)/);
+  assert.match(profileSource, /knownSnapshot\.exists \? 'merge-update' : 'create-with-merge'/);
+  assert.match(profileSource, /code: String\(error\?\.code/);
+  assert.match(profileSource, /message: String\(error\?\.message/);
+  assert.match(profileSource, /payload: diagnosticProfileValue\(payload\)/);
+  assert.match(profileSource, /console\.error\('saveProfile:', diagnostic, error\)/);
+  assert.match(profileSource, /const verification = await getDoc\(reference\)/);
+  assert.match(profileSource, /persistedProfileValueMatches\(persistedData, data\)/);
+  assert.match(profileSource, /window\.commitPendingGuestProfileMigration = async function\(user\)/);
+  assert.match(migrationSource, /status: 'failed'/);
+});
+
+test('the real full profile payload exactly matches the strict Rules field contract', () => {
+  const payloadBlock = between(
+    migrationSource,
+    'window.getLootlinguaProfilePayload = function()',
+    'function clearDailyQuestStorage()'
+  );
+  const buildPayload = new Function(
+    'window',
+    'document',
+    'localStorage',
+    'userXP',
+    'XP_ECONOMY_VERSION',
+    'dailyStreak',
+    'lastActivity',
+    'todayStr',
+    'loadInt',
+    'loadJSON',
+    'readQuizExposureHistory',
+    'getThemeIntroSeenList',
+    'getLootState',
+    'getTitleState',
+    'getDailyQuestStorageKey',
+    `${payloadBlock}\nreturn window.getLootlinguaProfilePayload;`
+  );
+  const storageValues = new Map([['lootlinguaDisplayName', 'Legacy Player']]);
+  const getPayload = buildPayload(
+    {},
+    { documentElement: { getAttribute: (name) => name === 'data-theme' ? 'ocean' : 'dark' } },
+    { getItem: (key) => storageValues.get(key) || null },
+    125,
+    2,
+    4,
+    '2026-08-01',
+    () => '2026-08-01',
+    (_key, fallback) => fallback,
+    (_key, fallback) => fallback,
+    () => [{ sessionId: 'quiz-session-a', at: 1 }],
+    () => ['lootlingua', 'ocean'],
+    () => ({ totalOpens: 2, rewards: [] }),
+    () => ({ unlocked: ['first-loot'], lastUnlockedAt: {} }),
+    (date) => `lootlinguaDailyQuests_${date || '2026-08-01'}`
+  );
+  const payload = getPayload();
+  const fieldsBlock = between(rulesSource, 'function profileFieldNames()', 'function validProfileValues(data)');
+  const rulesFields = [...fieldsBlock.matchAll(/'([^']+)'/g)].map((match) => match[1]);
+
+  assert.deepEqual([...Object.keys(payload), 'updatedAt'].sort(), rulesFields.sort());
+  assert.equal(payload.theme, 'ocean');
+  assert.equal(payload.oasisMode, 'dark');
+  assert.deepEqual(payload.themeIntroSeen, ['lootlingua', 'ocean']);
 });
 
 test('an account quiz session wins without losing the guest resumable draft', () => {
@@ -302,8 +448,8 @@ test('explicit guest appearance is allowlisted and its marker survives failed cl
   assert.match(profileSource, /\['lootlingua', 'ocean'\]\.includes\(explicitThemeSession\?\.themeId\)/);
   assert.match(profileSource, /\['light', 'dark'\]\.includes\(explicitThemeSession\?\.oasisMode\)/);
   assert.match(profileSource, /shouldMergeGuestProfile \|\| hasCurrentExplicitTheme/);
-  assert.match(profileSource, /const saved = await window\._saveProfileToCloudNow\(\)/);
-  assert.match(profileSource, /completePendingGuestProfileMigration\(user, saved, hasCurrentExplicitTheme\)/);
+  assert.match(profileSource, /const saved = await window\._saveProfileToCloudNow\(\{[\s\S]*?verify:/);
+  assert.match(profileSource, /completePendingGuestProfileMigration\([\s\S]*?user,[\s\S]*?saved,[\s\S]*?hasCurrentExplicitTheme[\s\S]*?\)/);
   assert.match(profileSource, /function completePendingGuestProfileMigration\(user, saved, hasExplicitTheme\)[\s\S]*?if \(saved !== true\) return false;[\s\S]*?if \(hasExplicitTheme\)[\s\S]*?sessionStorage\.removeItem\('lootlingua:guest-theme-explicit:v1'\)/);
   assert.match(profileSource, /await setDoc\([\s\S]*?return true;[\s\S]*?return false;/);
 });

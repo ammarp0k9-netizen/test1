@@ -731,8 +731,8 @@ service cloud.firestore {
         validTimeValue(data.createdAt) && validTimeValue(data.updatedAt);
     }
 
-    function validProfile(data) {
-      return data.keys().hasOnly([
+    function profileFieldNames() {
+      return [
           'userXP', 'xpEconomyVersion', 'dailyStreak', 'maxStreak',
           'lastActivityDate', 'activityMap', 'quizExposureHistory', 'theme',
           'oasisMode', 'themeIntroSeen',
@@ -740,8 +740,11 @@ service cloud.firestore {
           'activeTitleId', 'dailyQuestDate', 'dailyQuestState',
           'streakFreezes', 'freezeSaves', 'gameDictAdds', 'perfectQuizzes',
           'extraChests', 'updatedAt'
-        ]) &&
-        data.keys().hasAll(['userXP', 'xpEconomyVersion']) &&
+        ];
+    }
+
+    function validProfileValues(data) {
+      return data.keys().hasAll(['userXP', 'xpEconomyVersion']) &&
         data.userXP is number && data.userXP >= 0 &&
         data.xpEconomyVersion is int && data.xpEconomyVersion >= 0 &&
         optionalNonNegativeInt(data, 'dailyStreak') &&
@@ -766,6 +769,18 @@ service cloud.firestore {
         optionalNonNegativeInt(data, 'perfectQuizzes') &&
         optionalList(data, 'extraChests', 500) &&
          optionalTime(data, 'updatedAt');
+    }
+
+    function validProfileCreate(data) {
+      return data.keys().hasOnly(profileFieldNames()) && validProfileValues(data);
+    }
+
+    function validProfileUpdate(before, after) {
+      // A legacy field may remain untouched on an existing document, but a
+      // client cannot add, delete, or mutate it. All current fields retain the
+      // same strict value validation used for new profiles.
+      return after.diff(before).affectedKeys().hasOnly(profileFieldNames()) &&
+        validProfileValues(after);
     }
 
     function validEntryExperienceInterestIds(ids) {
@@ -3732,7 +3747,9 @@ service cloud.firestore {
 
       match /meta/profile {
         allow read: if isOwner(uid);
-        allow create, update: if isOwner(uid) && validProfile(request.resource.data);
+        allow create: if isOwner(uid) && validProfileCreate(request.resource.data);
+        allow update: if isOwner(uid) &&
+          validProfileUpdate(resource.data, request.resource.data);
         allow delete: if false;
       }
 

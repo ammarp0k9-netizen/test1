@@ -233,6 +233,35 @@ function entryExperienceState(overrides = {}) {
   };
 }
 
+function fullProductionProfilePayload(overrides = {}) {
+  return {
+    userXP: 125,
+    xpEconomyVersion: 2,
+    dailyStreak: 4,
+    maxStreak: 7,
+    lastActivityDate: '2026-08-01',
+    activityMap: { '2026-08-01': 3 },
+    quizExposureHistory: [{ sessionId: 'quiz-session-a', at: 1 }],
+    theme: 'ocean',
+    oasisMode: 'dark',
+    themeIntroSeen: ['lootlingua', 'ocean'],
+    displayName: 'Legacy Player',
+    addedGameWords: ['sword'],
+    dailyLootState: { totalOpens: 2, rewards: [] },
+    titlesState: { unlocked: ['first-loot'], lastUnlockedAt: { 'first-loot': 1 } },
+    activeTitleId: 'first-loot',
+    dailyQuestDate: '2026-08-01',
+    dailyQuestState: { claimed: {}, flags: {} },
+    streakFreezes: 1,
+    freezeSaves: 1,
+    gameDictAdds: 2,
+    perfectQuizzes: 1,
+    extraChests: [{ id: 'chest-a', type: 'daily', earnedAt: 1 }],
+    updatedAt: serverTimestamp(),
+    ...overrides
+  };
+}
+
 function placementSession(
   assessmentId = 'placement_v1_journey-rank~journey-gate',
   overrides = {}
@@ -652,21 +681,14 @@ try {
     await assertFails(deleteDoc(reference));
   });
 
-  await test('profile accepts bounded Oasis preferences and rejects malformed values', async () => {
+  await test('full production profile supports create and legacy merge-update without weakening fields', async () => {
     const uid = 'entry-profile-owner';
     const owner = environment.authenticatedContext(uid).firestore();
     const other = environment.authenticatedContext('entry-profile-other').firestore();
     const reference = doc(owner, `users/${uid}/meta/profile`);
-    const profile = {
-      userXP: 0,
-      xpEconomyVersion: 2,
-      theme: 'ocean',
-      oasisMode: 'dark',
-      themeIntroSeen: ['lootlingua', 'ocean'],
-      updatedAt: serverTimestamp()
-    };
+    const profile = fullProductionProfilePayload();
 
-    await assertSucceeds(setDoc(reference, profile));
+    await assertSucceeds(setDoc(reference, profile, { merge: true }));
     await assertSucceeds(getDoc(reference));
     await assertFails(getDoc(doc(other, `users/${uid}/meta/profile`)));
     await assertSucceeds(updateDoc(reference, {
@@ -686,6 +708,40 @@ try {
       entryExperienceStatus: 'completed',
       updatedAt: serverTimestamp()
     }));
+
+    const legacyUid = 'entry-profile-legacy-owner';
+    const legacyOwner = environment.authenticatedContext(legacyUid).firestore();
+    const legacyReference = doc(legacyOwner, `users/${legacyUid}/meta/profile`);
+    await environment.withSecurityRulesDisabled(async (context) => {
+      await setDoc(doc(context.firestore(), `users/${legacyUid}/meta/profile`), {
+        userXP: 45,
+        xpEconomyVersion: 1,
+        legacyBadgeState: { id: 'pre-v1-badge' },
+        updatedAt: timestamp
+      });
+    });
+    await assertSucceeds(setDoc(
+      legacyReference,
+      fullProductionProfilePayload({ userXP: 45, oasisMode: 'light' }),
+      { merge: true }
+    ));
+    const legacySaved = await getDoc(legacyReference);
+    assert.deepEqual(legacySaved.data().legacyBadgeState, { id: 'pre-v1-badge' });
+    assert.equal(legacySaved.data().oasisMode, 'light');
+    await assertFails(updateDoc(legacyReference, {
+      legacyBadgeState: { id: 'tampered' },
+      updatedAt: serverTimestamp()
+    }));
+    await assertFails(updateDoc(legacyReference, {
+      legacyBadgeState: deleteField(),
+      updatedAt: serverTimestamp()
+    }));
+    await assertFails(setDoc(
+      doc(environment.authenticatedContext('unknown-profile-create').firestore(),
+        'users/unknown-profile-create/meta/profile'),
+      fullProductionProfilePayload({ unknownLegacyField: true }),
+      { merge: true }
+    ));
   });
 
   await test('anonymous reads a published world but not a draft', async () => {

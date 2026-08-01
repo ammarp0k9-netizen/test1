@@ -119,6 +119,10 @@
     return `lootlingua:guest-profile-migration:v1:${storageOwner(identity)}`;
   }
 
+  function guestMigrationReceiptStorageKey(identity) {
+    return `lootlingua:guest-migration-receipt:v1:${storageOwner(identity)}`;
+  }
+
   function themeStorageKey(identity) {
     return `lootlingua:theme:${storageOwner(identity)}`;
   }
@@ -791,6 +795,7 @@
     entryStorageKey,
     pendingIntentStorageKey,
     profileMigrationStorageKey,
+    guestMigrationReceiptStorageKey,
     themeStorageKey,
     oasisModeStorageKey,
     themeIntroStorageKey,

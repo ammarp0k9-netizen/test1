@@ -9,6 +9,8 @@ const PENDING_CUSTOM_WORLDS_PREFIX = 'pending_custom_worlds_';
 const GUEST_MIGRATION_HANDLED_KEY = 'lootlinguaGuestMigrationHandled';
 const GUEST_MIGRATION_COMPLETE_KEY = 'lootlingua_migration_complete';
 const GUEST_DATA_DIRTY_KEY = 'lootlinguaGuestDataDirty';
+const GUEST_MIGRATION_RECEIPT_VERSION = 1;
+const GUEST_MIGRATION_SNAPSHOT_KEY = 'lootlingua:guest-migration-snapshot:v1:guest';
 const GUEST_PROFILE_DIRTY_KEYS = new Set([
   'userXP',
   'dailyStreak',
@@ -36,6 +38,7 @@ function markGuestDataDirty() {
   localStorage.setItem(GUEST_DATA_DIRTY_KEY, '1');
   localStorage.removeItem(GUEST_MIGRATION_HANDLED_KEY);
   localStorage.removeItem(GUEST_MIGRATION_COMPLETE_KEY);
+  localStorage.removeItem(GUEST_MIGRATION_SNAPSHOT_KEY);
   // A completed migration belongs to the previous guest snapshot. If the
   // signed-out user creates fresh local learning data, the next sign-in must
   // make a new, account-scoped migration decision instead of reusing the old
@@ -43,6 +46,7 @@ function markGuestDataDirty() {
   window.__guestMigrationSessionComplete = false;
   window.__guestMigrationPromise = null;
   window.__guestMigrationUid = '';
+  window.__guestMigrationSessionDecision = null;
 }
 
 function markGuestProfileDataDirty(key) {
@@ -58,7 +62,6 @@ function markGuestMigrationHandled(user, status) {
     uid: user?.uid || '',
     at: Date.now()
   }));
-  localStorage.removeItem(GUEST_DATA_DIRTY_KEY);
 }
 
 function hasHandledGuestMigration() {
@@ -90,15 +93,111 @@ function isGuestMigrationComplete(uid) {
   }
 }
 
-function markGuestMigrationCompleteFlag(user, status) {
+function guestMigrationReceiptStorageKey(user) {
+  return window.LootLinguaEntryExperience?.guestMigrationReceiptStorageKey({ uid: user?.uid }) ||
+    `lootlingua:guest-migration-receipt:v1:user:${user?.uid || ''}`;
+}
+
+function stableGuestSnapshotValue(value) {
+  if (Array.isArray(value)) return value.map(stableGuestSnapshotValue);
+  if (!value || typeof value !== 'object') return value;
+  return Object.fromEntries(
+    Object.keys(value).sort().map((key) => [key, stableGuestSnapshotValue(value[key])])
+  );
+}
+
+function guestMigrationSnapshotFingerprint(snapshot) {
+  const loot = snapshot || getGuestLootSnapshot();
+  const profile = loot.profile || {};
+  const stableSnapshot = stableGuestSnapshotValue({
+    words: loot.words || [],
+    customWorlds: loot.customWorlds || [],
+    pendingCustomWorlds: loot.pendingCustomWorlds || [],
+    wordMastery: loot.wordMastery || {},
+    activeQuizSession: loot.activeQuizSession || null,
+    profile: {
+      userXP: profile.userXP || 0,
+      dailyStreak: profile.dailyStreak || 0,
+      maxStreak: profile.maxStreak || 0,
+      lastActivityDate: profile.lastActivityDate || '',
+      activityMap: profile.activityMap || {},
+      quizExposureHistory: profile.quizExposureHistory || [],
+      addedGameWords: profile.addedGameWords || [],
+      dailyLootState: profile.dailyLootState || {},
+      titlesState: profile.titlesState || {},
+      activeTitleId: profile.activeTitleId || '',
+      dailyQuestState: profile.dailyQuestState || {},
+      streakFreezes: profile.streakFreezes || 0,
+      freezeSaves: profile.freezeSaves || 0,
+      gameDictAdds: profile.gameDictAdds || 0,
+      perfectQuizzes: profile.perfectQuizzes || 0,
+      extraChests: profile.extraChests || [],
+    },
+  });
+  const serialized = JSON.stringify(stableSnapshot);
+  let hash = 2166136261;
+  for (let index = 0; index < serialized.length; index += 1) {
+    hash ^= serialized.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+  return `guest-${(hash >>> 0).toString(36)}-${serialized.length}`;
+}
+
+function ensureGuestMigrationSnapshotId(snapshot) {
+  const id = guestMigrationSnapshotFingerprint(snapshot);
+  if (localStorage.getItem(GUEST_MIGRATION_SNAPSHOT_KEY) !== id) {
+    localStorage.setItem(GUEST_MIGRATION_SNAPSHOT_KEY, id);
+  }
+  return id;
+}
+
+function readGuestMigrationReceipt(user, snapshotId) {
+  if (!user?.uid || !snapshotId) return null;
+  try {
+    const receipt = JSON.parse(localStorage.getItem(guestMigrationReceiptStorageKey(user)) || 'null');
+    if (
+      receipt?.version !== GUEST_MIGRATION_RECEIPT_VERSION ||
+      receipt?.uid !== user.uid ||
+      receipt?.guestSnapshotId !== snapshotId ||
+      !['accepted', 'declined'].includes(receipt?.status)
+    ) return null;
+    return receipt;
+  } catch (_) {
+    return null;
+  }
+}
+
+function writeGuestMigrationReceipt(user, status, snapshotId) {
+  if (!user?.uid || !snapshotId || !['accepted', 'declined'].includes(status)) return null;
+  const now = Date.now();
+  const receipt = {
+    version: GUEST_MIGRATION_RECEIPT_VERSION,
+    uid: user.uid,
+    guestSnapshotId: snapshotId,
+    status,
+    decidedAt: now,
+    completedAt: status === 'accepted' ? now : 0,
+    declinedAt: status === 'declined' ? now : 0,
+  };
+  localStorage.setItem(guestMigrationReceiptStorageKey(user), JSON.stringify(receipt));
+  return receipt;
+}
+
+function markGuestMigrationCompleteFlag(user, status, snapshotId) {
+  writeGuestMigrationReceipt(user, status, snapshotId);
   localStorage.setItem(GUEST_MIGRATION_COMPLETE_KEY, JSON.stringify({
     uid: user?.uid || '',
     status,
     at: Date.now()
   }));
   markGuestMigrationHandled(user, status);
-  localStorage.removeItem(GUEST_DATA_DIRTY_KEY);
+  if (status === 'accepted') localStorage.removeItem(GUEST_DATA_DIRTY_KEY);
   window.__guestMigrationSessionComplete = true;
+  window.__guestMigrationSessionDecision = {
+    uid: user?.uid || '',
+    guestSnapshotId: snapshotId || '',
+    status,
+  };
 }
 
 function purgeStaleGuestLocalData() {
@@ -111,6 +210,7 @@ function purgeStaleGuestLocalData() {
   localStorage.removeItem('active_quiz_session');
   localStorage.removeItem(LEGACY_DICTIONARY_KEY);
   localStorage.removeItem(GUEST_DATA_DIRTY_KEY);
+  localStorage.removeItem(GUEST_MIGRATION_SNAPSHOT_KEY);
   GUEST_PROFILE_DIRTY_KEYS.forEach((key) => localStorage.removeItem(key));
   Object.keys(localStorage).forEach((key) => {
     if (GUEST_PROFILE_DIRTY_PREFIXES.some((prefix) => key.startsWith(prefix))) {
@@ -127,6 +227,7 @@ window.purgeStaleGuestLocalData = purgeStaleGuestLocalData;
 function getGuestLootSnapshot() {
   return {
     words: getGuestMigrationWords(),
+    customWorlds: readCustomWorldsFromStorage('guest'),
     profile: getGuestProgressSnapshot(),
     wordMastery: loadJSON('lootlinguaWordMastery_guest', {}),
     activeQuizSession: loadJSON('active_quiz_session', null),
@@ -187,12 +288,16 @@ function shouldSkipGuestMigrationPrompt(user) {
     reconcileEmptyGuestSessionState();
     return true;
   }
-  // A handled/completed marker describes a previous guest snapshot, not the
-  // meaningful data currently present. Older production versions did not set
-  // GUEST_DATA_DIRTY_KEY, so neither those markers, an account cache, nor an
-  // already-loaded profile may silently discard a later legacy guest snapshot.
-  // A successful accept/decline purges that exact snapshot; any meaningful
-  // data that still exists therefore needs an explicit new decision.
+  const snapshotId = ensureGuestMigrationSnapshotId();
+  if (readGuestMigrationReceipt(user, snapshotId)) return true;
+  const sessionDecision = window.__guestMigrationSessionDecision;
+  if (
+    sessionDecision?.uid === user.uid &&
+    sessionDecision?.guestSnapshotId === snapshotId &&
+    ['accepted', 'declined', 'failed'].includes(sessionDecision.status)
+  ) return true;
+  // Old global markers are intentionally insufficient: they do not identify
+  // the account and exact guest snapshot that was accepted or declined.
   return false;
 }
 

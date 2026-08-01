@@ -1971,7 +1971,7 @@ function renderGuestMigrationModal(summary) {
   if (confirm) confirm.style.display = 'none';
   if (decline) {
     decline.dataset.confirmed = '0';
-    decline.textContent = 'لا، ابدأ من جديد';
+    decline.textContent = 'ليس الآن، احتفظ به هنا';
     decline.disabled = false;
   }
   if (accept) {
@@ -1995,6 +1995,7 @@ window.prepareGuestMigrationForUser = function(user) {
   }
 
   const loot = getGuestLootSnapshot();
+  const guestSnapshotId = ensureGuestMigrationSnapshotId(loot);
   const words = loot.words;
   const profile = loot.profile;
   const hasGuestData = hasMeaningfulGuestLoot(loot);
@@ -2002,13 +2003,9 @@ window.prepareGuestMigrationForUser = function(user) {
   // releases could create it without invalidating handled/completed markers,
   // so reusing those markers here could silently purge a newer snapshot.
   const shouldPrompt = hasGuestData;
-  window.__guestMigrationSummary = { ...loot, words, profile, user };
+  window.__guestMigrationSummary = { ...loot, words, profile, user, guestSnapshotId };
 
   if (!shouldPrompt) {
-    if (hasMeaningfulGuestLoot(loot)) {
-      window.__acceptedGuestProfileMigration = { uid: user.uid, profile };
-    }
-    if (hasGuestData) purgeStaleGuestLocalData();
     window.__guestMigrationPromise = Promise.resolve('none');
     return window.__guestMigrationPromise;
   }
@@ -2016,6 +2013,11 @@ window.prepareGuestMigrationForUser = function(user) {
   window.__guestMigrationPromise = new Promise((resolve) => {
     window.__resolveGuestMigration = resolve;
   });
+  window.__guestMigrationSessionDecision = {
+    uid: user.uid,
+    guestSnapshotId,
+    status: 'prompted',
+  };
   renderGuestMigrationModal(window.__guestMigrationSummary);
   return window.__guestMigrationPromise;
 };
@@ -2034,6 +2036,11 @@ window.confirmGuestMigration = async function() {
   if (decline) decline.disabled = true;
 
   try {
+    if (window.auth?.currentUser?.uid !== user.uid) {
+      const identityError = new Error('Authenticated user changed during guest migration');
+      identityError.code = 'auth/identity-changed';
+      throw identityError;
+    }
     const existing = new Set((window.words || []).map((word) => normalizeMigrationWordKey(word)).filter(Boolean));
     const toMove = summary.words.filter((word) => {
       const key = normalizeMigrationWordKey(word);
@@ -2153,11 +2160,19 @@ window.confirmGuestMigration = async function() {
     const currentGuestProfile = summary.profile && typeof summary.profile === 'object'
       ? summary.profile
       : {};
+    const isSameProfile = (left, right) => {
+      try { return JSON.stringify(left) === JSON.stringify(right); } catch (_) { return false; }
+    };
+    const uniquePreviousProfiles = previousProfiles.filter(
+      (profile, index, profiles) => profiles.findIndex((item) => isSameProfile(item, profile)) === index
+    );
     const acceptedProfileMigration = {
       version: 1,
       uid: user.uid,
       profile: currentGuestProfile,
-      profiles: [...previousProfiles, currentGuestProfile],
+      profiles: isSameProfile(uniquePreviousProfiles[uniquePreviousProfiles.length - 1], currentGuestProfile)
+        ? uniquePreviousProfiles
+        : [...uniquePreviousProfiles, currentGuestProfile],
       createdAt: Number(previousProfileMigration?.createdAt) || Date.now(),
       updatedAt: Date.now(),
     };
@@ -2166,7 +2181,15 @@ window.confirmGuestMigration = async function() {
     // the recovery record only after the merged profile is durably saved.
     localStorage.setItem(profileMigrationKey, JSON.stringify(acceptedProfileMigration));
     window.__acceptedGuestProfileMigration = acceptedProfileMigration;
-    markGuestMigrationCompleteFlag(user, 'accepted');
+    const profileCommitted = typeof window.commitPendingGuestProfileMigration === 'function'
+      ? await window.commitPendingGuestProfileMigration(user)
+      : false;
+    if (!profileCommitted) {
+      const profileError = new Error('guest-profile-commit-failed');
+      profileError.code = window.__lootlinguaLastProfileSaveFailure?.code || 'profile/commit-failed';
+      throw profileError;
+    }
+    markGuestMigrationCompleteFlag(user, 'accepted', summary.guestSnapshotId);
     purgeStaleGuestLocalData();
     saveAndRender();
     hideModal('guestMigrationModal');
@@ -2177,6 +2200,11 @@ window.confirmGuestMigration = async function() {
     localStorage.removeItem(GUEST_MIGRATION_COMPLETE_KEY);
     localStorage.removeItem(GUEST_MIGRATION_HANDLED_KEY);
     window.__guestMigrationSessionComplete = false;
+    window.__guestMigrationSessionDecision = {
+      uid: user.uid,
+      guestSnapshotId: summary.guestSnapshotId,
+      status: 'failed',
+    };
     if (accept) {
       accept.disabled = false;
       accept.textContent = 'نعم، انقل اللوت!';
@@ -2187,23 +2215,12 @@ window.confirmGuestMigration = async function() {
 };
 
 window.declineGuestMigration = function() {
-  const decline = document.getElementById('guestMigrationDeclineBtn');
-  const confirm = document.getElementById('guestMigrationConfirm');
-  if (decline?.dataset.confirmed !== '1') {
-    if (decline) {
-      decline.dataset.confirmed = '1';
-      decline.textContent = 'متأكد، احذف لوت الضيف';
-    }
-    if (confirm) confirm.style.display = 'block';
-    showToast('اضغط تأكيد مرة ثانية إذا بدك تبدأ من جديد بدون نقل.', 'warning', 4200);
-    return;
-  }
+  const summary = window.__guestMigrationSummary;
   const user = window.auth?.currentUser;
-  markGuestMigrationCompleteFlag(user, 'declined');
-  purgeStaleGuestLocalData();
-  resetGuestProgressState();
+  if (!user?.uid || summary?.user?.uid !== user.uid || !summary?.guestSnapshotId) return;
+  markGuestMigrationCompleteFlag(user, 'declined', summary.guestSnapshotId);
   hideModal('guestMigrationModal');
-  showToast('تم تجاهل بيانات الضيف وبدينا صفحة جديدة.', 'info', 3600);
+  showToast('احتفظنا بلوت الضيف على هذا الجهاز، ولن نسألك عنه مجددًا لهذا الحساب.', 'info', 4200);
   window.__resolveGuestMigration?.('declined');
 };
 
