@@ -8347,6 +8347,90 @@ body.low-end-device .stats-overlay,
 body.low-end-device .overlay {
   background: rgba(0, 0, 0, 0.62) !important;
 }
+/* =====================================================
+   Performance mode visual corrections
+   يحافظ على شكل الواجهة بدون تغيير أسماء المتغيرات
+   ===================================================== */
+
+/* 1) منطقة النسخ الاحتياطي يجب أن تبقى حاوية شفافة */
+body.perf-balanced .backup-zone,
+body.perf-stable .backup-zone,
+body.perf-turbo .backup-zone,
+body.low-end-device .backup-zone {
+  background: transparent !important;
+  box-shadow: none !important;
+}
+
+/* 2) المستوى المتوازن: غباش مخفف بدل إلغائه بالكامل */
+body.perf-balanced {
+  --legend-glass-bg:
+    color-mix(in srgb, var(--card-bg) 78%, transparent);
+
+  --legend-glass-border:
+    color-mix(in srgb, var(--border) 82%, transparent);
+
+  --legend-glass-blur:
+    blur(9px) saturate(120%);
+
+  --legend-glass-shadow:
+    0 4px 14px rgba(0, 0, 0, 0.22);
+}
+
+/* شريط المستخدم والقوائم الزجاجية */
+body.perf-balanced .legend-top-bar,
+body.perf-balanced .sidebar,
+body.perf-balanced .legend-dock,
+body.perf-balanced .treasure-dock,
+body.perf-balanced .notif-popover {
+  background: var(--legend-glass-bg) !important;
+
+  backdrop-filter: var(--legend-glass-blur) !important;
+  -webkit-backdrop-filter: var(--legend-glass-blur) !important;
+
+  box-shadow: var(--legend-glass-shadow) !important;
+}
+
+/* نافذة الملف الشخصي: غباش أخف من Ultra */
+body.perf-balanced .profile-modal-backdrop {
+  background: rgba(0, 0, 0, 0.57) !important;
+
+  backdrop-filter: blur(3px) !important;
+  -webkit-backdrop-filter: blur(3px) !important;
+}
+
+body.perf-balanced .profile-modal-sheet {
+  background:
+    color-mix(in srgb, var(--card-bg) 88%, transparent) !important;
+
+  backdrop-filter:
+    blur(10px) saturate(116%) !important;
+
+  -webkit-backdrop-filter:
+    blur(10px) saturate(116%) !important;
+
+  box-shadow:
+    0 -14px 38px rgba(0, 0, 0, 0.32) !important;
+}
+
+/* النوافذ والبطاقات الزجاجية العامة في المستوى المتوازن */
+body.perf-balanced .modal-content,
+body.perf-balanced .stats-box,
+body.perf-balanced .card-box,
+body.perf-balanced .game-card,
+body.perf-balanced .game-search-bar,
+body.perf-balanced .game-search-inner,
+body.perf-balanced .game-gamer-ai-wrap,
+body.perf-balanced .gamer-ai-result,
+body.perf-balanced .treasure-card,
+body.perf-balanced .treasure-stage,
+body.perf-balanced .quiz-card,
+body.perf-balanced .world-card {
+  backdrop-filter:
+    blur(7px) saturate(112%) !important;
+
+  -webkit-backdrop-filter:
+    blur(7px) saturate(112%) !important;
+}
 body.perf-stable .treasure-chest-main,
 body.perf-stable .daily-quest-item,
 body.perf-stable .profile-stat-chip,
