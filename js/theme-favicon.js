@@ -2,64 +2,83 @@
   "use strict";
 
   /*
-   * صور الشعارات حسب الثيم.
-   * وجود الشرطة / في البداية يعني أن الصور موجودة
-   * في المجلد الرئيسي للموقع بجانب index.html.
+   * أسماء الملفات فقط، بدون / في البداية.
+   * يتم حساب المسار تلقائيًا بحسب مكان index.html.
    */
   const THEME_ASSETS = {
     lootlingua: {
-      favicon: "/Lootlingua_LOGO_2.png",
+      file: "Lootlingua_LOGO_2.png",
       browserColor: "#071a22",
+      version: "2",
     },
 
     golden: {
-      favicon: "/Lootlingua_LOGO_3.png",
+      file: "Lootlingua_LOGO_3.png",
       browserColor: "#0a0a0a",
+      version: "3",
     },
 
     scroll: {
-      favicon: "/Lootlingua_LOGO_4.png",
+      file: "Lootlingua_LOGO_4.png",
       browserColor: "#eee8dd",
+      version: "4",
     },
 
     oceanLight: {
-      favicon: "/Lootlingua_LOGO_5.png",
+      file: "Lootlingua_LOGO_5.png",
       browserColor: "#eaf4f4",
+      version: "5",
     },
 
     oceanDark: {
-      favicon: "/Lootlingua_LOGO_6.png",
+      file: "Lootlingua_LOGO_6.png",
       browserColor: "#090c0f",
+      version: "6",
     },
 
     glass: {
-      favicon: "/Lootlingua_LOGO_7.png",
+      file: "Lootlingua_LOGO_7.png",
       browserColor: "#0ea5e9",
+      version: "7",
     },
   };
 
+  let scheduledUpdate = null;
+
   /**
-   * يقرأ الخاصية من html أو body.
-   * هذا يجعل الكود يعمل مهما كان مكان data-theme في موقعك.
+   * يبحث عن قيمة الخاصية في html ثم body،
+   * ثم في أي عنصر آخر داخل الصفحة.
    */
-  function getThemeAttribute(attributeName) {
-    const htmlValue =
-      document.documentElement.getAttribute(attributeName);
+  function readDataAttribute(attributeName) {
+    const possibleElements = [
+      document.documentElement,
+      document.body,
+      ...document.querySelectorAll(`[${attributeName}]`),
+    ].filter(Boolean);
 
-    const bodyValue =
-      document.body?.getAttribute(attributeName);
+    for (const element of possibleElements) {
+      const value = element.getAttribute(attributeName);
 
-    return (htmlValue || bodyValue || "")
-      .trim()
-      .toLowerCase();
+      if (value && value.trim()) {
+        return value.trim().toLowerCase();
+      }
+    }
+
+    return "";
   }
 
   /**
-   * يحوّل الثيم الحالي إلى اسم داخل THEME_ASSETS.
+   * يحدد الصورة الصحيحة بحسب الثيم والوضع.
    */
-  function getCurrentThemeKey() {
-    const theme = getThemeAttribute("data-theme");
-    const oasisMode = getThemeAttribute("data-oasis-mode");
+  function getCurrentAssetKey() {
+    const theme = readDataAttribute("data-theme");
+    const oasisMode = readDataAttribute("data-oasis-mode");
+
+    if (theme === "ocean") {
+      return oasisMode === "dark"
+        ? "oceanDark"
+        : "oceanLight";
+    }
 
     switch (theme) {
       case "golden":
@@ -68,46 +87,48 @@
       case "scroll":
         return "scroll";
 
-      case "ocean":
-        return oasisMode === "dark"
-          ? "oceanDark"
-          : "oceanLight";
-
       case "glass":
         return "glass";
 
-      /*
-       * يشمل:
-       * data-theme="lootlingua"
-       * data-theme="default"
-       * أو عدم وجود data-theme أساسًا.
-       */
+      case "lootlingua":
+      case "default":
+      case "":
       default:
         return "lootlingua";
     }
   }
 
   /**
-   * يغير صورة التبويب ولون المتصفح.
+   * ينشئ رابطًا يعمل في GitHub Pages وLive Server وVercel.
+   */
+  function createAssetUrl(fileName, version) {
+    const url = new URL(fileName, document.baseURI);
+
+    /*
+     * يمنع Chrome من استخدام favicon قديم من الكاش.
+     */
+    url.searchParams.set("v", version);
+
+    return url.href;
+  }
+
+  /**
+   * يغير favicon ولون واجهة المتصفح.
    */
   function updateThemeBranding() {
-    const themeKey = getCurrentThemeKey();
-    const asset = THEME_ASSETS[themeKey];
+    const assetKey = getCurrentAssetKey();
+    const asset = THEME_ASSETS[assetKey];
 
     if (!asset) {
       console.warn(
-        `[LootLingua] لا توجد صورة معرفة للثيم: ${themeKey}`
+        `[LootLingua] لم يتم العثور على إعدادات الثيم: ${assetKey}`
       );
+
       return;
     }
 
-    let favicon =
-      document.getElementById("site-favicon");
+    let favicon = document.getElementById("site-favicon");
 
-    /*
-     * حماية إضافية:
-     * إذا لم يجد السطر داخل HTML، ينشئه تلقائيًا.
-     */
     if (!favicon) {
       favicon = document.createElement("link");
       favicon.id = "site-favicon";
@@ -116,11 +137,13 @@
       document.head.appendChild(favicon);
     }
 
-    const currentFavicon =
-      favicon.getAttribute("href");
+    const faviconUrl = createAssetUrl(
+      asset.file,
+      asset.version
+    );
 
-    if (currentFavicon !== asset.favicon) {
-      favicon.setAttribute("href", asset.favicon);
+    if (favicon.href !== faviconUrl) {
+      favicon.href = faviconUrl;
     }
 
     let themeColor =
@@ -133,47 +156,55 @@
       document.head.appendChild(themeColor);
     }
 
-    themeColor.setAttribute(
-      "content",
-      asset.browserColor
-    );
+    themeColor.content = asset.browserColor;
   }
 
   /**
-   * يبدأ المراقبة بعد تجهيز الصفحة.
+   * يمنع تشغيل التحديث مرات كثيرة في اللحظة نفسها.
    */
+  function scheduleBrandingUpdate() {
+    if (scheduledUpdate !== null) {
+      cancelAnimationFrame(scheduledUpdate);
+    }
+
+    scheduledUpdate = requestAnimationFrame(() => {
+      scheduledUpdate = null;
+      updateThemeBranding();
+    });
+  }
+
   function initializeThemeBranding() {
-    // يضبط الصورة الصحيحة عند فتح الموقع.
     updateThemeBranding();
 
-    const observerOptions = {
+    /*
+     * نراقب الصفحة كاملة؛ لأن data-oasis-mode
+     * قد لا تكون موجودة على نفس العنصر الذي توقعناه سابقًا.
+     */
+    const themeObserver = new MutationObserver(
+      scheduleBrandingUpdate
+    );
+
+    themeObserver.observe(document.documentElement, {
       attributes: true,
+      subtree: true,
       attributeFilter: [
         "data-theme",
         "data-oasis-mode",
       ],
-    };
+    });
 
     /*
-     * نراقب html وbody معًا،
-     * لأن الموقع قد يضع خصائص الثيم على أحدهما.
+     * احتياط لو الموقع عنده حدث مخصص لتغيير الثيم.
      */
-    const themeObserver =
-      new MutationObserver(() => {
-        updateThemeBranding();
-      });
-
-    themeObserver.observe(
-      document.documentElement,
-      observerOptions
+    window.addEventListener(
+      "storage",
+      scheduleBrandingUpdate
     );
 
-    if (document.body) {
-      themeObserver.observe(
-        document.body,
-        observerOptions
-      );
-    }
+    window.addEventListener(
+      "pageshow",
+      scheduleBrandingUpdate
+    );
   }
 
   if (document.readyState === "loading") {
