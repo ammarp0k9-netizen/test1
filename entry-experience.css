@@ -419,39 +419,63 @@ body.journey-auth-active {
 /* Oasis uses one token authority for both modes. */
 [data-theme="ocean"] {
   --main-bg: #eaf4f4;
-  --card-bg: #ffffff;
-  --surface-bg: #f4f9f8;
+
+  --card-bg: rgba(255, 255, 255, 0.82);
+  --surface-bg: rgba(244, 249, 248, 0.76);
+
   --accent: #0f766e;
   --accent2: #0d9488;
+
   --text-white: #102a2e;
   --text-gray: #526d70;
-  --border: #d5e7e5;
-  --hover-bg: rgba(15, 118, 110, .08);
-  --accent-soft: rgba(13, 148, 136, .12);
-  --overlay-bg: rgba(222, 239, 238, .96);
-  --game-card-bg: rgba(255, 255, 255, .94);
+  --heatmap-0: #edf3f2;
+  --heatmap-1: #c7eee8;
+  --heatmap-2: #81d8cd;
+  --heatmap-3: #2fb8a9;
+  --heatmap-4: #0f766e;
+  --border: rgba(15, 118, 110, 0.16);
+
+  --scrollbar-thumb: rgba(15, 118, 110, 0.24);
+  --scrollbar-thumb-hover: rgba(15, 118, 110, 0.46);
+  --scrollbar-track: rgba(15, 118, 110, 0.035);
+
+  --hover-bg: rgba(15, 118, 110, 0.08);
+  --accent-soft: rgba(13, 148, 136, 0.12);
+
+  --overlay-bg: rgba(222, 239, 238, 0.76);
+  --game-overlay: rgba(222, 239, 238, 0.7);
+  --game-card-bg: rgba(255, 255, 255, 0.72);
+
   color-scheme: light;
 }
 
 [data-theme="ocean"][data-oasis-mode="dark"] {
-  --main-bg: #071a22;
-  --card-bg: #0d2530;
-  --surface-bg: #12313d;
+  --main-bg: #090c0f;
+  --card-bg: #11161a;
+  --surface-bg: #192025;
   --accent: #5eead4;
   --accent2: #2dd4bf;
   --text-white: #e6fffb;
-  --text-gray: #a7c7c8;
+  --text-gray: #9aa8aa;
   --danger: #fb7185;
   --success: #4ade80;
   --star: #facc15;
-  --border: #244653;
+  --border: #283238;
+  --heatmap-0: rgba(255, 255, 255, 0.055);
+  --heatmap-1: #123a39;
+  --heatmap-2: #176c65;
+  --heatmap-3: #24a99b;
+  --heatmap-4: #5eead4;
+  --scrollbar-thumb: rgba(45, 212, 191, 0.22);
+  --scrollbar-thumb-hover: rgba(94, 234, 212, 0.42);
+  --scrollbar-track: rgba(255, 255, 255, 0.035);
   --hover-bg: rgba(94, 234, 212, .09);
   --track-bg: rgba(255, 255, 255, .09);
   --accent-soft: rgba(45, 212, 191, .14);
   --danger-soft: rgba(251, 113, 133, .13);
   --success-soft: rgba(74, 222, 128, .13);
   --star-soft: rgba(250, 204, 21, .14);
-  --overlay-bg: rgba(4, 19, 26, .96);
+  --overlay-bg: rgba(5, 7, 9, 0.96);
   --active-nav-bg: rgba(45, 212, 191, .14);
   --game-overlay: rgba(3, 18, 25, .9);
   --game-card-bg: rgba(13, 37, 48, .95);
