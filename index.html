@@ -42,7 +42,7 @@
     try {
       var earlyTheme = localStorage.getItem('theme');
       var earlyOasisMode = localStorage.getItem('lootlinguaOasisMode');
-      if (['lootlingua', 'golden', 'scroll', 'ocean', 'glass'].includes(earlyTheme)) {
+      if (['lootlingua', 'golden', 'scroll', 'ocean'].includes(earlyTheme)) {
         document.documentElement.setAttribute('data-theme', earlyTheme);
       }
       if (earlyOasisMode === 'light' || earlyOasisMode === 'dark') {
@@ -733,13 +733,23 @@
             <span class="theme-display-name">واحة الهدوء</span>
             <span class="theme-status-label" aria-hidden="true"></span>
           </div>
-          <div class="theme-option theme-coming-soon" data-theme="glass" data-unlock-level="5" data-coming-soon="1" onclick="setTheme('glass')" aria-disabled="true">
+          <div class="theme-option theme-coming-soon"
+            data-theme="glass"
+            data-unlock-level="5"
+            data-coming-soon="1"
+            onclick="setTheme('glass')"
+            aria-disabled="true">
+
             <div class="theme-preview preview-glass"></div>
+
             <span class="theme-display-name">الثيم الزجاجي</span>
-            <span class="theme-status-label theme-status-label--soon">قريباً</span>
-          </div>
-        </div>
-        <div id="profileOasisModeSetting" class="profile-oasis-mode-setting" hidden>
+
+            <span class="theme-status-label theme-status-label--soon">
+             قريباً
+           </span>
+           </div>
+           </div>
+            <div id="profileOasisModeSetting" class="profile-oasis-mode-setting" hidden>
           <div>
             <strong><i class="fa-solid fa-circle-half-stroke" aria-hidden="true"></i> إضاءة واحة الهدوء</strong>
             <small>يظهر هذا الخيار عند استخدام واحة الهدوء فقط</small>
@@ -1137,5 +1147,5 @@
 <script src="js/core-runtime.js"></script>
 <script src="js/theme-favicon.js" defer></script>
 <script src="js/oasis-preview-animation.js" defer></script>
-</body>
+<script src="js/lootlingua-glass-refraction-v2.8.js" defer></script></body>
 </html>

@@ -443,6 +443,17 @@ let notificationOwner = '';
 window.__notifications = [];
 let expandedNotificationIds = new Set();
 
+// Escape dynamic notification text before inserting it into HTML.
+// Kept local to core.js so notification rendering cannot fail if another helper is absent.
+function escapeHtml(value) {
+  return String(value ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
 function currentNotificationOwner() {
   return String(window.auth?.currentUser?.uid || 'guest');
 }

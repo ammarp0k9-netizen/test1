@@ -38,7 +38,6 @@ const THEME_DISPLAY_NAMES = {
 
 /** ثيمات/ميزات معطّلة مؤقتاً — تظهر باهتة مع «قريباً» */
 const THEMES_COMING_SOON = new Set(['glass']);
-
 function isThemeComingSoon(theme) {
   return THEMES_COMING_SOON.has(theme);
 }
@@ -48,7 +47,7 @@ function getThemeDisplayName(theme) {
 }
 
 function showGlassThemeComingSoonMessage() {
-  pushNotification(`«${getThemeDisplayName('glass')}» قريباً — ما زال قيد التطوير. ترقّب التحديث! ✨`, 'warning');
+  showToast(`«${getThemeDisplayName('glass')}» قريباً — ما زال قيد التطوير. ترقّب التحديث! ✨`, 'warning');
 }
 
 function ensureThemeStatusLabel(opt) {

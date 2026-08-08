@@ -2212,77 +2212,97 @@ body.admin-mode .admin-world-row {
 }
 
 [data-theme="glass"] {
-  /* نظام الزجاج المتكامل - Glass System */
-  --glass-bg-1:     rgba(255, 255, 255, 0.05);   /* للطبقات الخلفية */
-  --glass-bg-2:     rgba(255, 255, 255, 0.08);   /* للبطاقات العادية */
-  --glass-bg-3:     rgba(255, 255, 255, 0.10);   /* للعناصر الأمامية */
-  --glass-bg-input: rgba(255, 255, 255, 0.12);   /* للمدخلات */
-  
-  /* لمعة قطريه - Diagonal Specular Highlight */
-  --glass-shine: linear-gradient(135deg, rgba(255,255,255,0.25) 0%, rgba(255,255,255,0.05) 50%, transparent 100%);
-  
-  --glass-border-1: rgba(255, 255, 255, 0.35);   /* حدود خفيفة */
-  --glass-border-2: rgba(255, 255, 255, 0.50);   /* حدود واضحة */
-  --glass-border-3: rgba(255, 255, 255, 0.70);   /* حدود بيضاء */
-  
-  --glass-blur-bg:    20px;
-  --glass-blur-card:  16px;
-  --glass-blur-input: 12px;
-  --glass-saturation: 100%;
-  
-  --glass-shadow-soft:  0 4px 24px rgba(31, 38, 135, 0.12);
-  --glass-shadow-medium: 0 8px 32px rgba(31, 38, 135, 0.15);
-  --glass-shadow-strong: 0 16px 48px rgba(31, 38, 135, 0.20);
-  --glass-inner-glow: inset 0 1px 1px rgba(255, 255, 255, 0.4);
-  --glass-highlight: inset 0 1px 0 rgba(255, 255, 255, 0.6);
-  
-  /* الألوان الأساسية */
-  --main-bg:    linear-gradient(135deg, #06b6d4 0%, #0891b2 25%, #0c4a6e 50%, #075985 75%, #06b6d4 100%);
-  --main-bg-size: 400% 400%;
-  --card-bg:    var(--glass-bg-2);
-  --surface-bg: var(--glass-bg-input);
-  --accent:     #0ea5e9;
-  --accent2:    #06b6d4;
-  --text-white: #1e293b;
-  --text-gray:  #475569;
-  --danger:     #ef4444;
-  --success:    #10b981;
-  --star:       #f59e0b;
-  --border:     var(--glass-border-2);
-  --glass-blur: 4px;
-  --glass-saturation: 100%;
-  --scrollbar-thumb: rgba(14,165,233,0.3);
-  --scrollbar-thumb-hover: rgba(14,165,233,0.5);
-  --hover-bg:       rgba(255,255,255,0.15);
-  --track-bg:       rgba(255,255,255,0.1);
-  --accent-soft:    rgba(14,165,233,0.15);
-  --danger-soft:    rgba(239,68,68,0.15);
-  --success-soft:   rgba(16,185,129,0.15);
-  --star-soft:      rgba(245,158,11,0.2);
-  --overlay-bg:     rgba(15,23,42,0.85);
-  --active-nav-bg:  rgba(255,255,255,0.2);
-  --game-overlay:   rgba(15,23,42,0.7);
-  --game-card-bg:   rgba(255,255,255,0.3);
-  --text-on-accent: #ffffff;
-  --text-on-star:   #ffffff;
-  --header-grad:    #0ea5e9;
-  --focus-ring:     rgba(14,165,233,0.25);
-  --danger-warn-bg: rgba(239,68,68,0.12);
-  --danger-warn-bdr:rgba(239,68,68,0.3);
-  --danger-warn-txt:#ef4444;
-  --heatmap-0: rgba(255,255,255,0.1);
+  /* Public Glass variables kept intact for compatibility */
+  --glass-bg-1: rgba(14, 32, 60, 0.40);
+  --glass-bg-2: rgba(20, 44, 80, 0.34);
+  --glass-bg-3: rgba(255, 255, 255, 0.10);
+  --glass-bg-input: rgba(255, 255, 255, 0.075);
+  --glass-shine: none;
+
+  --glass-border-1: rgba(255, 255, 255, 0.12);
+  --glass-border-2: rgba(255, 255, 255, 0.20);
+  --glass-border-3: rgba(255, 255, 255, 0.30);
+
+  /* Repeated cards and controls no longer use their own blur */
+  --glass-blur-bg: 8px;
+  --glass-blur-card: 0px;
+  --glass-blur-input: 0px;
+  --glass-saturation: 116%;
+
+  --glass-shadow-soft: 0 5px 16px rgba(2, 8, 23, 0.14);
+  --glass-shadow-medium: 0 10px 28px rgba(2, 8, 23, 0.18);
+  --glass-shadow-strong: 0 16px 40px rgba(2, 8, 23, 0.22);
+  --glass-inner-glow: inset 0 1px 0 rgba(255, 255, 255, 0.16);
+  --glass-highlight: inset 0 1px 0 rgba(255, 255, 255, 0.20);
+
+  /* Main theme palette */
+  --main-bg: #07111f;
+  --card-bg: rgba(20, 44, 80, 0.36);
+  --surface-bg: rgba(255, 255, 255, 0.075);
+  --accent: #79d8ff;
+  --accent2: #9b8cff;
+  --text-white: #f5f9ff;
+  --text-gray: rgba(229, 239, 255, 0.72);
+  --danger: #ff7080;
+  --success: #4bd7aa;
+  --star: #ffd166;
+  --border: rgba(255, 255, 255, 0.18);
+
+  --scrollbar-thumb: rgba(190, 224, 255, 0.25);
+  --scrollbar-thumb-hover: rgba(190, 224, 255, 0.44);
+  --hover-bg: rgba(255, 255, 255, 0.10);
+  --track-bg: rgba(255, 255, 255, 0.075);
+  --accent-soft: rgba(121, 216, 255, 0.15);
+  --danger-soft: rgba(255, 112, 128, 0.14);
+  --success-soft: rgba(75, 215, 170, 0.14);
+  --star-soft: rgba(255, 209, 102, 0.16);
+  --overlay-bg: rgba(3, 9, 22, 0.66);
+  --active-nav-bg: rgba(121, 216, 255, 0.14);
+  --game-overlay: rgba(3, 9, 22, 0.64);
+  --game-card-bg: rgba(18, 40, 74, 0.42);
+  --text-on-accent: #06111c;
+  --text-on-star: #211700;
+  --header-grad: #79d8ff;
+  --focus-ring: rgba(121, 216, 255, 0.24);
+  --danger-warn-bg: rgba(255, 112, 128, 0.12);
+  --danger-warn-bdr: rgba(255, 112, 128, 0.30);
+  --danger-warn-txt: #ff7080;
+
+  --heatmap-0: rgba(255, 255, 255, 0.08);
   --heatmap-1: #bae6fd;
   --heatmap-2: #7dd3fc;
   --heatmap-3: #38bdf8;
   --heatmap-4: #0ea5e9;
-  --tag-verb: #f97316;
-  --tag-noun: #8b5cf6;
-  --tag-adj: #10b981;
-  --tag-tool: #ef4444;
-  --tag-sentence: #06b6d4;
-  --tag-general: #64748b;
-  --tag-adverb: #3b82f6;
-  --tag-game: #f59e0b;
+  --tag-verb: #fb923c;
+  --tag-noun: #a78bfa;
+  --tag-adj: #34d399;
+  --tag-tool: #fb7185;
+  --tag-sentence: #22d3ee;
+  --tag-general: #94a3b8;
+  --tag-adverb: #60a5fa;
+  --tag-game: #fbbf24;
+
+  /* Internal V2 material controls */
+  --glass-v2-blur-shell: 7px;
+  --glass-v2-blur-modal: 9px;
+  --glass-v2-saturation: 116%;
+  --glass-v2-panel: rgba(12, 31, 59, 0.36);
+  --glass-v2-panel-strong: rgba(10, 27, 52, 0.58);
+  --glass-v2-card: rgba(18, 40, 74, 0.32);
+  --glass-v2-card-soft: rgba(18, 40, 74, 0.24);
+  --glass-v2-edge-blur: 1.2px;
+  --glass-v2-edge-saturation: 150%;
+  --glass-v2-edge-opacity: 0.72;
+  --glass-v2-edge-scale: 1.055;
+  --glass-v2-contrast: 106%;
+  --glass-v2-brightness: 103%;
+  --glass-v2-control: rgba(255, 255, 255, 0.075);
+  --glass-v2-control-hover: rgba(255, 255, 255, 0.115);
+  --glass-v2-border: rgba(255, 255, 255, 0.18);
+  --glass-v2-border-strong: rgba(255, 255, 255, 0.28);
+  --glass-v2-shadow: 0 12px 34px rgba(2, 8, 23, 0.20);
+  --glass-v2-shadow-soft: 0 6px 18px rgba(2, 8, 23, 0.15);
+  --glass-v2-inner: inset 0 1px 0 rgba(255, 255, 255, 0.18);
 }
 
 :root {
@@ -5571,336 +5591,7 @@ body.game-bg-active .page-header h1 {
   border: 1px solid var(--border);
 }
 
-/* ═════════════════════════════════════════════════════════════════
-   LIQUID GLASS THEME - iOS Style Glassmorphism
-   نظام زجاجي متكامل مع تأثيرات سائلة وتكيف تلقائي
-   ═════════════════════════════════════════════════════════════════ */
-
-/* ── 1. Glass Cards with Depth Separation ── */
-[data-theme="glass"] .card-box,
-[data-theme="glass"] .word-card,
-[data-theme="glass"] .game-card,
-[data-theme="glass"] .stat-card {
-  background: var(--glass-bg-2);
-  backdrop-filter: blur(var(--glass-blur-card)) saturate(var(--glass-saturation));
-  -webkit-backdrop-filter: blur(var(--glass-blur-card)) saturate(var(--glass-saturation));
-  /* 3D Borders: top/left = white highlight, bottom/right = dark shadow */
-  border-top: 1px solid rgba(255, 255, 255, 0.6);
-  border-left: 1px solid rgba(255, 255, 255, 0.4);
-  border-bottom: 1px solid rgba(0, 0, 0, 0.15);
-  border-right: 1px solid rgba(0, 0, 0, 0.1);
-  /* Inset highlight from top for 3D glass feel */
-  box-shadow: 
-    inset 0 1px 0 rgba(255, 255, 255, 0.4),
-    inset 0 -1px 0 rgba(0, 0, 0, 0.05),
-    var(--glass-shadow-medium);
-  border-radius: 16px;
-  transition: transform 0.2s cubic-bezier(0.4, 0, 0.2, 1), box-shadow 0.2s ease, border-color 0.2s ease;
-  will-change: transform;
-  position: relative;
-  overflow: hidden;
-}
-
-/* Diagonal specular highlight - ضربة ضوء قطرية */
-[data-theme="glass"] .card-box::before,
-[data-theme="glass"] .word-card::before,
-[data-theme="glass"] .game-card::before,
-[data-theme="glass"] .stat-card::before {
-  content: '';
-  position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  background: var(--glass-shine);
-  pointer-events: none;
-  border-radius: 16px;
-  opacity: 0.8;
-}
-
-/* Hover - Liquid glow effect */
-[data-theme="glass"] .card-box:hover,
-[data-theme="glass"] .word-card:hover,
-[data-theme="glass"] .game-card:hover,
-[data-theme="glass"] .stat-card:hover {
-  box-shadow: var(--glass-shadow-strong), var(--glass-inner-glow);
-  border-color: var(--glass-border-3);
-  transform: translateY(-2px);
-}
-
-/* ── Glass Text محسّن ── */
-
-[data-theme="glass"] {
-  --glass-text-main: rgba(255,255,255,0.9);
-  --glass-text-soft: rgba(255,255,255,0.7);
-}
-
-/* النص الأساسي */
-[data-theme="glass"] h1,
-[data-theme="glass"] h2,
-[data-theme="glass"] h3,
-[data-theme="glass"] .word-text,
-[data-theme="glass"] .side-label,
-[data-theme="glass"] .cat-tag,
-[data-theme="glass"] .settings-title {
-  color: var(--glass-text-main);
-  text-shadow:
-    0 1px 2px rgba(0,0,0,0.3),
-    0 0 8px rgba(255,255,255,0.25);
-}
-
-/* النصوص الصغيرة */
-[data-theme="glass"] .meaning-text,
-[data-theme="glass"] .example-box,
-[data-theme="glass"] .hint-text,
-[data-theme="glass"] .tooltip-text,
-[data-theme="glass"] .settings-label {
-  color: var(--glass-text-soft);
-  text-shadow: 0 1px 3px rgba(0,0,0,0.4);
-}
-
-/* ── إصلاح إعدادات البحث 🔥 ── */
-[data-theme="glass"] .search-settings,
-[data-theme="glass"] .search-settings * {
-  color: var(--glass-text-main) !important;
-}
-
-/* ── إصلاح الـ tooltip (النيم تاج) 🔥 ── */
-[data-theme="glass"] .tooltip,
-[data-theme="glass"] .tooltip-text {
-  color: rgba(255,255,255,0.95) !important;
-  text-shadow: 0 1px 4px rgba(0,0,0,0.5);
-}
-
-/* ── لمعة خفيفة للنص (Apple vibe) ── */
-[data-theme="glass"] strong,
-[data-theme="glass"] .highlight {
-  text-shadow:
-    0 0 10px rgba(255,255,255,0.35),
-    0 1px 2px rgba(0,0,0,0.25);
-}
-
-/* ── إلغاء أي تخبيص سابق ── */
-[data-theme="glass"] * {
-  mix-blend-mode: normal !important;
-  -webkit-text-fill-color: unset !important;
-}
-
-/* ── 2. Glass Inputs with Frost Effect ── */
-[data-theme="glass"] input,
-[data-theme="glass"] select,
-[data-theme="glass"] textarea {
-  background: var(--glass-bg-input);
-  backdrop-filter: blur(var(--glass-blur-input)) saturate(140%);
-  -webkit-backdrop-filter: blur(var(--glass-blur-input)) saturate(140%);
-  border: 1px solid var(--glass-border-2);
-  border-bottom: 1px solid var(--glass-border-1);
-  box-shadow: var(--glass-shadow-soft), var(--glass-inner-glow);
-  border-radius: 12px;
-  transition: background 0.3s cubic-bezier(0.4, 0, 0.2, 1), border-color 0.3s cubic-bezier(0.4, 0, 0.2, 1), box-shadow 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-}
-
-[data-theme="glass"] input:focus,
-[data-theme="glass"] select:focus,
-[data-theme="glass"] textarea:focus {
-  background: var(--glass-bg-3);
-  border-color: var(--glass-border-3);
-  box-shadow: 0 0 0 3px rgba(14, 165, 233, 0.2), var(--glass-shadow-soft);
-}
-
-/* ── 3. Glass Sidebar - Back Layer ── */
-[data-theme="glass"] .sidebar {
-  position: relative;
-  background: transparent;
-  border-left: 1px solid var(--glass-border-2);
-  border-right: none;
-  box-shadow: var(--glass-shadow-strong);
-  z-index: 100;
-}
-
-[data-theme="glass"] .sidebar::before {
-  content: '';
-  position: absolute;
-  inset: 0;
-  background: var(--glass-bg-1);
-  backdrop-filter: blur(var(--glass-blur-bg)) saturate(var(--glass-saturation));
-  -webkit-backdrop-filter: blur(var(--glass-blur-bg)) saturate(var(--glass-saturation));
-  z-index: -1;
-  pointer-events: none;
-}
-
-[data-theme="glass"] .sidebar > * {
-  position: relative;
-  z-index: 1;
-}
-
-/* ── 4. Glass Game Header - Floating Layer ── */
-[data-theme="glass"] .game-header-bar {
-  background: var(--glass-bg-2);
-  backdrop-filter: blur(16px) saturate(160%);
-  -webkit-backdrop-filter: blur(16px) saturate(160%);
-  border: 1px solid var(--glass-border-2);
-  box-shadow: var(--glass-shadow-medium);
-  border-radius: 14px;
-}
-
-/* ── 5. Glass Stats Panel - Modal Layer ── */
-[data-theme="glass"] body {
-  /* خلفية ثابتة gradient أزرق فاتح هادئ بدون حركة */
-  background: linear-gradient(180deg, #3f7fc9, #2562a8);
-  background-attachment: fixed;
-  background-size: cover;
-  position: relative;
-  overflow-x: hidden;
-  /* إزالة أي animation */
-}
-
-/* إزالة أي keyframes أو حركة للخلفية */
-
-[data-theme="glass"] .stats-box {
-  background: var(--glass-bg-2);
-  backdrop-filter: blur(24px) saturate(140%);
-  -webkit-backdrop-filter: blur(24px) saturate(140%);
-  border: 1px solid var(--glass-border-2);
-  border-top: 1px solid var(--glass-border-3);
-  box-shadow: var(--glass-shadow-strong), 0 25px 50px rgba(0, 0, 0, 0.15);
-  border-radius: 20px;
-}
-
-[data-theme="glass"] .stats-overlay {
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
-  background: rgba(15, 23, 42, 0.4);
-}
-
-/* ── 6. Glass Search Bar ── */
-[data-theme="glass"] .search-bar-row input,
-[data-theme="glass"] .search-bar-row .app-dropdown-trigger {
-  background: var(--glass-bg-3);
-  backdrop-filter: blur(10px);
-  border: 1px solid var(--glass-border-2);
-  box-shadow: var(--glass-shadow-soft);
-  transition: background 0.3s ease, border-color 0.3s ease, box-shadow 0.3s ease;
-}
-
-[data-theme="glass"] .search-bar-row input:hover,
-[data-theme="glass"] .search-bar-row .app-dropdown-trigger:hover {
-  background: var(--glass-bg-input);
-  border-color: var(--glass-border-3);
-  box-shadow: var(--glass-shadow-medium);
-}
-
-/* ── 15. Sidebar Fix - Position & Layering ── */
-/* Desktop: Sidebar as rail (56px) */
-[data-theme="glass"] .sidebar {
-  position: fixed;
-  top: 0;
-  right: 0;
-  height: 100vh;
-  width: var(--sidebar-rail);  /* 56px rail by default */
-  /* Glass background WITHOUT blur on the sidebar itself */
-  background: rgba(255, 255, 255, 0.15);
-  /* 3D Borders - Glass edge effect */
-  border-top: 1px solid rgba(255, 255, 255, 0.6);
-  border-left: 1px solid rgba(255, 255, 255, 0.4);
-  border-bottom: 1px solid rgba(0, 0, 0, 0.15);
-  box-shadow: -8px 0 32px rgba(0, 0, 0, 0.2);
-  z-index: 1001;
-  transition: width 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-  overflow: hidden;
-}
-
-/* Sidebar OPEN state on Desktop */
-[data-theme="glass"] .sidebar.open,
-[data-theme="glass"] body.sidebar-open .sidebar {
-  width: var(--sidebar-open);  /* 280px when open */
-  overflow-y: auto;
-}
-
-/* Overlay - blur effect on content BEHIND sidebar */
-[data-theme="glass"] .overlay {
-  position: fixed;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  background: rgba(0, 0, 0, 0.3);
-  backdrop-filter: blur(8px);
-  -webkit-backdrop-filter: blur(8px);
-  z-index: 1000;
-}
-
-/* Sidebar content stays sharp - no blur */
-[data-theme="glass"] .sidebar > * {
-  position: relative;
-  z-index: 2;
-}
-
-/* ═════════════════════════════════════════════════════════════════
-   GLASS BUBBLES ANIMATION - Performance Optimized (GPU Only)
-   ═════════════════════════════════════════════════════════════════ */
-
-/* Bubbles container */
-[data-theme="glass"] .bubbles-container {
-  position: fixed;
-  top: 0;
-  left: 0;
-  width: 100%;
-  height: 100%;
-  pointer-events: none;
-  z-index: 0;
-  overflow: hidden;
-}
-
-/* Individual bubbles - GPU optimized with transform only */
-[data-theme="glass"] .bubble {
-  position: absolute;
-  bottom: -100px;
-  background: radial-gradient(circle at 30% 30%, 
-    rgba(255, 255, 255, 0.15) 0%, 
-    rgba(255, 255, 255, 0.05) 50%, 
-    transparent 70%);
-  border: 1px solid rgba(255, 255, 255, 0.2);
-  border-radius: 50%;
-  animation: floatUp linear infinite;
-  will-change: transform, opacity;
-  transform: translateZ(0);
-}
-
-/* Bubble sizes */
-[data-theme="glass"] .bubble--small { width: 20px; height: 20px; }
-[data-theme="glass"] .bubble--medium { width: 40px; height: 40px; }
-[data-theme="glass"] .bubble--large { width: 60px; height: 60px; }
-
-/* GPU-optimized animation - ONLY transform and opacity */
-@keyframes floatUp {
-  0% {
-    transform: translateY(0) translateX(0) scale(1);
-    opacity: 0;
-  }
-  10% {
-    opacity: 0.6;
-  }
-  90% {
-    opacity: 0.6;
-  }
-  100% {
-    transform: translateY(-120vh) translateX(20px) scale(0.8);
-    opacity: 0;
-  }
-}
-
-/* Varying animation durations for different speeds */
-[data-theme="glass"] .bubble--slow { animation-duration: 15s; }
-[data-theme="glass"] .bubble--normal { animation-duration: 10s; }
-[data-theme="glass"] .bubble--fast { animation-duration: 7s; }
-
-/* Mobile - Reduced bubbles for performance */
 @media (pointer: coarse), (max-width: 768px) {
-  [data-theme="glass"] .bubbles-container {
-    display: none; /* Disable on mobile for performance */
-  }
-
   /* ── تحسين تفاعل اللمس على الموبايل (Tap Interactions) ── */
 
   /* تأثير ضغط للأزرار (scale + feedback) */
@@ -6114,194 +5805,6 @@ body.game-bg-active .page-header h1 {
 
 /* END Mobile Interaction Fixes */
 
-/* ── تحسين وتوحيد أسلوب النص الزجاجي في ثيم Glass ── */
-[data-theme="glass"] .card-box,
-[data-theme="glass"] .word-card,
-[data-theme="glass"] .game-card,
-[data-theme="glass"] .stat-card,
-[data-theme="glass"] .sidebar,
-[data-theme="glass"] .btn-main,
-[data-theme="glass"] .btn-ai,
-[data-theme="glass"] .auth-btn,
-[data-theme="glass"] .btn-icon-tip,
-[data-theme="glass"] .search-bar-row input,
-[data-theme="glass"] .search-bar-row .app-dropdown-trigger,
-[data-theme="glass"] .search-bar-row,
-[data-theme="glass"] .sidebar-header h2,
-[data-theme="glass"] .side-label,
-[data-theme="glass"] .nav-link,
-[data-theme="glass"] .nav-link.active,
-[data-theme="glass"] .sidebar-divider,
-[data-theme="glass"] .page-header h1,
-[data-theme="glass"] .modal-content h2,
-[data-theme="glass"] .modal-content p,
-[data-theme="glass"] .quiz-word,
-[data-theme="glass"] .quiz-meaning,
-[data-theme="glass"] .quiz-example,
-[data-theme="glass"] .meaning-text,
-[data-theme="glass"] .example-box,
-[data-theme="glass"] .hint-text,
-[data-theme="glass"] .cat-tag,
-[data-theme="glass"] .streak-count,
-[data-theme="glass"] .xp-val,
-[data-theme="glass"] .xp-hint,
-[data-theme="glass"] .xp-next-val,
-[data-theme="glass"] .stat-lbl,
-[data-theme="glass"] .heatmap-title,
-[data-theme="glass"] .heatmap-legend,
-[data-theme="glass"] .btn-backup,
-[data-theme="glass"] .game-header-title,
-[data-theme="glass"] .game-stats-btn,
-[data-theme="glass"] .game-word-count,
-[data-theme="glass"] .quiz-btn,
-[data-theme="glass"] .btn-remember,
-[data-theme="glass"] .btn-forget,
-[data-theme="glass"] .btn-new,
-[data-theme="glass"] .btn-old,
-[data-theme="glass"] .btn-starred,
-[data-theme="glass"] .btn-all,
-[data-theme="glass"] .btn-close-quiz,
-[data-theme="glass"] .btn-confirm,
-[data-theme="glass"] .btn-cancel,
-[data-theme="glass"] .star-btn,
-[data-theme="glass"] .actions,
-[data-theme="glass"] .icon-circle,
-[data-theme="glass"] .backup-zone {
-  color: rgba(255,255,255,0.93) !important;
-  text-shadow:
-    0 2px 8px rgba(60,120,200,0.13),
-    0 1px 0 rgba(0,0,0,0.10),
-    0 0 6px rgba(255,255,255,0.10);
-}
-
-[data-theme="glass"] .meaning-text,
-[data-theme="glass"] .example-box,
-[data-theme="glass"] .hint-text,
-[data-theme="glass"] .quiz-example,
-[data-theme="glass"] .modal-content p,
-[data-theme="glass"] .stats-header h2,
-[data-theme="glass"] .stat-card,
-[data-theme="glass"] .cat-tag,
-[data-theme="glass"] .side-label,
-[data-theme="glass"] .sidebar-divider,
-[data-theme="glass"] .tooltip-text,
-[data-theme="glass"] .streak-count,
-[data-theme="glass"] .xp-val,
-[data-theme="glass"] .xp-hint,
-[data-theme="glass"] .xp-next-val,
-[data-theme="glass"] .stat-lbl,
-[data-theme="glass"] .heatmap-title,
-[data-theme="glass"] .heatmap-legend {
-  color: rgba(255,255,255,0.82) !important;
-  text-shadow:
-    0 1px 6px rgba(60,120,200,0.10),
-    0 1px 0 rgba(0,0,0,0.08),
-    0 0 4px rgba(255,255,255,0.08);
-}
-
-/* إصلاح tooltips: لون أبيض واضح دائماً فوق كل شيء */
-[data-theme="glass"] .tooltip-text {
-  color: #fff !important;
-  text-shadow: 0 2px 8px rgba(60,120,200,0.18), 0 1px 0 rgba(0,0,0,0.13);
-  background: rgba(30,41,59,0.98) !important;
-  -webkit-background-clip: border-box !important;
-  -webkit-text-fill-color: #fff !important;
-  background-clip: border-box !important;
-  text-fill-color: #fff !important;
-  filter: none !important;
-  mix-blend-mode: normal !important;
-}
-
-/* إصلاح search settings: فرض لون النص الأبيض */
-[data-theme="glass"] .search-bar-row input,
-[data-theme="glass"] .search-bar-row .app-dropdown-trigger,
-[data-theme="glass"] .search-bar-row {
-  color: rgba(255,255,255,0.93) !important;
-  text-shadow: 0 2px 8px rgba(60,120,200,0.13), 0 1px 0 rgba(0,0,0,0.10);
-}
-/* END تحسين وتوحيد أسلوب النص الزجاجي في ثيم Glass */
-
-/* ═════════════════════════════════════════════════════════════════
-   GLASS THEME SPECIFIC STYLES - Liquid iOS Style
-   ═════════════════════════════════════════════════════════════════ */
-
-/* Mobile / Low-power devices - Reduce effects automatically */
-@media (pointer: coarse), (max-width: 768px), (prefers-reduced-motion: reduce) {
-  [data-theme="glass"] {
-    --glass-blur-bg: 10px;
-    --glass-blur-card: 8px;
-    --glass-blur-input: 6px;
-    --glass-saturation: 120%;
-    --glass-shadow-soft: 0 2px 12px rgba(31, 38, 135, 0.08);
-    --glass-shadow-medium: 0 4px 20px rgba(31, 38, 135, 0.1);
-    --glass-shadow-strong: 0 8px 32px rgba(31, 38, 135, 0.12);
-  }
-  
-  /* Mobile: Sidebar hidden off-screen with transform */
-  [data-theme="glass"] .sidebar {
-    width: 260px;
-    right: -280px;  /* Hidden off-screen */
-    transform: translateX(0);
-    transition: right 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-    backdrop-filter: none;
-    -webkit-backdrop-filter: none;
-    background: rgba(255, 255, 255, 0.95);
-  }
-  
-  /* Mobile: Sidebar visible when open */
-  [data-theme="glass"] .sidebar.open,
-  [data-theme="glass"] body.sidebar-open .sidebar {
-    right: 0;
-    width: 260px;
-  }
-  
-  /* Mobile: lighter overlay */
-  [data-theme="glass"] .overlay {
-    backdrop-filter: blur(4px);
-    -webkit-backdrop-filter: blur(4px);
-    background: rgba(0, 0, 0, 0.2);
-  }
-  
-  [data-theme="glass"] .card-box,
-  [data-theme="glass"] .word-card,
-  [data-theme="glass"] .game-card,
-  [data-theme="glass"] .stat-card {
-    border-radius: 14px;
-  }
-  
-  [data-theme="glass"] .card-box::before,
-  [data-theme="glass"] .word-card::before,
-  [data-theme="glass"] .game-card::before,
-  [data-theme="glass"] .stat-card::before {
-    display: none; /* Remove reflection on mobile */
-  }
-  
-  [data-theme="glass"] .btn-primary::before {
-    display: none; /* Remove shimmer on mobile */
-  }
-}
-
-/* Very low-end devices - Minimal glass effects */
-@media (prefers-reduced-transparency: reduce) {
-  [data-theme="glass"] {
-    --glass-blur-bg: 4px;
-    --glass-blur-card: 4px;
-    --glass-blur-input: 2px;
-  }
-  
-  [data-theme="glass"] .sidebar,
-  [data-theme="glass"] .card-box,
-  [data-theme="glass"] .word-card,
-  [data-theme="glass"] .game-card,
-  [data-theme="glass"] .stat-card,
-  [data-theme="glass"] input,
-  [data-theme="glass"] select,
-  [data-theme="glass"] textarea {
-    background: rgba(255, 255, 255, 0.7);
-    backdrop-filter: blur(4px);
-  }
-}
-
 .stat-val { font-size:22px; font-weight:700; color:var(--accent); margin-bottom:4px; }
 .stat-lbl { font-size:11px; color:var(--text-gray); }
 
@@ -6455,19 +5958,6 @@ body.sidebar-open .sidebar.open nav {
   overflow-x: hidden !important;
   -webkit-overflow-scrolling: touch;
 }
-/* Sidebar performance tuning - added by Codex */
-@media (min-width: 769px) {
-  [data-theme="glass"] .sidebar {
-    transition: width 0.24s ease-out, box-shadow 0.2s ease-out !important;
-    box-shadow: -5px 0 18px rgba(0, 0, 0, 0.16) !important;
-  }
-
-  [data-theme="glass"] .sidebar.open,
-  [data-theme="glass"] body.sidebar-open .sidebar {
-    box-shadow: -7px 0 24px rgba(0, 0, 0, 0.22) !important;
-  }
-}
-
 @media (pointer: coarse), (max-width: 768px) {
   .sidebar {
     transition: right 0.16s ease-out !important;
@@ -6482,25 +5972,6 @@ body.sidebar-open .sidebar.open nav {
 
   .sidebar .side-label {
     transition: opacity 0.1s ease-out !important;
-  }
-
-  [data-theme="glass"] .sidebar {
-    background: rgba(255, 255, 255, 0.96) !important;
-    backdrop-filter: none !important;
-    -webkit-backdrop-filter: none !important;
-    transition: right 0.14s ease-out !important;
-    box-shadow: none !important;
-  }
-
-  [data-theme="glass"] .sidebar.open,
-  [data-theme="glass"] body.sidebar-open .sidebar {
-    box-shadow: -3px 0 12px rgba(0, 0, 0, 0.18) !important;
-  }
-
-  [data-theme="glass"] .overlay {
-    backdrop-filter: none !important;
-    -webkit-backdrop-filter: none !important;
-    background: rgba(0, 0, 0, 0.16) !important;
   }
 }
 
@@ -11602,4 +11073,2140 @@ body.modal-scroll-locked {
   border: 1px solid currentColor;
   border-radius: 50%;
   cursor: pointer;
+}
+
+/* ═════════════════════════════════════════════════════════════════
+   LOOTLINGUA GLASS V2.4 — LIQUID MATERIAL POLISH
+   One coherent material family, unclipped overlays, and event-driven motion.
+   The companion glass-liquid-interaction-v2.4.js runs only while the user interacts.
+   ═════════════════════════════════════════════════════════════════ */
+
+/* 1) Static optical canvas. No animated wallpaper cost. */
+html[data-theme="glass"] {
+  min-height: 100%;
+  background-color: #365B6D;
+  background-image:
+    radial-gradient(ellipse 74% 58% at 7% 7%, rgba(55, 174, 236, 0.54), transparent 66%),
+    radial-gradient(ellipse 69% 59% at 93% 9%, rgba(132, 103, 229, 0.46), transparent 68%),
+    radial-gradient(ellipse 60% 46% at 52% 100%, rgba(30, 188, 177, 0.24), transparent 72%),
+    linear-gradient(145deg, #07111f 0%, #102c4d 48%, #171c3d 100%);
+  background-repeat: no-repeat;
+  background-position: center;
+  background-size: 100% 100%;
+
+  /* Pointer values are updated only while the pointer is over a hero bar. */
+  --liquid-pointer-x: 50%;
+  --liquid-pointer-y: 18%;
+}
+
+html[data-theme="glass"] body {
+  min-height: 100dvh;
+  background: transparent !important;
+  color: var(--text-white);
+}
+
+/* Retired decoration and the unused sidebar never enter the compositor. */
+html[data-theme="glass"] :where(.bubbles-container, .bubble) {
+  display: none !important;
+  animation: none !important;
+}
+
+html[data-theme="glass"] .sidebar {
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+  box-shadow: none !important;
+}
+
+html[data-theme="glass"] .sidebar::before,
+html[data-theme="glass"] .sidebar::after {
+  content: none !important;
+  display: none !important;
+}
+
+/* 2) Performance ladder. Ultra remains practical, not a benchmark mode. */
+html[data-theme="glass"] body.perf-ultra {
+  --glass-v2-blur-shell: 7px;
+  --glass-v2-blur-modal: 9px;
+  --glass-v2-saturation: 124%;
+  --glass-v2-panel: rgba(12, 31, 59, 0.27);
+  --glass-v2-panel-strong: rgba(10, 27, 52, 0.46);
+  --glass-v2-card: rgba(18, 40, 74, 0.22);
+  --glass-v2-card-soft: rgba(18, 40, 74, 0.16);
+  --glass-v2-control: rgba(255, 255, 255, 0.068);
+  --glass-v2-control-hover: rgba(255, 255, 255, 0.115);
+  --glass-liquid-motion: 1;
+  --glass-v2-shadow: 0 12px 32px rgba(2, 8, 23, 0.20);
+  --glass-v2-shadow-soft: 0 7px 18px rgba(2, 8, 23, 0.15);
+}
+
+html[data-theme="glass"] body.perf-balanced {
+  --glass-v2-blur-shell: 5px;
+  --glass-v2-blur-modal: 6px;
+  --glass-v2-saturation: 116%;
+  --glass-v2-panel: rgba(12, 31, 59, 0.34);
+  --glass-v2-panel-strong: rgba(10, 27, 52, 0.56);
+  --glass-v2-card: rgba(18, 40, 74, 0.29);
+  --glass-v2-card-soft: rgba(18, 40, 74, 0.22);
+  --glass-v2-control: rgba(255, 255, 255, 0.078);
+  --glass-v2-control-hover: rgba(255, 255, 255, 0.125);
+  --glass-liquid-motion: 0.72;
+  --glass-v2-shadow: 0 10px 26px rgba(2, 8, 23, 0.18);
+  --glass-v2-shadow-soft: 0 6px 15px rgba(2, 8, 23, 0.14);
+}
+
+html[data-theme="glass"] body.perf-stable {
+  --glass-v2-blur-shell: 2px;
+  --glass-v2-blur-modal: 3px;
+  --glass-v2-saturation: 106%;
+  --glass-v2-panel: rgba(14, 34, 64, 0.50);
+  --glass-v2-panel-strong: rgba(11, 28, 54, 0.69);
+  --glass-v2-card: rgba(20, 43, 78, 0.43);
+  --glass-v2-card-soft: rgba(20, 43, 78, 0.33);
+  --glass-v2-control: rgba(255, 255, 255, 0.097);
+  --glass-v2-control-hover: rgba(255, 255, 255, 0.138);
+  --glass-liquid-motion: 0.34;
+  --glass-v2-shadow: 0 7px 18px rgba(2, 8, 23, 0.15);
+  --glass-v2-shadow-soft: 0 3px 10px rgba(2, 8, 23, 0.11);
+}
+
+html[data-theme="glass"] body.perf-turbo,
+html[data-theme="glass"] body.low-end-device {
+  --glass-v2-blur-shell: 0px;
+  --glass-v2-blur-modal: 0px;
+  --glass-v2-saturation: 100%;
+  --glass-v2-panel: rgba(16, 38, 70, 0.65);
+  --glass-v2-panel-strong: rgba(11, 28, 54, 0.82);
+  --glass-v2-card: rgba(20, 43, 78, 0.58);
+  --glass-v2-card-soft: rgba(20, 43, 78, 0.47);
+  --glass-v2-control: rgba(255, 255, 255, 0.112);
+  --glass-v2-control-hover: rgba(255, 255, 255, 0.15);
+  --glass-liquid-motion: 0;
+  --glass-v2-shadow: 0 4px 12px rgba(2, 8, 23, 0.12);
+  --glass-v2-shadow-soft: none;
+}
+
+/* 3) Hero liquid slabs. Refraction stays INSIDE the bars: no stray halos. */
+html[data-theme="glass"] :where(
+  .legend-top-bar,
+  .legend-dock,
+  .treasure-dock
+) {
+  position: fixed;
+  isolation: isolate;
+  overflow: visible;
+  background:
+    radial-gradient(125% 160% at var(--liquid-pointer-x, 18%) -42%, rgba(255,255,255,0.24), transparent 40%),
+    radial-gradient(105% 140% at 92% 132%, rgba(155, 140, 255, 0.16), transparent 52%),
+    linear-gradient(180deg, rgba(255,255,255,0.17), rgba(255,255,255,0.036) 43%, rgba(255,255,255,0.008) 72%),
+    var(--glass-v2-panel) !important;
+  border: 1px solid var(--glass-v2-border) !important;
+  border-top-color: rgba(255, 255, 255, 0.42) !important;
+  border-inline-start-color: rgba(255, 255, 255, 0.28) !important;
+  border-inline-end-color: rgba(167, 219, 255, 0.19) !important;
+  border-bottom-color: rgba(1, 8, 22, 0.42) !important;
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,0.34),
+    inset 0 8px 16px rgba(255,255,255,0.028),
+    inset 0 -11px 20px rgba(1,7,18,0.18),
+    0 1px 0 rgba(255,255,255,0.07),
+    0 14px 30px rgba(2,8,23,0.18) !important;
+  backdrop-filter:
+    blur(var(--glass-v2-blur-shell))
+    saturate(var(--glass-v2-saturation))
+    contrast(106%)
+    brightness(103%) !important;
+  -webkit-backdrop-filter:
+    blur(var(--glass-v2-blur-shell))
+    saturate(var(--glass-v2-saturation))
+    contrast(106%)
+    brightness(103%) !important;
+  background-clip: padding-box;
+  will-change: auto !important;
+}
+
+/* Moving caustic. It reacts to pointer and scroll without animating the wallpaper. */
+html[data-theme="glass"] :where(
+  .legend-top-bar,
+  .legend-dock,
+  .treasure-dock
+)::before {
+  content: "" !important;
+  position: absolute !important;
+  inset: 1px !important;
+  z-index: 0 !important;
+  display: block !important;
+  border-radius: inherit !important;
+  background:
+    radial-gradient(42% 84% at var(--liquid-pointer-x, 50%) var(--liquid-pointer-y, 18%), rgba(255,255,255,0.22), transparent 68%),
+    linear-gradient(108deg, rgba(255,255,255,0.13), transparent 24%, transparent 66%, rgba(121,216,255,0.095)),
+    radial-gradient(70% 58% at 50% 0%, rgba(255,255,255,0.075), transparent 72%) !important;
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,0.19),
+    inset 0 -1px 0 rgba(1,7,18,0.22) !important;
+  transform: translate3d(0, 0, 0) scaleY(1);
+  transform-origin: center;
+  opacity: 0.72 !important;
+  transition: transform 150ms cubic-bezier(.2,.8,.2,1), opacity 160ms ease;
+  pointer-events: none !important;
+}
+
+html[data-theme="glass"] :where(
+  .legend-top-bar,
+  .legend-dock,
+  .treasure-dock
+) > * {
+  position: relative;
+  z-index: 3;
+}
+
+/* Popovers and name tags must escape the hero bars. */
+html[data-theme="glass"] :where(.legend-top-bar, .legend-dock, .treasure-dock),
+html[data-theme="glass"] :where(.notif-hub, .tooltip-wrap, .actions) {
+  overflow: visible !important;
+}
+html[data-theme="glass"] .notif-hub {
+  position: relative;
+  z-index: 80;
+  isolation: auto;
+}
+html[data-theme="glass"] .notif-popover {
+  z-index: 14000 !important;
+}
+html[data-theme="glass"] .notif-hub.notif-open .notif-popover {
+  visibility: visible !important;
+  opacity: 1 !important;
+  pointer-events: auto !important;
+}
+html[data-theme="glass"] :where(.word-card, .game-card, .published-word-card) {
+  overflow: visible !important;
+}
+html[data-theme="glass"] :where(.word-card, .game-card, .published-word-card):hover,
+html[data-theme="glass"] :where(.word-card, .game-card, .published-word-card):focus-within {
+  position: relative;
+  z-index: 60;
+}
+html[data-theme="glass"] :where(
+  .tooltip-text,
+  .btn-icon-tip::after,
+  .star-btn[data-tip]::after,
+  .icon-circle[data-tip]::after,
+  .delayed-tip::after,
+  .treasure-dock-btn::after
+) {
+  z-index: 15000 !important;
+}
+
+
+/* Event-driven liquid response: the whole inner caustic shifts briefly.
+   No extra strip, no continuous animation, and no sampled edge halo. */
+html.glass-is-scrolling[data-theme="glass"] body.perf-ultra :where(.legend-top-bar, .legend-dock, .treasure-dock)::before,
+html.glass-is-scrolling[data-theme="glass"] body.perf-balanced :where(.legend-top-bar, .legend-dock, .treasure-dock)::before {
+  opacity: 0.94 !important;
+}
+
+html.glass-scroll-down[data-theme="glass"] body.perf-ultra :where(.legend-top-bar, .legend-dock, .treasure-dock)::before {
+  transform: translate3d(0, 3px, 0) scaleY(1.045);
+}
+html.glass-scroll-up[data-theme="glass"] body.perf-ultra :where(.legend-top-bar, .legend-dock, .treasure-dock)::before {
+  transform: translate3d(0, -3px, 0) scaleY(1.045);
+}
+html.glass-scroll-down[data-theme="glass"] body.perf-balanced :where(.legend-top-bar, .legend-dock, .treasure-dock)::before {
+  transform: translate3d(0, 2px, 0) scaleY(1.028);
+}
+html.glass-scroll-up[data-theme="glass"] body.perf-balanced :where(.legend-top-bar, .legend-dock, .treasure-dock)::before {
+  transform: translate3d(0, -2px, 0) scaleY(1.028);
+}
+
+/* Turbo has the same thick material, but zero backdrop compositing. */
+html[data-theme="glass"] body.perf-turbo :where(.legend-top-bar, .legend-dock, .treasure-dock),
+html[data-theme="glass"] body.low-end-device :where(.legend-top-bar, .legend-dock, .treasure-dock) {
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+/* Active dock item is a smaller liquid capsule, not a painted pill. */
+html[data-theme="glass"] :where(.legend-dock, .treasure-dock) .treasure-dock-btn.active {
+  background:
+    radial-gradient(90% 130% at 24% -25%, rgba(255,255,255,0.22), transparent 48%),
+    linear-gradient(180deg, rgba(255,255,255,0.13), rgba(255,255,255,0.018) 64%),
+    color-mix(in srgb, var(--star) 7%, var(--glass-v2-control)) !important;
+  border: 1px solid color-mix(in srgb, rgba(255,255,255,.32) 72%, var(--star)) !important;
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,0.28),
+    inset 0 -6px 11px rgba(1,7,18,0.15),
+    0 5px 12px rgba(2,8,23,0.14) !important;
+}
+
+/* Game header uses the same family, without fixed-position lens logic. */
+html[data-theme="glass"] .game-header-bar {
+  position: relative;
+  isolation: isolate;
+  overflow: hidden;
+  background:
+    radial-gradient(115% 120% at 10% -28%, rgba(121,216,255,0.16), transparent 48%),
+    linear-gradient(180deg, rgba(255,255,255,0.12), rgba(255,255,255,0.018) 48%, transparent 78%),
+    var(--glass-v2-panel) !important;
+  border-color: var(--glass-v2-border) !important;
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,0.22),
+    inset 0 -1px 0 rgba(2,8,23,0.18),
+    var(--glass-v2-shadow-soft) !important;
+  backdrop-filter: blur(var(--glass-v2-blur-shell)) saturate(var(--glass-v2-saturation)) !important;
+  -webkit-backdrop-filter: blur(var(--glass-v2-blur-shell)) saturate(var(--glass-v2-saturation)) !important;
+}
+
+html[data-theme="glass"] body.perf-turbo .game-header-bar,
+html[data-theme="glass"] body.low-end-device .game-header-bar {
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+/* 4) Low-count modal surfaces may use controlled blur. */
+html[data-theme="glass"] :where(
+  .profile-modal-sheet,
+  .modal-content,
+  .stats-box,
+  .daily-quests-sheet,
+  .notif-popover,
+  .app-dropdown-menu,
+  .sort-dropdown-menu
+) {
+  background:
+    radial-gradient(110% 90% at 10% -20%, rgba(121,216,255,0.11), transparent 50%),
+    linear-gradient(180deg, rgba(255,255,255,0.11), rgba(255,255,255,0.018) 42%, transparent 76%),
+    var(--glass-v2-panel-strong) !important;
+  border-color: var(--glass-v2-border-strong) !important;
+  box-shadow: var(--glass-v2-inner), var(--glass-v2-shadow) !important;
+  backdrop-filter: blur(var(--glass-v2-blur-modal)) saturate(var(--glass-v2-saturation)) !important;
+  -webkit-backdrop-filter: blur(var(--glass-v2-blur-modal)) saturate(var(--glass-v2-saturation)) !important;
+}
+
+/* 5) Thick reusable liquid surfaces. Repeated cards never get their own blur. */
+html[data-theme="glass"] :where(
+  .card-box,
+  #personalControls,
+  .word-card,
+  .game-card,
+  .stat-card,
+  .theme-option,
+  .profile-stat-chip,
+  .daily-quest-item,
+  .notif-item,
+  .xp-panel,
+  .quiz-card,
+  .treasure-card,
+  .treasure-stage,
+  .world-card,
+  .published-card,
+  .published-word-card,
+  .published-active-journey,
+  .published-journey-panel,
+  .published-gate-journey,
+  .published-world-achievement,
+  .game-search-bar,
+  .game-search-inner,
+  .game-gamer-ai-wrap,
+  .gamer-ai-result,
+  .selection-action-bar,
+  #suggestionsBox
+) {
+  background:
+    radial-gradient(105% 145% at 12% -42%, rgba(255,255,255,0.17), transparent 45%),
+    radial-gradient(85% 110% at 96% 120%, rgba(155,140,255,0.07), transparent 54%),
+    linear-gradient(180deg, rgba(255,255,255,0.095), rgba(255,255,255,0.018) 45%, rgba(1,7,18,0.035) 100%),
+    var(--glass-v2-card) !important;
+  border: 1px solid var(--glass-v2-border) !important;
+  border-top-color: rgba(255,255,255,0.31) !important;
+  border-inline-start-color: rgba(255,255,255,0.23) !important;
+  border-inline-end-color: rgba(121,216,255,0.14) !important;
+  border-bottom-color: rgba(1,8,22,0.32) !important;
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,0.22),
+    inset 0 7px 13px rgba(255,255,255,0.018),
+    inset 0 -8px 14px rgba(1,7,18,0.12),
+    var(--glass-v2-shadow-soft) !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+  will-change: auto !important;
+}
+
+/* Form shell is slightly lighter so fields do not sit in a black slab. */
+html[data-theme="glass"] :where(.card-box, #personalControls) {
+  background:
+    radial-gradient(105% 145% at 10% -45%, rgba(255,255,255,0.16), transparent 46%),
+    linear-gradient(180deg, rgba(255,255,255,0.075), rgba(255,255,255,0.012) 50%),
+    var(--glass-v2-card-soft) !important;
+}
+
+html[data-theme="glass"] .word-card {
+  border-inline-start: 3px solid color-mix(in srgb, var(--accent) 62%, rgba(255,255,255,.58)) !important;
+}
+
+/* Public/private worlds get a deeper slab and a glass icon lens. */
+html[data-theme="glass"] :where(.published-card, .world-card) {
+  background:
+    radial-gradient(110% 150% at 9% -48%, rgba(255,255,255,0.19), transparent 44%),
+    radial-gradient(80% 105% at 98% 112%, rgba(121,216,255,0.08), transparent 54%),
+    linear-gradient(180deg, rgba(255,255,255,0.105), rgba(255,255,255,0.016) 48%, rgba(1,7,18,0.055)),
+    var(--glass-v2-card) !important;
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,0.25),
+    inset 0 -10px 18px rgba(1,7,18,0.13),
+    0 10px 24px rgba(2,8,23,0.16) !important;
+}
+
+html[data-theme="glass"] :where(.published-card-visual, .world-card-icon) {
+  background:
+    radial-gradient(90% 120% at 25% -18%, rgba(255,255,255,0.23), transparent 48%),
+    linear-gradient(180deg, rgba(255,255,255,0.10), rgba(255,255,255,0.018)),
+    color-mix(in srgb, currentColor 7%, var(--glass-v2-control)) !important;
+  border: 1px solid rgba(255,255,255,0.22) !important;
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,0.24),
+    inset 0 -6px 10px rgba(1,7,18,0.12),
+    0 7px 16px rgba(2,8,23,0.14) !important;
+}
+
+html[data-theme="glass"] .world-card-add {
+  border: 1px dashed rgba(255,255,255,0.32) !important;
+  background:
+    radial-gradient(90% 130% at 50% -25%, rgba(255,255,255,0.14), transparent 48%),
+    var(--glass-v2-card-soft) !important;
+}
+
+html[data-theme="glass"] .world-add-plus {
+  background: transparent !important;
+  background-image: none !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  box-shadow: none !important;
+  color: color-mix(in srgb, var(--accent) 74%, white) !important;
+  text-shadow: 0 2px 10px rgba(121,216,255,0.22);
+}
+
+/* Journey gates and nested rows: state tint sits inside the same glass recipe. */
+html[data-theme="glass"] :where(
+  .published-gate-journey,
+  .published-active-journey,
+  .published-journey-panel,
+  .published-world-achievement,
+  .xp-rank-row,
+  .published-meta-chip,
+  .published-word-restore
+) {
+  background:
+    linear-gradient(180deg, rgba(255,255,255,0.075), rgba(255,255,255,0.010)),
+    var(--glass-v2-card-soft) !important;
+  border-color: var(--glass-v2-border) !important;
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,0.16),
+    inset 0 -4px 8px rgba(1,7,18,0.10) !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+html[data-theme="glass"] .published-gate-journey-learning {
+  background:
+    linear-gradient(180deg, rgba(255,255,255,0.075), rgba(255,255,255,0.010)),
+    color-mix(in srgb, var(--success) 7%, var(--glass-v2-card-soft)) !important;
+}
+
+html[data-theme="glass"] .published-gate-journey-ready {
+  background:
+    linear-gradient(180deg, rgba(255,255,255,0.09), rgba(255,255,255,0.012)),
+    color-mix(in srgb, var(--accent) 6%, var(--glass-v2-card-soft)) !important;
+}
+
+html[data-theme="glass"] .published-gate-journey-mastered {
+  background:
+    linear-gradient(180deg, rgba(255,255,255,0.09), rgba(255,255,255,0.012)),
+    color-mix(in srgb, var(--star) 8%, var(--glass-v2-card-soft)) !important;
+}
+
+html[data-theme="glass"] .published-gate-journey-locked {
+  background:
+    linear-gradient(180deg, rgba(255,255,255,0.055), rgba(255,255,255,0.006)),
+    color-mix(in srgb, var(--text-gray) 5%, var(--glass-v2-card-soft)) !important;
+}
+
+/* Current rank: thick neutral glass, no blue painted rectangle. */
+html[data-theme="glass"] .xp-rank-row.current {
+  opacity: 1;
+  background:
+    radial-gradient(95% 130% at 18% -30%, rgba(255,255,255,0.20), transparent 48%),
+    linear-gradient(180deg, rgba(255,255,255,0.11), rgba(255,255,255,0.014) 68%),
+    var(--glass-v2-card) !important;
+  border: 1px solid rgba(235,248,255,0.28) !important;
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,0.28),
+    inset 0 -7px 12px rgba(1,7,18,0.14),
+    0 0 0 1px rgba(255,255,255,0.075),
+    0 7px 16px rgba(2,8,23,0.14) !important;
+}
+
+html[data-theme="glass"] .published-gate-readiness-track {
+  background: rgba(255,255,255,0.085) !important;
+  border: 1px solid rgba(255,255,255,0.10);
+  box-shadow: inset 0 2px 4px rgba(1,7,18,0.18);
+}
+
+html[data-theme="glass"] .published-gate-readiness-fill {
+  background:
+    linear-gradient(90deg, rgba(255,255,255,0.34), rgba(121,216,255,0.74), rgba(155,140,255,0.52)) !important;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.36), 0 0 10px rgba(121,216,255,0.18);
+}
+
+/* Existing semantic pseudo-elements are preserved; old global reflections stay retired. */
+html[data-theme="glass"] :where(.card-box, .game-card, .stat-card)::before,
+html[data-theme="glass"] :where(.card-box, .game-card, .stat-card)::after {
+  content: none !important;
+  display: none !important;
+}
+
+/* 6) Unified Liquid Glass buttons. No solid cyan primary button. */
+html[data-theme="glass"] button:not(.add-form-toggle):not(.treasure-dock-btn):not(.icon-circle):not(.star-btn):not(.notif-bell-btn):not(.voice-search-btn):not(.xp-guide-toggle):not(.treasure-chest-main) {
+  --glass-button-tint: rgba(121,216,255,0.045);
+  background:
+    radial-gradient(95% 135% at 20% -34%, rgba(255,255,255,0.24), transparent 45%),
+    linear-gradient(180deg, rgba(255,255,255,0.125), rgba(255,255,255,0.018) 62%, rgba(1,7,18,0.045)),
+    color-mix(in srgb, var(--glass-button-tint) 72%, var(--glass-v2-control)) !important;
+  border: 1px solid var(--glass-v2-border) !important;
+  border-top-color: rgba(255,255,255,0.36) !important;
+  border-inline-start-color: rgba(255,255,255,0.24) !important;
+  border-bottom-color: rgba(1,8,22,0.30) !important;
+  color: var(--text-white) !important;
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,0.28),
+    inset 0 -7px 12px rgba(1,7,18,0.13),
+    0 6px 14px rgba(2,8,23,0.13) !important;
+  text-shadow: 0 1px 1px rgba(1,7,18,0.24) !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+  transition: transform .16s ease, border-color .18s ease, box-shadow .18s ease, filter .18s ease, background .18s ease !important;
+}
+
+html[data-theme="glass"] :where(
+  .btn-main,
+  .dictionary-search-btn,
+  .search-btn,
+  .btn-confirm,
+  .admin-btn-primary,
+  .quiz-start-btn,
+  .published-action-btn
+) {
+  --glass-button-tint: rgba(121,216,255,0.105);
+}
+
+html[data-theme="glass"] :where(
+  .btn-add-mine,
+  .sug-add-personal-btn,
+  .admin-btn-success,
+  .btn-remember
+) {
+  --glass-button-tint: rgba(75,215,170,0.105);
+}
+
+html[data-theme="glass"] :where(
+  .btn-delete,
+  .del-btn,
+  .admin-btn-danger,
+  .btn-forget,
+  .quiz-exit-btn
+) {
+  --glass-button-tint: rgba(255,112,128,0.105);
+}
+
+html[data-theme="glass"] :where(.star-btn, .admin-btn-warning, .quest-pill-btn) {
+  --glass-button-tint: rgba(255,209,102,0.10);
+}
+
+/* Semantic icon buttons: neutral glass shell, color belongs to the glyph only. */
+html[data-theme="glass"] :where(.icon-circle, .notif-bell-btn) {
+  background:
+    radial-gradient(95% 125% at 24% -28%, rgba(255,255,255,0.18), transparent 48%),
+    linear-gradient(180deg, rgba(255,255,255,0.075), rgba(255,255,255,0.008)),
+    rgba(255,255,255,0.035) !important;
+  border: 1px solid rgba(230,246,255,0.18) !important;
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,0.20),
+    inset 0 -4px 8px rgba(1,7,18,0.10) !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+html[data-theme="glass"] .sound-btn { color: #8fe6ff !important; }
+html[data-theme="glass"] .edit-btn  { color: #61e2b2 !important; }
+html[data-theme="glass"] .del-btn   { color: #ff8394 !important; }
+html[data-theme="glass"] :where(.sound-btn, .edit-btn, .del-btn):hover {
+  background: rgba(255,255,255,0.075) !important;
+  filter: brightness(1.12);
+}
+
+html[data-theme="glass"] .star-btn {
+  background: transparent !important;
+  background-image: none !important;
+  border: 0 !important;
+  box-shadow: none !important;
+  color: var(--text-gray) !important;
+  text-shadow: 0 1px 3px rgba(1,7,18,0.34) !important;
+}
+html[data-theme="glass"] .star-btn:hover,
+html[data-theme="glass"] .star-btn.active,
+html[data-theme="glass"] .star-btn[aria-pressed="true"] {
+  color: var(--star) !important;
+  filter: drop-shadow(0 0 6px color-mix(in srgb, var(--star) 42%, transparent));
+}
+
+html[data-theme="glass"] .notif-bell-btn {
+  color: var(--text-gray) !important;
+}
+html[data-theme="glass"] .notif-hub.notif-open .notif-bell-btn,
+html[data-theme="glass"] .notif-bell-btn:hover {
+  color: var(--star) !important;
+  background: rgba(255,255,255,0.075) !important;
+}
+html[data-theme="glass"] .notif-hub.notif-open .notif-bell-ring {
+  border-color: color-mix(in srgb, var(--star) 52%, transparent) !important;
+  box-shadow: 0 0 12px color-mix(in srgb, var(--star) 18%, transparent);
+}
+
+@media (hover: hover) and (pointer: fine) {
+  html[data-theme="glass"] body.perf-ultra button:not(.add-form-toggle):not(.treasure-dock-btn):not(.icon-circle):not(.star-btn):not(.notif-bell-btn):not(.voice-search-btn):not(.xp-guide-toggle):not(.treasure-chest-main):hover,
+  html[data-theme="glass"] body.perf-balanced button:not(.add-form-toggle):not(.treasure-dock-btn):not(.icon-circle):not(.star-btn):not(.notif-bell-btn):not(.voice-search-btn):not(.xp-guide-toggle):not(.treasure-chest-main):hover {
+    transform: translateY(-1px);
+    border-color: rgba(235,248,255,0.36) !important;
+    box-shadow:
+      inset 0 1px 0 rgba(255,255,255,0.34),
+      inset 0 -8px 13px rgba(1,7,18,0.12),
+      0 9px 19px rgba(2,8,23,0.16) !important;
+    filter: brightness(1.045);
+  }
+}
+
+html[data-theme="glass"] button:not(.add-form-toggle):not(.treasure-dock-btn):not(.icon-circle):not(.star-btn):not(.notif-bell-btn):not(.voice-search-btn):not(.xp-guide-toggle):not(.treasure-chest-main):active {
+  transform: translateY(1px) scale(0.985) !important;
+  box-shadow:
+    inset 0 3px 7px rgba(1,7,18,0.16),
+    inset 0 -1px 0 rgba(255,255,255,0.13),
+    0 2px 7px rgba(2,8,23,0.11) !important;
+}
+
+/* Dock buttons remain structurally transparent; active state is handled above. */
+html[data-theme="glass"] .treasure-dock-btn:not(.active) {
+  background: transparent !important;
+  border-color: transparent !important;
+  box-shadow: none !important;
+}
+
+/* 7) Inputs and wrappers use one glass focus halo, never the old blue double ring. */
+html[data-theme="glass"] :where(
+  input,
+  select,
+  textarea,
+  .app-dropdown-trigger,
+  .app-dropdown-trigger-icon,
+  .btn-icon-tip,
+  .selection-mode-entry,
+  .btn-text-tool,
+  .btn-backup,
+  .help-btn
+) {
+  background:
+    radial-gradient(92% 130% at 18% -35%, rgba(255,255,255,0.15), transparent 46%),
+    linear-gradient(180deg, rgba(255,255,255,0.08), rgba(255,255,255,0.009)),
+    var(--glass-v2-control) !important;
+  border-color: var(--glass-v2-border) !important;
+  color: var(--text-white) !important;
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,0.16),
+    inset 0 -5px 9px rgba(1,7,18,0.11) !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+  text-shadow: none !important;
+}
+
+html[data-theme="glass"] :where(input, select, textarea, .app-dropdown-trigger):focus,
+html[data-theme="glass"] :where(input, select, textarea, .app-dropdown-trigger):focus-visible {
+  outline: none !important;
+  border-color: rgba(235,248,255,0.34) !important;
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,0.23),
+    inset 0 -5px 9px rgba(1,7,18,0.10),
+    0 0 0 2px rgba(255,255,255,0.13),
+    0 0 0 4px rgba(255,255,255,0.055),
+    0 8px 18px rgba(2,8,23,0.12) !important;
+}
+
+html[data-theme="glass"] :where(
+  button,
+  .published-card,
+  .world-card,
+  .published-word-card,
+  .xp-rank-row,
+  .theme-option
+):focus-visible {
+  outline: none !important;
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,0.25),
+    0 0 0 2px rgba(255,255,255,0.13),
+    0 0 0 4px rgba(255,255,255,0.055),
+    0 8px 18px rgba(2,8,23,0.12) !important;
+}
+
+html[data-theme="glass"] select option {
+  background: #12223d !important;
+  color: var(--text-white) !important;
+}
+
+html[data-theme="glass"] ::placeholder {
+  color: rgba(229,239,255,0.52) !important;
+}
+
+/* Dictionary filter search is one continuous glass control. */
+html[data-theme="glass"] .dictionary-filter-search {
+  background:
+    radial-gradient(100% 140% at 16% -38%, rgba(255,255,255,0.15), transparent 46%),
+    linear-gradient(180deg, rgba(255,255,255,0.075), rgba(255,255,255,0.009)),
+    var(--glass-v2-control) !important;
+  border: 1px solid var(--glass-v2-border) !important;
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,0.17),
+    inset 0 -5px 9px rgba(1,7,18,0.11) !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+html[data-theme="glass"] .dictionary-filter-search:focus-within {
+  border-color: rgba(235,248,255,0.34) !important;
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,0.22),
+    inset 0 -5px 9px rgba(1,7,18,0.10),
+    0 0 0 2px rgba(255,255,255,0.12),
+    0 0 0 4px rgba(255,255,255,0.052) !important;
+}
+
+html[data-theme="glass"] .dictionary-filter-search > input {
+  background: transparent !important;
+  background-image: none !important;
+  border: 0 !important;
+  box-shadow: none !important;
+  outline: 0 !important;
+}
+
+html[data-theme="glass"] .dictionary-filter-search .voice-search-btn {
+  background: transparent !important;
+  background-image: none !important;
+  border: 0 !important;
+  border-inline-start: 1px solid var(--glass-v2-border) !important;
+  color: var(--text-gray) !important;
+  box-shadow: none !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+html[data-theme="glass"] .dictionary-filter-search .voice-search-btn:hover,
+html[data-theme="glass"] .dictionary-filter-search .voice-search-btn.is-listening {
+  background: rgba(255,255,255,0.07) !important;
+  color: var(--text-white) !important;
+}
+
+/* Difficult-words/game search: one shell only; the layout wrapper stays invisible. */
+html[data-theme="glass"] .game-search-bar {
+  background: transparent !important;
+  background-image: none !important;
+  border: 0 !important;
+  box-shadow: none !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+html[data-theme="glass"] .game-search-inner {
+  background:
+    radial-gradient(100% 140% at 16% -38%, rgba(255,255,255,0.15), transparent 46%),
+    linear-gradient(180deg, rgba(255,255,255,0.075), rgba(255,255,255,0.009)),
+    var(--glass-v2-control) !important;
+  border: 1px solid var(--glass-v2-border) !important;
+  border-radius: 11px;
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,0.17),
+    inset 0 -5px 9px rgba(1,7,18,0.11) !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+html[data-theme="glass"] .game-search-inner:focus-within {
+  border-color: rgba(235,248,255,0.34) !important;
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,0.22),
+    inset 0 -5px 9px rgba(1,7,18,0.10),
+    0 0 0 2px rgba(255,255,255,0.12),
+    0 0 0 4px rgba(255,255,255,0.052) !important;
+}
+html[data-theme="glass"] .game-search-inner input {
+  background: transparent !important;
+  background-image: none !important;
+  border: 0 !important;
+  box-shadow: none !important;
+  outline: 0 !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+/* 8) Modal backdrops: tiny blur only while open. */
+html[data-theme="glass"] :where(
+  .profile-modal-backdrop,
+  .stats-overlay,
+  .custom-modal,
+  .daily-quests-backdrop,
+  .admin-modal-backdrop
+) {
+  background: rgba(2,7,18,0.56) !important;
+  backdrop-filter: blur(2px) !important;
+  -webkit-backdrop-filter: blur(2px) !important;
+}
+
+html[data-theme="glass"] body.perf-stable :where(
+  .profile-modal-backdrop,
+  .stats-overlay,
+  .custom-modal,
+  .daily-quests-backdrop,
+  .admin-modal-backdrop
+),
+html[data-theme="glass"] body.perf-turbo :where(
+  .profile-modal-backdrop,
+  .stats-overlay,
+  .custom-modal,
+  .daily-quests-backdrop,
+  .admin-modal-backdrop
+),
+html[data-theme="glass"] body.low-end-device :where(
+  .profile-modal-backdrop,
+  .stats-overlay,
+  .custom-modal,
+  .daily-quests-backdrop,
+  .admin-modal-backdrop
+) {
+  background: rgba(2,7,18,0.68) !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+html[data-theme="glass"] .overlay {
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+html[data-theme="glass"] .smart-loading-backdrop {
+  background: rgba(5,14,29,0.80) !important;
+  backdrop-filter: blur(var(--glass-v2-blur-shell)) !important;
+  -webkit-backdrop-filter: blur(var(--glass-v2-blur-shell)) !important;
+}
+
+html[data-theme="glass"] body.perf-turbo .smart-loading-backdrop,
+html[data-theme="glass"] body.low-end-device .smart-loading-backdrop {
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+/* 9) Text, tooltips and scrollbar. */
+html[data-theme="glass"] :where(h1, h2, h3, .word-text, .game-header-title, .quiz-word) {
+  color: var(--text-white) !important;
+  text-shadow: 0 1px 2px rgba(0,0,0,0.24) !important;
+}
+
+html[data-theme="glass"] :where(
+  .meaning-text,
+  .example-box,
+  .hint-text,
+  .settings-label,
+  .stat-lbl,
+  .heatmap-title,
+  .heatmap-legend,
+  .world-card-desc,
+  .published-card-description
+) {
+  color: var(--text-gray) !important;
+  text-shadow: none !important;
+}
+
+html[data-theme="glass"] .tooltip-text {
+  background: rgba(7,16,31,0.96) !important;
+  color: #fff !important;
+  border: 1px solid rgba(255,255,255,0.16) !important;
+  box-shadow: 0 8px 22px rgba(2,8,23,0.24) !important;
+  text-shadow: none !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+html[data-theme="glass"]::-webkit-scrollbar,
+html[data-theme="glass"] body::-webkit-scrollbar {
+  width: 9px;
+}
+
+html[data-theme="glass"]::-webkit-scrollbar-thumb,
+html[data-theme="glass"] body::-webkit-scrollbar-thumb {
+  border: 2px solid transparent;
+  border-radius: 999px;
+  background:
+    linear-gradient(180deg, rgba(255,255,255,0.28), rgba(121,216,255,0.15)) padding-box;
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,0.24),
+    inset 0 -2px 3px rgba(1,7,18,0.15);
+}
+
+/* 10) Motion: elegant on capable modes, static on performance modes. */
+@media (hover: hover) and (pointer: fine) {
+  html[data-theme="glass"] body.perf-ultra :where(
+    .word-card,
+    .game-card,
+    .stat-card,
+    .theme-option,
+    .world-card,
+    .published-card,
+    .published-word-card
+  ):hover,
+  html[data-theme="glass"] body.perf-balanced :where(
+    .word-card,
+    .game-card,
+    .stat-card,
+    .theme-option,
+    .world-card,
+    .published-card,
+    .published-word-card
+  ):hover {
+    transform: translateY(-2px) !important;
+    border-color: rgba(235,248,255,0.31) !important;
+    box-shadow:
+      inset 0 1px 0 rgba(255,255,255,0.28),
+      inset 0 -9px 16px rgba(1,7,18,0.12),
+      0 13px 27px rgba(2,8,23,0.18) !important;
+  }
+}
+
+html[data-theme="glass"] body.perf-stable :where(
+  .word-card,
+  .game-card,
+  .stat-card,
+  .theme-option,
+  .world-card,
+  .published-card,
+  .published-word-card
+),
+html[data-theme="glass"] body.perf-turbo :where(
+  .word-card,
+  .game-card,
+  .stat-card,
+  .theme-option,
+  .world-card,
+  .published-card,
+  .published-word-card
+),
+html[data-theme="glass"] body.low-end-device :where(
+  .word-card,
+  .game-card,
+  .stat-card,
+  .theme-option,
+  .world-card,
+  .published-card,
+  .published-word-card
+) {
+  transform: none !important;
+  transition-property: background-color, border-color, opacity !important;
+}
+
+html[data-theme="glass"] body.perf-stable :where(
+  .word-card,
+  .game-card,
+  .stat-card,
+  .world-card,
+  .published-card,
+  .published-word-card
+) {
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,0.18),
+    inset 0 -6px 10px rgba(1,7,18,0.10),
+    var(--glass-v2-shadow-soft) !important;
+}
+
+html[data-theme="glass"] body.perf-turbo :where(
+  .word-card,
+  .game-card,
+  .stat-card,
+  .world-card,
+  .published-card,
+  .published-word-card
+),
+html[data-theme="glass"] body.low-end-device :where(
+  .word-card,
+  .game-card,
+  .stat-card,
+  .world-card,
+  .published-card,
+  .published-word-card
+) {
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,0.16),
+    inset 0 -5px 8px rgba(1,7,18,0.09) !important;
+}
+
+/* Touch devices cap compositor cost but retain the material identity. */
+@media (max-width: 768px), (pointer: coarse) {
+  html[data-theme="glass"] body.perf-ultra,
+  html[data-theme="glass"] body.perf-balanced {
+    --glass-v2-blur-shell: 4px;
+    --glass-v2-blur-modal: 6px;
+    --glass-v2-saturation: 110%;
+  }
+
+  html[data-theme="glass"] :where(
+    .word-card,
+    .game-card,
+    .stat-card,
+    .theme-option,
+    .world-card,
+    .published-card,
+    .published-word-card
+  ) {
+    transform: none !important;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html[data-theme="glass"] :where(.legend-top-bar, .legend-dock, .treasure-dock)::before {
+    transition: none !important;
+  }
+}
+
+@media (prefers-reduced-transparency: reduce) {
+  html[data-theme="glass"] {
+    --glass-v2-blur-shell: 0px;
+    --glass-v2-blur-modal: 0px;
+    --glass-v2-panel: rgba(16,38,70,0.86);
+    --glass-v2-panel-strong: rgba(11,28,54,0.93);
+    --glass-v2-card: rgba(20,43,78,0.82);
+    --glass-v2-card-soft: rgba(20,43,78,0.76);
+  }
+}
+
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  html[data-theme="glass"] {
+    --glass-v2-panel: rgba(16,38,70,0.86);
+    --glass-v2-panel-strong: rgba(11,28,54,0.93);
+    --glass-v2-card: rgba(20,43,78,0.82);
+    --glass-v2-card-soft: rgba(20,43,78,0.76);
+  }
+}
+
+/* ═════════════════════════════════════════════════════════════════
+   LOOTLINGUA GLASS V2.7 — TRUE CHROMIUM BACKDROP REFRACTION
+   The browser samples the real DOM behind the two fixed docks, then an
+   injected SVG displacement filter bends that sample. No scroll loop,
+   no pointer tracking, and no painted rainbow/reflection pretending to
+   be refraction.
+   ═════════════════════════════════════════════════════════════════ */
+
+/* 1) Optical strength by performance mode. */
+html[data-theme="glass"] body.perf-ultra {
+  --glass-refraction-fallback-blur: 0.55px;
+  --glass-refraction-saturation: 132%;
+  --glass-refraction-contrast: 106%;
+  --glass-refraction-brightness: 102%;
+  --glass-refraction-surface-alpha: 0.72;
+}
+
+html[data-theme="glass"] body.perf-balanced {
+  --glass-refraction-fallback-blur: 0.35px;
+  --glass-refraction-saturation: 124%;
+  --glass-refraction-contrast: 104%;
+  --glass-refraction-brightness: 101.5%;
+  --glass-refraction-surface-alpha: 0.79;
+}
+
+html[data-theme="glass"] body.perf-stable {
+  --glass-refraction-fallback-blur: 0.16px;
+  --glass-refraction-saturation: 114%;
+  --glass-refraction-contrast: 102%;
+  --glass-refraction-brightness: 101%;
+  --glass-refraction-surface-alpha: 0.87;
+}
+
+html[data-theme="glass"] body.perf-turbo,
+html[data-theme="glass"] body.low-end-device {
+  --glass-refraction-fallback-blur: 0px;
+  --glass-refraction-saturation: 100%;
+  --glass-refraction-contrast: 100%;
+  --glass-refraction-brightness: 100%;
+  --glass-refraction-surface-alpha: 1;
+}
+
+/* 2) The two hero slabs stay transparent enough for the displaced sample. */
+html[data-theme="glass"] :where(.legend-top-bar, .legend-dock, .treasure-dock) {
+  isolation: isolate !important;
+  overflow: visible !important;
+  background:
+    linear-gradient(180deg,
+      rgba(255,255,255,0.105) 0%,
+      rgba(255,255,255,0.024) 38%,
+      rgba(255,255,255,0.006) 68%,
+      rgba(1,7,18,0.038) 100%),
+    color-mix(in srgb, var(--glass-v2-panel) calc(var(--glass-refraction-surface-alpha) * 100%), transparent) !important;
+  border: 1px solid var(--glass-v2-border) !important;
+  border-top-color: rgba(255,255,255,0.42) !important;
+  border-inline-start-color: rgba(255,255,255,0.25) !important;
+  border-inline-end-color: rgba(196,231,255,0.18) !important;
+  border-bottom-color: rgba(1,8,22,0.42) !important;
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,0.34),
+    inset 0 6px 14px rgba(255,255,255,0.018),
+    inset 0 -11px 19px rgba(1,7,18,0.15),
+    0 1px 0 rgba(255,255,255,0.06),
+    0 12px 27px rgba(2,8,23,0.17) !important;
+  background-clip: padding-box !important;
+  will-change: auto !important;
+}
+
+/* A neutral material rim only. It does not move and contains no invented colour. */
+html[data-theme="glass"] :where(.legend-top-bar, .legend-dock, .treasure-dock)::before {
+  content: "" !important;
+  position: absolute !important;
+  inset: 1px !important;
+  z-index: 0 !important;
+  display: block !important;
+  border-radius: inherit !important;
+  pointer-events: none !important;
+  opacity: 1 !important;
+  transform: none !important;
+  transition: none !important;
+  background: transparent !important;
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,0.17),
+    inset 0 -1px 0 rgba(1,7,18,0.17) !important;
+}
+
+/* Completely retire the old fake edge strip/line. */
+html[data-theme="glass"] :where(.legend-top-bar, .legend-dock, .treasure-dock)::after {
+  content: none !important;
+  display: none !important;
+}
+
+/* 3) Safe fallback used before JS runs and on non-Chromium engines. */
+html[data-theme="glass"] :where(.legend-top-bar, .legend-dock, .treasure-dock),
+html.glass-refraction-fallback[data-theme="glass"] :where(.legend-top-bar, .legend-dock, .treasure-dock) {
+  backdrop-filter:
+    blur(var(--glass-refraction-fallback-blur))
+    saturate(var(--glass-refraction-saturation))
+    contrast(var(--glass-refraction-contrast))
+    brightness(var(--glass-refraction-brightness)) !important;
+  -webkit-backdrop-filter:
+    blur(var(--glass-refraction-fallback-blur))
+    saturate(var(--glass-refraction-saturation))
+    contrast(var(--glass-refraction-contrast))
+    brightness(var(--glass-refraction-brightness)) !important;
+}
+
+/* 4) Actual sampled-backdrop displacement. The URL filters are injected once by JS. */
+html.glass-true-refraction[data-theme="glass"] body.perf-ultra :where(
+  .legend-top-bar,
+  .legend-dock,
+  .treasure-dock
+) {
+  backdrop-filter:
+    url("#lootlingua-refraction-ultra")
+    saturate(var(--glass-refraction-saturation))
+    contrast(var(--glass-refraction-contrast))
+    brightness(var(--glass-refraction-brightness)) !important;
+  -webkit-backdrop-filter:
+    url("#lootlingua-refraction-ultra")
+    saturate(var(--glass-refraction-saturation))
+    contrast(var(--glass-refraction-contrast))
+    brightness(var(--glass-refraction-brightness)) !important;
+}
+
+html.glass-true-refraction[data-theme="glass"] body.perf-balanced :where(
+  .legend-top-bar,
+  .legend-dock,
+  .treasure-dock
+) {
+  backdrop-filter:
+    url("#lootlingua-refraction-balanced")
+    saturate(var(--glass-refraction-saturation))
+    contrast(var(--glass-refraction-contrast))
+    brightness(var(--glass-refraction-brightness)) !important;
+  -webkit-backdrop-filter:
+    url("#lootlingua-refraction-balanced")
+    saturate(var(--glass-refraction-saturation))
+    contrast(var(--glass-refraction-contrast))
+    brightness(var(--glass-refraction-brightness)) !important;
+}
+
+/* Stable uses one displacement pass rather than three colour-separated passes. */
+html.glass-true-refraction[data-theme="glass"] body.perf-stable :where(
+  .legend-top-bar,
+  .legend-dock,
+  .treasure-dock
+) {
+  backdrop-filter:
+    url("#lootlingua-refraction-stable")
+    saturate(var(--glass-refraction-saturation))
+    contrast(var(--glass-refraction-contrast))
+    brightness(var(--glass-refraction-brightness)) !important;
+  -webkit-backdrop-filter:
+    url("#lootlingua-refraction-stable")
+    saturate(var(--glass-refraction-saturation))
+    contrast(var(--glass-refraction-contrast))
+    brightness(var(--glass-refraction-brightness)) !important;
+}
+
+html[data-theme="glass"] body.perf-turbo :where(.legend-top-bar, .legend-dock, .treasure-dock),
+html[data-theme="glass"] body.low-end-device :where(.legend-top-bar, .legend-dock, .treasure-dock) {
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+/* Mobile caps cost: Ultra -> Balanced, Balanced -> Stable. */
+@media (max-width: 768px), (pointer: coarse) {
+  html.glass-true-refraction[data-theme="glass"] body.perf-ultra :where(
+    .legend-top-bar,
+    .legend-dock,
+    .treasure-dock
+  ) {
+    backdrop-filter:
+      url("#lootlingua-refraction-balanced")
+      saturate(122%) contrast(103%) brightness(101.5%) !important;
+    -webkit-backdrop-filter:
+      url("#lootlingua-refraction-balanced")
+      saturate(122%) contrast(103%) brightness(101.5%) !important;
+  }
+
+  html.glass-true-refraction[data-theme="glass"] body.perf-balanced :where(
+    .legend-top-bar,
+    .legend-dock,
+    .treasure-dock
+  ) {
+    backdrop-filter:
+      url("#lootlingua-refraction-stable")
+      saturate(114%) contrast(102%) brightness(101%) !important;
+    -webkit-backdrop-filter:
+      url("#lootlingua-refraction-stable")
+      saturate(114%) contrast(102%) brightness(101%) !important;
+  }
+}
+
+/* 5) Keep the final UI fixes from V2.6. */
+html[data-theme="glass"] .treasure-stage {
+  min-height: 330px;
+  overflow: visible !important;
+  border-radius: 26px !important;
+  border: 1px solid var(--glass-v2-border) !important;
+  border-top-color: rgba(255,255,255,0.30) !important;
+  border-inline-start-color: rgba(255,255,255,0.21) !important;
+  border-bottom-color: rgba(1,8,22,0.34) !important;
+  background:
+    radial-gradient(ellipse 44% 48% at 50% 38%, rgba(250,204,21,0.115), transparent 72%),
+    linear-gradient(180deg, rgba(255,255,255,0.090), rgba(255,255,255,0.018) 46%, rgba(1,7,18,0.040)),
+    var(--glass-v2-card) !important;
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,0.20),
+    inset 0 -1px 0 rgba(1,7,18,0.16),
+    0 10px 25px rgba(2,8,23,0.13) !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+html[data-theme="glass"] button.treasure-chest-main,
+html[data-theme="glass"] button.treasure-chest-main:hover,
+html[data-theme="glass"] button.treasure-chest-main:focus-visible,
+html[data-theme="glass"] button.treasure-chest-main:active {
+  padding: 0 !important;
+  background: transparent !important;
+  background-image: none !important;
+  border: 0 !important;
+  outline: 0 !important;
+  border-radius: 0 !important;
+  box-shadow: none !important;
+  transform: none !important;
+}
+
+html[data-theme="glass"] button.xp-guide-toggle,
+html[data-theme="glass"] button.xp-guide-toggle:hover,
+html[data-theme="glass"] button.xp-guide-toggle:focus-visible,
+html[data-theme="glass"] button.xp-guide-toggle:active {
+  width: 100% !important;
+  min-height: 30px !important;
+  padding: 0 !important;
+  background: transparent !important;
+  background-image: none !important;
+  border: 0 !important;
+  outline: 0 !important;
+  border-radius: 0 !important;
+  box-shadow: none !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+  transform: none !important;
+  filter: none !important;
+}
+
+html[data-theme="glass"] button.xp-guide-toggle:hover,
+html[data-theme="glass"] button.xp-guide-toggle:focus-visible {
+  color: var(--text-white) !important;
+}
+
+html[data-theme="glass"] button.xp-guide-toggle:focus-visible span {
+  text-decoration: underline;
+  text-decoration-color: rgba(235,248,255,0.48);
+  text-underline-offset: 4px;
+}
+
+html[data-theme="glass"] button.hero-avatar-btn {
+  background: transparent !important;
+  background-image: none !important;
+  border: 1px solid transparent !important;
+  box-shadow: none !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+html[data-theme="glass"] .hero-avatar-circle {
+  background: transparent !important;
+  border-color: transparent !important;
+  box-shadow: none !important;
+  color: var(--text-white) !important;
+  transition: background 160ms ease, border-color 160ms ease, box-shadow 160ms ease;
+}
+
+html[data-theme="glass"] button.hero-avatar-btn:hover,
+html[data-theme="glass"] button.hero-avatar-btn:focus-visible,
+html[data-theme="glass"] body.profile-modal-open button.hero-avatar-btn {
+  background:
+    linear-gradient(180deg, rgba(255,255,255,0.105), rgba(255,255,255,0.018)),
+    var(--glass-v2-control) !important;
+  border-color: var(--glass-v2-border) !important;
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,0.22),
+    inset 0 -6px 11px rgba(1,7,18,0.12),
+    0 5px 13px rgba(2,8,23,0.12) !important;
+}
+
+html[data-theme="glass"] button.hero-avatar-btn:hover .hero-avatar-circle,
+html[data-theme="glass"] button.hero-avatar-btn:focus-visible .hero-avatar-circle,
+html[data-theme="glass"] body.profile-modal-open button.hero-avatar-btn .hero-avatar-circle {
+  background:
+    linear-gradient(180deg, rgba(255,255,255,0.16), rgba(255,255,255,0.025)),
+    color-mix(in srgb, var(--accent) 12%, var(--glass-v2-control)) !important;
+  border-color: rgba(235,248,255,0.30) !important;
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,0.28),
+    inset 0 -5px 10px rgba(1,7,18,0.13),
+    0 5px 13px rgba(2,8,23,0.13) !important;
+}
+
+
+/* ═════════════════════════════════════════════════════════════════
+   LOOTLINGUA GLASS V2.9 — FROSTED REFRACTION FINAL
+   Real backdrop-derived color bleed on the two docks only.
+   No scroll loop, no pointer tracking, no SVG displacement.
+   ═════════════════════════════════════════════════════════════════ */
+
+/* 1) Performance ladder.
+   The centre stays frosted; the edge optics are deliberately much sharper
+   so the colours/details behind the dock can bend through the rim. */
+html[data-theme="glass"] body.perf-ultra {
+  --glass-v29-dock-fill: rgba(9, 24, 45, 0.27);
+  --glass-v29-dock-blur: 8px;
+  --glass-v29-dock-saturation: 138%;
+  --glass-v29-dock-contrast: 104%;
+  --glass-v29-dock-brightness: 102%;
+  --glass-v29-edge-blur: 0.7px;
+  --glass-v29-edge-saturation: 172%;
+  --glass-v29-edge-contrast: 112%;
+  --glass-v29-edge-brightness: 104%;
+  --glass-v29-edge-opacity: 0.88;
+  --glass-v29-edge-scale-y: 1.07;
+  --glass-v29-modal-fill: rgba(8, 23, 44, 0.66);
+  --glass-v29-modal-blur: 9px;
+}
+
+html[data-theme="glass"] body.perf-balanced {
+  --glass-v29-dock-fill: rgba(9, 24, 45, 0.36);
+  --glass-v29-dock-blur: 6px;
+  --glass-v29-dock-saturation: 128%;
+  --glass-v29-dock-contrast: 103%;
+  --glass-v29-dock-brightness: 101.5%;
+  --glass-v29-edge-blur: 0.45px;
+  --glass-v29-edge-saturation: 154%;
+  --glass-v29-edge-contrast: 108%;
+  --glass-v29-edge-brightness: 103%;
+  --glass-v29-edge-opacity: 0.72;
+  --glass-v29-edge-scale-y: 1.05;
+  --glass-v29-modal-fill: rgba(8, 23, 44, 0.75);
+  --glass-v29-modal-blur: 6px;
+}
+
+html[data-theme="glass"] body.perf-stable {
+  --glass-v29-dock-fill: rgba(10, 28, 51, 0.60);
+  --glass-v29-dock-blur: 3px;
+  --glass-v29-dock-saturation: 112%;
+  --glass-v29-dock-contrast: 101.5%;
+  --glass-v29-dock-brightness: 101%;
+  --glass-v29-edge-blur: 0px;
+  --glass-v29-edge-saturation: 118%;
+  --glass-v29-edge-contrast: 103%;
+  --glass-v29-edge-brightness: 101%;
+  --glass-v29-edge-opacity: 0.34;
+  --glass-v29-edge-scale-y: 1.02;
+  --glass-v29-modal-fill: rgba(8, 23, 44, 0.88);
+  --glass-v29-modal-blur: 2px;
+}
+
+html[data-theme="glass"] body.perf-turbo,
+html[data-theme="glass"] body.low-end-device {
+  --glass-v29-dock-fill: rgba(10, 28, 51, 0.90);
+  --glass-v29-dock-blur: 0px;
+  --glass-v29-dock-saturation: 100%;
+  --glass-v29-dock-contrast: 100%;
+  --glass-v29-dock-brightness: 100%;
+  --glass-v29-edge-blur: 0px;
+  --glass-v29-edge-saturation: 100%;
+  --glass-v29-edge-contrast: 100%;
+  --glass-v29-edge-brightness: 100%;
+  --glass-v29-edge-opacity: 0;
+  --glass-v29-edge-scale-y: 1;
+  --glass-v29-modal-fill: rgba(6, 18, 36, 0.97);
+  --glass-v29-modal-blur: 0px;
+}
+
+/* 2) The two hero docks.
+   The colour comes from what is physically behind them; no cyan/purple paint.
+   A very small neutral white surface reflection remains because real glass has one. */
+html[data-theme="glass"] :where(.legend-top-bar, .legend-dock, .treasure-dock) {
+  isolation: isolate !important;
+  overflow: visible !important;
+  background:
+    linear-gradient(
+      180deg,
+      rgba(255,255,255,0.105) 0%,
+      rgba(255,255,255,0.032) 27%,
+      rgba(255,255,255,0.010) 58%,
+      rgba(0,0,0,0.030) 100%
+    ),
+    var(--glass-v29-dock-fill) !important;
+  border: 1px solid rgba(232, 246, 255, 0.24) !important;
+  border-top-color: rgba(255,255,255,0.52) !important;
+  border-inline-start-color: rgba(255,255,255,0.29) !important;
+  border-inline-end-color: rgba(255,255,255,0.20) !important;
+  border-bottom-color: rgba(0, 7, 20, 0.45) !important;
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,0.36),
+    inset 0 6px 14px rgba(255,255,255,0.020),
+    inset 0 -10px 18px rgba(0,7,20,0.15),
+    0 1px 0 rgba(255,255,255,0.055),
+    0 10px 26px rgba(2,8,23,0.18) !important;
+  backdrop-filter:
+    blur(var(--glass-v29-dock-blur))
+    saturate(var(--glass-v29-dock-saturation))
+    contrast(var(--glass-v29-dock-contrast))
+    brightness(var(--glass-v29-dock-brightness)) !important;
+  -webkit-backdrop-filter:
+    blur(var(--glass-v29-dock-blur))
+    saturate(var(--glass-v29-dock-saturation))
+    contrast(var(--glass-v29-dock-contrast))
+    brightness(var(--glass-v29-dock-brightness)) !important;
+  background-clip: padding-box !important;
+  will-change: auto !important;
+}
+
+/* 3) Inner optical layer.
+   This is not a painted glow. It re-samples the live backdrop with almost no blur
+   near the top/bottom of the glass, so passing text/cards retain colour and shape. */
+html[data-theme="glass"] body.perf-ultra :where(.legend-top-bar, .legend-dock, .treasure-dock)::before,
+html[data-theme="glass"] body.perf-balanced :where(.legend-top-bar, .legend-dock, .treasure-dock)::before {
+  content: "" !important;
+  display: block !important;
+  position: absolute !important;
+  inset: 2px !important;
+  z-index: 0 !important;
+  border-radius: inherit !important;
+  pointer-events: none !important;
+  background: rgba(255,255,255,0.001) !important;
+  opacity: var(--glass-v29-edge-opacity) !important;
+  transform: scaleY(var(--glass-v29-edge-scale-y)) translateZ(0) !important;
+  transform-origin: center !important;
+  backdrop-filter:
+    blur(var(--glass-v29-edge-blur))
+    saturate(var(--glass-v29-edge-saturation))
+    contrast(var(--glass-v29-edge-contrast))
+    brightness(var(--glass-v29-edge-brightness)) !important;
+  -webkit-backdrop-filter:
+    blur(var(--glass-v29-edge-blur))
+    saturate(var(--glass-v29-edge-saturation))
+    contrast(var(--glass-v29-edge-contrast))
+    brightness(var(--glass-v29-edge-brightness)) !important;
+  -webkit-mask-image:
+    linear-gradient(
+      to bottom,
+      #000 0%,
+      #000 10%,
+      rgba(0,0,0,0.72) 18%,
+      transparent 34%,
+      transparent 66%,
+      rgba(0,0,0,0.72) 82%,
+      #000 90%,
+      #000 100%
+    ) !important;
+  mask-image:
+    linear-gradient(
+      to bottom,
+      #000 0%,
+      #000 10%,
+      rgba(0,0,0,0.72) 18%,
+      transparent 34%,
+      transparent 66%,
+      rgba(0,0,0,0.72) 82%,
+      #000 90%,
+      #000 100%
+    ) !important;
+}
+
+/* 4) Perimeter lens.
+   A 5px ring samples the SAME background again and slightly stretches it.
+   That produces the subtle "spoon leaving water" bend at the rim without
+   invented rainbow colours. */
+html[data-theme="glass"] body.perf-ultra :where(.legend-top-bar, .legend-dock, .treasure-dock)::after,
+html[data-theme="glass"] body.perf-balanced :where(.legend-top-bar, .legend-dock, .treasure-dock)::after {
+  content: "" !important;
+  display: block !important;
+  position: absolute !important;
+  inset: 0 !important;
+  z-index: 1 !important;
+  padding: 5px !important;
+  border-radius: inherit !important;
+  pointer-events: none !important;
+  background: rgba(255,255,255,0.001) !important;
+  opacity: var(--glass-v29-edge-opacity) !important;
+  transform: scale(1.008, var(--glass-v29-edge-scale-y)) translateZ(0) !important;
+  transform-origin: center !important;
+  backdrop-filter:
+    blur(var(--glass-v29-edge-blur))
+    saturate(var(--glass-v29-edge-saturation))
+    contrast(var(--glass-v29-edge-contrast))
+    brightness(var(--glass-v29-edge-brightness)) !important;
+  -webkit-backdrop-filter:
+    blur(var(--glass-v29-edge-blur))
+    saturate(var(--glass-v29-edge-saturation))
+    contrast(var(--glass-v29-edge-contrast))
+    brightness(var(--glass-v29-edge-brightness)) !important;
+
+  /* ring mask: outer shape minus the inner shape */
+  -webkit-mask:
+    linear-gradient(#000 0 0) content-box,
+    linear-gradient(#000 0 0) !important;
+  -webkit-mask-composite: xor !important;
+  mask:
+    linear-gradient(#000 0 0) content-box,
+    linear-gradient(#000 0 0) !important;
+  mask-composite: exclude !important;
+}
+
+html[data-theme="glass"] :where(.legend-top-bar, .legend-dock, .treasure-dock) > * {
+  position: relative;
+  z-index: 3;
+}
+
+/* Stable/Turbo never pay for the extra optical sampling layer. */
+html[data-theme="glass"] body.perf-stable :where(.legend-top-bar, .legend-dock, .treasure-dock)::before,
+html[data-theme="glass"] body.perf-stable :where(.legend-top-bar, .legend-dock, .treasure-dock)::after,
+html[data-theme="glass"] body.perf-turbo :where(.legend-top-bar, .legend-dock, .treasure-dock)::before,
+html[data-theme="glass"] body.perf-turbo :where(.legend-top-bar, .legend-dock, .treasure-dock)::after,
+html[data-theme="glass"] body.low-end-device :where(.legend-top-bar, .legend-dock, .treasure-dock)::before,
+html[data-theme="glass"] body.low-end-device :where(.legend-top-bar, .legend-dock, .treasure-dock)::after {
+  content: none !important;
+  display: none !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+/* 5) Turbo remains visually separated even with zero backdrop blur. */
+html[data-theme="glass"] body.perf-turbo :where(.legend-top-bar, .legend-dock, .treasure-dock),
+html[data-theme="glass"] body.low-end-device :where(.legend-top-bar, .legend-dock, .treasure-dock) {
+  background:
+    linear-gradient(180deg, rgba(255,255,255,0.075), rgba(255,255,255,0.010) 52%, rgba(0,0,0,0.040)),
+    rgba(10, 28, 51, 0.90) !important;
+  border-color: rgba(232,246,255,0.19) !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,0.16),
+    inset 0 -1px 0 rgba(0,7,20,0.22),
+    0 8px 20px rgba(2,8,23,0.22) !important;
+}
+
+/* 6) Low-count sheets/popovers.
+   Turbo gets opaque-enough material separation without a costly blur layer. */
+html[data-theme="glass"] :where(
+  .profile-modal-sheet,
+  .modal-content,
+  .stats-box,
+  .daily-quests-sheet,
+  .notif-popover,
+  .app-dropdown-menu,
+  .sort-dropdown-menu
+) {
+  background:
+    linear-gradient(180deg, rgba(255,255,255,0.070), rgba(255,255,255,0.010) 50%, rgba(0,0,0,0.025)),
+    var(--glass-v29-modal-fill) !important;
+  border-color: rgba(232,246,255,0.20) !important;
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,0.16),
+    inset 0 -1px 0 rgba(0,7,20,0.18),
+    0 16px 38px rgba(2,8,23,0.29) !important;
+  backdrop-filter: blur(var(--glass-v29-modal-blur)) saturate(112%) !important;
+  -webkit-backdrop-filter: blur(var(--glass-v29-modal-blur)) saturate(112%) !important;
+}
+
+html[data-theme="glass"] body.perf-turbo :where(
+  .profile-modal-sheet,
+  .modal-content,
+  .stats-box,
+  .daily-quests-sheet,
+  .notif-popover,
+  .app-dropdown-menu,
+  .sort-dropdown-menu
+),
+html[data-theme="glass"] body.low-end-device :where(
+  .profile-modal-sheet,
+  .modal-content,
+  .stats-box,
+  .daily-quests-sheet,
+  .notif-popover,
+  .app-dropdown-menu,
+  .sort-dropdown-menu
+) {
+  background:
+    linear-gradient(180deg, rgba(255,255,255,0.050), rgba(255,255,255,0.007)),
+    rgba(6,18,36,0.97) !important;
+  border-color: rgba(232,246,255,0.18) !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,0.13),
+    0 14px 34px rgba(0,0,0,0.34) !important;
+}
+
+html[data-theme="glass"] body.perf-turbo :where(
+  .profile-modal-backdrop,
+  .stats-overlay,
+  .custom-modal,
+  .daily-quests-backdrop,
+  .admin-modal-backdrop
+),
+html[data-theme="glass"] body.low-end-device :where(
+  .profile-modal-backdrop,
+  .stats-overlay,
+  .custom-modal,
+  .daily-quests-backdrop,
+  .admin-modal-backdrop
+) {
+  background: rgba(1,6,16,0.72) !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+/* 7) FINAL structural-button fix.
+   These two are intentionally NOT members of the general glass-button family.
+   The global selector above already excludes them; these rules also neutralize
+   any legacy state/pseudo-element styling. */
+html[data-theme="glass"] body #dailyLootChest,
+html[data-theme="glass"] body #dailyLootChest:hover,
+html[data-theme="glass"] body #dailyLootChest:focus,
+html[data-theme="glass"] body #dailyLootChest:focus-visible,
+html[data-theme="glass"] body #dailyLootChest:active {
+  -webkit-appearance: none !important;
+  appearance: none !important;
+  padding: 0 !important;
+  background: transparent !important;
+  background-image: none !important;
+  border: 0 !important;
+  outline: 0 !important;
+  border-radius: 0 !important;
+  box-shadow: none !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+  transform: none !important;
+}
+
+html[data-theme="glass"] body #dailyLootChest::before,
+html[data-theme="glass"] body #dailyLootChest::after {
+  content: none !important;
+  display: none !important;
+  background: none !important;
+  border: 0 !important;
+  box-shadow: none !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+html[data-theme="glass"] body button.xp-guide-toggle,
+html[data-theme="glass"] body button.xp-guide-toggle:hover,
+html[data-theme="glass"] body button.xp-guide-toggle:focus,
+html[data-theme="glass"] body button.xp-guide-toggle:focus-visible,
+html[data-theme="glass"] body button.xp-guide-toggle:active {
+  -webkit-appearance: none !important;
+  appearance: none !important;
+  width: 100% !important;
+  min-height: 30px !important;
+  padding: 0 !important;
+  margin: 0 !important;
+  background: transparent !important;
+  background-image: none !important;
+  border: 0 !important;
+  outline: 0 !important;
+  border-radius: 0 !important;
+  box-shadow: none !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+  transform: none !important;
+  filter: none !important;
+  text-shadow: none !important;
+}
+
+html[data-theme="glass"] body button.xp-guide-toggle::before,
+html[data-theme="glass"] body button.xp-guide-toggle::after {
+  content: none !important;
+  display: none !important;
+  background: none !important;
+  border: 0 !important;
+  box-shadow: none !important;
+}
+
+html[data-theme="glass"] body button.xp-guide-toggle:hover,
+html[data-theme="glass"] body button.xp-guide-toggle:focus-visible {
+  color: var(--text-white) !important;
+}
+
+html[data-theme="glass"] body button.xp-guide-toggle:focus-visible span {
+  text-decoration: underline;
+  text-decoration-color: rgba(235,248,255,0.44);
+  text-underline-offset: 4px;
+}
+
+/* Keep the actual large treasure stage intact.
+   Only the accidental square on the chest BUTTON is removed. */
+html[data-theme="glass"] .treasure-stage {
+  min-height: 330px !important;
+  overflow: visible !important;
+  border-radius: 26px !important;
+  border: 1px solid var(--glass-v2-border) !important;
+  border-top-color: rgba(255,255,255,0.30) !important;
+  border-inline-start-color: rgba(255,255,255,0.21) !important;
+  border-bottom-color: rgba(1,8,22,0.34) !important;
+  background:
+    radial-gradient(ellipse 44% 48% at 50% 38%, rgba(250,204,21,0.10), transparent 72%),
+    linear-gradient(180deg, rgba(255,255,255,0.085), rgba(255,255,255,0.016) 46%, rgba(1,7,18,0.038)),
+    var(--glass-v2-card) !important;
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,0.19),
+    inset 0 -1px 0 rgba(1,7,18,0.16),
+    0 10px 25px rgba(2,8,23,0.13) !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+/* Mobile compositor cap. */
+@media (max-width: 768px), (pointer: coarse) {
+  html[data-theme="glass"] body.perf-ultra {
+    --glass-v29-dock-blur: 6px;
+    --glass-v29-edge-blur: 0.4px;
+    --glass-v29-edge-saturation: 150%;
+    --glass-v29-edge-opacity: 0.72;
+    --glass-v29-modal-blur: 6px;
+  }
+
+  html[data-theme="glass"] body.perf-balanced {
+    --glass-v29-dock-blur: 4.5px;
+    --glass-v29-edge-blur: 0.25px;
+    --glass-v29-edge-saturation: 138%;
+    --glass-v29-edge-opacity: 0.58;
+    --glass-v29-modal-blur: 4px;
+  }
+}
+
+/* ═════════════════════════════════════════════════════════════════
+   LOOTLINGUA GLASS V3.1 — OASIS + CALM CANVAS
+   Safe visual-only layer: theme-aware active dock, cold glass accents,
+   and a single calm cold-blue canvas. No layout/JS/performance foundations changed.
+   ═════════════════════════════════════════════════════════════════ */
+
+/* 1) Theme-aware active dock indicator.
+   The base dock used a fixed gold highlight; these variables keep the same
+   interaction while letting each theme speak in its own palette. */
+[data-theme="lootlingua"] {
+  --dock-active-color: #60a5fa;
+  --dock-active-fill: rgba(59, 130, 246, 0.16);
+  --dock-active-border: rgba(96, 165, 250, 0.42);
+  --dock-active-glow: rgba(59, 130, 246, 0.16);
+}
+
+[data-theme="golden"] {
+  --dock-active-color: #f6c94c;
+  --dock-active-fill: rgba(201, 162, 39, 0.17);
+  --dock-active-border: rgba(246, 201, 76, 0.46);
+  --dock-active-glow: rgba(201, 162, 39, 0.16);
+}
+
+[data-theme="scroll"] {
+  --dock-active-color: #5b4030;
+  --dock-active-fill: rgba(74, 53, 40, 0.12);
+  --dock-active-border: rgba(91, 64, 48, 0.34);
+  --dock-active-glow: rgba(74, 53, 40, 0.10);
+}
+
+/* Oasis / واحة الهدوء — light mode follows the real Oasis teal tokens. */
+[data-theme="ocean"] {
+  --dock-active-color: #0f766e;
+  --dock-active-fill: rgba(13, 148, 136, 0.12);
+  --dock-active-border: rgba(15, 118, 110, 0.30);
+  --dock-active-glow: rgba(13, 148, 136, 0.10);
+}
+
+/* Oasis / واحة الهدوء — dark mode gets the brighter mint-teal used by the theme itself. */
+[data-theme="ocean"][data-oasis-mode="dark"] {
+  --dock-active-color: #5eead4;
+  --dock-active-fill: rgba(45, 212, 191, 0.14);
+  --dock-active-border: rgba(94, 234, 212, 0.34);
+  --dock-active-glow: rgba(45, 212, 191, 0.12);
+}
+
+/* Non-glass themes keep their current simple visual language; only the
+   hard-coded golden pill is replaced by the theme's own accent family. */
+:where(
+  [data-theme="lootlingua"],
+  [data-theme="golden"],
+  [data-theme="scroll"],
+  [data-theme="ocean"]
+) .treasure-dock-btn.active {
+  color: var(--dock-active-color) !important;
+  background: var(--dock-active-fill) !important;
+  border: 1px solid var(--dock-active-border) !important;
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, white 16%, transparent),
+    0 4px 12px var(--dock-active-glow) !important;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  :where(
+    [data-theme="lootlingua"],
+    [data-theme="golden"],
+    [data-theme="scroll"],
+    [data-theme="ocean"]
+  ) .treasure-dock-btn:hover:not(.active) {
+    color: var(--dock-active-color) !important;
+    background: color-mix(in srgb, var(--dock-active-fill) 62%, transparent) !important;
+    box-shadow: none !important;
+  }
+}
+
+/* 2) Glass active dock item — a compact Apple-like liquid bubble.
+   It is the only dock item that receives its own tiny backdrop sample.
+   No pseudo-element is used, so the existing tooltip ::after remains untouched. */
+html[data-theme="glass"] :where(.legend-dock, .treasure-dock) .treasure-dock-btn.active {
+  color: #eefaff !important;
+  background:
+    radial-gradient(125% 175% at 18% -58%, rgba(255,255,255,0.34) 0 22%, transparent 49%),
+    radial-gradient(95% 130% at 88% 128%, rgba(114,220,255,0.12), transparent 62%),
+    linear-gradient(180deg, rgba(255,255,255,0.125), rgba(255,255,255,0.030) 56%, rgba(90,194,240,0.042)),
+    rgba(126, 211, 250, 0.060) !important;
+  border: 1px solid rgba(222, 246, 255, 0.32) !important;
+  border-top-color: rgba(255,255,255,0.55) !important;
+  border-inline-start-color: rgba(255,255,255,0.34) !important;
+  border-inline-end-color: rgba(183,232,255,0.22) !important;
+  border-bottom-color: rgba(1,10,24,0.34) !important;
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,0.39),
+    inset 0 5px 11px rgba(255,255,255,0.025),
+    inset 0 -8px 13px rgba(1,9,23,0.15),
+    0 7px 16px rgba(1,9,23,0.15),
+    0 0 14px rgba(121,216,255,0.065) !important;
+  text-shadow: 0 1px 2px rgba(1,8,20,0.34) !important;
+  backdrop-filter: blur(8px) saturate(145%) contrast(104%) brightness(102%) !important;
+  -webkit-backdrop-filter: blur(8px) saturate(145%) contrast(104%) brightness(102%) !important;
+}
+
+html[data-theme="glass"] body.perf-balanced :where(.legend-dock, .treasure-dock) .treasure-dock-btn.active {
+  backdrop-filter: blur(6px) saturate(136%) contrast(103%) !important;
+  -webkit-backdrop-filter: blur(6px) saturate(136%) contrast(103%) !important;
+}
+
+html[data-theme="glass"] body.perf-stable :where(.legend-dock, .treasure-dock) .treasure-dock-btn.active {
+  background:
+    linear-gradient(180deg, rgba(255,255,255,0.12), rgba(255,255,255,0.026) 60%, rgba(88,193,238,0.038)),
+    rgba(101, 190, 232, 0.085) !important;
+  backdrop-filter: blur(2px) saturate(118%) !important;
+  -webkit-backdrop-filter: blur(2px) saturate(118%) !important;
+}
+
+html[data-theme="glass"] body.perf-turbo :where(.legend-dock, .treasure-dock) .treasure-dock-btn.active,
+html[data-theme="glass"] body.low-end-device :where(.legend-dock, .treasure-dock) .treasure-dock-btn.active {
+  background:
+    linear-gradient(180deg, rgba(255,255,255,0.11), rgba(255,255,255,0.018) 58%, rgba(0,0,0,0.045)),
+    rgba(17, 48, 79, 0.92) !important;
+  border-color: rgba(214,242,255,0.25) !important;
+  border-top-color: rgba(255,255,255,0.34) !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,0.24),
+    inset 0 -5px 10px rgba(0,6,18,0.18),
+    0 5px 12px rgba(0,7,18,0.18) !important;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  html[data-theme="glass"] :where(.legend-dock, .treasure-dock) .treasure-dock-btn:not(.active):hover {
+    color: #dff6ff !important;
+    background: rgba(121,216,255,0.065) !important;
+    border-color: rgba(215,243,255,0.14) !important;
+  }
+}
+
+/* 3) Glass primary actions: cool colour lives INSIDE the glass instead of
+   replacing it with a solid button. These target the real IDs, so no other
+   button family or state is changed. */
+html[data-theme="glass"] #searchBtn {
+  --glass-button-tint: rgba(74, 178, 255, 0.22);
+  background:
+    radial-gradient(110% 150% at 18% -38%, rgba(255,255,255,0.28), transparent 45%),
+    linear-gradient(180deg, rgba(126,211,255,0.16), rgba(64,158,230,0.060) 56%, rgba(9,42,76,0.075)),
+    rgba(61, 160, 232, 0.13) !important;
+  border-color: rgba(157, 222, 255, 0.29) !important;
+  border-top-color: rgba(239,250,255,0.48) !important;
+  color: #f2fbff !important;
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,0.34),
+    inset 0 -8px 13px rgba(4,30,58,0.15),
+    0 7px 16px rgba(6,58,102,0.11) !important;
+}
+
+html[data-theme="glass"] #addBtn {
+  --glass-button-tint: rgba(70, 205, 224, 0.18);
+  background:
+    radial-gradient(110% 150% at 18% -38%, rgba(255,255,255,0.26), transparent 45%),
+    linear-gradient(180deg, rgba(112,219,235,0.135), rgba(57,178,210,0.052) 57%, rgba(5,42,67,0.070)),
+    rgba(55, 173, 207, 0.105) !important;
+  border-color: rgba(149, 228, 240, 0.25) !important;
+  border-top-color: rgba(238,253,255,0.45) !important;
+  color: #f1fdff !important;
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,0.32),
+    inset 0 -8px 13px rgba(3,31,51,0.14),
+    0 7px 16px rgba(3,69,92,0.09) !important;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  html[data-theme="glass"] body.perf-ultra #searchBtn:hover,
+  html[data-theme="glass"] body.perf-balanced #searchBtn:hover {
+    background:
+      radial-gradient(110% 150% at 18% -38%, rgba(255,255,255,0.32), transparent 45%),
+      linear-gradient(180deg, rgba(139,220,255,0.20), rgba(72,170,238,0.075) 56%, rgba(9,42,76,0.080)),
+      rgba(67, 169, 240, 0.15) !important;
+  }
+
+  html[data-theme="glass"] body.perf-ultra #addBtn:hover,
+  html[data-theme="glass"] body.perf-balanced #addBtn:hover {
+    background:
+      radial-gradient(110% 150% at 18% -38%, rgba(255,255,255,0.30), transparent 45%),
+      linear-gradient(180deg, rgba(127,229,242,0.17), rgba(64,187,217,0.066) 57%, rgba(5,42,67,0.076)),
+      rgba(60, 184, 214, 0.125) !important;
+  }
+}
+
+/* 4) Final Glass canvas — one calm cold-blue colour only.
+   No gradient layers, animation, filter, pseudo-element, or compositor work. */
+html[data-theme="glass"] {
+  background-color: #86aec7 !important;
+  background-image: none !important;
+  background-repeat: no-repeat !important;
+  background-position: center !important;
+  background-size: auto !important;
+}
+
+/* ═════════════════════════════════════════════════════════════════
+   LOOTLINGUA GLASS V3.2 — ICE CANVAS + LIGHT MATERIAL LADDER
+   Visual-only correction layered after V3.1.
+   Keeps V2.9 refraction, structural resets, buttons, layout and JS untouched.
+   ═════════════════════════════════════════════════════════════════ */
+
+/* 1) One calm, cold, genuinely light canvas. No gradients. */
+html[data-theme="glass"] {
+  background-color: #2F6F95 !important;
+  background-image: none !important;
+}
+
+/* 2) The performance ladder must reduce compositor work — not turn the material black.
+   These are cool blue-grey glass inks chosen for the light canvas above. */
+html[data-theme="glass"] body.perf-ultra {
+  --glass-v2-panel: rgba(70, 113, 143, 0.20);
+  --glass-v2-panel-strong: rgba(62, 103, 135, 0.32);
+  --glass-v2-card: rgba(75, 117, 146, 0.22);
+  --glass-v2-card-soft: rgba(79, 121, 150, 0.16);
+  --glass-v2-control: rgba(246, 252, 255, 0.10);
+  --glass-v2-control-hover: rgba(246, 252, 255, 0.17);
+  --glass-v2-shadow: 0 12px 30px rgba(45, 78, 103, 0.18);
+  --glass-v2-shadow-soft: 0 7px 18px rgba(45, 78, 103, 0.13);
+
+  --glass-v29-dock-fill: rgba(64, 107, 138, 0.22);
+  --glass-v29-modal-fill: rgba(64, 105, 136, 0.56);
+}
+
+html[data-theme="glass"] body.perf-balanced {
+  --glass-v2-panel: rgba(70, 113, 143, 0.28);
+  --glass-v2-panel-strong: rgba(61, 102, 134, 0.42);
+  --glass-v2-card: rgba(75, 117, 146, 0.30);
+  --glass-v2-card-soft: rgba(79, 121, 150, 0.23);
+  --glass-v2-control: rgba(246, 252, 255, 0.115);
+  --glass-v2-control-hover: rgba(246, 252, 255, 0.18);
+  --glass-v2-shadow: 0 10px 25px rgba(45, 78, 103, 0.16);
+  --glass-v2-shadow-soft: 0 6px 15px rgba(45, 78, 103, 0.12);
+
+  --glass-v29-dock-fill: rgba(64, 107, 138, 0.30);
+  --glass-v29-modal-fill: rgba(63, 104, 135, 0.66);
+}
+
+html[data-theme="glass"] body.perf-stable {
+  --glass-v2-panel: rgba(69, 111, 142, 0.42);
+  --glass-v2-panel-strong: rgba(60, 100, 131, 0.56);
+  --glass-v2-card: rgba(74, 116, 145, 0.43);
+  --glass-v2-card-soft: rgba(78, 120, 149, 0.34);
+  --glass-v2-control: rgba(246, 252, 255, 0.13);
+  --glass-v2-control-hover: rgba(246, 252, 255, 0.19);
+  --glass-v2-shadow: 0 7px 18px rgba(45, 78, 103, 0.14);
+  --glass-v2-shadow-soft: 0 3px 10px rgba(45, 78, 103, 0.10);
+
+  --glass-v29-dock-fill: rgba(65, 108, 139, 0.46);
+  --glass-v29-modal-fill: rgba(62, 103, 134, 0.78);
+}
+
+html[data-theme="glass"] body.perf-turbo,
+html[data-theme="glass"] body.low-end-device {
+  --glass-v2-panel: rgba(74, 116, 145, 0.66);
+  --glass-v2-panel-strong: rgba(62, 102, 133, 0.79);
+  --glass-v2-card: rgba(78, 120, 149, 0.64);
+  --glass-v2-card-soft: rgba(82, 124, 152, 0.56);
+  --glass-v2-control: rgba(246, 252, 255, 0.15);
+  --glass-v2-control-hover: rgba(246, 252, 255, 0.21);
+  --glass-v2-shadow: 0 4px 12px rgba(45, 78, 103, 0.12);
+  --glass-v2-shadow-soft: none;
+
+  --glass-v29-dock-fill: rgba(67, 109, 140, 0.72);
+  --glass-v29-modal-fill: rgba(61, 101, 132, 0.93);
+}
+
+/* 3) Docks keep the same V2.9 optics, but use blue depth instead of black depth. */
+html[data-theme="glass"] :where(.legend-top-bar, .legend-dock, .treasure-dock) {
+  border-bottom-color: rgba(49, 86, 113, 0.34) !important;
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,0.38),
+    inset 0 6px 14px rgba(255,255,255,0.026),
+    inset 0 -9px 17px rgba(47, 86, 116, 0.12),
+    0 1px 0 rgba(255,255,255,0.07),
+    0 10px 25px rgba(46, 82, 108, 0.16) !important;
+}
+
+/* Turbo has no blur, so separation comes from a medium icy-blue material — never navy/black. */
+html[data-theme="glass"] body.perf-turbo :where(.legend-top-bar, .legend-dock, .treasure-dock),
+html[data-theme="glass"] body.low-end-device :where(.legend-top-bar, .legend-dock, .treasure-dock) {
+  background:
+    linear-gradient(180deg, rgba(255,255,255,0.13), rgba(255,255,255,0.025) 54%, rgba(70,112,142,0.055)),
+    rgba(67, 109, 140, 0.78) !important;
+  border-color: rgba(239,249,255,0.30) !important;
+  border-top-color: rgba(255,255,255,0.48) !important;
+  border-bottom-color: rgba(48,85,111,0.31) !important;
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,0.27),
+    inset 0 -1px 0 rgba(47,85,113,0.16),
+    0 8px 18px rgba(48,83,107,0.16) !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+/* 4) Turbo sheets/popovers: opaque enough to isolate content, still unmistakably blue glass. */
+html[data-theme="glass"] body.perf-turbo :where(
+  .profile-modal-sheet,
+  .modal-content,
+  .stats-box,
+  .daily-quests-sheet,
+  .notif-popover,
+  .app-dropdown-menu,
+  .sort-dropdown-menu
+),
+html[data-theme="glass"] body.low-end-device :where(
+  .profile-modal-sheet,
+  .modal-content,
+  .stats-box,
+  .daily-quests-sheet,
+  .notif-popover,
+  .app-dropdown-menu,
+  .sort-dropdown-menu
+) {
+  background:
+    linear-gradient(180deg, rgba(255,255,255,0.085), rgba(255,255,255,0.014)),
+    rgba(61, 101, 132, 0.95) !important;
+  border-color: rgba(239,249,255,0.25) !important;
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,0.21),
+    0 14px 30px rgba(43,76,101,0.22) !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+html[data-theme="glass"] body.perf-turbo :where(
+  .profile-modal-backdrop,
+  .stats-overlay,
+  .custom-modal,
+  .daily-quests-backdrop,
+  .admin-modal-backdrop
+),
+html[data-theme="glass"] body.low-end-device :where(
+  .profile-modal-backdrop,
+  .stats-overlay,
+  .custom-modal,
+  .daily-quests-backdrop,
+  .admin-modal-backdrop
+) {
+  background: rgba(58, 97, 126, 0.48) !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+/* 5) The active Apple-like dock bubble also stays icy in Turbo instead of becoming navy. */
+html[data-theme="glass"] body.perf-turbo :where(.legend-dock, .treasure-dock) .treasure-dock-btn.active,
+html[data-theme="glass"] body.low-end-device :where(.legend-dock, .treasure-dock) .treasure-dock-btn.active {
+  background:
+    linear-gradient(180deg, rgba(255,255,255,0.19), rgba(255,255,255,0.040) 58%, rgba(89,143,174,0.055)),
+    rgba(86, 137, 168, 0.72) !important;
+  border-color: rgba(235,248,255,0.35) !important;
+  border-top-color: rgba(255,255,255,0.55) !important;
+  border-bottom-color: rgba(49,88,116,0.28) !important;
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,0.35),
+    inset 0 -5px 10px rgba(51,91,119,0.10),
+    0 5px 12px rgba(48,84,110,0.13) !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+/* 6) In case the OS asks for reduced transparency or backdrop-filter is unavailable,
+   use the same light-blue material family instead of the old navy fallback. */
+@media (prefers-reduced-transparency: reduce) {
+  html[data-theme="glass"] {
+    --glass-v2-panel: rgba(74, 116, 145, 0.72);
+    --glass-v2-panel-strong: rgba(62, 102, 133, 0.84);
+    --glass-v2-card: rgba(78, 120, 149, 0.70);
+    --glass-v2-card-soft: rgba(82, 124, 152, 0.62);
+  }
+}
+
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  html[data-theme="glass"] {
+    --glass-v2-panel: rgba(74, 116, 145, 0.72);
+    --glass-v2-panel-strong: rgba(62, 102, 133, 0.84);
+    --glass-v2-card: rgba(78, 120, 149, 0.70);
+    --glass-v2-card-soft: rgba(82, 124, 152, 0.62);
+  }
 }
