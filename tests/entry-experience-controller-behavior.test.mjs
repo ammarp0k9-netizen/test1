@@ -372,19 +372,21 @@ function entryState(overrides = {}) {
   const now = Date.now();
   const status = overrides.status || 'in-progress';
   return contract.normalizeEntryState({
-    contractVersion: 1,
-    experienceVersion: 1,
+    contractVersion: 2,
+    experienceVersion: 2,
     status,
     audience: 'new',
     classification: 'brand-new',
-    currentStep: status === 'in-progress' ? 'interests' : 'action',
+    currentStep: status === 'in-progress' ? 'interests' : 'destination',
     interestsStatus: 'selected',
-    interestIds: ['games'],
+    interestIds: ['study'],
     themeStatus: 'selected',
     themeId: 'lootlingua',
     oasisMode: 'light',
     themeExplicit: true,
-    actionStatus: status === 'completed' ? 'completed' : 'pending',
+    journeyStatus: status === 'completed' ? 'structure-explored' : 'pending',
+    selectedWorldId: status === 'completed' ? 'world-study' : '',
+    gamerStatus: 'not-applicable',
     source: 'app-entry',
     startedAt: now - 10_000,
     updatedAt: now - 1_000,
@@ -395,9 +397,27 @@ function entryState(overrides = {}) {
 }
 
 function legacyEntryStateWithoutActionProof(overrides = {}) {
-  const legacy = clone(entryState(overrides));
-  delete legacy.actionStatus;
-  return legacy;
+  const now = Date.now();
+  return {
+    contractVersion: 1,
+    experienceVersion: 1,
+    status: 'completed',
+    audience: 'returning',
+    classification: 'returning-light',
+    currentStep: 'action',
+    interestsStatus: 'selected',
+    interestIds: ['study'],
+    themeStatus: 'selected',
+    themeId: 'ocean',
+    oasisMode: 'dark',
+    themeExplicit: true,
+    source: 'app-entry',
+    startedAt: now - 10_000,
+    updatedAt: now - 1_000,
+    completedAt: now - 1_000,
+    skippedAt: null,
+    ...overrides,
+  };
 }
 
 function freshUser(uid) {
@@ -492,6 +512,10 @@ async function createHarness(options = {}) {
         calls.entryLoads.push(user.uid);
         return options.entryLoad ? options.entryLoad(user) : { exists: false, state: null };
       },
+      async loadLegacyPreferences(user) {
+        if (options.legacyEntryLoad) return options.legacyEntryLoad(user);
+        return { exists: false, preferences: null };
+      },
       async save(state, user) {
         calls.entrySaves.push({ state: clone(state), uid: user.uid });
         if (options.entrySave) return options.entrySave(state, user, calls.entrySaves.length);
@@ -499,7 +523,36 @@ async function createHarness(options = {}) {
       },
     },
     LootLinguaPublishedContent: {
-      getPublishedWorld: async (worldId) => ({ worldId }),
+      getPublishedWorld: async (worldId) => ({ worldId, title: worldId === 'world-games' ? 'عالم الألعاب' : 'عالم المعرفة' }),
+    },
+    LootLinguaWorldsEntryPreview: {
+      async loadWorldChoices() {
+        return clone(options.worldChoices || [
+          {
+            worldId: 'world-study', title: 'عالم المعرفة', description: 'رحلة تعلم منشورة',
+            rankCount: 2, gateCount: 6, recommendation: { kind: 'interest-match' },
+          },
+          {
+            worldId: 'world-games', title: 'عالم الألعاب', description: 'لغة الألعاب في رحلة منشورة',
+            rankCount: 3, gateCount: 9, recommendation: { kind: 'available' },
+          },
+        ]);
+      },
+      async loadWorldStructure(worldId) {
+        return {
+          world: { worldId, title: worldId === 'world-games' ? 'عالم الألعاب' : 'عالم المعرفة' },
+          ranks: [{ rankId: 'rank-a1', title: 'المبتدئ' }, { rankId: 'rank-a2', title: 'المستكشف' }],
+          rank: { rankId: 'rank-a1', title: 'المبتدئ' },
+          gates: [{ gateId: 'gate-1', title: 'البداية', wordCount: 12 }],
+        };
+      },
+      async loadJourneyContext(journey) {
+        return {
+          world: { worldId: journey.worldId, title: 'رحلتك المنشورة' },
+          rank: { rankId: journey.activeRankId, title: 'الرتبة الحالية' },
+          gate: { gateId: journey.activeGateId, title: 'البوابة الحالية' },
+        };
+      },
     },
     LootLinguaJourneyEntryActions: {
       async resumePendingIntent(intent, world) {
@@ -536,6 +589,18 @@ async function createHarness(options = {}) {
     showToast() {},
     flushDeferredEntryToasts() {},
   });
+  if (options.enableGamerSearch) {
+    root.fetchSuggestions = async () => {
+      root.dispatchEvent(new FakeCustomEvent('lootlingua:dictionary-search-result', {
+        detail: { type: 'normal', status: options.gamerNormalStatus || 'success', word: 'Spawn' },
+      }));
+    };
+    root.fetchGamerSuggestions = async () => {
+      root.dispatchEvent(new FakeCustomEvent('lootlingua:dictionary-search-result', {
+        detail: { type: 'gamer', status: options.gamerStatus || 'success', word: 'Spawn' },
+      }));
+    };
+  }
 
   evaluateContract(root);
   const evaluateController = new Function(
@@ -577,8 +642,8 @@ async function createHarness(options = {}) {
 
   async function chooseInterestsAndTheme() {
     assert.equal(controller.getState()?.currentStep, 'interests');
-    assert.ok(panel.querySelector('[data-entry-interest="games"]'));
-    await click('[data-entry-interest="games"]');
+    assert.ok(panel.querySelector('[data-entry-interest="study"]'));
+    await click('[data-entry-interest="study"]');
     await click('[data-entry-action="continue-interests"]');
     assert.equal(controller.getState()?.currentStep, 'theme');
     assert.ok(panel.querySelector('[data-entry-theme="lootlingua"]'));
@@ -587,11 +652,17 @@ async function createHarness(options = {}) {
 
   async function reachRevealedAction() {
     await chooseInterestsAndTheme();
-    await click('[data-entry-action="continue-action"]');
-    assert.equal(controller.getState()?.currentStep, 'action');
+    await click('[data-entry-action="continue-theme"]');
+    assert.equal(controller.getState()?.currentStep, 'worlds');
+    await settle();
+    await click('[data-entry-world="world-study"]');
+    await click('[data-entry-action="continue-worlds"]');
+    assert.equal(controller.getState()?.currentStep, 'journey');
     assert.equal(controller.getState()?.status, 'in-progress');
-    assert.ok(panel.querySelector('[data-entry-action="reveal-value"]'));
-    await click('[data-entry-action="reveal-value"]');
+    await settle();
+    await click('[data-entry-route-node]');
+    await click('[data-entry-action="continue-journey"]');
+    assert.equal(controller.getState()?.currentStep, 'destination');
     assert.ok(panel.querySelector('[data-entry-cta]'));
   }
 
@@ -637,22 +708,23 @@ function persistedState(storage, key) {
   return raw ? JSON.parse(raw) : null;
 }
 
-test('the action screen stays in-progress until its CTA reaches a concrete destination', async () => {
+test('the destination screen stays in-progress until its CTA opens the concrete selected World', async () => {
   const harness = await createHarness();
   await harness.reachRevealedAction();
 
   const awaitingAction = harness.controller.getState();
   assert.equal(awaitingAction.status, 'in-progress');
-  assert.equal(awaitingAction.currentStep, 'action');
+  assert.equal(awaitingAction.currentStep, 'destination');
   assert.equal(harness.controller.isActive(), true);
-  assert.ok(harness.panel.querySelector('[data-entry-cta="explore-worlds"]'));
+  assert.ok(harness.panel.querySelector('[data-entry-cta="open-selected-world"]'));
   assert.equal(
     persistedState(harness.storage, contract.entryStorageKey({})).status,
     'in-progress'
   );
 
-  await harness.click('[data-entry-cta="explore-worlds"]');
+  await harness.click('[data-entry-cta="open-selected-world"]');
   assert.equal(harness.calls.worlds, 1);
+  assert.deepEqual(harness.calls.openedWorlds, ['world-study']);
   assert.equal(harness.controller.getState().status, 'completed');
   assert.equal(harness.controller.isActive(), false);
   assert.equal(
@@ -680,7 +752,7 @@ test('an Entry cloud failure keeps an authenticated experience resumable and non
     },
   });
   await harness.reachRevealedAction();
-  await harness.click('[data-entry-cta="explore-worlds"]');
+  await harness.click('[data-entry-cta="open-selected-world"]');
 
   const localKey = contract.entryStorageKey({ uid: user.uid });
   assert.equal(harness.controller.getState().status, 'in-progress');
@@ -716,7 +788,7 @@ test('a Profile cloud failure cannot close Entry or leave a terminal local recei
     profileSave: async () => false,
   });
   await harness.reachRevealedAction();
-  await harness.click('[data-entry-cta="explore-worlds"]');
+  await harness.click('[data-entry-cta="open-selected-world"]');
 
   const local = persistedState(storage, contract.entryStorageKey({ uid: user.uid }));
   assert.ok(harness.calls.profileSaves > 0, 'the profile persistence path must be exercised');
@@ -832,7 +904,7 @@ test('a guest terminal state observed with account A cannot silently complete fr
   );
 });
 
-test('matrix: a fresh guest sees the full three-step experience and reaches a guest-safe destination', async () => {
+test('matrix: a fresh guest sees the full Journey onboarding and reaches a guest-safe World destination', async () => {
   const harness = await createHarness();
 
   assert.equal(harness.controller.getPresentation().classification, 'brand-new');
@@ -840,12 +912,57 @@ test('matrix: a fresh guest sees the full three-step experience and reaches a gu
   assert.equal(harness.controller.isActive(), true);
 
   await harness.reachRevealedAction();
-  assert.ok(harness.panel.querySelector('[data-entry-cta="new-user-start"]'));
-  await harness.click('[data-entry-cta="new-user-start"]');
+  assert.ok(harness.panel.querySelector('[data-entry-cta="open-selected-world"]'));
+  await harness.click('[data-entry-cta="open-selected-world"]');
 
-  assert.equal(harness.calls.dictionary, 1);
+  assert.equal(harness.calls.worlds, 1);
+  assert.deepEqual(harness.calls.openedWorlds, ['world-study']);
   assert.equal(harness.controller.getState().status, 'completed');
   assert.equal(harness.controller.isActive(), false);
+});
+
+test('games interest alone offers the real search guide, while success and AI unavailability both return safely', async (t) => {
+  for (const outcome of ['success', 'empty', 'error']) {
+    await t.test(outcome, async () => {
+      const harness = await createHarness({
+        enableGamerSearch: true,
+        gamerStatus: outcome,
+      });
+      await harness.click('[data-entry-interest="games"]');
+      await harness.click('[data-entry-action="continue-interests"]');
+      await harness.click('[data-entry-theme="lootlingua"]');
+      await harness.click('[data-entry-action="continue-theme"]');
+      await harness.click('[data-entry-world="world-games"]');
+      await harness.click('[data-entry-action="continue-worlds"]');
+      await harness.click('[data-entry-route-node]');
+      await harness.click('[data-entry-action="continue-journey"]');
+      assert.equal(harness.controller.getState().currentStep, 'context');
+
+      await harness.click('[data-entry-action="start-gamer-demo"]');
+      assert.equal(harness.controller.getState().gamerStatus, 'running');
+      assert.equal(harness.controller.isActive(), false);
+      await harness.root.fetchSuggestions();
+      await settle();
+      await harness.root.fetchGamerSuggestions();
+      await settle(12);
+
+      assert.equal(harness.controller.getState().currentStep, 'destination');
+      assert.equal(
+        harness.controller.getState().gamerStatus,
+        outcome === 'success' ? 'completed' : 'unavailable'
+      );
+      assert.equal(harness.controller.isActive(), true);
+      assert.equal(harness.document.getElementById('journeyAuthPrompt'), null);
+      assert.ok(harness.panel.querySelector('[data-entry-cta="open-selected-world"]'));
+    });
+  }
+});
+
+test('non-games interests never insert the gamer-meaning step', async () => {
+  const harness = await createHarness({ enableGamerSearch: true });
+  await harness.reachRevealedAction();
+  assert.equal(harness.controller.getState().currentStep, 'destination');
+  assert.equal(harness.controller.getState().gamerStatus, 'not-applicable');
 });
 
 test('matrix: guest words alone are returning-light data, not Journey progress, and keep the full first action', async () => {
@@ -873,10 +990,10 @@ test('matrix: guest XP alone remains light local use and does not shorten Produc
   assert.equal(harness.controller.getPresentation().classification, 'returning-guest-with-local-data');
   assert.equal(harness.controller.getState().currentStep, 'interests');
   await harness.reachRevealedAction();
-  assert.ok(harness.panel.querySelector('[data-entry-cta="new-user-start"]'));
-  await harness.click('[data-entry-cta="new-user-start"]');
+  assert.ok(harness.panel.querySelector('[data-entry-cta="open-selected-world"]'));
+  await harness.click('[data-entry-cta="open-selected-world"]');
 
-  assert.equal(harness.calls.dictionary, 1);
+  assert.equal(harness.calls.worlds, 1);
   assert.equal(harness.controller.getState().status, 'completed');
 });
 
@@ -891,7 +1008,7 @@ test('matrix: a fresh account with an existing empty profile is still brand-new 
   assert.equal(harness.controller.getPresentation().classification, 'brand-new');
   assert.equal(harness.controller.getState().currentStep, 'interests');
   await harness.reachRevealedAction();
-  assert.ok(harness.panel.querySelector('[data-entry-cta="new-user-start"]'));
+  assert.ok(harness.panel.querySelector('[data-entry-cta="open-selected-world"]'));
 });
 
 test('matrix: an old account with words only is returning-light and is not sent through the progress shortcut', async () => {
@@ -909,7 +1026,7 @@ test('matrix: an old account with words only is returning-light and is not sent 
   assert.ok(harness.panel.querySelector('[data-entry-cta="review-words"]'));
 });
 
-test('matrix: an account with a real active Journey gets the short preserved-progress action', async () => {
+test('matrix: an account with a real active Journey gets the short truthful return path', async () => {
   const user = oldUser('account-real-journey');
   const activeJourney = {
     worldId: 'world-active',
@@ -927,9 +1044,13 @@ test('matrix: an account with a real active Journey gets the short preserved-pro
   });
 
   assert.equal(harness.controller.getPresentation().classification, 'returning-with-progress');
-  assert.equal(harness.controller.getState().currentStep, 'action');
+  assert.equal(harness.controller.getState().currentStep, 'return');
   assert.equal(harness.controller.getState().status, 'in-progress');
-  assert.equal(harness.panel.querySelector('[data-entry-action="reveal-value"]'), null);
+  assert.equal(harness.panel.querySelector('[data-entry-interest]'), null);
+  assert.ok(harness.panel.querySelector('[data-entry-action="review-return"]'));
+  await harness.click('[data-entry-action="review-return"]');
+  assert.equal(harness.controller.getState().journeyStatus, 'return-reviewed');
+  await harness.click('[data-entry-action="continue-return"]');
   assert.ok(harness.panel.querySelector('[data-entry-cta="continue-journey"]'));
 
   await harness.click('[data-entry-cta="continue-journey"]');
@@ -939,7 +1060,7 @@ test('matrix: an account with a real active Journey gets the short preserved-pro
   assert.equal(harness.controller.isActive(), false);
 });
 
-test('migration: an old completed v1 cloud document without action proof reopens the full path for a words-only account', async () => {
+test('migration: completed v1 contributes preferences but never suppresses the full v2 path', async () => {
   const user = oldUser('legacy-completed-words-only');
   const legacyCompleted = legacyEntryStateWithoutActionProof({
     status: 'completed',
@@ -947,9 +1068,7 @@ test('migration: an old completed v1 cloud document without action proof reopens
     classification: 'returning-with-progress',
   });
   assert.equal(Object.hasOwn(legacyCompleted, 'actionStatus'), false);
-  const storage = new MemoryStorage({
-    [contract.entryStorageKey({ uid: user.uid })]: JSON.stringify(legacyCompleted),
-  });
+  const storage = new MemoryStorage();
 
   const harness = await createHarness({
     storage,
@@ -957,19 +1076,25 @@ test('migration: an old completed v1 cloud document without action proof reopens
     profileExists: true,
     profile: {},
     words: [{ id: 'legacy-word-one', word: 'harbor', meaning: 'port' }],
-    entryLoad: async () => ({ exists: true, state: clone(legacyCompleted) }),
+    entryLoad: async () => ({ exists: false, state: null }),
+    legacyEntryLoad: async () => ({
+      exists: true,
+      preferences: contract.normalizeLegacyPreferences(legacyCompleted),
+    }),
   });
 
   assert.equal(harness.controller.getPresentation().classification, 'returning-light');
   assert.equal(harness.controller.getState().status, 'in-progress');
   assert.equal(harness.controller.getState().currentStep, 'interests');
-  assert.equal(harness.controller.getState().actionStatus, 'pending');
+  assert.equal(harness.controller.getState().journeyStatus, 'pending');
+  assert.equal(harness.controller.getState().themeId, 'ocean');
+  assert.deepEqual(harness.controller.getState().interestIds, ['study']);
   assert.equal(harness.controller.isActive(), true);
   assert.equal(harness.shell.hidden, false);
   assert.ok(harness.panel.querySelector('[data-entry-interest="games"]'));
 });
 
-test('migration: an old completed v1 cloud document without action proof reopens the short action for real Journey progress', async () => {
+test('migration: completed v1 plus real Journey progress opens only the v2 return reminder', async () => {
   const user = oldUser('legacy-completed-real-journey');
   const legacyCompleted = legacyEntryStateWithoutActionProof({
     status: 'completed',
@@ -990,19 +1115,22 @@ test('migration: an old completed v1 cloud document without action proof reopens
     activeJourney,
     hasJourneyProgress: true,
     journeyDestination: { type: 'gate', reason: 'started' },
-    entryLoad: async () => ({ exists: true, state: clone(legacyCompleted) }),
+    entryLoad: async () => ({ exists: false, state: null }),
+    legacyEntryLoad: async () => ({
+      exists: true,
+      preferences: contract.normalizeLegacyPreferences(legacyCompleted),
+    }),
   });
 
   assert.equal(harness.controller.getPresentation().classification, 'returning-with-progress');
   assert.equal(harness.controller.getState().status, 'in-progress');
-  assert.equal(harness.controller.getState().currentStep, 'action');
-  assert.equal(harness.controller.getState().actionStatus, 'ready');
+  assert.equal(harness.controller.getState().currentStep, 'return');
+  assert.equal(harness.controller.getState().journeyStatus, 'pending');
   assert.equal(harness.controller.isActive(), true);
-  assert.equal(harness.panel.querySelector('[data-entry-action="reveal-value"]'), null);
-  assert.ok(harness.panel.querySelector('[data-entry-cta="continue-journey"]'));
+  assert.ok(harness.panel.querySelector('[data-entry-action="review-return"]'));
 });
 
-test('migration: an old skipped v1 cloud document without action proof reopens the full path', async () => {
+test('migration: a skipped v1 document also reopens the full v2 path', async () => {
   const user = oldUser('legacy-skipped-words-only');
   const legacySkipped = legacyEntryStateWithoutActionProof({
     status: 'skipped',
@@ -1016,18 +1144,22 @@ test('migration: an old skipped v1 cloud document without action proof reopens t
     profileExists: true,
     profile: {},
     words: [{ id: 'legacy-skipped-word', word: 'lantern', meaning: 'lamp' }],
-    entryLoad: async () => ({ exists: true, state: clone(legacySkipped) }),
+    entryLoad: async () => ({ exists: false, state: null }),
+    legacyEntryLoad: async () => ({
+      exists: true,
+      preferences: contract.normalizeLegacyPreferences(legacySkipped),
+    }),
   });
 
   assert.equal(harness.controller.getPresentation().classification, 'returning-light');
   assert.equal(harness.controller.getState().status, 'in-progress');
   assert.equal(harness.controller.getState().currentStep, 'interests');
-  assert.equal(harness.controller.getState().actionStatus, 'pending');
+  assert.equal(harness.controller.getState().journeyStatus, 'pending');
   assert.equal(harness.controller.isActive(), true);
   assert.ok(harness.panel.querySelector('[data-entry-interest="games"]'));
 });
 
-test('migration: revealing the first action checkpoints completion and keeps its CTA visible after refresh', async () => {
+test('Journey-structure interaction is checkpointed and keeps the destination resumable after refresh', async () => {
   const user = freshUser('first-action-refresh-account');
   const storage = new MemoryStorage();
   const harness = await createHarness({
@@ -1038,20 +1170,24 @@ test('migration: revealing the first action checkpoints completion and keeps its
   });
 
   await harness.chooseInterestsAndTheme();
-  await harness.click('[data-entry-action="continue-action"]');
-  assert.equal(harness.controller.getState().actionStatus, 'pending');
-  await harness.click('[data-entry-action="reveal-value"]');
+  await harness.click('[data-entry-action="continue-theme"]');
+  await harness.click('[data-entry-world="world-study"]');
+  await harness.click('[data-entry-action="continue-worlds"]');
+  await harness.click('[data-entry-route-node]');
 
   const revealed = harness.controller.getState();
   assert.equal(revealed.status, 'in-progress');
-  assert.equal(revealed.currentStep, 'action');
-  assert.equal(revealed.actionStatus, 'completed');
-  assert.ok(harness.panel.querySelector('[data-entry-cta="new-user-start"]'));
+  assert.equal(revealed.currentStep, 'journey');
+  assert.equal(revealed.journeyStatus, 'structure-explored');
+  assert.ok(harness.panel.querySelector('[data-entry-action="continue-journey"]'));
   assert.equal(
-    persistedState(storage, contract.entryStorageKey({ uid: user.uid })).actionStatus,
-    'completed'
+    persistedState(storage, contract.entryStorageKey({ uid: user.uid })).journeyStatus,
+    'structure-explored'
   );
-  assert.equal(harness.calls.entrySaves.at(-1).state.actionStatus, 'completed');
+  assert.equal(harness.calls.entrySaves.at(-1).state.journeyStatus, 'structure-explored');
+
+  await harness.click('[data-entry-action="continue-journey"]');
+  assert.equal(harness.controller.getState().currentStep, 'destination');
 
   const refreshed = await createHarness({
     storage,
@@ -1060,18 +1196,16 @@ test('migration: revealing the first action checkpoints completion and keeps its
     profile: {},
   });
   assert.equal(refreshed.controller.getState().status, 'in-progress');
-  assert.equal(refreshed.controller.getState().currentStep, 'action');
-  assert.equal(refreshed.controller.getState().actionStatus, 'completed');
+  assert.equal(refreshed.controller.getState().currentStep, 'destination');
+  assert.equal(refreshed.controller.getState().journeyStatus, 'structure-explored');
   assert.equal(refreshed.controller.isActive(), true);
-  assert.equal(refreshed.panel.querySelector('[data-entry-action="reveal-value"]'), null);
-  assert.ok(refreshed.panel.querySelector('[data-entry-cta="new-user-start"]'));
+  assert.ok(refreshed.panel.querySelector('[data-entry-cta="open-selected-world"]'));
 });
 
-test('matrix: a proven completed v1 account remains once-only and never reopens or writes on boot', async () => {
-  const user = oldUser('completed-v1-account');
+test('matrix: a proven completed v2 account remains once-only and never reopens or writes on boot', async () => {
+  const user = oldUser('completed-v2-account');
   const completed = entryState({
     status: 'completed',
-    actionStatus: 'completed',
     audience: 'returning',
     classification: 'returning-light',
   });
@@ -1081,13 +1215,13 @@ test('matrix: a proven completed v1 account remains once-only and never reopens 
   });
 
   assert.equal(harness.controller.getState().status, 'completed');
-  assert.equal(harness.controller.getState().actionStatus, 'completed');
+  assert.equal(harness.controller.getState().journeyStatus, 'structure-explored');
   assert.equal(harness.controller.isActive(), false);
   assert.equal(harness.shell.hidden, true);
   assert.equal(harness.calls.entrySaves.length, 0);
 });
 
-test('matrix: refresh restores interests, theme, and action without manufacturing completion', async () => {
+test('matrix: refresh restores interests, theme, Worlds, and Journey stages without manufacturing completion', async () => {
   const storage = new MemoryStorage();
   const interests = await createHarness({ storage });
   await interests.click('[data-entry-interest="games"]');
@@ -1104,15 +1238,21 @@ test('matrix: refresh restores interests, theme, and action without manufacturin
   assert.equal(themeRefresh.controller.getState().currentStep, 'theme');
   assert.equal(themeRefresh.controller.getState().themeId, 'ocean');
   assert.equal(themeRefresh.controller.getState().status, 'in-progress');
-  assert.ok(themeRefresh.panel.querySelector('[data-entry-action="continue-action"]'));
-  await themeRefresh.click('[data-entry-action="continue-action"]');
+  assert.ok(themeRefresh.panel.querySelector('[data-entry-action="continue-theme"]'));
+  await themeRefresh.click('[data-entry-action="continue-theme"]');
 
-  const actionRefresh = await createHarness({ storage });
-  assert.equal(actionRefresh.controller.getState().currentStep, 'action');
-  assert.equal(actionRefresh.controller.getState().status, 'in-progress');
-  assert.equal(actionRefresh.controller.isActive(), true);
-  assert.ok(actionRefresh.panel.querySelector('[data-entry-action="reveal-value"]'));
-  assert.equal(actionRefresh.panel.querySelector('[data-entry-cta]'), null);
+  const worldsRefresh = await createHarness({ storage });
+  assert.equal(worldsRefresh.controller.getState().currentStep, 'worlds');
+  assert.equal(worldsRefresh.controller.getState().status, 'in-progress');
+  await worldsRefresh.click('[data-entry-world="world-games"]');
+  await worldsRefresh.click('[data-entry-action="continue-worlds"]');
+
+  const journeyRefresh = await createHarness({ storage });
+  assert.equal(journeyRefresh.controller.getState().currentStep, 'journey');
+  assert.equal(journeyRefresh.controller.getState().selectedWorldId, 'world-games');
+  assert.equal(journeyRefresh.controller.getState().journeyStatus, 'world-selected');
+  assert.ok(journeyRefresh.panel.querySelector('[data-entry-route-node]'));
+  assert.equal(journeyRefresh.panel.querySelector('[data-entry-cta]'), null);
 });
 
 test('auth success claims the exact guest operation and consumes it only after restored:true', async () => {

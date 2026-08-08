@@ -3,10 +3,11 @@ import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 import vm from 'node:vm';
 
-const [dictionarySource, renderSource, cloudSource] = await Promise.all([
+const [dictionarySource, renderSource, cloudSource, entryControllerSource] = await Promise.all([
   readFile(new URL('../js/dictionary.js', import.meta.url), 'utf8'),
   readFile(new URL('../js/dictionary-render.js', import.meta.url), 'utf8'),
   readFile(new URL('../js/cloud.js', import.meta.url), 'utf8'),
+  readFile(new URL('../js/entry-experience-controller.js', import.meta.url), 'utf8'),
 ]);
 
 test('personal words retain every published educational field from the cloud snapshot', () => {
@@ -80,4 +81,17 @@ test('opening one card among 180 words only updates that card and preserves scro
     ['attribute', 'aria-expanded', 'true'],
   ]);
   assert.equal(context.window.scrollY, 912);
+});
+
+test('the optional Entry gamer guide observes the real dictionary search and gamer-meaning button', () => {
+  assert.match(dictionarySource, /new CustomEvent\('lootlingua:dictionary-search-result'/);
+  for (const status of ['success', 'empty', 'error', 'blocked']) {
+    assert.match(dictionarySource, new RegExp(`announceDictionarySearchResult\\([^\\n]+['"]${status}['"]`));
+  }
+  assert.match(dictionarySource, /window\.__lootlinguaEntryGamerGuideActive\) return;/);
+  assert.match(entryControllerSource, /typeof root\.fetchSuggestions !== 'function'/);
+  assert.match(entryControllerSource, /typeof root\.fetchGamerSuggestions !== 'function'/);
+  assert.match(entryControllerSource, /targetGamerGuide\('#searchBtn'\)/);
+  assert.match(entryControllerSource, /targetGamerGuide\('#gamerMeaningBubble \.gamer-meaning-btn'\)/);
+  assert.doesNotMatch(entryControllerSource, /fetch\(|\/api\/gamer-dictionary/);
 });

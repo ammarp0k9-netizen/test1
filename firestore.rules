@@ -848,6 +848,79 @@ service cloud.firestore {
         );
     }
 
+    function validEntryExperienceV2(data, versionId) {
+      return versionId == 'v2' &&
+        data.keys().hasOnly([
+          'contractVersion', 'experienceVersion', 'status', 'audience',
+          'classification', 'currentStep', 'interestsStatus', 'interestIds',
+          'themeStatus', 'themeId', 'oasisMode', 'themeExplicit',
+          'journeyStatus', 'selectedWorldId', 'gamerStatus', 'source',
+          'startedAt', 'updatedAt', 'completedAt', 'skippedAt'
+        ]) && data.keys().size() == 20 &&
+        data.contractVersion == 2 && data.experienceVersion == 2 &&
+        (data.status == 'in-progress' || data.status == 'completed') &&
+        (data.audience == 'new' || data.audience == 'returning' || data.audience == 'returning-guest') &&
+        (
+          data.classification == 'brand-new' ||
+          data.classification == 'returning-with-progress' ||
+          data.classification == 'returning-light' ||
+          data.classification == 'returning-guest-with-local-data' ||
+          data.classification == 'existing-account-without-meaningful-progress'
+        ) &&
+        (
+          data.currentStep == 'interests' || data.currentStep == 'theme' ||
+          data.currentStep == 'worlds' || data.currentStep == 'journey' ||
+          data.currentStep == 'context' || data.currentStep == 'destination' ||
+          data.currentStep == 'return'
+        ) &&
+        (data.interestsStatus == 'pending' || data.interestsStatus == 'selected' || data.interestsStatus == 'skipped') &&
+        validEntryExperienceInterestIds(data.interestIds) &&
+        (data.interestsStatus != 'selected' || data.interestIds.size() > 0) &&
+        (data.interestsStatus == 'selected' || data.interestIds.size() == 0) &&
+        (data.themeStatus == 'pending' || data.themeStatus == 'selected' || data.themeStatus == 'preserved') &&
+        (
+          data.themeId == '' || data.themeId == 'lootlingua' || data.themeId == 'ocean' ||
+          data.themeId == 'golden' || data.themeId == 'scroll' || data.themeId == 'glass'
+        ) &&
+        (data.oasisMode == 'light' || data.oasisMode == 'dark') &&
+        data.themeExplicit is bool &&
+        (
+          data.journeyStatus == 'pending' || data.journeyStatus == 'world-selected' ||
+          data.journeyStatus == 'structure-explored' || data.journeyStatus == 'return-reviewed'
+        ) &&
+        data.selectedWorldId is string && data.selectedWorldId.size() <= 128 &&
+        (
+          data.gamerStatus == 'not-applicable' || data.gamerStatus == 'offered' ||
+          data.gamerStatus == 'running' || data.gamerStatus == 'completed' ||
+          data.gamerStatus == 'unavailable' || data.gamerStatus == 'skipped'
+        ) &&
+        (data.source == 'app-entry' || data.source == 'guest-migration' || data.source == 'settings') &&
+        data.startedAt is timestamp && data.updatedAt == request.time &&
+        (data.completedAt == null || data.completedAt is timestamp) &&
+        data.skippedAt == null &&
+        (data.status != 'completed' || (
+          data.currentStep == 'destination' &&
+          (data.journeyStatus == 'structure-explored' || data.journeyStatus == 'return-reviewed') &&
+          data.completedAt is timestamp
+        )) &&
+        (data.status == 'completed' || data.completedAt == null);
+    }
+
+    function validEntryExperienceV2Update(before, after, versionId) {
+      return validEntryExperienceV2(after, versionId) &&
+        after.contractVersion == before.contractVersion &&
+        after.experienceVersion == before.experienceVersion &&
+        after.audience == before.audience &&
+        after.classification == before.classification &&
+        after.startedAt == before.startedAt &&
+        (
+          (before.status == 'in-progress' &&
+            (after.status == 'in-progress' || after.status == 'completed')) ||
+          (before.status == 'completed' && after.status == 'completed')
+        ) &&
+        (before.completedAt == null || after.completedAt == before.completedAt);
+    }
+
     function validWordMasteryDocument(data) {
       return data.keys().hasOnly(['entries', 'updatedAt']) &&
         data.keys().hasAll(['entries']) &&
@@ -3614,9 +3687,15 @@ service cloud.firestore {
         allow read: if isOwner(uid);
         allow create: if isOwner(uid) &&
           request.resource.data.status != 'skipped' &&
-          validEntryExperience(request.resource.data, versionId);
+          (
+            validEntryExperience(request.resource.data, versionId) ||
+            validEntryExperienceV2(request.resource.data, versionId)
+          );
         allow update: if isOwner(uid) &&
-          validEntryExperienceUpdate(resource.data, request.resource.data, versionId);
+          (
+            validEntryExperienceUpdate(resource.data, request.resource.data, versionId) ||
+            validEntryExperienceV2Update(resource.data, request.resource.data, versionId)
+          );
         allow delete: if false;
       }
 

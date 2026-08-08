@@ -34,7 +34,7 @@ const legacyRuntimeSources = [
   xpSource,
 ].join('\n');
 
-test('the app shell contains Entry v1 but no legacy onboarding or welcome DOM', () => {
+test('the app shell contains versioned Product Entry but no legacy onboarding or welcome DOM', () => {
   assert.match(indexSource, /id="entryExperienceRoot"/);
   assert.match(indexSource, /id="editInterestsBtn"/);
   assert.doesNotMatch(indexSource, /id="(?:onboardingBackdrop|onboardingBox|onboardingTooltip|onboardingExampleChips|welcomeModal|replayOnboardingBtn)"/);

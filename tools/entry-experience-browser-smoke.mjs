@@ -6,6 +6,22 @@ import WebSocketClient from 'ws';
 
 const root = path.resolve(import.meta.dirname, '..');
 const evidenceDir = path.join(root, 'reports', 'product-entry-evidence');
+const evidenceScreenshotNames = new Set([
+  'guest-new-desktop-worlds',
+  'guest-new-desktop-journey-structure',
+  'guest-new-desktop-personalized-destination',
+  'guest-new-320-worlds',
+  'guest-new-320-journey-structure',
+  'account-journey-short-return',
+  'guest-games-success-real-general-search',
+  'guest-games-success-real-gamer-button',
+  'guest-games-success-returned-destination',
+  'guest-games-empty-returned-destination',
+  'account-completed-hidden-app',
+  'auth-close-prompt',
+  'auth-close-guest-exploration',
+  'entry-cloud-failure-kept-open',
+]);
 const browserPath = [
   'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
   'C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe',
@@ -58,8 +74,8 @@ async function retry(operation, attempts = 60, waitMs = 200) {
 function baseEntry(overrides = {}) {
   const now = Date.now();
   return {
-    contractVersion: 1,
-    experienceVersion: 1,
+    contractVersion: 2,
+    experienceVersion: 2,
     status: 'in-progress',
     audience: 'new',
     classification: 'brand-new',
@@ -70,7 +86,9 @@ function baseEntry(overrides = {}) {
     themeId: '',
     oasisMode: 'light',
     themeExplicit: false,
-    actionStatus: 'pending',
+    journeyStatus: 'pending',
+    selectedWorldId: '',
+    gamerStatus: 'not-applicable',
     source: 'app-entry',
     startedAt: now - 5000,
     updatedAt: now - 1000,
@@ -170,10 +188,13 @@ addScenario('account-completed', {
   accounts: { [accountCompleted.uid]: accountCompleted },
   cloudEntries: {
     [accountCompleted.uid]: baseEntry({
-      status: 'completed', currentStep: 'action', actionStatus: 'completed', completedAt: Date.now() - 1000,
+      status: 'completed', currentStep: 'destination', journeyStatus: 'structure-explored',
+      selectedWorldId: 'smoke-world', completedAt: Date.now() - 1000,
     }),
   },
 });
+addScenario('guest-games-success', { gamerOutcome: 'success' });
+addScenario('guest-games-empty', { gamerOutcome: 'empty' });
 addScenario('auth-close', { accounts: { [authAccount.uid]: authAccount } });
 addScenario('auth-success', { accounts: { [authAccount.uid]: authAccount } });
 addScenario('refresh-guest');
@@ -271,6 +292,9 @@ function browserHarness() {
       pushEvent('entry-load', { uid: user.uid, status: state?.status || 'missing', step: state?.currentStep || '' });
       return { exists: Boolean(state), state };
     },
+    async loadLegacyPreferences() {
+      return { exists: false, preferences: null };
+    },
     async save(state, user) {
       const snapshot = clone(state);
       window.__entrySmoke.entrySaveCalls.push({ uid: user.uid, status: snapshot.status, step: snapshot.currentStep });
@@ -302,7 +326,50 @@ function browserHarness() {
   window.LootLinguaPublishedContent = Object.freeze({
     async getPublishedWorld(worldId) {
       pushEvent('published-world-read', { worldId });
-      return worldId === 'smoke-world' ? { worldId, title: 'Smoke World' } : null;
+      if (worldId === 'smoke-world') return { worldId, title: 'عالم المعرفة' };
+      if (worldId === 'games-world') return { worldId, title: 'عالم الألعاب' };
+      return null;
+    },
+  });
+  window.LootLinguaWorldsEntryPreview = Object.freeze({
+    async loadWorldChoices(interestIds) {
+      pushEvent('entry-worlds-read', { interestIds });
+      return [
+        {
+          worldId: 'smoke-world', title: 'عالم المعرفة', description: 'رحلة منشورة للتعلّم اليومي',
+          icon: '📚', rankCount: 2, gateCount: 6,
+          recommendation: { kind: interestIds.includes('study') ? 'interest-match' : 'available' },
+        },
+        {
+          worldId: 'games-world', title: 'عالم الألعاب', description: 'مصطلحات اللعب ضمن رحلة منظمة',
+          icon: '🎮', rankCount: 3, gateCount: 9,
+          recommendation: { kind: interestIds.includes('games') ? 'interest-match' : 'available' },
+        },
+      ].sort((left, right) => Number(right.recommendation.kind === 'interest-match') - Number(left.recommendation.kind === 'interest-match'));
+    },
+    async loadWorldStructure(worldId) {
+      pushEvent('entry-structure-read', { worldId });
+      return {
+        world: { worldId, title: worldId === 'games-world' ? 'عالم الألعاب' : 'عالم المعرفة', icon: worldId === 'games-world' ? '🎮' : '📚' },
+        ranks: [
+          { rankId: 'rank-a1', title: 'المستكشف' },
+          { rankId: 'rank-a2', title: 'المغامر' },
+        ],
+        rank: { rankId: 'rank-a1', title: 'المستكشف' },
+        gates: [
+          { gateId: 'gate-a1', title: 'بوابة البداية', wordCount: 12 },
+          { gateId: 'gate-a2', title: 'بوابة الفهم', wordCount: 15 },
+          { gateId: 'gate-a3', title: 'بوابة الإتقان', wordCount: 18 },
+        ],
+      };
+    },
+    async loadJourneyContext(journey) {
+      pushEvent('entry-return-read', { worldId: journey.worldId });
+      return {
+        world: { worldId: journey.worldId, title: 'عالم رحلتك' },
+        rank: { rankId: journey.activeRankId, title: 'رتبة المستكشف' },
+        gate: { gateId: journey.activeGateId, title: 'بوابة البداية' },
+      };
     },
   });
   window.LootLinguaJourneyEntryActions = Object.freeze({
@@ -352,6 +419,44 @@ function browserHarness() {
     pushEvent('open-world', { worldId });
   };
 
+  window.fetchSuggestions = async () => {
+    const word = document.getElementById('wordInput')?.value?.trim() || 'Spawn';
+    const list = document.getElementById('suggestionsList');
+    const suggestionsBox = document.getElementById('suggestionsBox');
+    if (suggestionsBox) suggestionsBox.style.display = 'block';
+    if (list) list.innerHTML = `<article class="sug-result-card"><strong>${word}</strong><span> يظهر / ينشأ</span></article>`;
+    let bubble = document.getElementById('gamerMeaningBubble');
+    if (!bubble) {
+      bubble = document.createElement('div');
+      bubble.id = 'gamerMeaningBubble';
+      bubble.className = 'gamer-meaning-bubble search-zone';
+      bubble.innerHTML = '<button type="button" class="gamer-meaning-btn"><span>معنى الألعاب</span></button>';
+      document.getElementById('suggestionsBox')?.appendChild(bubble);
+      bubble.querySelector('.gamer-meaning-btn')?.addEventListener('click', () => window.fetchGamerSuggestions());
+    }
+    pushEvent('dictionary-normal-result', { word });
+    window.dispatchEvent(new CustomEvent('lootlingua:dictionary-search-result', {
+      detail: { type: 'normal', status: 'success', word },
+    }));
+  };
+  window.fetchGamerSuggestions = async () => {
+    const outcome = scenario.gamerOutcome || 'success';
+    const bubble = document.getElementById('gamerMeaningBubble');
+    let panel = document.getElementById('gamerSuggestionsPanel');
+    if (!panel) {
+      panel = document.createElement('div');
+      panel.id = 'gamerSuggestionsPanel';
+      bubble?.insertAdjacentElement('afterend', panel);
+    }
+    if (panel) panel.textContent = outcome === 'success'
+      ? 'Spawn: الظهور داخل الخريطة أو نقطة إعادة الظهور'
+      : 'ما لقينا معنى ألعاب واضح لهالكلمة.';
+    pushEvent('dictionary-gamer-result', { outcome });
+    window.dispatchEvent(new CustomEvent('lootlingua:dictionary-search-result', {
+      detail: { type: 'gamer', status: outcome, word: 'Spawn' },
+    }));
+  };
+
   window.login = async () => {
     pushEvent('login-called');
     if (scenario.authResult === 'cancel') return false;
@@ -396,7 +501,15 @@ function harnessHtml(scenario) {
 <body data-current-view="homeView">
   <main id="smokeApp">
     <section id="homeView" data-smoke-view><h1>LootLingua smoke app</h1></section>
-    <section id="personalView" data-smoke-view hidden><h1>القاموس الشخصي</h1><input id="wordInput" aria-label="الكلمة الإنجليزية"></section>
+    <section id="personalView" data-smoke-view hidden>
+      <h1>القاموس الشخصي</h1>
+      <div id="normalSearchZone" class="search-zone" data-search-type="normal">
+        <label for="wordInput">الكلمة الإنجليزية</label>
+        <input id="wordInput" aria-label="الكلمة الإنجليزية">
+        <button id="searchBtn" type="button" onclick="fetchSuggestions()">ابحث عن معنى</button>
+      </div>
+      <div id="suggestionsBox"><div id="suggestionsList"></div></div>
+    </section>
     <section id="worldsView" data-smoke-view hidden><h1>العوالم</h1><button id="startJourneyBtn" type="button">ابدأ رحلة محفوظة</button></section>
     <section id="quizView" data-smoke-view hidden><h1>الاختبار</h1></section>
     <div class="smoke-controls">
@@ -511,10 +624,8 @@ async function snapshot() {
     const presentation = controller?.getPresentation?.() || null;
     const shell = document.getElementById('entryExperienceRoot');
     const visible = Boolean(shell && !shell.hidden && shell.getAttribute('aria-hidden') !== 'true');
-    const interest = document.querySelector('[data-entry-interest]');
-    const theme = document.querySelector('[data-entry-theme]');
     const cta = document.querySelector('[data-entry-cta]');
-    const stage = !visible ? 'hidden' : (interest ? 'interests' : (theme ? 'theme' : (cta || document.querySelector('.entry-first-action-card') ? 'action' : 'unknown')));
+    const stage = !visible ? 'hidden' : (state?.currentStep || 'unknown');
     const pending = Object.keys(localStorage)
       .filter((key) => key.startsWith('lootlingua:pending-intent:v1:'))
       .map((key) => {
@@ -532,10 +643,14 @@ async function snapshot() {
       interestIds: state?.interestIds || [],
       themeId: state?.themeId || '',
       themeExplicit: state?.themeExplicit === true,
+      journeyStatus: state?.journeyStatus || '',
+      selectedWorldId: state?.selectedWorldId || '',
+      gamerStatus: state?.gamerStatus || '',
       visible,
       stage,
-      firstActionCard: Boolean(document.querySelector('.entry-first-action-card')),
-      firstActionRevealed: Boolean(document.querySelector('.entry-first-action-card.is-revealed')),
+      worldCardCount: document.querySelectorAll('[data-entry-world]').length,
+      routeNodeCount: document.querySelectorAll('[data-entry-route-node]').length,
+      gamerGuideVisible: Boolean(document.getElementById('entryGamerGuide')),
       actionId: cta?.dataset.entryCta || '',
       actionIds: Array.from(document.querySelectorAll('[data-entry-cta]')).map((button) => button.dataset.entryCta),
       authVisible: Boolean(document.getElementById('journeyAuthPrompt')),
@@ -554,6 +669,7 @@ async function snapshot() {
 }
 
 async function screenshot(name) {
+  if (process.env.ENTRY_SMOKE_SCREENSHOTS !== 'all' && !evidenceScreenshotNames.has(name)) return null;
   await delay(120);
   const result = await send('Page.captureScreenshot', {
     format: 'png',
@@ -601,37 +717,49 @@ async function stage() {
 
 async function reachAction(options = {}) {
   const observed = [];
-  for (let index = 0; index < 6; index += 1) {
+  for (let index = 0; index < 10; index += 1) {
     const current = await snapshot();
     if (!observed.includes(current.stage)) observed.push(current.stage);
-    if (current.stage === 'action') {
-      if (documentNeedsReveal(current) && options.reveal !== false) {
-        await click('[data-entry-action="reveal-value"]');
-      }
+    if (current.stage === 'destination') {
       return { observed, state: await snapshot() };
     }
     if (current.stage === 'interests') {
-      if (!current.interestIds.length) await click('[data-entry-interest="study"]');
+      if (!current.interestIds.length) await click(`[data-entry-interest="${options.interestId || 'study'}"]`);
       await click('[data-entry-action="continue-interests"]');
       await waitFor(`document.querySelector('[data-entry-theme]') !== null`, 'theme step');
       continue;
     }
     if (current.stage === 'theme') {
       await click('[data-entry-theme="ocean"]');
-      const nextSelector = await evaluate(`document.querySelector('[data-entry-action="continue-action"]')
-        ? '[data-entry-action="continue-action"]'
-        : '[data-entry-action="complete"]'`);
-      await click(nextSelector);
-      await waitFor(`document.querySelector('[data-entry-cta], .entry-first-action-card') !== null || document.getElementById('entryExperienceRoot')?.hidden === true`, 'first action');
+      await click('[data-entry-action="continue-theme"]');
+      await waitFor(`document.querySelector('[data-entry-world]') !== null`, 'published World choices');
       continue;
     }
-    throw new Error(`${activeCase}: cannot reach action from stage ${current.stage}`);
+    if (current.stage === 'worlds') {
+      if (options.captureStages) options.captureStages.push(await screenshot(`${options.screenshotPrefix || activeCase}-worlds`));
+      const worldId = options.worldId || (current.interestIds.includes('games') ? 'games-world' : 'smoke-world');
+      await click(`[data-entry-world="${worldId}"]`);
+      await click('[data-entry-action="continue-worlds"]');
+      await waitFor(`document.querySelector('[data-entry-route-node]') !== null`, 'Journey structure');
+      continue;
+    }
+    if (current.stage === 'journey') {
+      if (options.captureStages) options.captureStages.push(await screenshot(`${options.screenshotPrefix || activeCase}-journey-structure`));
+      if (current.journeyStatus !== 'structure-explored') await click('[data-entry-route-node]');
+      await click('[data-entry-action="continue-journey"]');
+      await waitFor(`window.LootLinguaEntryExperienceController?.getState?.()?.currentStep !== 'journey'`, 'post-Journey step');
+      continue;
+    }
+    if (current.stage === 'context') {
+      if (options.captureStages) options.captureStages.push(await screenshot(`${options.screenshotPrefix || activeCase}-context`));
+      if (options.stopAtContext) return { observed, state: current };
+      await click('[data-entry-action="skip-gamer-demo"]');
+      await waitFor(`document.querySelector('[data-entry-cta]') !== null`, 'personalized destination');
+      continue;
+    }
+    throw new Error(`${activeCase}: cannot reach destination from stage ${current.stage}`);
   }
-  throw new Error(`${activeCase}: action step loop exhausted`);
-}
-
-function documentNeedsReveal(current) {
-  return current.firstActionCard && !current.firstActionRevealed;
+  throw new Error(`${activeCase}: destination loop exhausted`);
 }
 
 function assertion(condition, message, failures) {
@@ -643,13 +771,17 @@ async function runHappy(id, expected) {
   const images = [];
   const initial = await navigateScenario(id);
   images.push(await screenshot(`${id}-interests`));
-  const reached = await reachAction();
+  const reached = await reachAction({
+    captureStages: id.startsWith('guest-new') ? images : null,
+    screenshotPrefix: id,
+  });
   const action = reached.state;
-  images.push(await screenshot(`${id}-first-action`));
+  images.push(await screenshot(`${id}-personalized-destination`));
   assertion(initial.classification === expected.classification, `classification=${initial.classification}, expected ${expected.classification}`, failures);
   assertion(initial.visible, 'Product Entry did not open', failures);
-  assertion(action.stage === 'action', `first action stage missing (${action.stage})`, failures);
-  assertion(action.status === 'in-progress', `completed before first action (${action.status})`, failures);
+  assertion(action.stage === 'destination', `personalized destination missing (${action.stage})`, failures);
+  assertion(action.status === 'in-progress', `completed before destination opened (${action.status})`, failures);
+  assertion(action.journeyStatus === 'structure-explored', `Journey interaction proof=${action.journeyStatus}`, failures);
   assertion(action.actionId === expected.actionId, `action=${action.actionId}, expected ${expected.actionId}`, failures);
   assertion(action.noHorizontalOverflow && action.panelInsideViewport, 'mobile/desktop horizontal overflow detected', failures);
   await click(`[data-entry-cta="${expected.actionId}"]`);
@@ -662,7 +794,7 @@ async function runHappy(id, expected) {
     id,
     classification: initial.classification,
     visibleSteps: reached.observed,
-    firstAction: { visible: action.stage === 'action', revealed: action.firstActionRevealed, statusBefore: action.status },
+    onboardingInteraction: { worldId: action.selectedWorldId, journeyStatus: action.journeyStatus, statusBefore: action.status },
     auth: 'not shown during Product Entry',
     completion: { at: 'after destination CTA', status: final.status },
     destination: final.destination,
@@ -681,9 +813,14 @@ async function runProgressAccount() {
   const initial = await navigateScenario(id);
   images.push(await screenshot(`${id}-short-return`));
   assertion(initial.classification === 'returning-with-progress', `classification=${initial.classification}`, failures);
-  assertion(initial.stage === 'action', `meaningful progress did not receive shortened action (${initial.stage})`, failures);
+  assertion(initial.stage === 'return', `meaningful progress did not receive shortened return (${initial.stage})`, failures);
   assertion(initial.status === 'in-progress', `progress Entry already terminal (${initial.status})`, failures);
-  assertion(initial.actionId === 'continue-journey', `action=${initial.actionId}`, failures);
+  await click('[data-entry-action="review-return"]');
+  await click('[data-entry-action="continue-return"]');
+  await waitFor(`document.querySelector('[data-entry-cta="continue-journey"]') !== null`, 'preserved Journey destination');
+  const destination = await snapshot();
+  assertion(destination.actionId === 'continue-journey', `action=${destination.actionId}`, failures);
+  assertion(destination.journeyStatus === 'return-reviewed', `return proof=${destination.journeyStatus}`, failures);
   await click('[data-entry-cta="continue-journey"]');
   await waitFor(`document.getElementById('entryExperienceRoot')?.hidden === true`, 'progress destination close');
   const final = await snapshot();
@@ -692,10 +829,58 @@ async function runProgressAccount() {
   return {
     id,
     classification: initial.classification,
-    visibleSteps: [initial.stage],
-    firstAction: { visible: true, kind: 'shortened return CTA', statusBefore: initial.status },
+    visibleSteps: ['return', 'destination'],
+    onboardingInteraction: { kind: 'shortened Journey reminder', journeyStatus: destination.journeyStatus },
     auth: 'not required',
     completion: { at: 'after Journey destination', status: final.status },
+    destination: `${final.destination}:${final.openWorld}`,
+    images,
+    failures,
+    passed: failures.length === 0,
+  };
+}
+
+async function runGamerMeaning(id, expectedStatus) {
+  const failures = [];
+  const images = [];
+  await navigateScenario(id);
+  const reached = await reachAction({
+    interestId: 'games',
+    worldId: 'games-world',
+    stopAtContext: true,
+    captureStages: images,
+    screenshotPrefix: id,
+  });
+  assertion(reached.state.stage === 'context', `games context missing (${reached.state.stage})`, failures);
+  images.push(await screenshot(`${id}-optional-context`));
+  const refreshedContext = await reloadScenario();
+  assertion(refreshedContext.stage === 'context', `games context did not survive refresh (${refreshedContext.stage})`, failures);
+  images.push(await screenshot(`${id}-context-after-refresh`));
+  await click('[data-entry-action="start-gamer-demo"]');
+  await waitFor(`document.getElementById('entryGamerGuide') !== null && document.querySelector('#searchBtn.entry-guided-search-target') !== null`, 'real search guide');
+  images.push(await screenshot(`${id}-real-general-search`));
+  await click('#searchBtn');
+  await waitFor(`document.querySelector('#gamerMeaningBubble .gamer-meaning-btn.entry-guided-search-target') !== null`, 'real gamer meaning button');
+  images.push(await screenshot(`${id}-real-gamer-button`));
+  await click('#gamerMeaningBubble .gamer-meaning-btn');
+  await waitFor(`document.getElementById('entryExperienceRoot')?.hidden === false && window.LootLinguaEntryExperienceController?.getState?.()?.currentStep === 'destination'`, 'return from gamer result');
+  const returned = await snapshot();
+  images.push(await screenshot(`${id}-returned-destination`));
+  assertion(returned.gamerStatus === expectedStatus, `gamerStatus=${returned.gamerStatus}, expected ${expectedStatus}`, failures);
+  assertion(!returned.authVisible, 'auth was shown because gamer meaning was unavailable', failures);
+  assertion(returned.status === 'in-progress', `Entry completed before destination (${returned.status})`, failures);
+  await click('[data-entry-cta="open-selected-world"]');
+  await waitFor(`document.getElementById('entryExperienceRoot')?.hidden === true`, 'gamer route destination close');
+  const final = await snapshot();
+  assertion(final.status === 'completed', `final gamer route status=${final.status}`, failures);
+  return {
+    id,
+    classification: reached.state.classification,
+    visibleSteps: reached.observed,
+    onboardingInteraction: { worldId: 'games-world', journeyStatus: returned.journeyStatus },
+    gamerMeaning: { outcome: expectedStatus, contextRefresh: refreshedContext.stage, usedRealSearchButton: true, usedRealGamerButton: true },
+    auth: 'not shown for success/empty gamer result',
+    completion: { at: 'after selected World destination', status: final.status },
     destination: `${final.destination}:${final.openWorld}`,
     images,
     failures,
@@ -708,13 +893,13 @@ async function runCompletedAccount() {
   const failures = [];
   const initial = await navigateScenario(id);
   assertion(initial.classification === 'brand-new', `stored classification changed (${initial.classification})`, failures);
-  assertion(!initial.visible && initial.stage === 'hidden', 'completed v1 was presented again', failures);
+  assertion(!initial.visible && initial.stage === 'hidden', 'completed v2 was presented again', failures);
   assertion(initial.status === 'completed', `status=${initial.status}`, failures);
   return {
     id,
     classification: initial.classification,
     visibleSteps: [],
-    firstAction: { visible: false, reason: 'v1 already completed' },
+    onboardingInteraction: { visible: false, reason: 'v2 already completed' },
     auth: 'not shown',
     completion: { at: 'pre-existing version document', status: initial.status },
     destination: initial.destination,
@@ -728,10 +913,10 @@ async function completeGuestToWorlds(id) {
   await navigateScenario(id);
   const reached = await reachAction();
   const action = reached.state;
-  if (!action.actionIds.includes('explore-worlds')) {
-    throw new Error(`${id}: secondary guest explore-worlds CTA is unavailable`);
+  if (!action.actionIds.includes('open-selected-world')) {
+    throw new Error(`${id}: selected guest World CTA is unavailable`);
   }
-  await click('[data-entry-cta="explore-worlds"]');
+  await click('[data-entry-cta="open-selected-world"]');
   await waitFor(`document.getElementById('entryExperienceRoot')?.hidden === true && document.body.dataset.currentView === 'worldsView'`, 'guest worlds destination');
   await click('#startJourneyBtn');
   await waitFor(`document.getElementById('journeyAuthPrompt') !== null`, 'contextual auth prompt');
@@ -757,7 +942,7 @@ async function runAuthClose() {
     id,
     classification: before.reached.state.classification,
     visibleSteps: before.reached.observed,
-    firstAction: { visible: true, revealed: true },
+    onboardingInteraction: { visible: true, journeyStatus: before.reached.state.journeyStatus },
     auth: 'shown only after Start Journey; dismissed with real Escape key',
     pendingIntent: after.pending.map((item) => item.value?.status),
     completion: { at: 'guest exploration destination before cloud-only action', status: after.status },
@@ -788,10 +973,10 @@ async function runAuthSuccess() {
     id,
     classification: before.reached.state.classification,
     visibleSteps: before.reached.observed,
-    firstAction: { visible: true, revealed: true },
+    onboardingInteraction: { visible: true, journeyStatus: before.reached.state.journeyStatus },
     auth: 'real DOM prompt → login button → auth-state callback',
     pendingIntent: consumed?.status || 'missing',
-    completion: { at: 'guest first-action destination; intent consumed only after execution', status: after.status },
+    completion: { at: 'guest World destination; intent consumed only after execution', status: after.status },
     destination: `${after.destination}:${after.openWorld}`,
     images,
     failures,
@@ -816,29 +1001,41 @@ async function runRefreshGuest() {
   const themeAfter = await reloadScenario();
   images.push(await screenshot(`${id}-theme-after-refresh`));
   assertion(themeAfter.stage === 'theme' && themeAfter.themeId === 'ocean', `theme was not restored (${themeAfter.stage}/${themeAfter.themeId})`, failures);
-  const nextSelector = await evaluate(`document.querySelector('[data-entry-action="continue-action"]')
-    ? '[data-entry-action="continue-action"]'
-    : '[data-entry-action="complete"]'`);
-  await click(nextSelector);
-  await waitFor(`document.querySelector('[data-entry-cta], .entry-first-action-card') !== null || document.getElementById('entryExperienceRoot')?.hidden === true`, 'action before refresh');
-  const actionBefore = await snapshot();
-  const actionAfter = await reloadScenario();
-  images.push(await screenshot(`${id}-action-after-refresh`));
-  assertion(actionBefore.stage === 'action' && actionBefore.status === 'in-progress', `action was terminal before refresh (${actionBefore.stage}/${actionBefore.status})`, failures);
-  assertion(actionAfter.stage === 'action' && actionAfter.visible && actionAfter.status === 'in-progress', `action did not survive refresh (${actionAfter.stage}/${actionAfter.status})`, failures);
+  await click('[data-entry-action="continue-theme"]');
+  await waitFor(`document.querySelector('[data-entry-world]') !== null`, 'Worlds before refresh');
+  const worldsBefore = await snapshot();
+  const worldsAfter = await reloadScenario();
+  await waitFor(`document.querySelector('[data-entry-world]') !== null`, 'Worlds after refresh');
+  images.push(await screenshot(`${id}-worlds-after-refresh`));
+  assertion(worldsBefore.stage === 'worlds' && worldsAfter.stage === 'worlds', `Worlds did not survive refresh (${worldsAfter.stage})`, failures);
+  await click('[data-entry-world="smoke-world"]');
+  await click('[data-entry-action="continue-worlds"]');
+  await waitFor(`document.querySelector('[data-entry-route-node]') !== null`, 'Journey before refresh');
+  const journeyBefore = await snapshot();
+  const journeyAfter = await reloadScenario();
+  await waitFor(`document.querySelector('[data-entry-route-node]') !== null`, 'Journey after refresh');
+  images.push(await screenshot(`${id}-journey-after-refresh`));
+  assertion(journeyBefore.stage === 'journey' && journeyAfter.stage === 'journey', `Journey did not survive refresh (${journeyAfter.stage})`, failures);
+  await click('[data-entry-route-node]');
+  const exploredBefore = await snapshot();
+  const exploredAfter = await reloadScenario();
+  images.push(await screenshot(`${id}-interaction-after-refresh`));
+  assertion(exploredBefore.journeyStatus === 'structure-explored' && exploredAfter.journeyStatus === 'structure-explored', 'Journey interaction proof was not restored', failures);
   return {
     id,
     classification: interestAfter.classification,
-    visibleSteps: ['interests', 'theme', 'action'],
+    visibleSteps: ['interests', 'theme', 'worlds', 'journey'],
     refresh: {
       interests: { before: interestBefore.interestIds, after: interestAfter.interestIds },
       theme: { before: themeBefore.themeId, after: themeAfter.themeId },
-      action: { before: `${actionBefore.stage}/${actionBefore.status}`, after: `${actionAfter.stage}/${actionAfter.status}` },
+      worlds: { before: worldsBefore.stage, after: worldsAfter.stage },
+      journey: { before: journeyBefore.stage, after: journeyAfter.stage },
+      interaction: { before: exploredBefore.journeyStatus, after: exploredAfter.journeyStatus },
     },
-    firstAction: { visible: actionAfter.stage === 'action' },
+    onboardingInteraction: { visible: true, journeyStatus: exploredAfter.journeyStatus },
     auth: 'not shown',
-    completion: { at: 'not yet complete', status: actionAfter.status },
-    destination: actionAfter.destination,
+    completion: { at: 'not yet complete', status: exploredAfter.status },
+    destination: exploredAfter.destination,
     images,
     failures,
     passed: failures.length === 0,
@@ -862,7 +1059,7 @@ async function runRefreshAccountTheme() {
     classification: after.classification,
     visibleSteps: ['interests', 'theme'],
     refresh: { theme: { before: before.themeId, after: after.themeId, explicit: after.themeExplicit } },
-    firstAction: { visible: false, reason: 'refresh probe stopped at theme' },
+    onboardingInteraction: { visible: false, reason: 'refresh probe stopped at theme' },
     auth: 'account already authenticated',
     completion: { at: 'not complete', status: after.status },
     destination: after.destination,
@@ -882,7 +1079,7 @@ async function runTerminalFailure(id, kind) {
   await waitFor(`document.getElementById('entryExperienceStatus')?.textContent?.trim().length > 0`, `${kind} failure message`);
   const failed = await snapshot();
   images.push(await screenshot(`${id}-kept-open`));
-  assertion(failed.visible && failed.stage === 'action', `Entry closed on ${kind} failure (${failed.stage})`, failures);
+  assertion(failed.visible && failed.stage === 'destination', `Entry closed on ${kind} failure (${failed.stage})`, failures);
   assertion(failed.status === 'in-progress', `Entry became terminal on ${kind} failure (${failed.status})`, failures);
   assertion(failed.statusText.length > 0, `${kind} failure has no visible status`, failures);
   if (kind === 'profile') {
@@ -893,12 +1090,12 @@ async function runTerminalFailure(id, kind) {
   }
   const refreshed = await reloadScenario();
   images.push(await screenshot(`${id}-after-refresh`));
-  assertion(refreshed.visible && refreshed.stage === 'action' && refreshed.status === 'in-progress', `${kind} failure did not remain resumable after refresh`, failures);
+  assertion(refreshed.visible && refreshed.stage === 'destination' && refreshed.status === 'in-progress', `${kind} failure did not remain resumable after refresh`, failures);
   return {
     id,
     classification: before.classification,
     visibleSteps: reached.observed,
-    firstAction: { visible: true, revealed: true },
+    onboardingInteraction: { visible: true, journeyStatus: before.journeyStatus },
     auth: 'account already authenticated',
     failure: { kind, statusText: failed.statusText, saveCalls: failed.entrySaveCalls, profileCalls: failed.profileSaveCalls },
     completion: { at: 'not complete because persistence failed', status: failed.status },
@@ -942,7 +1139,7 @@ async function runAccountSwitch() {
     id,
     classification: { accountA: initialA.classification, accountB: initialB.classification },
     visibleSteps: { accountA: completedA.reached.observed, accountB: completedB.reached.observed },
-    firstAction: { accountA: true, accountB: true },
+    onboardingInteraction: { accountA: true, accountB: true },
     auth: 'two real auth-state callbacks on one browser profile',
     completion: { accountA: completedA.final.status, accountB: completedB.final.status },
     destination: { accountA: completedA.final.destination, accountB: completedB.final.destination },
@@ -1056,14 +1253,16 @@ try {
     patterns: [{ urlPattern: `${origin}/app*`, resourceType: 'Document', requestStage: 'Request' }],
   });
 
-  await record(() => runHappy('guest-new-desktop', { classification: 'brand-new', actionId: 'new-user-start', destination: 'personalView' }));
-  await record(() => runHappy('guest-new-390', { classification: 'brand-new', actionId: 'new-user-start', destination: 'personalView' }));
-  await record(() => runHappy('guest-new-320', { classification: 'brand-new', actionId: 'new-user-start', destination: 'personalView' }));
+  await record(() => runHappy('guest-new-desktop', { classification: 'brand-new', actionId: 'open-selected-world', destination: 'worldsView' }));
+  await record(() => runHappy('guest-new-390', { classification: 'brand-new', actionId: 'open-selected-world', destination: 'worldsView' }));
+  await record(() => runHappy('guest-new-320', { classification: 'brand-new', actionId: 'open-selected-world', destination: 'worldsView' }));
   await record(() => runHappy('guest-words', { classification: 'returning-guest-with-local-data', actionId: 'review-words', destination: 'personalView' }));
-  await record(() => runHappy('guest-xp-light', { classification: 'returning-guest-with-local-data', actionId: 'new-user-start', destination: 'personalView' }));
-  await record(() => runHappy('account-new', { classification: 'brand-new', actionId: 'new-user-start', destination: 'personalView' }));
+  await record(() => runHappy('guest-xp-light', { classification: 'returning-guest-with-local-data', actionId: 'open-selected-world', destination: 'worldsView' }));
+  await record(() => runHappy('account-new', { classification: 'brand-new', actionId: 'open-selected-world', destination: 'worldsView' }));
   await record(() => runHappy('account-words', { classification: 'returning-light', actionId: 'review-words', destination: 'personalView' }));
   await record(runProgressAccount);
+  await record(() => runGamerMeaning('guest-games-success', 'completed'));
+  await record(() => runGamerMeaning('guest-games-empty', 'unavailable'));
   await record(runCompletedAccount);
   await record(runAuthClose);
   await record(runAuthSuccess);
@@ -1073,6 +1272,9 @@ try {
   await record(() => runTerminalFailure('profile-cloud-failure', 'profile'));
   await record(runAccountSwitch);
 
+  results.forEach((result) => {
+    result.images = (result.images || []).filter(Boolean);
+  });
   const failures = results.flatMap((result) => (result.failures || []).map((failure) => ({ case: result.id, failure })));
   const summary = {
     generatedAt: new Date().toISOString(),

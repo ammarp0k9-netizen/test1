@@ -17,7 +17,19 @@ function sourceSection(source, start, end) {
   return source.slice(startIndex, endIndex);
 }
 
-const context = vm.createContext({ window: {} });
+class TestCustomEvent {
+  constructor(type, init = {}) {
+    this.type = type;
+    this.detail = init.detail;
+  }
+}
+
+const context = vm.createContext({
+  window: { dispatchEvent() {} },
+  CustomEvent: TestCustomEvent,
+});
+new vm.Script('function getPublishedContentApi() { return window.LootLinguaPublishedContent; }')
+  .runInContext(context);
 new vm.Script(schemaSource, { filename: 'content-schema.recommendations.js' }).runInContext(context);
 new vm.Script(entryContractSource, { filename: 'entry-experience.recommendations.js' }).runInContext(context);
 new vm.Script(sourceSection(
@@ -146,7 +158,7 @@ test('renders badges without sorting, filtering, or mutating progress', () => {
   const recommendationSection = sourceSection(
     worldsSource,
     'const PUBLISHED_WORLD_RECOMMENDATION_COPY',
-    'function appendMetaChip'
+    'async function loadEntryWorldChoices'
   );
   assert.match(renderSection, /items\.forEach\(\(world\) =>/);
   assert.doesNotMatch(renderSection, /items\.(?:sort|filter)\(/);
@@ -154,4 +166,67 @@ test('renders badges without sorting, filtering, or mutating progress', () => {
   assert.match(cardSection, /published-meta-chip-recommendation/);
   assert.match(cardSection, /published-meta-chip-availability/);
   assert.doesNotMatch(recommendationSection, /localStorage|setDoc|updateDoc|Journey|progress/i);
+});
+
+test('Entry preview reads real published Worlds, ranks, and gates without creating Journey progress', async () => {
+  const calls = [];
+  context.window.LootLinguaPublishedContent = {
+    async listPublishedWorlds() {
+      calls.push('worlds');
+      return [
+        { worldId: 'study', primaryInterest: 'study', title: 'Study', rankCount: 2, gateCount: 4 },
+        { worldId: 'games', primaryInterest: 'games', title: 'Games', rankCount: 3, gateCount: 8 },
+        { worldId: 'soon', primaryInterest: 'games', title: 'Soon', comingSoon: true },
+      ];
+    },
+    async getPublishedWorld(worldId) {
+      calls.push(`world:${worldId}`);
+      return { worldId, title: 'Games' };
+    },
+    async listPublishedRanks(worldId) {
+      calls.push(`ranks:${worldId}`);
+      return [{ rankId: 'rank-a1', title: 'A1' }];
+    },
+    async listPublishedGates(worldId, rankId) {
+      calls.push(`gates:${worldId}:${rankId}`);
+      return [{ gateId: 'gate-a1', title: 'Gate' }];
+    },
+    async getPublishedRank(worldId, rankId) {
+      calls.push(`rank:${worldId}:${rankId}`);
+      return { rankId, title: 'A1' };
+    },
+    async getPublishedGate(worldId, rankId, gateId) {
+      calls.push(`gate:${worldId}:${rankId}:${gateId}`);
+      return { gateId, title: 'Gate' };
+    },
+  };
+
+  const preview = context.window.LootLinguaWorldsEntryPreview;
+  const choices = JSON.parse(JSON.stringify(await preview.loadWorldChoices(['games'])));
+  assert.deepEqual(choices.map((world) => world.worldId), ['games', 'study']);
+  assert.equal(choices[0].recommendation.kind, 'interest-match');
+
+  const structure = JSON.parse(JSON.stringify(await preview.loadWorldStructure('games')));
+  assert.equal(structure.world.worldId, 'games');
+  assert.equal(structure.rank.rankId, 'rank-a1');
+  assert.equal(structure.gates[0].gateId, 'gate-a1');
+
+  const saved = JSON.parse(JSON.stringify(await preview.loadJourneyContext({
+    worldId: 'games', activeRankId: 'rank-a1', activeGateId: 'gate-a1',
+  })));
+  assert.equal(saved.world.worldId, 'games');
+  assert.equal(saved.rank.rankId, 'rank-a1');
+  assert.equal(saved.gate.gateId, 'gate-a1');
+  assert.deepEqual(calls, [
+    'worlds',
+    'world:games', 'ranks:games', 'gates:games:rank-a1',
+    'world:games', 'rank:games:rank-a1', 'gate:games:rank-a1:gate-a1',
+  ]);
+
+  const previewSection = sourceSection(
+    worldsSource,
+    'async function loadEntryWorldChoices',
+    'function appendMetaChip'
+  );
+  assert.doesNotMatch(previewSection, /setDoc|updateDoc|beginJourney|awardXP|gateProgress/i);
 });

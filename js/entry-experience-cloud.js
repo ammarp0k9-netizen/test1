@@ -34,8 +34,8 @@ function requireUser(expectedUser) {
   return user;
 }
 
-function entryRef(uid) {
-  return doc(db, 'users', uid, 'entryExperiences', `v${contract().EXPERIENCE_VERSION}`);
+function entryRef(uid, version = contract().EXPERIENCE_VERSION) {
+  return doc(db, 'users', uid, 'entryExperiences', `v${version}`);
 }
 
 function timestampOrNull(value) {
@@ -59,7 +59,9 @@ function cloudPayload(state) {
     themeId: normalized.themeId,
     oasisMode: normalized.oasisMode,
     themeExplicit: normalized.themeExplicit,
-    actionStatus: normalized.actionStatus,
+    journeyStatus: normalized.journeyStatus,
+    selectedWorldId: normalized.selectedWorldId,
+    gamerStatus: normalized.gamerStatus,
     source: normalized.source,
     startedAt: timestampOrNull(normalized.startedAt) || serverTimestamp(),
     updatedAt: serverTimestamp(),
@@ -87,6 +89,23 @@ async function load(user) {
   }
 }
 
+async function loadLegacyPreferences(user) {
+  if (!db) throw entryError('entry/storage-unavailable', 'Entry Experience storage is unavailable.');
+  const current = requireUser(user);
+  try {
+    const snapshot = await getDoc(entryRef(current.uid, 1));
+    requireUser(current);
+    if (!snapshot.exists()) return { exists: false, preferences: null };
+    return {
+      exists: true,
+      preferences: contract().normalizeLegacyPreferences(snapshot.data()),
+    };
+  } catch (error) {
+    if (error?.code === 'entry/auth-changed') throw error;
+    throw entryError('entry/read-failed', 'Could not read legacy Entry preferences.', error);
+  }
+}
+
 async function save(state, user) {
   if (!db) throw entryError('entry/storage-unavailable', 'Entry Experience storage is unavailable.');
   const current = requireUser(user);
@@ -100,7 +119,7 @@ async function save(state, user) {
   }
 }
 
-const API = Object.freeze({ load, save });
+const API = Object.freeze({ load, loadLegacyPreferences, save });
 
 Object.defineProperty(window, 'LootLinguaEntryExperienceCloud', {
   value: API,

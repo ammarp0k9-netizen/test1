@@ -312,7 +312,7 @@ async function unlockChestXP(reason = '') {
   saveChestProgressState(state);
   if (awarded > 0) {
     showXPBadge(awarded, 'dailyLootChest', false);
-    showToast(`انفتح XP الصندوق! +${awarded} XP${reason ? ` — ${reason}` : ''}`, 'success', 5200);
+    showToast(`انفتح الxp المقفل!+${awarded} XP${reason ? ` — ${reason}` : ''}`, 'success', 5200);
   }
   return true;
   })();
@@ -3762,6 +3762,67 @@ function getPublishedWorldRecommendation(world, viewerInterestIds) {
     matchedInterestId: '',
   };
 }
+
+async function loadEntryWorldChoices(interestIds, options) {
+  const api = getPublishedContentApi();
+  const worlds = await api.listPublishedWorlds({ force: Boolean(options?.force) });
+  const available = worlds.filter((world) => world?.comingSoon !== true && world?.isComingSoon !== true);
+  const source = available.length ? available : worlds;
+  return source
+    .map((world, index) => ({
+      ...world,
+      recommendation: getPublishedWorldRecommendation(world, interestIds),
+      __entryOrder: index,
+    }))
+    .sort((left, right) => {
+      const leftMatched = left.recommendation?.kind === 'interest-match' ? 0 : 1;
+      const rightMatched = right.recommendation?.kind === 'interest-match' ? 0 : 1;
+      return leftMatched - rightMatched || left.__entryOrder - right.__entryOrder;
+    })
+    .map(({ __entryOrder, ...world }) => world);
+}
+
+async function loadEntryWorldStructure(worldId, options) {
+  const api = getPublishedContentApi();
+  const settings = { force: Boolean(options?.force) };
+  const [world, ranks] = await Promise.all([
+    api.getPublishedWorld(worldId),
+    api.listPublishedRanks(worldId, settings),
+  ]);
+  const rank = ranks.find((item) => item?.comingSoon !== true && item?.isComingSoon !== true) || ranks[0] || null;
+  const gates = rank
+    ? await api.listPublishedGates(worldId, rank.rankId, settings)
+    : [];
+  return { world, ranks, rank, gates };
+}
+
+async function loadEntryJourneyContext(journey, options) {
+  const worldId = String(journey?.worldId || '');
+  if (!worldId) return { world: null, rank: null, gate: null };
+  const api = getPublishedContentApi();
+  const settings = { force: Boolean(options?.force) };
+  const world = await api.getPublishedWorld(worldId);
+  const rankId = String(journey?.activeRankId || journey?.currentRankId || '');
+  const gateId = String(journey?.activeGateId || journey?.currentGateId || '');
+  const rank = rankId ? await api.getPublishedRank(worldId, rankId) : null;
+  const gate = rankId && gateId ? await api.getPublishedGate(worldId, rankId, gateId) : null;
+  return { world, rank, gate };
+}
+
+const ENTRY_PREVIEW_API = Object.freeze({
+  loadWorldChoices: loadEntryWorldChoices,
+  loadWorldStructure: loadEntryWorldStructure,
+  loadJourneyContext: loadEntryJourneyContext,
+});
+
+Object.defineProperty(window, 'LootLinguaWorldsEntryPreview', {
+  value: ENTRY_PREVIEW_API,
+  configurable: false,
+  enumerable: true,
+  writable: false,
+});
+
+window.dispatchEvent(new CustomEvent('lootlingua:worlds-entry-preview-ready'));
 
 function appendMetaChip(container, text, iconClass, className) {
   if (text === undefined || text === null || text === '') return;

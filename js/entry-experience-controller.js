@@ -20,6 +20,12 @@
     savePromise: Promise.resolve(),
     intentConsuming: false,
     authPromptFocus: null,
+    legacyPreferences: null,
+    previewGeneration: 0,
+    worldsPreview: { status: 'idle', items: [], error: null },
+    structurePreview: { status: 'idle', worldId: '', model: null, error: null },
+    returnPreview: { status: 'idle', worldId: '', model: null, error: null },
+    gamerGuide: null,
   };
 
   function api() {
@@ -91,6 +97,9 @@
     if (!api()) return null;
     const mastery = readJson('lootlinguaWordMastery_guest', {});
     const guestState = api().normalizeEntryState(readJson(api().entryStorageKey({}), null));
+    const legacyPreferences = api().normalizeLegacyPreferences(
+      readJson(api().entryStorageKey({}, 1), null)
+    );
     const snapshot = {
       words: readGuestWords(),
       profile: guestProfileSnapshot(),
@@ -107,6 +116,7 @@
         welcome: localStorage.getItem('lootlingua_welcome_v1_seen') || '',
       },
       entryState: guestState,
+      legacyPreferences,
       capturedAt: Date.now(),
     };
     runtime.capturedGuest = snapshot;
@@ -131,13 +141,16 @@
     writeJson(api().entryStorageKey(identityFor(user)), normalized);
   }
 
-  function recoverTerminalAsActionDraft(state) {
+  function recoverTerminalAsDraft(state) {
     const normalized = api().normalizeEntryState(state);
     if (!normalized || !api().isTerminalState(normalized)) return normalized;
     return api().normalizeEntryState({
       ...normalized,
       status: 'in-progress',
-      currentStep: 'action',
+      currentStep: normalized.classification === 'returning-with-progress' ? 'return' : 'interests',
+      journeyStatus: 'pending',
+      selectedWorldId: '',
+      gamerStatus: 'not-applicable',
       completedAt: 0,
       skippedAt: 0,
       updatedAt: Date.now(),
@@ -148,14 +161,14 @@
     const account = api().normalizeEntryState(cloudState);
     let local = api().normalizeEntryState(localState);
     if (account && api().isTerminalState(account)) return account;
-    const accountNeedsFirstActionProof = account &&
+    const accountNeedsJourneyProof = account &&
       account.status !== 'in-progress' && !api().isTerminalState(account);
-    if (accountNeedsFirstActionProof && local?.status === 'in-progress') return local;
-    const localNeedsFirstActionProof = local &&
+    if (accountNeedsJourneyProof && local?.status === 'in-progress') return local;
+    const localNeedsJourneyProof = local &&
       local.status !== 'in-progress' && !api().isTerminalState(local);
-    if (accountNeedsFirstActionProof && localNeedsFirstActionProof) {
-      // Keep the legacy terminal marker intact until boot has the current
-      // learning signals. Turning two old completed caches into an in-progress
+    if (accountNeedsJourneyProof && localNeedsJourneyProof) {
+      // Keep the unverified terminal marker intact until boot has the current
+      // learning signals. Turning two completed caches into an in-progress
       // merge here would lose whether recovery must restart at interests or use
       // the real-progress shortcut.
       return Number(local.updatedAt || 0) > Number(account.updatedAt || 0)
@@ -164,7 +177,7 @@
     }
     if (local && api().isTerminalState(local)) {
       if (!cloudReadSucceeded) return local;
-      local = recoverTerminalAsActionDraft(local);
+      local = recoverTerminalAsDraft(local);
     }
     if (!account) return local;
     if (!local) return account;
@@ -276,6 +289,9 @@
 
   async function loadAccountEntry(user, token) {
     const local = localStateFor(user);
+    let legacyPreferences = api().normalizeLegacyPreferences(
+      readJson(api().entryStorageKey(identityFor(user), 1), null)
+    );
     let account = local;
     let cloudReadFailed = false;
     let cloudReadSucceeded = false;
@@ -290,11 +306,20 @@
         cloudReadFailed = true;
       }
     }
+    if (!account && cloud()?.loadLegacyPreferences) {
+      try {
+        const legacy = await cloud().loadLegacyPreferences(user);
+        if (token !== runtime.bootToken) return { state: null, legacyPreferences: null, cloudReadFailed: true };
+        legacyPreferences = legacy.preferences || legacyPreferences;
+      } catch (error) {
+        if (error?.code === 'entry/auth-changed') return { state: null, legacyPreferences: null, cloudReadFailed: true };
+      }
+    }
 
     let guest = runtime.capturedGuest?.entryState || null;
     if (guest && guest.status !== 'in-progress' && !api().isTerminalState(guest)) {
-      // Anonymous completed/skipped v1 documents came from the broken flow and
-      // carry no durable first-action proof. Migrate them as a full draft.
+      // A malformed v2 terminal snapshot carries no required Journey proof.
+      // Recover it as a draft instead of suppressing Product Entry.
       guest = api().recoverUnverifiedTerminal(guest, {
         classification: 'returning-guest-with-local-data',
       });
@@ -316,36 +341,38 @@
           runtime.capturedGuest.entryState = null;
         } catch (_) {
           cloudReadFailed = true;
-          account = recoverTerminalAsActionDraft(account);
+          account = recoverTerminalAsDraft(account);
         }
       } else if (account && api().isTerminalState(account)) {
-        // The account already owns a terminal v1. Claim this anonymous snapshot
+        // The account already owns a terminal v2. Claim this anonymous snapshot
         // so it cannot later complete a different account on the same device.
         claimGuestEntry(user, guest);
       }
     }
     if (!cloudReadSucceeded && !cloud()?.load) account = reconcileAccountDraft(null, local, false);
-    return { state: account, cloudReadFailed };
+    return { state: account, legacyPreferences, cloudReadFailed };
   }
 
   function existingPreferences(user, state, profileSnapshot) {
     const profile = profileSnapshot?.data || {};
+    const legacy = runtime.legacyPreferences || {};
     const preservableThemes = api().PRESERVABLE_THEME_IDS || api().THEME_IDS;
-    const themeId = state?.themeId || (
+    const themeId = state?.themeId || legacy.themeId || (
       preservableThemes.includes(profile.theme) ? profile.theme : ''
     ) || (!user && preservableThemes.includes(runtime.capturedGuest?.profile?.theme)
       ? runtime.capturedGuest.profile.theme
       : '');
     const scopedOasis = localStorage.getItem(api().oasisModeStorageKey(identityFor(user)));
     return {
-      interestIds: state?.interestIds || [],
+      interestIds: state?.interestIds?.length ? state.interestIds : (legacy.interestIds || []),
       themeId,
-      oasisMode: state?.oasisMode || profile.oasisMode || scopedOasis || 'light',
+      oasisMode: state?.oasisMode || legacy.oasisMode || profile.oasisMode || scopedOasis || 'light',
     };
   }
 
   function baselinePreferences(user, state, profileSnapshot) {
     const profile = profileSnapshot?.data || {};
+    const legacy = runtime.legacyPreferences || {};
     const scopedTheme = localStorage.getItem(api().themeStorageKey(identityFor(user)));
     const scopedOasis = localStorage.getItem(api().oasisModeStorageKey(identityFor(user)));
     const preservableThemes = api().PRESERVABLE_THEME_IDS || api().THEME_IDS;
@@ -357,7 +384,9 @@
       ? scopedTheme
       : (profileTheme || guestTheme || (state?.themeExplicit ? '' : state?.themeId) || '');
     const profileInterests = Array.isArray(profile.interestIds) ? profile.interestIds : [];
-    const initialInterestIds = profileInterests.length ? profileInterests : (state?.interestIds || []);
+    const initialInterestIds = profileInterests.length
+      ? profileInterests
+      : (state?.interestIds?.length ? state.interestIds : (legacy.interestIds || []));
     return {
       interestsStatus: initialInterestIds.length
         ? 'selected'
@@ -377,6 +406,10 @@
     const token = ++runtime.bootToken;
     const user = root.__lootlinguaAuthUser || null;
     runtime.user = user;
+    runtime.previewGeneration += 1;
+    runtime.worldsPreview = { status: 'idle', items: [], error: null };
+    runtime.structurePreview = { status: 'idle', worldId: '', model: null, error: null };
+    runtime.returnPreview = { status: 'idle', worldId: '', model: null, error: null };
     if (user) {
       claimGuestPendingIntentForUser(user);
       claimGuestThemeForUser(user);
@@ -393,10 +426,14 @@
     runtime.profile = profileSnapshot;
     let entryState = localStateFor(user);
     let entryCloudReadFailed = false;
+    runtime.legacyPreferences = user
+      ? api().normalizeLegacyPreferences(readJson(api().entryStorageKey(identityFor(user), 1), null))
+      : (runtime.capturedGuest?.legacyPreferences || null);
     if (user) {
       const loaded = await loadAccountEntry(user, token);
       if (token !== runtime.bootToken) return;
       entryState = loaded.state;
+      runtime.legacyPreferences = loaded.legacyPreferences || runtime.legacyPreferences;
       entryCloudReadFailed = loaded.cloudReadFailed;
     }
 
@@ -478,7 +515,9 @@
       entryState = api().recoverUnverifiedTerminal(entryState, runtime.presentation, Date.now());
       persistLocalState(entryState, user);
     }
-    runtime.action = api().resolveNextAction(signals);
+    runtime.action = api().resolveNextAction(signals, {
+      selectedWorldId: entryState?.selectedWorldId || '',
+    });
     runtime.baselinePreferences = baselinePreferences(user, entryState, profileSnapshot);
 
     if (entryState && !api().shouldPresent(entryState)) {
@@ -494,7 +533,7 @@
     );
     announceEntryState();
     open();
-    if (user && runtime.state.currentStep === 'action') {
+    if (user && runtime.state.currentStep === 'destination') {
       const resumed = await consumePendingJourneyIntent({ allowWhileOpen: true });
       if (resumed && token === runtime.bootToken && runtime.state?.status === 'in-progress') {
         try {
@@ -536,8 +575,12 @@
   }
 
   function stepIndicator(step) {
-    const index = step === 'interests' ? 1 : (step === 'theme' ? 2 : 3);
-    return `الخطوة ${index} من 3`;
+    const hasGames = runtime.state?.interestIds?.includes('games');
+    const order = hasGames
+      ? ['interests', 'theme', 'worlds', 'journey', 'context', 'destination']
+      : ['interests', 'theme', 'worlds', 'journey', 'destination'];
+    const index = Math.max(0, order.indexOf(step)) + 1;
+    return `الخطوة ${index} من ${order.length}`;
   }
 
   function renderInterests() {
@@ -629,57 +672,302 @@
         <p class="entry-helper ready">${explicit ? 'سيُطبّق اختيارك عند إكمال الإعداد' : (runtime.state.themeId ? 'لن نغيّر مظهرك الحالي ما لم تختر مظهرًا آخر' : 'LootLingua هو الخيار الافتراضي ويمكن تغييره لاحقًا')}</p>
         <div class="entry-actions">
           <button type="button" class="entry-secondary" data-entry-action="back"><i class="fa-solid fa-arrow-right" aria-hidden="true"></i> رجوع</button>
-          <button type="button" class="entry-primary" data-entry-action="continue-action">جرّب أول خطوة <i class="fa-solid fa-wand-magic-sparkles" aria-hidden="true"></i></button>
+          <button type="button" class="entry-primary" data-entry-action="${isSettings ? 'complete' : 'continue-theme'}">${isSettings ? 'حفظ المظهر' : 'اكتشف العوالم'} <i class="fa-solid fa-compass" aria-hidden="true"></i></button>
         </div>
       </footer>
     `;
     bindPanelActions();
   }
 
-  function renderAction() {
+  function previewApi() {
+    return root.LootLinguaWorldsEntryPreview;
+  }
+
+  function currentNextAction() {
+    runtime.action = api().resolveNextAction(runtime.signals || {}, {
+      selectedWorldId: runtime.state?.selectedWorldId || '',
+    });
+    return runtime.action;
+  }
+
+  function selectedWorldPreview() {
+    const id = String(runtime.state?.selectedWorldId || '');
+    const choice = runtime.worldsPreview.items.find((item) => String(item?.worldId || '') === id);
+    return choice || runtime.structurePreview.model?.world || null;
+  }
+
+  function worldPreviewVisual(world) {
+    const cover = String(world?.cover || world?.coverUrl || world?.imageUrl || world?.image || '').trim();
+    if (cover) return `<img src="${escapeHtml(cover)}" alt="" loading="lazy" decoding="async">`;
+    const icon = String(world?.icon || '').trim();
+    if (/^(fa-|fas |far |fab )/.test(icon)) return `<i class="${escapeHtml(icon)}" aria-hidden="true"></i>`;
+    if (icon && /\p{Extended_Pictographic}/u.test(icon)) return `<span class="entry-world-emoji">${escapeHtml(icon)}</span>`;
+    return '<i class="fa-solid fa-earth-americas" aria-hidden="true"></i>';
+  }
+
+  async function ensureWorldChoices(force) {
+    if (!runtime.state || runtime.state.currentStep !== 'worlds') return;
+    if (!force && ['loading', 'ready'].includes(runtime.worldsPreview.status)) return;
+    const provider = previewApi();
+    if (!provider?.loadWorldChoices) {
+      runtime.worldsPreview = { status: 'waiting', items: [], error: null };
+      return;
+    }
+    const generation = ++runtime.previewGeneration;
+    runtime.worldsPreview = { status: 'loading', items: [], error: null };
+    renderWorldsOnboarding();
+    try {
+      const items = await provider.loadWorldChoices(runtime.state.interestIds, { force: Boolean(force) });
+      if (generation !== runtime.previewGeneration || runtime.state?.currentStep !== 'worlds') return;
+      runtime.worldsPreview = { status: 'ready', items: Array.isArray(items) ? items : [], error: null };
+    } catch (error) {
+      if (generation !== runtime.previewGeneration || runtime.state?.currentStep !== 'worlds') return;
+      runtime.worldsPreview = { status: 'error', items: [], error };
+    }
+    renderWorldsOnboarding();
+    focusEntryHeading();
+  }
+
+  async function ensureStructurePreview(force) {
+    if (!runtime.state || runtime.state.currentStep !== 'journey') return;
+    const worldId = String(runtime.state.selectedWorldId || '');
+    if (!worldId) return;
+    if (
+      !force &&
+      ['loading', 'ready'].includes(runtime.structurePreview.status) &&
+      runtime.structurePreview.worldId === worldId
+    ) return;
+    const provider = previewApi();
+    if (!provider?.loadWorldStructure) {
+      runtime.structurePreview = { status: 'waiting', worldId, model: null, error: null };
+      return;
+    }
+    const generation = ++runtime.previewGeneration;
+    runtime.structurePreview = { status: 'loading', worldId, model: null, error: null };
+    renderJourneyStructure();
+    try {
+      const model = await provider.loadWorldStructure(worldId, { force: Boolean(force) });
+      if (generation !== runtime.previewGeneration || runtime.state?.currentStep !== 'journey') return;
+      runtime.structurePreview = { status: 'ready', worldId, model, error: null };
+    } catch (error) {
+      if (generation !== runtime.previewGeneration || runtime.state?.currentStep !== 'journey') return;
+      runtime.structurePreview = { status: 'error', worldId, model: null, error };
+    }
+    renderJourneyStructure();
+    focusEntryHeading();
+  }
+
+  async function ensureReturnPreview(force) {
+    if (!runtime.state || runtime.state.currentStep !== 'return') return;
+    const journey = runtime.signals?.activeJourney;
+    const worldId = String(journey?.worldId || '');
+    if (!worldId) return;
+    if (!force && ['loading', 'ready'].includes(runtime.returnPreview.status) && runtime.returnPreview.worldId === worldId) return;
+    const provider = previewApi();
+    if (!provider?.loadJourneyContext) {
+      runtime.returnPreview = { status: 'waiting', worldId, model: null, error: null };
+      return;
+    }
+    const generation = ++runtime.previewGeneration;
+    runtime.returnPreview = { status: 'loading', worldId, model: null, error: null };
+    renderReturnJourney();
+    try {
+      const model = await provider.loadJourneyContext(journey, { force: Boolean(force) });
+      if (generation !== runtime.previewGeneration || runtime.state?.currentStep !== 'return') return;
+      runtime.returnPreview = { status: 'ready', worldId, model, error: null };
+    } catch (error) {
+      if (generation !== runtime.previewGeneration || runtime.state?.currentStep !== 'return') return;
+      runtime.returnPreview = { status: 'error', worldId, model: null, error };
+    }
+    renderReturnJourney();
+    focusEntryHeading();
+  }
+
+  function renderWorldsOnboarding() {
     const panel = panelElement();
-    if (!panel) return;
-    const action = runtime.action || api().resolveNextAction(runtime.signals || {});
-    const isProgressReturn = runtime.presentation?.classification === 'returning-with-progress';
-    const firstActionCompleted = runtime.state?.actionStatus === 'completed';
-    const showDestination = isProgressReturn || firstActionCompleted;
+    if (!panel || !runtime.state) return;
+    const selectedId = String(runtime.state.selectedWorldId || '');
+    const state = runtime.worldsPreview;
+    const loading = state.status === 'loading' || state.status === 'waiting' || state.status === 'idle';
+    const empty = state.status === 'ready' && !state.items.length;
+    const failed = state.status === 'error';
+    let content = '';
+    if (loading) {
+      content = `<div class="entry-world-grid" aria-label="جاري تحميل العوالم">
+        ${[1, 2, 3].map(() => '<span class="entry-world-card entry-world-skeleton" aria-hidden="true"></span>').join('')}
+      </div><p class="entry-helper ready">جاري قراءة العوالم المنشورة…</p>`;
+      queueMicrotask(() => ensureWorldChoices(false));
+    } else if (failed || empty) {
+      content = `<div class="entry-preview-fallback" role="status">
+        <i class="fa-solid ${failed ? 'fa-cloud-arrow-down' : 'fa-compass'}" aria-hidden="true"></i>
+        <strong>${failed ? 'تعذر تحميل العوالم الآن' : 'لا توجد عوالم منشورة جاهزة للعرض الآن'}</strong>
+        <span>لن نخترع عالمًا بديلًا. يمكنك فهم بنية الرحلة ثم فتح مساحة العوالم الحقيقية.</span>
+        ${failed ? '<button type="button" class="entry-secondary" data-entry-action="retry-worlds"><i class="fa-solid fa-rotate-right" aria-hidden="true"></i> إعادة المحاولة</button>' : ''}
+      </div>`;
+    } else {
+      content = `<div class="entry-world-grid" role="radiogroup" aria-label="اختر عالمًا للتعرّف إلى رحلته">
+        ${state.items.map((world) => {
+          const selected = String(world.worldId || '') === selectedId;
+          const recommended = world.recommendation?.kind === 'interest-match';
+          return `<button type="button" role="radio" aria-checked="${selected}" class="entry-world-card${selected ? ' selected' : ''}${recommended ? ' recommended' : ''}" data-entry-world="${escapeHtml(world.worldId)}">
+            <span class="entry-world-visual">${worldPreviewVisual(world)}</span>
+            <span class="entry-world-copy">
+              ${recommended ? '<small><i class="fa-solid fa-wand-magic-sparkles" aria-hidden="true"></i> مقترح حسب اهتماماتك</small>' : '<small>عالم منشور</small>'}
+              <strong>${escapeHtml(world.title || world.name || 'عالم تعلّم')}</strong>
+              <span>${escapeHtml(world.description || world.subtitle || 'رحلة منظمة عبر رتب وبوابات.')}</span>
+              <em>${Number(world.rankCount) || 0} رتبة · ${Number(world.gateCount) || 0} بوابة</em>
+            </span>
+            <i class="fa-solid fa-circle-check entry-world-check" aria-hidden="true"></i>
+          </button>`;
+        }).join('')}
+      </div>`;
+    }
     panel.innerHTML = `
-      <div class="entry-action-screen">
-        <header class="entry-header entry-action-header">
-          <span class="entry-eyebrow">${isProgressReturn ? 'تقدّمك في مكانه' : 'جرّب قيمة LootLingua'}</span>
-          <span class="entry-step-label">${isProgressReturn ? 'عودة سريعة' : stepIndicator('action')}</span>
-        </header>
-        <span class="entry-action-icon"><i class="fa-solid ${isProgressReturn ? 'fa-route' : 'fa-language'}" aria-hidden="true"></i></span>
-        <h1 id="entryExperienceTitle">${isProgressReturn ? 'رحلتك جاهزة للمتابعة' : 'من كلمة إلى معرفة قابلة للمراجعة'}</h1>
-        ${isProgressReturn ? `
-          <p>${escapeHtml(action.hint)}</p>
-        ` : `
-          <p>اكشف معنى الكلمة لترى كيف يحوّل LootLingua ما تقابله إلى بطاقة واضحة يمكنك حفظها ومراجعتها لاحقًا.</p>
-          <div class="entry-first-action-card${firstActionCompleted ? ' is-revealed' : ''}">
-            <span class="entry-first-action-label">كلمة تجريبية</span>
-            <strong lang="en" dir="ltr">Adventure</strong>
-            <span class="entry-first-action-meaning" ${firstActionCompleted ? '' : 'hidden'}>مغامرة · تجربة مليئة بالاكتشاف</span>
-            ${firstActionCompleted
-              ? '<span class="entry-first-action-success"><i class="fa-solid fa-circle-check" aria-hidden="true"></i> هكذا تبدأ بطاقتك، من دون إنشاء حساب.</span>'
-              : '<button type="button" class="entry-primary entry-reveal-action" data-entry-action="reveal-value">اكشف المعنى</button>'}
-          </div>
-          ${showDestination ? `<p class="entry-action-destination-hint">${escapeHtml(action.hint)}</p>` : ''}
-        `}
-        ${showDestination ? `
-          <div class="entry-action-destinations">
-            ${isProgressReturn ? '' : '<button type="button" class="entry-secondary" data-entry-action="back"><i class="fa-solid fa-arrow-right" aria-hidden="true"></i> رجوع</button>'}
-            <button type="button" class="entry-primary entry-action-primary" data-entry-cta="${action.id}">${escapeHtml(action.label)} <i class="fa-solid fa-arrow-left" aria-hidden="true"></i></button>
-            ${action.secondaryId ? `<button type="button" class="entry-secondary entry-action-secondary" data-entry-cta="${action.secondaryId}">${escapeHtml(action.secondaryLabel)}</button>` : ''}
-          </div>
-        ` : ''}
+      <header class="entry-header"><div><span class="entry-eyebrow">اهتماماتك تفتح لك أبوابًا حقيقية</span><span class="entry-step-label">${stepIndicator('worlds')}</span></div></header>
+      <div class="entry-copy entry-copy-compact">
+        <h1 id="entryExperienceTitle">اختر عالمًا يثير فضولك</h1>
+        <p>كل بطاقة هنا عالم منشور فعليًا. اختيارك يحدد سياق الجولة فقط؛ لن يبدأ Journey ولن يغيّر تقدمك.</p>
       </div>
-    `;
+      ${content}
+      <footer class="entry-footer">
+        <p class="entry-helper${selectedId || failed || empty ? ' ready' : ''}">${selectedId ? 'اختيارك محفوظ — سنريك كيف تُبنى رحلة هذا العالم.' : (failed || empty ? 'يمكنك متابعة معاينة بنية الرحلة من دون محتوى مختلق.' : 'اختر عالمًا واحدًا للمتابعة.')}</p>
+        <div class="entry-actions">
+          <button type="button" class="entry-secondary" data-entry-action="back"><i class="fa-solid fa-arrow-right" aria-hidden="true"></i> رجوع</button>
+          ${failed || empty
+            ? '<button type="button" class="entry-primary" data-entry-action="continue-worlds-fallback">افهم بنية الرحلة <i class="fa-solid fa-route" aria-hidden="true"></i></button>'
+            : `<button type="button" class="entry-primary" data-entry-action="continue-worlds" ${selectedId ? '' : 'disabled'}>استكشف رحلته <i class="fa-solid fa-arrow-left" aria-hidden="true"></i></button>`}
+        </div>
+      </footer>`;
+    bindPanelActions();
+  }
+
+  function structureNodes(model) {
+    const ranks = Array.isArray(model?.ranks) ? model.ranks.slice(0, 3) : [];
+    const gates = Array.isArray(model?.gates) ? model.gates.slice(0, 4) : [];
+    const rankNodes = ranks.length
+      ? ranks.map((rank, index) => `<button type="button" class="entry-route-node entry-route-rank" data-entry-route-node="rank:${escapeHtml(rank.rankId)}"><i class="fa-solid fa-ranking-star" aria-hidden="true"></i><span>${escapeHtml(rank.title || `الرتبة ${index + 1}`)}</span></button>`).join('')
+      : '<button type="button" class="entry-route-node entry-route-rank" data-entry-route-node="rank:example"><i class="fa-solid fa-ranking-star" aria-hidden="true"></i><span>رتبة منظّمة</span></button>';
+    const gateNodes = gates.length
+      ? gates.map((gate, index) => `<button type="button" class="entry-route-node entry-route-gate" data-entry-route-node="gate:${escapeHtml(gate.gateId)}"><span>${index + 1}</span><strong>${escapeHtml(gate.title || `البوابة ${index + 1}`)}</strong><small>${Number(gate.wordCount) || 0} كلمة</small></button>`).join('')
+      : [1, 2, 3].map((index) => `<button type="button" class="entry-route-node entry-route-gate" data-entry-route-node="gate:example-${index}"><span>${index}</span><strong>بوابة ${index}</strong><small>تعلّم ومراجعة</small></button>`).join('');
+    return `<div class="entry-route-ranks">${rankNodes}</div><div class="entry-route-line" aria-hidden="true"></div><div class="entry-route-gates">${gateNodes}</div>`;
+  }
+
+  function renderJourneyStructure() {
+    const panel = panelElement();
+    if (!panel || !runtime.state) return;
+    const selectedId = String(runtime.state.selectedWorldId || '');
+    const status = runtime.structurePreview.status;
+    const model = runtime.structurePreview.model;
+    const explored = runtime.state.journeyStatus === 'structure-explored';
+    if (selectedId && ['idle', 'waiting'].includes(status)) queueMicrotask(() => ensureStructurePreview(false));
+    const loading = selectedId && ['idle', 'waiting', 'loading'].includes(status);
+    const failed = selectedId && status === 'error';
+    const world = model?.world || selectedWorldPreview();
+    panel.innerHTML = `
+      <header class="entry-header"><div><span class="entry-eyebrow">معاينة تعليمية — لا تغيّر تقدمك</span><span class="entry-step-label">${stepIndicator('journey')}</span></div></header>
+      <div class="entry-copy entry-copy-compact">
+        <h1 id="entryExperienceTitle">${escapeHtml(world?.title || 'من العالم إلى بوابة تتقنها')}</h1>
+        <p>العالم ليس قائمة كلمات؛ هو طريق من رتب، وكل رتبة تُفتح عبر بوابات تتعلم كلماتها ثم تعود لمراجعتها.</p>
+      </div>
+      <section class="entry-route-preview${explored ? ' explored' : ''}" aria-label="بنية رحلة تعليمية">
+        <div class="entry-route-world"><span>${worldPreviewVisual(world)}</span><div><small>العالم</small><strong>${escapeHtml(world?.title || 'عالم التعلّم')}</strong></div></div>
+        ${loading ? '<div class="entry-route-loading"><i class="fa-solid fa-circle-notch fa-spin" aria-hidden="true"></i> جاري تحميل الرتب والبوابات المنشورة…</div>' : structureNodes(model)}
+        ${failed ? '<button type="button" class="entry-secondary entry-route-retry" data-entry-action="retry-structure"><i class="fa-solid fa-rotate-right" aria-hidden="true"></i> أعد تحميل البنية الحقيقية</button>' : ''}
+      </section>
+      ${explored ? `<div class="entry-learning-loop" role="status">
+        <span><i class="fa-solid fa-book-open" aria-hidden="true"></i><strong>تتعلّم</strong><small>كلمات البوابة</small></span>
+        <i class="fa-solid fa-arrow-left" aria-hidden="true"></i>
+        <span><i class="fa-solid fa-rotate" aria-hidden="true"></i><strong>تراجع</strong><small>الكلمات لا تختفي بعد عرضها</small></span>
+        <i class="fa-solid fa-arrow-left" aria-hidden="true"></i>
+        <span><i class="fa-solid fa-unlock-keyhole" aria-hidden="true"></i><strong>تتقدّم</strong><small>بوابة بعد بوابة</small></span>
+      </div>` : '<p class="entry-interaction-callout"><i class="fa-solid fa-hand-pointer" aria-hidden="true"></i> افتح رتبة أو بوابة في الخريطة لترى كيف يتحرك التعلم.</p>'}
+      <footer class="entry-footer"><p class="entry-helper${explored ? ' ready' : ''}">${explored ? 'الآن عرفت الحلقة: تعلّم، مراجعة، ثم تقدّم تدريجي.' : 'هذا تفاعل للشرح فقط، وليس حالة تقدم حقيقية.'}</p>
+        <div class="entry-actions"><button type="button" class="entry-secondary" data-entry-action="back"><i class="fa-solid fa-arrow-right" aria-hidden="true"></i> رجوع</button><button type="button" class="entry-primary" data-entry-action="continue-journey" ${explored ? '' : 'disabled'}>حدد خطوتي التالية <i class="fa-solid fa-arrow-left" aria-hidden="true"></i></button></div>
+      </footer>`;
+    bindPanelActions();
+  }
+
+  function renderContextFeature() {
+    const panel = panelElement();
+    if (!panel || !runtime.state) return;
+    const status = runtime.state.gamerStatus;
+    const guestQuotaUnavailable = !runtime.user && (
+      localStorage.getItem('hasUsedNormalGuestShot') === '1' ||
+      localStorage.getItem('hasUsedGamerGuestShot') === '1'
+    );
+    const finished = ['completed', 'unavailable'].includes(status);
+    panel.innerHTML = `
+      <header class="entry-header"><div><span class="entry-eyebrow">ميزة من سياق اهتمامك</span><span class="entry-step-label">${stepIndicator('context')}</span></div></header>
+      <div class="entry-context-layout">
+        <span class="entry-context-icon"><i class="fa-solid fa-gamepad" aria-hidden="true"></i></span>
+        <div class="entry-copy entry-copy-compact"><h1 id="entryExperienceTitle">الكلمة العامة قد تتغير داخل اللعبة</h1><p>يمكنك تجربة البحث الحقيقي: تظهر الترجمة العامة أولًا، ثم تختار بنفسك زر «معنى الألعاب» الموجود تحت النتائج.</p></div>
+        <div class="entry-context-example" aria-hidden="true"><strong lang="en" dir="ltr">Spawn</strong><span>ترجمة عامة</span><i class="fa-solid fa-arrow-left"></i><span><i class="fa-solid fa-gamepad"></i> سياق الألعاب</span></div>
+        ${guestQuotaUnavailable ? '<p class="entry-context-note"><i class="fa-solid fa-circle-info" aria-hidden="true"></i> تجربة البحث المجانية استُخدمت على هذا الجهاز. لن نطلب تسجيل الدخول بسبب ذلك؛ يمكنك متابعة الجولة.</p>' : ''}
+        ${finished ? `<p class="entry-context-note ${status === 'completed' ? 'success' : ''}"><i class="fa-solid ${status === 'completed' ? 'fa-circle-check' : 'fa-circle-info'}" aria-hidden="true"></i>${status === 'completed' ? 'جرّبت الفرق داخل البحث الحقيقي.' : 'لم تتوفر نتيجة سياقية هذه المرة، ويمكنك المحاولة لاحقًا من القاموس.'}</p>` : ''}
+      </div>
+      <footer class="entry-footer"><p class="entry-helper ready">هذه الميزة اختيارية ولا تحدد نجاح الجولة.</p><div class="entry-actions">
+        ${finished ? '<button type="button" class="entry-secondary" data-entry-action="back"><i class="fa-solid fa-arrow-right" aria-hidden="true"></i> رجوع</button><button type="button" class="entry-primary" data-entry-action="continue-context">تابع إلى خطوتك <i class="fa-solid fa-arrow-left" aria-hidden="true"></i></button>' : `
+          <button type="button" class="entry-secondary" data-entry-action="skip-gamer-demo">ليس الآن</button>
+          <button type="button" class="entry-primary" data-entry-action="start-gamer-demo" ${guestQuotaUnavailable ? 'disabled' : ''}>${status === 'running' ? 'استأنف البحث الحقيقي' : 'جرّبها في البحث الحقيقي'} <i class="fa-solid fa-arrow-up-right-from-square" aria-hidden="true"></i></button>`}
+      </div></footer>`;
+    bindPanelActions();
+  }
+
+  function renderReturnJourney() {
+    const panel = panelElement();
+    if (!panel || !runtime.state) return;
+    const journey = runtime.signals?.activeJourney || {};
+    const model = runtime.returnPreview.model;
+    const reviewed = runtime.state.journeyStatus === 'return-reviewed';
+    if (['idle', 'waiting'].includes(runtime.returnPreview.status)) queueMicrotask(() => ensureReturnPreview(false));
+    const worldTitle = model?.world?.title || 'رحلتك الحالية';
+    const rankTitle = model?.rank?.title || journey.activeRankId || 'الرتبة الحالية';
+    const gateTitle = model?.gate?.title || journey.activeGateId || 'البوابة الحالية';
+    panel.innerHTML = `
+      <header class="entry-header entry-action-header"><span class="entry-eyebrow">تقدّمك الحقيقي محفوظ</span><span class="entry-step-label">عودة سريعة</span></header>
+      <div class="entry-copy entry-copy-compact"><h1 id="entryExperienceTitle">أعدناك إلى موضعك، لا إلى بداية جديدة</h1><p>النظام الجديد ينظم التعلم في عالم، ثم رتبة، ثم بوابة. هذه البطاقة تقرأ رحلتك الفعلية ولا تغيّرها.</p></div>
+      <section class="entry-saved-route${reviewed ? ' reviewed' : ''}">
+        <span><i class="fa-solid fa-earth-americas" aria-hidden="true"></i><small>العالم</small><strong>${escapeHtml(worldTitle)}</strong></span>
+        <i class="fa-solid fa-angle-left" aria-hidden="true"></i>
+        <span><i class="fa-solid fa-ranking-star" aria-hidden="true"></i><small>الرتبة</small><strong>${escapeHtml(rankTitle)}</strong></span>
+        <i class="fa-solid fa-angle-left" aria-hidden="true"></i>
+        <span><i class="fa-solid fa-dungeon" aria-hidden="true"></i><small>البوابة</small><strong>${escapeHtml(gateTitle)}</strong></span>
+      </section>
+      ${reviewed ? '<p class="entry-context-note success"><i class="fa-solid fa-circle-check" aria-hidden="true"></i> هذا هو موضعك المحفوظ، وسنفتحه كما هو.</p>' : '<button type="button" class="entry-primary entry-inspect-return" data-entry-action="review-return"><i class="fa-solid fa-location-crosshairs" aria-hidden="true"></i> أرني موضعي في الرحلة</button>'}
+      <footer class="entry-footer"><div class="entry-actions entry-actions-single"><button type="button" class="entry-primary" data-entry-action="continue-return" ${reviewed ? '' : 'disabled'}>تابع إلى رحلتك <i class="fa-solid fa-arrow-left" aria-hidden="true"></i></button></div></footer>`;
+    bindPanelActions();
+  }
+
+  function renderDestination() {
+    const panel = panelElement();
+    if (!panel || !runtime.state) return;
+    const action = currentNextAction();
+    const selectedWorld = selectedWorldPreview();
+    panel.innerHTML = `
+      <div class="entry-action-screen entry-destination-screen">
+        <header class="entry-header entry-action-header"><span class="entry-eyebrow">خطوتك التالية واضحة</span><span class="entry-step-label">${runtime.presentation?.classification === 'returning-with-progress' ? 'عودة سريعة' : stepIndicator('destination')}</span></header>
+        <span class="entry-action-icon"><i class="fa-solid ${action.id.includes('journey') ? 'fa-route' : (action.id === 'review-words' ? 'fa-rotate' : 'fa-compass')}" aria-hidden="true"></i></span>
+        <h1 id="entryExperienceTitle">${escapeHtml(action.label)}</h1>
+        <p>${escapeHtml(action.hint)}</p>
+        ${selectedWorld ? `<div class="entry-selected-world-summary"><span>${worldPreviewVisual(selectedWorld)}</span><div><small>العالم الذي اخترته</small><strong>${escapeHtml(selectedWorld.title || selectedWorld.name || 'عالم التعلّم')}</strong></div></div>` : ''}
+        <div class="entry-journey-recap"><span><i class="fa-solid fa-earth-americas"></i> عالم</span><i class="fa-solid fa-angle-left"></i><span><i class="fa-solid fa-ranking-star"></i> رتب</span><i class="fa-solid fa-angle-left"></i><span><i class="fa-solid fa-dungeon"></i> بوابات</span><i class="fa-solid fa-angle-left"></i><span><i class="fa-solid fa-rotate"></i> تعلم ومراجعة</span></div>
+        <div class="entry-action-destinations">
+          ${runtime.presentation?.classification === 'returning-with-progress' ? '' : '<button type="button" class="entry-secondary" data-entry-action="back"><i class="fa-solid fa-arrow-right" aria-hidden="true"></i> رجوع</button>'}
+          <button type="button" class="entry-primary entry-action-primary" data-entry-cta="${action.id}">${escapeHtml(action.label)} <i class="fa-solid fa-arrow-left" aria-hidden="true"></i></button>
+          ${action.secondaryId ? `<button type="button" class="entry-secondary entry-action-secondary" data-entry-cta="${action.secondaryId}">${escapeHtml(action.secondaryLabel)}</button>` : ''}
+        </div>
+      </div>`;
     bindPanelActions();
   }
 
   function render() {
     if (!runtime.state) return;
-    if (runtime.state.status !== 'in-progress' || runtime.state.currentStep === 'action') renderAction();
+    if (runtime.state.status !== 'in-progress' || runtime.state.currentStep === 'destination') renderDestination();
+    else if (runtime.state.currentStep === 'return') renderReturnJourney();
+    else if (runtime.state.currentStep === 'context') renderContextFeature();
+    else if (runtime.state.currentStep === 'journey') renderJourneyStructure();
+    else if (runtime.state.currentStep === 'worlds') renderWorldsOnboarding();
     else if (runtime.state.currentStep === 'theme') renderTheme();
     else renderInterests();
   }
@@ -701,6 +989,12 @@
     });
     panel.querySelectorAll('[data-entry-theme]').forEach((button) => {
       button.addEventListener('click', () => selectTheme(button.dataset.entryTheme));
+    });
+    panel.querySelectorAll('[data-entry-world]').forEach((button) => {
+      button.addEventListener('click', () => selectWorld(button.dataset.entryWorld));
+    });
+    panel.querySelectorAll('[data-entry-route-node]').forEach((button) => {
+      button.addEventListener('click', () => inspectJourneyStructure(button));
     });
     panel.querySelectorAll('[data-entry-oasis-mode]').forEach((button) => {
       button.addEventListener('click', () => selectOasisMode(button.dataset.entryOasisMode));
@@ -759,6 +1053,163 @@
     transition({ type: 'select-theme', themeId: 'ocean', oasisMode: mode });
     renderTheme();
     requestAnimationFrame(() => panelElement()?.querySelector(`[data-entry-oasis-mode="${mode}"]`)?.focus());
+  }
+
+  async function selectWorld(worldId) {
+    if (!worldId || runtime.state?.currentStep !== 'worlds') return;
+    try {
+      transition({ type: 'select-world', worldId });
+      runtime.structurePreview = { status: 'idle', worldId: '', model: null, error: null };
+      await saveCheckpoint('جاري حفظ اختيار العالم…');
+      renderWorldsOnboarding();
+      requestAnimationFrame(() => {
+        const target = [...(panelElement()?.querySelectorAll('[data-entry-world]') || [])]
+          .find((element) => element.dataset.entryWorld === worldId);
+        target?.focus();
+      });
+    } catch (error) {
+      setBusy(false);
+      renderWorldsOnboarding();
+      const status = document.getElementById('entryExperienceStatus');
+      if (status) status.textContent = 'تعذر حفظ اختيار العالم في الحساب. بقي اختيارك محفوظًا على هذا الجهاز؛ حاول مرة أخرى.';
+    }
+  }
+
+  async function inspectJourneyStructure(button) {
+    if (runtime.state?.currentStep !== 'journey') return;
+    try {
+      transition({ type: 'explore-structure' });
+      button?.classList?.add('activated');
+      await saveCheckpoint('جاري حفظ تقدم الجولة التعريفية…');
+      renderJourneyStructure();
+      focusEntryHeading();
+    } catch (error) {
+      setBusy(false);
+      const status = document.getElementById('entryExperienceStatus');
+      if (status) status.textContent = 'تعذر حفظ تفاعل الجولة الآن. يمكنك المحاولة مرة أخرى.';
+    }
+  }
+
+  function clearGamerGuide() {
+    const guide = runtime.gamerGuide;
+    if (guide?.listener) root.removeEventListener('lootlingua:dictionary-search-result', guide.listener);
+    document.getElementById('entryGamerGuide')?.remove();
+    document.querySelectorAll('.entry-guided-search-target').forEach((element) => {
+      element.classList.remove('entry-guided-search-target');
+    });
+    root.__lootlinguaEntryGamerGuideActive = false;
+    runtime.gamerGuide = null;
+  }
+
+  function targetGamerGuide(selector) {
+    document.querySelectorAll('.entry-guided-search-target').forEach((element) => {
+      element.classList.remove('entry-guided-search-target');
+    });
+    const target = document.querySelector(selector);
+    target?.classList?.add('entry-guided-search-target');
+    target?.scrollIntoView?.({ block: 'center', behavior: 'smooth' });
+    return target;
+  }
+
+  function updateGamerGuide(phase) {
+    const coach = document.getElementById('entryGamerGuide');
+    if (!coach) return;
+    const title = coach.querySelector('[data-entry-guide-title]');
+    const body = coach.querySelector('[data-entry-guide-body]');
+    const badge = coach.querySelector('[data-entry-guide-step]');
+    if (phase === 'gamer') {
+      if (badge) badge.textContent = '2 من 2';
+      if (title) title.textContent = 'الآن اطلب معنى الألعاب';
+      if (body) body.textContent = 'ظهرت الترجمة العامة. اضغط زر «معنى ألعاب؟» الحقيقي أسفل النتائج لترى الفرق.';
+      targetGamerGuide('#gamerMeaningBubble .gamer-meaning-btn');
+    } else {
+      if (badge) badge.textContent = '1 من 2';
+      if (title) title.textContent = 'ابدأ بالترجمة العامة';
+      if (body) body.textContent = 'جهزنا كلمة Spawn كمثال. اضغط زر «ابحث عن معنى» الحقيقي؛ لن نضيف الكلمة إلى قاموسك.';
+      targetGamerGuide('#searchBtn');
+    }
+  }
+
+  async function finishGamerGuide(outcome) {
+    if (!runtime.state || runtime.state.currentStep !== 'context') return;
+    clearGamerGuide();
+    try {
+      transition({ type: 'finish-gamer-demo', outcome });
+      transition({ type: 'continue-context' });
+      await saveCheckpoint('جاري العودة إلى جولتك…');
+    } catch (error) {
+      setBusy(false);
+    }
+    open();
+    render();
+    focusEntryHeading();
+  }
+
+  async function skipActiveGamerGuide() {
+    if (!runtime.state || runtime.state.currentStep !== 'context') return;
+    clearGamerGuide();
+    try {
+      transition({ type: 'skip-gamer-demo' });
+      await saveCheckpoint('جاري العودة إلى جولتك…');
+    } catch (error) {
+      setBusy(false);
+    }
+    open();
+    render();
+    focusEntryHeading();
+  }
+
+  async function launchGamerGuide() {
+    if (!runtime.state || runtime.state.currentStep !== 'context') return;
+    const unavailable = !runtime.user && (
+      localStorage.getItem('hasUsedNormalGuestShot') === '1' ||
+      localStorage.getItem('hasUsedGamerGuestShot') === '1'
+    );
+    if (unavailable || typeof root.fetchSuggestions !== 'function' || typeof root.fetchGamerSuggestions !== 'function') {
+      await finishGamerGuide('unavailable');
+      return;
+    }
+    try {
+      if (runtime.state.gamerStatus !== 'running') {
+        transition({ type: 'start-gamer-demo' });
+        await saveCheckpoint('جاري فتح البحث الحقيقي…');
+      }
+    } catch (error) {
+      setBusy(false);
+      return;
+    }
+
+    close({ silent: true });
+    root.loadPersonalDictionary?.();
+    root.__lootlinguaEntryGamerGuideActive = true;
+    const coach = document.createElement('aside');
+    coach.id = 'entryGamerGuide';
+    coach.className = 'entry-gamer-guide';
+    coach.setAttribute('role', 'dialog');
+    coach.setAttribute('aria-labelledby', 'entryGamerGuideTitle');
+    coach.innerHTML = `<span class="entry-guide-step" data-entry-guide-step>1 من 2</span>
+      <i class="fa-solid fa-gamepad" aria-hidden="true"></i>
+      <div><strong id="entryGamerGuideTitle" data-entry-guide-title>ابدأ بالترجمة العامة</strong><p data-entry-guide-body>جهزنا كلمة Spawn كمثال. اضغط زر «ابحث عن معنى» الحقيقي؛ لن نضيف الكلمة إلى قاموسك.</p></div>
+      <button type="button" class="entry-secondary" data-entry-guide-skip>تخطي التجربة</button>`;
+    document.body.appendChild(coach);
+    const listener = (event) => {
+      const detail = event.detail || {};
+      if (detail.type === 'normal') {
+        if (detail.status === 'success') updateGamerGuide('gamer');
+        else if (['empty', 'error', 'blocked'].includes(detail.status)) finishGamerGuide('unavailable');
+      } else if (detail.type === 'gamer') {
+        finishGamerGuide(detail.status === 'success' ? 'completed' : 'unavailable');
+      }
+    };
+    runtime.gamerGuide = { listener };
+    root.addEventListener('lootlingua:dictionary-search-result', listener);
+    coach.querySelector('[data-entry-guide-skip]')?.addEventListener('click', skipActiveGamerGuide);
+    const input = document.getElementById('wordInput');
+    if (input) {
+      input.value = 'Spawn';
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+    }
+    updateGamerGuide('normal');
   }
 
   async function saveCheckpoint(label) {
@@ -863,10 +1314,26 @@
         }
       }
       else if (action === 'skip-interests') transition({ type: 'skip-interests' });
-      else if (action === 'continue-action') {
-        transition({ type: 'continue-action' });
+      else if (action === 'continue-theme') transition({ type: 'continue-theme' });
+      else if (action === 'retry-worlds') {
+        await ensureWorldChoices(true);
+        return;
       }
-      else if (action === 'reveal-value') transition({ type: 'complete-action' });
+      else if (action === 'continue-worlds') transition({ type: 'continue-worlds' });
+      else if (action === 'continue-worlds-fallback') transition({ type: 'continue-worlds-fallback' });
+      else if (action === 'retry-structure') {
+        await ensureStructurePreview(true);
+        return;
+      }
+      else if (action === 'continue-journey') transition({ type: 'continue-journey' });
+      else if (action === 'start-gamer-demo') {
+        await launchGamerGuide();
+        return;
+      }
+      else if (action === 'skip-gamer-demo') transition({ type: 'skip-gamer-demo' });
+      else if (action === 'continue-context') transition({ type: 'continue-context' });
+      else if (action === 'review-return') transition({ type: 'review-return' });
+      else if (action === 'continue-return') transition({ type: 'continue-return' });
       else if (action === 'complete') {
         if (runtime.settingsMode === 'theme') {
           const draft = runtime.state;
@@ -1064,7 +1531,7 @@
     const intent = api().sanitizePendingIntent({
       ...rawIntent,
       source: rawIntent?.source || 'world',
-      entryStep: runtime.state?.currentStep || 'action',
+      entryStep: runtime.state?.currentStep || 'destination',
       operationId: createOperationId(),
       createdAt: now,
       status: 'pending',
@@ -1204,6 +1671,24 @@
       root.openPublishedWorld(worldId);
       return { type: 'world', worldId };
     }
+    if (id === 'open-selected-world') {
+      const worldId = expected?.worldId || runtime.state?.selectedWorldId;
+      if (!worldId || typeof root.loadWorldsView !== 'function' || typeof root.openPublishedWorld !== 'function') {
+        throw new Error('Selected World destination is unavailable.');
+      }
+      const published = root.LootLinguaPublishedContent;
+      if (published?.getPublishedWorld) {
+        const world = await published.getPublishedWorld(worldId);
+        if (!world) {
+          root.loadWorldsView();
+          root.showToast?.('هذا العالم لم يعد منشورًا. اختر عالمًا آخر من قائمة العوالم.', 'info', 4200);
+          return { type: 'worlds' };
+        }
+      }
+      root.loadWorldsView();
+      root.openPublishedWorld(worldId);
+      return { type: 'world', worldId };
+    }
     if (id === 'review-words' || id === 'new-user-start') {
       if (typeof root.loadPersonalDictionary !== 'function') {
         throw new Error('Dictionary destination is unavailable.');
@@ -1220,14 +1705,10 @@
   }
 
   async function runCta(id) {
-    if (!runtime.state || runtime.state.status !== 'in-progress' || runtime.state.currentStep !== 'action') return;
-    const expected = runtime.action || api().resolveNextAction(runtime.signals || {});
+    if (!runtime.state || runtime.state.status !== 'in-progress' || runtime.state.currentStep !== 'destination') return;
+    const expected = currentNextAction();
     if (![expected?.id, expected?.secondaryId].filter(Boolean).includes(id)) return;
-    const actionReady = runtime.state.actionStatus === 'completed' || (
-      runtime.presentation?.classification === 'returning-with-progress' &&
-      runtime.state.actionStatus === 'ready'
-    );
-    if (!actionReady) return;
+    if (!['structure-explored', 'return-reviewed'].includes(runtime.state.journeyStatus)) return;
     if (api().ctaContradictsSignals({ ...expected, id }, runtime.signals)) return;
 
     setBusy(true, 'جارٍ فتح وجهتك…');
@@ -1378,6 +1859,11 @@
     root.addEventListener('lootlingua:entry-cloud-ready', () => queueMicrotask(boot));
     root.addEventListener('lootlingua:journey-cloud-ready', () => queueMicrotask(boot));
     root.addEventListener('lootlingua:word-mastery-snapshot', () => queueMicrotask(boot));
+    root.addEventListener('lootlingua:worlds-entry-preview-ready', () => {
+      if (runtime.state?.currentStep === 'worlds') queueMicrotask(() => ensureWorldChoices(true));
+      else if (runtime.state?.currentStep === 'journey') queueMicrotask(() => ensureStructurePreview(true));
+      else if (runtime.state?.currentStep === 'return') queueMicrotask(() => ensureReturnPreview(true));
+    });
     queueMicrotask(boot);
   }
 

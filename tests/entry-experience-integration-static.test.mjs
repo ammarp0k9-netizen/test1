@@ -149,17 +149,19 @@ test('the app wires one Entry shell and loads its versioned contract before clou
   assert.ok(entryCloudIndex > firebaseIndex);
 });
 
-test('cloud persistence is owner-scoped to users/{uid}/entryExperiences/v1', () => {
+test('v2 cloud persistence is owner-scoped while v1 is read only for preference seeding', () => {
   assert.match(
     cloudSource,
-    /doc\(db,\s*'users',\s*uid,\s*'entryExperiences',\s*`v\$\{contract\(\)\.EXPERIENCE_VERSION\}`\)/
+    /function entryRef\(uid, version = contract\(\)\.EXPERIENCE_VERSION\)[\s\S]*?`v\$\{version\}`/
   );
-  assert.match(cloudSource, /const API = Object\.freeze\(\{ load, save \}\)/);
+  assert.match(cloudSource, /getDoc\(entryRef\(current\.uid, 1\)\)/);
+  assert.match(cloudSource, /const API = Object\.freeze\(\{ load, loadLegacyPreferences, save \}\)/);
   assert.equal(occurrences(cloudSource, /\bsetDoc\s*\(/g), 1);
   assert.doesNotMatch(cloudSource, /onboarding\.completed|hasCompletedOnboarding/);
 
   assert.match(rulesSource, /match \/entryExperiences\/\{versionId\}/);
   assert.match(rulesSource, /versionId == 'v1'/);
+  assert.match(rulesSource, /versionId == 'v2'/);
   assert.match(rulesSource, /allow read: if isOwner\(uid\)/);
   assert.match(rulesSource, /allow delete: if false/);
 });
@@ -171,7 +173,7 @@ test('passive fresh guest boot classifies in memory without local or cloud write
   assert.deepEqual(harness.cloudCalls, { loads: 0, saves: 0 });
 });
 
-test('passive fresh account boot reads v1 but does not create it before interaction', async () => {
+test('passive fresh account boot reads v2 but does not create it before interaction', async () => {
   const now = new Date().toISOString();
   const harness = await createBootHarness({
     user: {

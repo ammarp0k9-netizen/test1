@@ -959,6 +959,7 @@ window.refreshGuestSearchLocks = function() {
 
 function showGuestTrialBlocked() {
   pushNotification('عذراً يا بطل! ميزة البحث مخصصة للأساطير المسجلين فقط. سجل الآن مجاناً!', 'warning');
+  if (window.__lootlinguaEntryGamerGuideActive) return;
   const modal = document.getElementById('profileModal');
   if (typeof window.toggleProfileModal === 'function' && modal && !modal.classList.contains('open')) {
     window.toggleProfileModal();
@@ -967,6 +968,7 @@ function showGuestTrialBlocked() {
 
 function showSearchLockRegisterHint() {
   pushNotification('عذراً يا بطل! ميزة البحث مخصصة للأساطير المسجلين فقط. سجل الآن مجاناً!', 'warning');
+  if (window.__lootlinguaEntryGamerGuideActive) return;
   const modal = document.getElementById('profileModal');
   if (typeof window.toggleProfileModal === 'function' && modal && !modal.classList.contains('open')) {
     window.toggleProfileModal();
@@ -980,6 +982,16 @@ function guardGuestAiSearch(type) {
     return false;
   }
   return true;
+}
+
+function announceDictionarySearchResult(type, status, word) {
+  window.dispatchEvent(new CustomEvent('lootlingua:dictionary-search-result', {
+    detail: {
+      type: type === 'gamer' ? 'gamer' : 'normal',
+      status: String(status || 'error'),
+      word: String(word || '').trim(),
+    },
+  }));
 }
 
 async function buildAiRequestHeaders() {
@@ -1349,8 +1361,14 @@ window.fetchGamerSuggestions = async function() {
     showToast('اكتب كلمة وابحث أولاً!');
     return;
   }
-  if (!guardGuestAiSearch('gamer')) return;
-  if (!rateLimit('fetchGamerSuggestions', 4, 45000)) return;
+  if (!guardGuestAiSearch('gamer')) {
+    announceDictionarySearchResult('gamer', 'blocked', word);
+    return;
+  }
+  if (!rateLimit('fetchGamerSuggestions', 4, 45000)) {
+    announceDictionarySearchResult('gamer', 'error', word);
+    return;
+  }
 
   const bubbleBtn = document.querySelector('#gamerMeaningBubble .gamer-meaning-btn');
   let panel = document.getElementById('gamerSuggestionsPanel');
@@ -1373,6 +1391,7 @@ window.fetchGamerSuggestions = async function() {
     const { data, fromCache } = await fetchAiMeaningsWithCache(word, 'gamer');
     if (!data.length) {
       panel.innerHTML = '<p class="gamer-suggestions-empty">ما لقينا معنى ألعاب واضح لهالكلمة.</p>';
+      announceDictionarySearchResult('gamer', 'empty', word);
       return;
     }
 
@@ -1390,12 +1409,17 @@ window.fetchGamerSuggestions = async function() {
     });
     html += '</div>';
     panel.innerHTML = html;
+    announceDictionarySearchResult('gamer', 'success', word);
   } catch (err) {
-    if (err.code === 403) return;
+    if (err.code === 403) {
+      announceDictionarySearchResult('gamer', 'blocked', word);
+      return;
+    }
     const msg = err.message === 'sleeping' || String(err.message).includes('fetch')
       ? 'السيرفر كان نايم.. جرّب بعد شوي.'
       : (err.message || 'فشل جلب معنى الألعاب');
     panel.innerHTML = `<p class="gamer-suggestions-error">${escapeHtml(msg)}</p>`;
+    announceDictionarySearchResult('gamer', 'error', word);
   } finally {
     if (bubbleBtn) {
       bubbleBtn.disabled = false;
@@ -1412,9 +1436,15 @@ window.fetchSuggestions = async function() {
     return;
   }
 
-  if (!guardGuestAiSearch('normal')) return;
+  if (!guardGuestAiSearch('normal')) {
+    announceDictionarySearchResult('normal', 'blocked', word);
+    return;
+  }
   // Spam protection: max 5 requests per 30 seconds
-  if (!rateLimit('fetchSuggestions', 5, 30000)) return;
+  if (!rateLimit('fetchSuggestions', 5, 30000)) {
+    announceDictionarySearchResult('normal', 'error', word);
+    return;
+  }
   const btn  = document.getElementById('searchBtn');
   const box  = document.getElementById('suggestionsBox');
   const list = document.getElementById('suggestionsList');
@@ -1441,6 +1471,7 @@ window.fetchSuggestions = async function() {
 
     if (!suggestions.length) {
       list.innerHTML = '<p style="text-align:center;font-size:12px;color:var(--text-gray);padding:10px;">ما لقينا معاني لهالكلمة.</p>';
+      announceDictionarySearchResult('normal', 'empty', word);
       return;
     }
 
@@ -1459,9 +1490,13 @@ window.fetchSuggestions = async function() {
     html += '</div>';
     list.innerHTML = html;
     injectGamerMeaningBubble();
+    announceDictionarySearchResult('normal', 'success', word);
 
   } catch (error) {
-    if (error.code === 403) return;
+    if (error.code === 403) {
+      announceDictionarySearchResult('normal', 'blocked', word);
+      return;
+    }
     console.error("Frontend Error:", error);
     
     // التعامل مع الأخطاء بطريقة مريحة للمستخدم
@@ -1470,6 +1505,7 @@ window.fetchSuggestions = async function() {
     } else {
          list.innerHTML = "<p style='color:var(--danger);text-align:center;font-size:12px;padding:10px;'>فشل في جلب البيانات من السيرفر</p>";
     }
+    announceDictionarySearchResult('normal', 'error', word);
   } finally {
     loadingTimers.forEach(clearTimeout);
     btn.disabled  = false;

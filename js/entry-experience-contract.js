@@ -1,15 +1,16 @@
 (function attachLootLinguaEntryExperienceContract(root) {
   'use strict';
 
-  const EXPERIENCE_VERSION = 1;
-  const CONTRACT_VERSION = 1;
+  const EXPERIENCE_VERSION = 2;
+  const CONTRACT_VERSION = 2;
   const RELEASE_AT = Date.UTC(2026, 6, 30, 0, 0, 0);
   const NEW_ACCOUNT_WINDOW_MS = 30 * 60 * 1000;
 
-  const STATUSES = Object.freeze(['in-progress', 'completed', 'skipped']);
+  const STATUSES = Object.freeze(['in-progress', 'completed']);
   const TERMINAL_STATUSES = Object.freeze(['completed']);
-  const STEPS = Object.freeze(['interests', 'theme', 'action']);
-  const ACTION_STATUSES = Object.freeze(['pending', 'ready', 'completed']);
+  const STEPS = Object.freeze(['interests', 'theme', 'worlds', 'journey', 'context', 'destination', 'return']);
+  const JOURNEY_STATUSES = Object.freeze(['pending', 'world-selected', 'structure-explored', 'return-reviewed']);
+  const GAMER_STATUSES = Object.freeze(['not-applicable', 'offered', 'running', 'completed', 'unavailable', 'skipped']);
   const AUDIENCES = Object.freeze(['new', 'returning', 'returning-guest']);
   const CLASSIFICATIONS = Object.freeze([
     'brand-new',
@@ -43,6 +44,7 @@
     'explore-worlds',
     'suggest-placement',
     'new-user-start',
+    'open-selected-world',
   ]);
 
   function deepFreeze(value, seen) {
@@ -157,7 +159,7 @@
     const currentStep = cleanEnum(
       raw.currentStep,
       STEPS,
-      status === 'in-progress' ? 'interests' : 'action'
+      status === 'in-progress' ? 'interests' : 'destination'
     );
     const interestsStatus = cleanEnum(raw.interestsStatus, INTEREST_STATUSES, 'pending');
     const interestIds = interestsStatus === 'selected'
@@ -170,10 +172,9 @@
     const themeId = cleanEnum(raw.themeId, PRESERVABLE_THEME_IDS, '');
     const oasisMode = cleanEnum(raw.oasisMode, OASIS_MODES, 'light');
     const themeExplicit = raw.themeExplicit === true;
-    // Documents written by the original v1 flow have no actionStatus. They are
-    // intentionally normalized as pending: that old client wrote completed at
-    // the theme button, so status alone is not proof that first action ran.
-    const actionStatus = cleanEnum(raw.actionStatus, ACTION_STATUSES, 'pending');
+    const journeyStatus = cleanEnum(raw.journeyStatus, JOURNEY_STATUSES, 'pending');
+    const selectedWorldId = cleanString(raw.selectedWorldId, 128);
+    const gamerStatus = cleanEnum(raw.gamerStatus, GAMER_STATUSES, 'not-applicable');
     const startedAt = timestampMillis(raw.startedAt);
     const updatedAt = timestampMillis(raw.updatedAt);
     const completedAt = status === 'completed' ? timestampMillis(raw.completedAt) : 0;
@@ -192,12 +193,29 @@
       themeId,
       oasisMode,
       themeExplicit,
-      actionStatus,
+      journeyStatus,
+      selectedWorldId,
+      gamerStatus,
       source: cleanEnum(raw.source, ['app-entry', 'guest-migration', 'settings'], 'app-entry'),
       startedAt,
       updatedAt,
       completedAt,
       skippedAt,
+    };
+  }
+
+  function normalizeLegacyPreferences(raw) {
+    if (!isPlainObject(raw)) return null;
+    const version = Math.floor(finiteNumber(raw.experienceVersion ?? raw.version, 0));
+    if (version !== 1) return null;
+    const interestsStatus = cleanEnum(raw.interestsStatus, INTEREST_STATUSES, 'pending');
+    const interestIds = interestsStatus === 'selected'
+      ? uniqueStrings(raw.interestIds, INTEREST_IDS, INTEREST_IDS.length)
+      : [];
+    return {
+      interestIds,
+      themeId: cleanEnum(raw.themeId, PRESERVABLE_THEME_IDS, ''),
+      oasisMode: cleanEnum(raw.oasisMode, OASIS_MODES, 'light'),
     };
   }
 
@@ -211,14 +229,16 @@
       status: 'in-progress',
       audience: context.audience,
       classification: context.classification,
-      currentStep: context.classification === 'returning-with-progress' ? 'action' : 'interests',
+      currentStep: context.classification === 'returning-with-progress' ? 'return' : 'interests',
       interestsStatus: Array.isArray(saved.interestIds) && saved.interestIds.length ? 'selected' : 'pending',
       interestIds: saved.interestIds,
       themeStatus: existingTheme ? 'preserved' : 'pending',
       themeId: existingTheme,
       oasisMode: cleanEnum(saved.oasisMode, OASIS_MODES, 'light'),
       themeExplicit: false,
-      actionStatus: context.classification === 'returning-with-progress' ? 'ready' : 'pending',
+      journeyStatus: 'pending',
+      selectedWorldId: '',
+      gamerStatus: 'not-applicable',
       source: 'app-entry',
     });
   }
@@ -228,7 +248,8 @@
     return Boolean(
       normalized &&
       TERMINAL_STATUSES.includes(normalized.status) &&
-      normalized.actionStatus === 'completed'
+      normalized.currentStep === 'destination' &&
+      ['structure-explored', 'return-reviewed'].includes(normalized.journeyStatus)
     );
   }
 
@@ -246,8 +267,10 @@
     return normalizeEntryState({
       ...normalized,
       status: 'in-progress',
-      currentStep: hasProgress ? 'action' : 'interests',
-      actionStatus: hasProgress ? 'ready' : 'pending',
+      currentStep: hasProgress ? 'return' : 'interests',
+      journeyStatus: 'pending',
+      selectedWorldId: '',
+      gamerStatus: 'not-applicable',
       completedAt: 0,
       skippedAt: 0,
       updatedAt: timestampMillis(nowValue) || Date.now(),
@@ -525,8 +548,10 @@
     ].includes(type);
   }
 
-  function resolveNextAction(input) {
+  function resolveNextAction(input, contextInput) {
     const signals = input && input.profileSignals ? input : normalizeSignals(input || {});
+    const context = isPlainObject(contextInput) ? contextInput : {};
+    const selectedWorldId = cleanString(context.selectedWorldId, 128);
     const destination = signals.journeyDestination;
     if (signals.activeJourney && isJourneySessionDestination(destination)) {
       return {
@@ -559,8 +584,10 @@
         id: 'review-words',
         label: 'راجع كلماتك',
         hint: signals.hasPublishedWorld ? 'كلماتك محفوظة، ويمكنك استكشاف العوالم أيضًا.' : 'كلماتك محفوظة كما هي.',
-        secondaryId: signals.hasPublishedWorld ? 'explore-worlds' : '',
-        secondaryLabel: signals.hasPublishedWorld ? 'اكتشف العوالم' : '',
+        secondaryId: selectedWorldId ? 'open-selected-world' : (signals.hasPublishedWorld ? 'explore-worlds' : ''),
+        secondaryLabel: selectedWorldId ? 'افتح العالم الذي اخترته' : (signals.hasPublishedWorld ? 'اكتشف العوالم' : ''),
+        secondaryWorldId: selectedWorldId,
+        worldId: selectedWorldId,
         primary: true,
       };
     }
@@ -582,12 +609,21 @@
         primary: true,
       };
     }
+    if (selectedWorldId) {
+      return {
+        id: 'open-selected-world',
+        label: 'استكشف العالم الذي اخترته',
+        hint: 'سنفتح صفحة العالم نفسها. الاستكشاف متاح للضيف، وبدء الرحلة المحفوظة يطلب الحساب في سياقه فقط.',
+        worldId: selectedWorldId,
+        primary: true,
+      };
+    }
     return {
-      id: 'new-user-start',
-      label: 'أضف أول كلمة',
-      hint: 'ابدأ بقاموسك الشخصي، أو انتقل إلى العوالم عندما تريد.',
-      secondaryId: signals.hasPublishedWorld ? 'explore-worlds' : '',
-      secondaryLabel: signals.hasPublishedWorld ? 'استكشف العوالم' : '',
+      id: signals.hasPublishedWorld ? 'explore-worlds' : 'new-user-start',
+      label: signals.hasPublishedWorld ? 'اكتشف العوالم' : 'أضف أول كلمة',
+      hint: signals.hasPublishedWorld
+        ? 'افتح مساحة العوالم واختر بدايتك بنفسك.'
+        : 'ابدأ بقاموسك الشخصي، وسنحتفظ بكلماتك كما هي.',
       primary: true,
     };
   }
@@ -603,12 +639,29 @@
     if (id === 'continue-journey' && !signals.activeJourney) return true;
     if (id === 'resume-quiz' && !signals.resumableQuiz) return true;
     if (id === 'review-words' && signals.wordCount === 0 && signals.srsCount === 0) return true;
+    if (id === 'open-selected-world' && !cleanString(action?.worldId || action?.secondaryWorldId, 128)) return true;
     if (id === 'suggest-placement' && (!signals.placementEligible || signals.hasJourneyProgress || !signals.isAuthenticated)) return true;
     return false;
   }
 
   function stepRank(step) {
     return Math.max(0, STEPS.indexOf(cleanEnum(step, STEPS, 'interests')));
+  }
+
+  function journeyStatusRank(status) {
+    return Math.max(0, JOURNEY_STATUSES.indexOf(cleanEnum(status, JOURNEY_STATUSES, 'pending')));
+  }
+
+  function gamerStatusRank(status) {
+    const ranks = {
+      'not-applicable': 0,
+      offered: 1,
+      running: 2,
+      skipped: 3,
+      unavailable: 3,
+      completed: 4,
+    };
+    return ranks[cleanEnum(status, GAMER_STATUSES, 'not-applicable')] || 0;
   }
 
   function mergeEntryStates(accountRaw, guestRaw, context) {
@@ -653,9 +706,15 @@
     const appearance = account.themeExplicit
       ? account
       : (guest.themeExplicit ? guest : (account.themeId ? account : guest));
-    const actionStatus = account.actionStatus === 'completed' || guest.actionStatus === 'completed'
-      ? 'completed'
-      : (account.actionStatus === 'ready' || guest.actionStatus === 'ready' ? 'ready' : 'pending');
+    const journeySource = journeyStatusRank(guest.journeyStatus) > journeyStatusRank(account.journeyStatus)
+      ? guest
+      : account;
+    const worldSource = furthest.selectedWorldId
+      ? furthest
+      : (account.selectedWorldId ? account : guest);
+    const gamerSource = gamerStatusRank(guest.gamerStatus) > gamerStatusRank(account.gamerStatus)
+      ? guest
+      : account;
     const merged = normalizeEntryState({
       ...account,
       status: 'in-progress',
@@ -666,7 +725,9 @@
       themeId: appearance.themeId,
       oasisMode: appearance.oasisMode,
       themeExplicit: appearance.themeExplicit,
-      actionStatus,
+      journeyStatus: journeySource.journeyStatus,
+      selectedWorldId: worldSource.selectedWorldId,
+      gamerStatus: gamerSource.gamerStatus,
       source: 'guest-migration',
       startedAt: Math.min(
         ...[account.startedAt, guest.startedAt].filter(Boolean)
@@ -705,33 +766,100 @@
       next.oasisMode = cleanEnum(action.oasisMode, OASIS_MODES, next.oasisMode || 'light');
       next.themeStatus = 'selected';
       next.themeExplicit = true;
-    } else if (type === 'continue-action') {
+    } else if (type === 'continue-theme') {
       if (next.currentStep !== 'theme') {
-        throw new RangeError('The theme step must be active before the first action.');
+        throw new RangeError('The theme step must be active before Worlds onboarding.');
       }
-      next.currentStep = 'action';
-    } else if (type === 'complete-action') {
-      if (next.currentStep !== 'action') {
-        throw new RangeError('The first action step must be active before it can be completed.');
+      next.currentStep = 'worlds';
+    } else if (type === 'select-world') {
+      if (next.currentStep !== 'worlds') {
+        throw new RangeError('Worlds onboarding must be active before selecting a world.');
       }
-      next.actionStatus = 'completed';
+      const worldId = cleanString(action.worldId, 128);
+      if (!worldId) throw new RangeError('A published world is required.');
+      next.selectedWorldId = worldId;
+      next.journeyStatus = 'world-selected';
+    } else if (type === 'continue-worlds') {
+      if (next.currentStep !== 'worlds' || next.journeyStatus !== 'world-selected') {
+        throw new RangeError('A world must be selected before exploring its structure.');
+      }
+      next.currentStep = 'journey';
+    } else if (type === 'continue-worlds-fallback') {
+      if (next.currentStep !== 'worlds') {
+        throw new RangeError('Worlds onboarding must be active before using its fallback.');
+      }
+      next.selectedWorldId = '';
+      next.journeyStatus = 'world-selected';
+      next.currentStep = 'journey';
+    } else if (type === 'explore-structure') {
+      if (next.currentStep !== 'journey') {
+        throw new RangeError('Journey structure must be active before it can be explored.');
+      }
+      next.journeyStatus = 'structure-explored';
+    } else if (type === 'continue-journey') {
+      if (next.currentStep !== 'journey' || next.journeyStatus !== 'structure-explored') {
+        throw new RangeError('Journey structure must be explored before continuing.');
+      }
+      if (next.interestIds.includes('games')) {
+        next.currentStep = 'context';
+        if (next.gamerStatus === 'not-applicable') next.gamerStatus = 'offered';
+      } else {
+        next.currentStep = 'destination';
+        next.gamerStatus = 'not-applicable';
+      }
+    } else if (type === 'start-gamer-demo') {
+      if (next.currentStep !== 'context') {
+        throw new RangeError('The contextual feature step must be active.');
+      }
+      next.gamerStatus = 'running';
+    } else if (type === 'finish-gamer-demo') {
+      if (next.currentStep !== 'context') {
+        throw new RangeError('The contextual feature step must be active.');
+      }
+      next.gamerStatus = action.outcome === 'completed' ? 'completed' : 'unavailable';
+    } else if (type === 'skip-gamer-demo') {
+      if (next.currentStep !== 'context') {
+        throw new RangeError('The contextual feature step must be active.');
+      }
+      next.gamerStatus = 'skipped';
+      next.currentStep = 'destination';
+    } else if (type === 'continue-context') {
+      if (next.currentStep !== 'context' || !['completed', 'unavailable', 'skipped'].includes(next.gamerStatus)) {
+        throw new RangeError('The contextual feature must finish or be skipped before continuing.');
+      }
+      next.currentStep = 'destination';
+    } else if (type === 'review-return') {
+      if (next.currentStep !== 'return') {
+        throw new RangeError('The saved Journey reminder must be active.');
+      }
+      next.journeyStatus = 'return-reviewed';
+    } else if (type === 'continue-return') {
+      if (next.currentStep !== 'return' || next.journeyStatus !== 'return-reviewed') {
+        throw new RangeError('The saved Journey reminder must be reviewed before continuing.');
+      }
+      next.currentStep = 'destination';
     } else if (type === 'complete') {
-      if (next.currentStep !== 'action') {
-        throw new RangeError('The first action must be reached before completion.');
+      if (next.currentStep !== 'destination') {
+        throw new RangeError('The final destination step must be reached before completion.');
       }
-      if (!['ready', 'completed'].includes(next.actionStatus)) {
-        throw new RangeError('The first action must be completed before onboarding completion.');
+      if (!['structure-explored', 'return-reviewed'].includes(next.journeyStatus)) {
+        throw new RangeError('The required Journey interaction must be completed before onboarding completion.');
       }
       next.status = 'completed';
-      next.currentStep = 'action';
-      next.actionStatus = 'completed';
+      next.currentStep = 'destination';
       next.completedAt = now;
       next.skippedAt = 0;
       if (next.themeStatus === 'pending') next.themeStatus = next.themeId ? 'preserved' : 'preserved';
     } else if (type === 'back') {
-      next.currentStep = next.currentStep === 'action'
-        ? 'theme'
-        : (next.currentStep === 'theme' ? 'interests' : next.currentStep);
+      if (next.currentStep === 'theme') next.currentStep = 'interests';
+      else if (next.currentStep === 'worlds') next.currentStep = 'theme';
+      else if (next.currentStep === 'journey') next.currentStep = 'worlds';
+      else if (next.currentStep === 'context') next.currentStep = 'journey';
+      else if (next.currentStep === 'destination') {
+        next.currentStep = next.interestIds.includes('games') && next.gamerStatus !== 'not-applicable'
+          ? 'context'
+          : 'journey';
+      }
     } else {
       throw new RangeError('Unsupported entry state transition.');
     }
@@ -761,7 +889,7 @@
       worldId,
       cefrLevel,
       source: cleanEnum(raw.source, ['entry', 'world', 'placement'], 'world'),
-      entryStep: cleanEnum(raw.entryStep, STEPS, 'action'),
+      entryStep: cleanEnum(raw.entryStep, [...STEPS, 'action'], 'destination'),
       operationId,
       createdAt,
       status,
@@ -843,7 +971,8 @@
     STATUSES,
     TERMINAL_STATUSES,
     STEPS,
-    ACTION_STATUSES,
+    JOURNEY_STATUSES,
+    GAMER_STATUSES,
     AUDIENCES,
     CLASSIFICATIONS,
     INTEREST_STATUSES,
@@ -865,6 +994,7 @@
     themeIntroStorageKey,
     timestampMillis,
     normalizeEntryState,
+    normalizeLegacyPreferences,
     createEntryDraft,
     isTerminalState,
     recoverUnverifiedTerminal,

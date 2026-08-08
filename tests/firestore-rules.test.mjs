@@ -234,6 +234,32 @@ function entryExperienceState(overrides = {}) {
   };
 }
 
+function entryExperienceV2State(overrides = {}) {
+  return {
+    contractVersion: 2,
+    experienceVersion: 2,
+    status: 'in-progress',
+    audience: 'returning',
+    classification: 'returning-light',
+    currentStep: 'interests',
+    interestsStatus: 'pending',
+    interestIds: [],
+    themeStatus: 'preserved',
+    themeId: 'ocean',
+    oasisMode: 'dark',
+    themeExplicit: false,
+    journeyStatus: 'pending',
+    selectedWorldId: '',
+    gamerStatus: 'not-applicable',
+    source: 'app-entry',
+    startedAt: serverTimestamp(),
+    updatedAt: serverTimestamp(),
+    completedAt: null,
+    skippedAt: null,
+    ...overrides
+  };
+}
+
 function fullProductionProfilePayload(overrides = {}) {
   return {
     userXP: 125,
@@ -670,6 +696,94 @@ try {
       updatedAt: serverTimestamp()
     }));
     await assertFails(deleteDoc(reference));
+  });
+
+  await test('Entry Experience v2 is owner-bound, proof-gated, monotonic, and independent from v1', async () => {
+    const uid = 'entry-v2-owner';
+    const owner = environment.authenticatedContext(uid).firestore();
+    const other = environment.authenticatedContext('entry-v2-other').firestore();
+    const reference = doc(owner, `users/${uid}/entryExperiences/v2`);
+
+    await assertSucceeds(setDoc(reference, entryExperienceV2State()));
+    await assertSucceeds(getDoc(reference));
+    await assertFails(getDoc(doc(other, `users/${uid}/entryExperiences/v2`)));
+    await assertFails(setDoc(
+      doc(other, `users/${uid}/entryExperiences/v2`),
+      entryExperienceV2State()
+    ));
+    await assertFails(setDoc(
+      doc(owner, `users/${uid}/entryExperiences/v1`),
+      entryExperienceV2State()
+    ));
+
+    await assertSucceeds(updateDoc(reference, {
+      currentStep: 'worlds',
+      interestsStatus: 'selected',
+      interestIds: ['study'],
+      themeStatus: 'selected',
+      themeExplicit: true,
+      updatedAt: serverTimestamp()
+    }));
+    await assertSucceeds(updateDoc(reference, {
+      currentStep: 'journey',
+      journeyStatus: 'world-selected',
+      selectedWorldId: 'published-world-study',
+      updatedAt: serverTimestamp()
+    }));
+    await assertSucceeds(updateDoc(reference, {
+      journeyStatus: 'structure-explored',
+      updatedAt: serverTimestamp()
+    }));
+    await assertSucceeds(updateDoc(reference, {
+      currentStep: 'destination',
+      gamerStatus: 'not-applicable',
+      updatedAt: serverTimestamp()
+    }));
+    await assertFails(updateDoc(reference, {
+      status: 'completed',
+      journeyStatus: 'pending',
+      completedAt: serverTimestamp(),
+      updatedAt: serverTimestamp()
+    }));
+    await assertFails(updateDoc(reference, {
+      audience: 'new',
+      updatedAt: serverTimestamp()
+    }));
+    await assertFails(updateDoc(reference, {
+      classification: 'brand-new',
+      updatedAt: serverTimestamp()
+    }));
+    await assertSucceeds(updateDoc(reference, {
+      status: 'completed',
+      completedAt: serverTimestamp(),
+      updatedAt: serverTimestamp()
+    }));
+    await assertSucceeds(updateDoc(reference, {
+      source: 'settings',
+      updatedAt: serverTimestamp()
+    }));
+    await assertFails(updateDoc(reference, {
+      status: 'in-progress',
+      currentStep: 'journey',
+      completedAt: null,
+      updatedAt: serverTimestamp()
+    }));
+    await assertFails(updateDoc(reference, {
+      completedAt: serverTimestamp(),
+      updatedAt: serverTimestamp()
+    }));
+    await assertFails(deleteDoc(reference));
+
+    const invalidUid = 'entry-v2-invalid';
+    const invalidDb = environment.authenticatedContext(invalidUid).firestore();
+    const invalidReference = doc(invalidDb, `users/${invalidUid}/entryExperiences/v2`);
+    const missingField = entryExperienceV2State();
+    delete missingField.gamerStatus;
+    await assertFails(setDoc(invalidReference, missingField));
+    await assertFails(setDoc(invalidReference, {
+      ...entryExperienceV2State(),
+      journeyProgress: { gateId: 'forged-progress' }
+    }));
   });
 
   await test('legacy completed/skipped v1 without first-action proof can migrate once', async () => {
@@ -5628,7 +5742,7 @@ try {
   });
 
   if (testFilter) assert.ok(selected > 0, `No Rules test matched "${testFilter}"`);
-  assert.equal(passed, testFilter ? selected : 78);
+  assert.equal(passed, testFilter ? selected : 79);
   console.log(`# ${passed} Firestore Rules emulator tests passed`);
 } finally {
   await environment.cleanup();
