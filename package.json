@@ -26,7 +26,7 @@
     "test:rank-completion": "node --test tests/rank-completion.test.mjs",
     "test:world-completion": "node --test tests/world-completion.test.mjs tests/notification-system.test.mjs tests/test-clock.test.mjs",
     "set-test-clock-claim": "node tools/set-test-clock-claim.mjs",
-    "test:quiz": "node --test tests/quiz-core.test.mjs tests/quiz-lifecycle.test.mjs tests/quiz-finish-transaction.test.mjs",
+    "test:quiz": "node --test tests/quiz-core.test.mjs tests/quiz-lifecycle.test.mjs tests/quiz-finish-transaction.test.mjs tests/quiz-learning-regression.test.mjs",
     "test:quiz:browser": "node tools/quiz-matching-browser-smoke.mjs",
     "test:srs": "node --test tests/srs-lifecycle.test.mjs",
     "test:notifications": "node --test tests/notification-system.test.mjs tests/smart-notification-system.test.mjs",

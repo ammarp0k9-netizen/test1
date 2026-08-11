@@ -420,7 +420,7 @@ test('streak-risk CTA completes a verified activity, marks the local day, preser
   const launched = getLaunchedActivity();
   assert.equal(launched?.mode, 'scramble');
   assert.equal(launched?.options?.source, 'notification:due');
-  assert.match(quizSource, /function isVerifiedQuizMode\(mode\)\s*\{\s*return mode === 'timeAttack' \|\| mode === 'scramble';/);
+  assert.match(quizSource, /function isVerifiedQuizMode\(mode\)\s*\{\s*return mode === 'timeAttack' \|\| mode === 'scramble' \|\| mode === 'matching';/);
   assert.match(quizRuntimeSource, /if \(fullyCompleted && commit\.total > 0\) \{[\s\S]*?incrementDailyCountBy\(commit\.total\);[\s\S]*?checkAndUpdateStreak\(\{ learningEvent: true \}\);/);
 
   const completion = completeTrustedStreakDay({

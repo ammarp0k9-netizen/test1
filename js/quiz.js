@@ -598,9 +598,16 @@ window.ensureQuizSourceReady = ensureQuizSourceReady;
 
 let quizSourceRefreshScheduled = false;
 let quizSourceRefreshOwnerId = '';
+let quizSourceRefreshPendingAfterCommit = false;
+let quizSourceRefreshPendingReason = '';
 
 function scheduleQuizSourceRefresh(reason = 'source-change') {
   const ownerId = getQuizSourceOwnerId();
+  if ((Number(window.__lootlinguaQuizLearningCommitDepth) || 0) > 0) {
+    quizSourceRefreshPendingAfterCommit = true;
+    quizSourceRefreshPendingReason = reason;
+    return;
+  }
   if (quizSourceRefreshScheduled && quizSourceRefreshOwnerId === ownerId) return;
   quizSourceRefreshScheduled = true;
   quizSourceRefreshOwnerId = ownerId;
@@ -621,6 +628,8 @@ window.addEventListener('lootlingua:auth-state', () => {
   currentQuizSelectionPlan = null;
   quizSourceRefreshScheduled = false;
   quizSourceRefreshOwnerId = '';
+  quizSourceRefreshPendingAfterCommit = false;
+  quizSourceRefreshPendingReason = '';
   if (currentView === 'quiz') {
     scheduleQuizSourceRefresh('auth-state');
   }
@@ -635,6 +644,14 @@ window.addEventListener('lootlingua:quiz-source-data-changed', (event) => {
 window.addEventListener('lootlingua:learning-data-changed', () => {
   if (currentView !== 'quiz') return;
   scheduleQuizSourceRefresh('learning-data-change');
+});
+
+window.addEventListener('lootlingua:quiz-learning-commit-complete', () => {
+  if (!quizSourceRefreshPendingAfterCommit) return;
+  const reason = quizSourceRefreshPendingReason || 'quiz-learning-commit';
+  quizSourceRefreshPendingAfterCommit = false;
+  quizSourceRefreshPendingReason = '';
+  scheduleQuizSourceRefresh(reason);
 });
 
 function getQuizSourceParts(source = 'personal') {

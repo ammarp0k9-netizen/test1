@@ -4446,6 +4446,14 @@ function installQuizEvidenceBeforeRewardHook() {
       eventCount: Array.isArray(reward?.awards) ? reward.awards.filter((amount) => amount > 0).length : 0,
       pendingCount: Number(reward?.pendingCount) || 0,
     });
+    if (reward && typeof reward === 'object' && Object.isExtensible(reward)) {
+      Object.defineProperty(reward, 'evidence', {
+        value: evidence,
+        configurable: true,
+        enumerable: false,
+      });
+      return reward;
+    }
     return reward && typeof reward === 'object' ? { ...reward, evidence } : reward;
   };
   Object.defineProperty(wrapped, '__lootlinguaEvidenceBeforeRewardHook', {

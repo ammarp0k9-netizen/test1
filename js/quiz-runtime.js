@@ -1,5 +1,10 @@
 async function commitVerifiedQuizResults(trace, onStage) {
   if (!activeQuizSession || !isVerifiedQuizMode(activeQuizSession.mode)) return { xp: 0, masteredCount: 0, correctCount: 0, total: 0 };
+  window.LootLinguaOperations?.diagnostic?.('commitVerifiedQuizResults', {
+    ownerId: window.auth?.currentUser?.uid || 'guest',
+    sessionId: String(activeQuizSession.id || ''),
+    mode: String(activeQuizSession.mode || ''),
+  });
   const byWord = new Map();
   quizSessionResults.forEach(result => {
     const key = String(result.wordId);
@@ -36,7 +41,7 @@ async function commitVerifiedQuizResults(trace, onStage) {
   trace?.stage('srs-calculated', { transitionCount: transitionEntries.length });
   onStage?.('applying-rewards');
   const batch = typeof awardWordTransitionXPBatch === 'function'
-    ? await awardWordTransitionXPBatch(transitionEntries, activeQuizSession.id)
+    ? await awardWordTransitionXPBatch(transitionEntries, activeQuizSession.id, { trace })
     : {
       awards: await Promise.all(transitionEntries.map((entry) =>
         awardWordTransitionXP(entry.word, entry.update, activeQuizSession.id)
@@ -48,36 +53,74 @@ async function commitVerifiedQuizResults(trace, onStage) {
     pendingCount: batch.pendingCount || 0,
   });
   onStage?.('committing-learning');
-
-  transitionEntries.forEach(({ word, result, update }, index) => {
-    const awarded = batch.awards[index] || 0;
-    xp += awarded;
-    if (update.advanced && awarded > 0) {
-      advancedWords.push({ word: word.word, nextStatus: update.nextStatus });
-    }
-    const wordKey = getWordMasteryKey(word);
-    if (update.mastered && wordKey && !masteredIds.has(wordKey)) {
-      masteredIds.add(wordKey);
-      masteredCount++;
-    }
-    const forgetCount = result.correct ? Math.max((word.forgetCount || 0) - 1, 0) : (word.forgetCount || 0) + 1;
-    const updated = { ...word, ...update.state, forgetCount };
-    updateQuizWordInSource(word.id, updated, word.quizSource || activeQuizSession.source || currentQuizSource);
-  });
-
-  let evidence = { recorded: 0, duplicate: 0, ineligible: transitionEntries.length };
-  if (
-    window.auth?.currentUser &&
-    typeof window.LootLinguaJourneyCloud?.recordQuizEvidenceBatch === 'function'
-  ) {
-    evidence = await window.LootLinguaJourneyCloud.recordQuizEvidenceBatch({
-      sessionId: activeQuizSession.id,
-      mode: activeQuizSession.mode,
-      source: activeQuizSession.source || currentQuizSource,
-      completed: true,
-      entries: transitionEntries,
+  window.__lootlinguaQuizLearningCommitDepth = (Number(window.__lootlinguaQuizLearningCommitDepth) || 0) + 1;
+  let evidence = batch?.evidence || null;
+  try {
+    transitionEntries.forEach(({ word, update }, index) => {
+      const awarded = batch.awards[index] || 0;
+      xp += awarded;
+      if (update.advanced && awarded > 0) {
+        advancedWords.push({ word: word.word, nextStatus: update.nextStatus });
+      }
+      const wordKey = getWordMasteryKey(word);
+      if (update.mastered && wordKey && !masteredIds.has(wordKey)) {
+        masteredIds.add(wordKey);
+        masteredCount++;
+      }
     });
+
+    if (typeof window.applyQuizLearningBatch === 'function') {
+      await window.applyQuizLearningBatch(transitionEntries, {
+        source: activeQuizSession.source || currentQuizSource,
+        trace,
+      });
+    } else {
+      transitionEntries.forEach(({ word, result, update }) => {
+        const forgetCount = result.correct
+          ? Math.max((word.forgetCount || 0) - 1, 0)
+          : (word.forgetCount || 0) + 1;
+        updateQuizWordInSource(
+          word.id,
+          { ...word, ...update.state, forgetCount },
+          word.quizSource || activeQuizSession.source || currentQuizSource
+        );
+      });
+    }
+
+    if (
+      !evidence &&
+      window.auth?.currentUser &&
+      typeof window.LootLinguaJourneyCloud?.recordQuizEvidenceBatch === 'function'
+    ) {
+      trace?.stage('evidence-write-start', { fallback: true, entryCount: transitionEntries.length });
+      evidence = await window.LootLinguaJourneyCloud.recordQuizEvidenceBatch({
+        sessionId: activeQuizSession.id,
+        mode: activeQuizSession.mode,
+        source: activeQuizSession.source || currentQuizSource,
+        completed: true,
+        entries: transitionEntries,
+        projectReadiness: false,
+      });
+      trace?.stage('evidence-write-end', { ...evidence, fallback: true });
+    }
+    evidence ||= { recorded: 0, duplicate: 0, ineligible: transitionEntries.length, readinessError: null };
+    if (
+      window.auth?.currentUser &&
+      typeof window.LootLinguaJourneyCloud?.projectQuizEvidenceReadiness === 'function'
+    ) {
+      trace?.stage('journey-projection-start');
+      evidence = await window.LootLinguaJourneyCloud.projectQuizEvidenceReadiness(evidence);
+      trace?.stage('journey-projection-end', evidence);
+    }
     trace?.stage('evidence-committed', evidence);
+  } finally {
+    window.__lootlinguaQuizLearningCommitDepth = Math.max(
+      0,
+      (Number(window.__lootlinguaQuizLearningCommitDepth) || 1) - 1
+    );
+    if (window.__lootlinguaQuizLearningCommitDepth === 0) {
+      window.dispatchEvent(new CustomEvent('lootlingua:quiz-learning-commit-complete'));
+    }
   }
 
   const totalUnique = byWord.size;
@@ -128,6 +171,7 @@ const QUIZ_FINISH_TRANSITIONS = Object.freeze({
   'save-failed': ['saving-result'],
   completed: ['answering'],
 });
+const QUIZ_FINISH_COMMIT_TIMEOUT_MS = 30000;
 let quizFinishState = 'answering';
 let quizFinishPromise = null;
 let quizFinishUi = null;
@@ -177,7 +221,28 @@ function resetQuizFinishState() {
   quizFinishPromise = null;
 }
 
+function waitForQuizCommit(promise) {
+  const configured = Number(window.__lootlinguaQuizFinishTimeoutMs);
+  const timeoutMs = Number.isFinite(configured) && configured > 0
+    ? configured
+    : QUIZ_FINISH_COMMIT_TIMEOUT_MS;
+  let timeoutId = null;
+  const timeout = new Promise((_resolve, reject) => {
+    timeoutId = setTimeout(() => {
+      const error = new Error('Quiz result commit timed out.');
+      error.code = 'quiz-finish/timeout';
+      reject(error);
+    }, timeoutMs);
+  });
+  return Promise.race([Promise.resolve(promise), timeout])
+    .finally(() => clearTimeout(timeoutId));
+}
+
 function finishQuizRun() {
+  window.LootLinguaOperations?.diagnostic?.('finishQuizRun', {
+    ownerId: window.auth?.currentUser?.uid || 'guest',
+    coalesced: Boolean(quizFinishPromise),
+  });
   if (quizFinishPromise) return quizFinishPromise;
   const retrying = quizFinishState === 'save-failed';
   setQuizFinishState(retrying ? 'saving-result' : 'final-answer-locked');
@@ -185,6 +250,7 @@ function finishQuizRun() {
   const trace = window.LootLinguaOperations?.startTrace('quiz-finish', {
     questionCount: currentQuizWords.length,
   });
+  trace?.stage('quiz-finish-start');
   trace?.stage('ui-feedback-visible');
 
   quizFinishPromise = (async () => {
@@ -192,7 +258,7 @@ function finishQuizRun() {
     setQuizFinishState('saving-result');
     const verified = activeQuizSession && isVerifiedQuizMode(activeQuizSession.mode);
     const commit = verified
-      ? await commitVerifiedQuizResults(trace, (stage) => setQuizFinishState(stage))
+      ? await waitForQuizCommit(commitVerifiedQuizResults(trace, (stage) => setQuizFinishState(stage)))
       : { xp: 0, correctCount: currentQuizWords.length - currentQuizMistakes, total: currentQuizWords.length };
   const accuracy = commit.total > 0 ? commit.correctCount / commit.total : 0;
   const fullyCompleted = verified && quizIndex >= currentQuizWords.length;
@@ -250,11 +316,16 @@ function finishQuizRun() {
   quizSessionResults = [];
   matchingQuizState = null;
   hasStartedAnswering = false;
-  showToast(verified
+    showToast(verified
     ? `تم حفظ الاختبار: ${Math.round(accuracy * 100)}% دقة${commit.xp ? `، +${commit.xp} XP` : ''}`
     : 'تمت مراجعة البطاقات بدون XP. أحسنت!',
-    'success',
-    3600);
+      'success',
+      3600);
+    trace?.stage('quiz-finish-complete', {
+      accuracy,
+      xp: commit.xp,
+      pendingRewards: commit.pendingRewards || 0,
+    });
     trace?.stage('navigation-scheduled').end({
       accuracy,
       xp: commit.xp,

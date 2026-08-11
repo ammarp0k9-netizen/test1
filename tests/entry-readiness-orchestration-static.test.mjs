@@ -60,6 +60,7 @@ test('Entry defers ordinary toasts and releases one preview instead of a complet
   assert.match(showToast, /__entryExperienceActive/);
   assert.match(showToast, /type !== 'danger'/);
   assert.match(showToast, /settings\.critical !== true/);
-  assert.match(scriptSource, /const \[first\] = deferred\.splice\(0, deferred\.length\)/);
+  assert.match(scriptSource, /const pending = deferred\.splice\(0, deferred\.length\)/);
+  assert.match(scriptSource, /const first = pending\.find\(/);
   assert.doesNotMatch(scriptSource, /deferred\.forEach\([^)]*queue\.push/);
 });

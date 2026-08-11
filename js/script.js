@@ -1960,6 +1960,10 @@ function getGuestMigrationWords() {
 }
 
 function getGuestProgressSnapshot() {
+  // Legacy profile keys (XP, streak, titles...) are unscoped. They are safe to
+  // treat as guest-owned only when a signed-out write marked that namespace as
+  // dirty. Account hydration also uses these keys and is not guest evidence.
+  if (typeof hasDirtyGuestData !== 'function' || !hasDirtyGuestData()) return {};
   return window.getLootlinguaProfilePayload ? window.getLootlinguaProfilePayload() : {};
 }
 
