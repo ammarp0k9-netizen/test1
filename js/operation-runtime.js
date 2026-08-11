@@ -26,6 +26,19 @@
     return root.__lootlinguaPerformanceDebug === true;
   }
 
+  function diagnostic(name, details = {}) {
+    if (!debugEnabled()) return null;
+    const key = String(name || 'event');
+    const store = root.__lootlinguaPerformanceDiagnostics ||= {
+      counters: {},
+      events: [],
+    };
+    store.counters[key] = (Number(store.counters[key]) || 0) + 1;
+    store.events.push({ name: key, at: Date.now(), ...details });
+    if (store.events.length > 200) store.events.splice(0, store.events.length - 200);
+    return store.counters[key];
+  }
+
   function startTrace(operation, metadata = {}) {
     const name = String(operation || 'operation');
     const startedAt = now();
@@ -53,9 +66,8 @@
         return trace;
       },
       count(counter, amount = 1) {
-        if (Object.prototype.hasOwnProperty.call(counters, counter)) {
-          counters[counter] += Number(amount) || 0;
-        }
+        const key = String(counter || '').trim();
+        if (key) counters[key] = (Number(counters[key]) || 0) + (Number(amount) || 0);
         return trace;
       },
       warn(message) {
@@ -234,5 +246,6 @@
     beginStatus,
     setButtonsBusy,
     nextPaint,
+    diagnostic,
   });
 })(typeof window !== 'undefined' ? window : globalThis);

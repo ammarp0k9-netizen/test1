@@ -1112,6 +1112,11 @@ async function ensureQuizEvidenceSession(user, input, entries) {
 async function recordQuizEvidenceBatch(input = {}) {
   const user = requireUser();
   const entries = Array.isArray(input.entries) ? input.entries : [];
+  window.LootLinguaOperations?.diagnostic?.('recordQuizEvidenceBatch', {
+    ownerId: user.uid,
+    sessionId: String(input.sessionId || ''),
+    entryCount: entries.length,
+  });
   if (!entries.length || input.completed !== true) {
     return { recorded: 0, duplicate: 0, ineligible: entries.length };
   }
@@ -1210,11 +1215,13 @@ async function recordQuizEvidenceBatch(input = {}) {
     ineligible: results.filter((result) => result === 'ineligible').length +
       Math.max(0, entries.length - correctEntries.length),
   };
+  if (input.projectReadiness === false) return { ...summary, readinessError: null };
+  return projectQuizEvidenceReadiness(summary);
+}
+
+async function projectQuizEvidenceReadiness(summary = {}) {
   let readinessError = null;
-  if (
-    (summary.recorded > 0 || summary.duplicate > 0) &&
-    input.projectReadiness !== false
-  ) {
+  if (Number(summary.recorded) > 0 || Number(summary.duplicate) > 0) {
     try {
       await evaluateActiveJourneyReadiness();
     } catch (error) {
@@ -1222,7 +1229,7 @@ async function recordQuizEvidenceBatch(input = {}) {
       console.warn('[Journey] Quiz evidence committed; readiness projection remains retryable.', {
         code: readinessError.code,
         operation: readinessError.operation,
-        recordedCount: summary.recorded,
+        recordedCount: Number(summary.recorded) || 0,
       });
     }
   }
@@ -4413,12 +4420,18 @@ function installQuizEvidenceBeforeRewardHook() {
   ) {
     return;
   }
-  const wrapped = async function evidenceFirstQuizReward(entries, sessionId) {
+  const wrapped = async function evidenceFirstQuizReward(entries, sessionId, options = {}) {
     const context = window.getActiveVerifiedQuizCommitContext?.(sessionId);
     if (!window.auth?.currentUser || !context) {
       return original.apply(this, arguments);
     }
-    await recordQuizEvidenceBatch({
+    window.LootLinguaOperations?.diagnostic?.('evidenceFirstQuizReward', {
+      ownerId: window.auth.currentUser.uid,
+      sessionId: String(sessionId || ''),
+      entryCount: Array.isArray(entries) ? entries.length : 0,
+    });
+    options.trace?.stage('evidence-write-start', { entryCount: Array.isArray(entries) ? entries.length : 0 });
+    const evidence = await recordQuizEvidenceBatch({
       sessionId: context.sessionId,
       mode: context.mode,
       source: context.source,
@@ -4426,7 +4439,14 @@ function installQuizEvidenceBeforeRewardHook() {
       entries,
       projectReadiness: false,
     });
-    return original.apply(this, arguments);
+    options.trace?.stage('evidence-write-end', evidence);
+    options.trace?.stage('xp-journey-start');
+    const reward = await original.apply(this, arguments);
+    options.trace?.stage('xp-journey-end', {
+      eventCount: Array.isArray(reward?.awards) ? reward.awards.filter((amount) => amount > 0).length : 0,
+      pendingCount: Number(reward?.pendingCount) || 0,
+    });
+    return reward && typeof reward === 'object' ? { ...reward, evidence } : reward;
   };
   Object.defineProperty(wrapped, '__lootlinguaEvidenceBeforeRewardHook', {
     value: true,
@@ -4480,6 +4500,7 @@ const API = Object.freeze({
   getGateNotificationFacts,
   subscribeGateProgress,
   recordQuizEvidenceBatch,
+  projectQuizEvidenceReadiness,
   evaluateActiveJourneyReadiness,
   getGateClearAttempt,
   startGateClearAttempt,

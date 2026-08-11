@@ -196,60 +196,262 @@ window.getSharedWordMasteryByKey = function(wordKey) {
   return stored ? getInlineWordMasteryState(stored) : null;
 };
 
+function masteryStateFingerprint(state) {
+  return JSON.stringify(getInlineWordMasteryState(state || {}), (_key, value) => {
+    if (value?.toMillis && typeof value.toMillis === 'function') return value.toMillis();
+    if (value instanceof Date) return value.getTime();
+    return value;
+  });
+}
+
+function masteryStatesEqual(left, right) {
+  return masteryStateFingerprint(left) === masteryStateFingerprint(right);
+}
+
+function applyMasteryBatchToWords(words, masteryUpdates, directUpdates) {
+  let changed = false;
+  const cloudWords = [];
+  const nextWords = (Array.isArray(words) ? words : []).map((word) => {
+    const direct = directUpdates?.get(String(word?.id));
+    const base = direct ? { ...word, ...direct } : word;
+    const mastery = masteryUpdates.get(getWordMasteryKey(base));
+    if (!direct && !mastery) return word;
+    const next = mastery ? applyMasteryStateToWord(base, mastery) : base;
+    cloudWords.push(next);
+    if (JSON.stringify(next) === JSON.stringify(word)) return word;
+    changed = true;
+    return next;
+  });
+  return { words: changed ? nextWords : words, changed, cloudWords };
+}
+
+function applyMasteryUpdatesAcrossLocalCopies(masteryUpdates, options = {}) {
+  const uid = options.uid;
+  const currentMastery = options.currentMastery || readSharedWordMasteryStore(uid);
+  const nextMastery = { ...currentMastery };
+  let masteryChanged = false;
+  masteryUpdates.forEach((state, key) => {
+    if (!masteryStatesEqual(nextMastery[key], state)) masteryChanged = true;
+    nextMastery[key] = state;
+  });
+  if (masteryChanged) writeSharedWordMasteryStore(nextMastery, uid);
+
+  const directPersonal = options.directPersonal || new Map();
+  const directCustom = options.directCustom || new Map();
+  const worldIds = new Set((Array.isArray(customWorlds) ? customWorlds : []).map((world) => String(world.id)));
+  directCustom.forEach((_updates, worldId) => worldIds.add(String(worldId)));
+  const batchToken = window.beginQuizSourceDataChangeBatch?.(uid);
+  let personalResult;
+  const worldResults = new Map();
+  let localWordWrites = 0;
+  try {
+    personalResult = applyMasteryBatchToWords(
+      readWordsFromStorage('normal', uid),
+      masteryUpdates,
+      directPersonal
+    );
+    if (personalResult.changed && writeWordsToStorage(personalResult.words, 'normal', uid)) localWordWrites += 1;
+    worldIds.forEach((worldId) => {
+      const result = applyMasteryBatchToWords(
+        readCustomWorldWordsFromStorage(worldId, uid),
+        masteryUpdates,
+        directCustom.get(worldId) || new Map()
+      );
+      worldResults.set(worldId, result);
+      if (result.changed && writeCustomWorldWordsToStorage(worldId, result.words, uid)) localWordWrites += 1;
+    });
+  } finally {
+    window.endQuizSourceDataChangeBatch?.(batchToken);
+  }
+
+  if (isEditableDictionaryView()) {
+    if (isCustomWorldView()) {
+      const activeResult = worldResults.get(String(activeCustomWorldId));
+      if (activeResult?.changed) window.words = activeResult.words;
+    } else if (personalResult?.changed) {
+      window.words = personalResult.words;
+    }
+  }
+  return {
+    masteryChanged,
+    localWordWrites,
+    fullDatasetPasses: 1 + worldIds.size,
+    personalCloudWords: personalResult?.cloudWords || [],
+    worldResults,
+  };
+}
+
+window.applyQuizLearningBatch = async function(transitionEntries = [], options = {}) {
+  const entries = Array.isArray(transitionEntries) ? transitionEntries : [];
+  const uid = window.auth?.currentUser?.uid;
+  const ownerId = getStorageUserId(uid);
+  const trace = options.trace;
+  const masteryStore = readSharedWordMasteryStore(uid);
+  const masteryUpdates = new Map();
+  const directPersonal = new Map();
+  const directCustom = new Map();
+  trace?.count('masteryStoreReads');
+  trace?.stage('mastery-update-start', { transitionCount: entries.length, ownerId });
+  window.LootLinguaOperations?.diagnostic?.('mastery-update-start', { transitionCount: entries.length, ownerId });
+
+  entries.forEach(({ word, result, update }) => {
+    const wordKey = getWordMasteryKey(word);
+    if (!wordKey || !word?.id || !update?.state) return;
+    const previous = masteryUpdates.get(wordKey) || masteryStore[wordKey];
+    const state = mergePermanentWordMasteryState(previous, update.state);
+    masteryUpdates.set(wordKey, state);
+    const forgetCount = result?.correct
+      ? Math.max((Number(word.forgetCount) || 0) - 1, 0)
+      : (Number(word.forgetCount) || 0) + 1;
+    const updatedWord = applyMasteryStateToWord({ ...word, ...update.state, forgetCount }, state);
+    const source = String(word.quizSource || options.source || currentQuizSource || 'personal');
+    if (source.startsWith('custom:')) {
+      const worldId = source.slice(7);
+      if (!directCustom.has(worldId)) directCustom.set(worldId, new Map());
+      directCustom.get(worldId).set(String(word.id), updatedWord);
+    } else {
+      directPersonal.set(String(word.id), updatedWord);
+    }
+  });
+
+  const local = applyMasteryUpdatesAcrossLocalCopies(masteryUpdates, {
+    uid,
+    currentMastery: masteryStore,
+    directPersonal,
+    directCustom,
+  });
+  trace?.count('masteryStoreWrites', local.masteryChanged ? 1 : 0);
+  trace?.count('localWordWrites', local.localWordWrites);
+  trace?.count('fullDatasetPasses', local.fullDatasetPasses);
+  trace?.stage('local-state-update', {
+    masteryKeys: masteryUpdates.size,
+    localWordWrites: local.localWordWrites,
+    fullDatasetPasses: local.fullDatasetPasses,
+  });
+  window.LootLinguaOperations?.diagnostic?.('local-state-update', {
+    ownerId,
+    masteryKeys: masteryUpdates.size,
+    localWordWrites: local.localWordWrites,
+    fullDatasetPasses: local.fullDatasetPasses,
+  });
+
+  let cloud = { saved: true, firestoreWrites: 0, skipped: true };
+  if (uid) {
+    if (window.auth?.currentUser?.uid !== uid) {
+      const error = new Error('Quiz owner changed while committing learning state.');
+      error.code = 'quiz-learning/stale-owner';
+      throw error;
+    }
+    if (typeof window.commitQuizLearningBatchToCloud !== 'function') {
+      const error = new Error('Quiz learning cloud writer is unavailable.');
+      error.code = 'quiz-learning/cloud-writer-unavailable';
+      throw error;
+    }
+    const customWords = [];
+    local.worldResults.forEach((result, worldId) => {
+      result.cloudWords.forEach((word) => customWords.push({ worldId, id: word.id, data: word }));
+    });
+    trace?.stage('mastery-cloud-write-start', {
+      personalWords: local.personalCloudWords.length,
+      customWords: customWords.length,
+      masteryKeys: masteryUpdates.size,
+    });
+    cloud = await window.commitQuizLearningBatchToCloud({
+      ownerId: uid,
+      masteryEntries: Object.fromEntries(masteryUpdates),
+      personalWords: local.personalCloudWords.map((word) => ({ id: word.id, data: word })),
+      customWords,
+    });
+    if (cloud?.saved !== true) {
+      const error = new Error('Quiz learning cloud batch was not saved.');
+      error.code = cloud?.stale ? 'quiz-learning/stale-owner' : 'quiz-learning/cloud-save-failed';
+      throw error;
+    }
+    trace?.count('firestoreWrites', cloud.firestoreWrites || 0);
+    trace?.stage('mastery-cloud-write-end', cloud);
+  }
+  trace?.stage('mastery-update-end', {
+    masteryKeys: masteryUpdates.size,
+    localWordWrites: local.localWordWrites,
+    cloudWrites: cloud.firestoreWrites || 0,
+  });
+  window.LootLinguaOperations?.diagnostic?.('mastery-update-end', {
+    ownerId,
+    masteryKeys: masteryUpdates.size,
+    localWordWrites: local.localWordWrites,
+    cloudWrites: cloud.firestoreWrites || 0,
+  });
+  return { ...local, cloud, masteryKeys: masteryUpdates.size };
+};
+
 function propagateMasteryStateAcrossAccount(wordText, state, options = {}) {
   const key = getWordMasteryKey(wordText);
   if (!key) return;
   const uid = window.auth?.currentUser?.uid;
   const entries = readSharedWordMasteryStore(uid);
   const normalizedState = mergePermanentWordMasteryState(entries[key], state);
-  entries[key] = normalizedState;
-  writeSharedWordMasteryStore(entries, uid);
+  const local = applyMasteryUpdatesAcrossLocalCopies(new Map([[key, normalizedState]]), {
+    uid,
+    currentMastery: entries,
+  });
   if (!options.skipMetaSave) window.saveGlobalWordMasteryToCloud?.(key, normalizedState);
 
-  const updateCopies = (words) => (Array.isArray(words) ? words : []).map((word) =>
-    getWordMasteryKey(word) === key ? applyMasteryStateToWord(word, normalizedState) : word
-  );
-  const personal = updateCopies(readWordsFromStorage('normal', uid));
-  writeWordsToStorage(personal, 'normal', uid);
-  const worldCopies = new Map();
-  customWorlds.forEach((world) => {
-    const worldWords = updateCopies(readCustomWorldWordsFromStorage(world.id, uid));
-    worldCopies.set(String(world.id), worldWords);
-    writeCustomWorldWordsToStorage(world.id, worldWords, uid);
-  });
-  if (isEditableDictionaryView()) window.words = updateCopies(window.words);
-
   if (!hasSignedInUser() || options.skipCloudCopies) return;
-  personal.forEach((word) => {
-    if (getWordMasteryKey(word) === key) window.updateWordInCloud?.(word.id, normalizedState);
+  local.personalCloudWords.forEach((word) => {
+    if (options.cloudOwner?.type === 'personal' && String(options.cloudOwner.id) === String(word.id)) return;
+    window.updateWordInCloud?.(word.id, normalizedState);
   });
-  worldCopies.forEach((worldWords, worldId) => {
-    worldWords.forEach((word) => {
-      if (getWordMasteryKey(word) === key) {
-        window.updateCustomWorldWordInCloud?.(worldId, word.id, normalizedState);
-      }
+  local.worldResults.forEach((result, worldId) => {
+    result.cloudWords.forEach((word) => {
+      if (
+        options.cloudOwner?.type === 'custom' &&
+        String(options.cloudOwner.worldId) === String(worldId) &&
+        String(options.cloudOwner.id) === String(word.id)
+      ) return;
+      window.updateCustomWorldWordInCloud?.(worldId, word.id, normalizedState);
     });
   });
 }
 
+let globalMasterySnapshotCache = { ownerId: '', fingerprints: new Map() };
+
+window.addEventListener?.('lootlingua:auth-state', (event) => {
+  globalMasterySnapshotCache = {
+    ownerId: event?.detail?.user?.uid || 'guest',
+    fingerprints: new Map(),
+  };
+});
+
 window.applyGlobalWordMasterySnapshot = function(entries) {
   if (!entries || typeof entries !== 'object') return;
-  const current = readSharedWordMasteryStore();
-  const merged = { ...current };
+  const uid = window.auth?.currentUser?.uid;
+  const ownerId = getStorageUserId(uid);
+  if (globalMasterySnapshotCache.ownerId !== ownerId) {
+    globalMasterySnapshotCache = { ownerId, fingerprints: new Map() };
+  }
+  const current = readSharedWordMasteryStore(uid);
+  const changed = new Map();
   Object.entries(entries).forEach(([key, state]) => {
-    merged[key] = mergePermanentWordMasteryState(current[key], state);
+    const incomingFingerprint = masteryStateFingerprint(state);
+    const merged = mergePermanentWordMasteryState(current[key], state);
+    const alreadySeen = globalMasterySnapshotCache.fingerprints.get(key) === incomingFingerprint;
+    globalMasterySnapshotCache.fingerprints.set(key, incomingFingerprint);
+    if (alreadySeen && masteryStatesEqual(current[key], merged)) return;
+    if (!masteryStatesEqual(current[key], merged)) changed.set(key, merged);
   });
-  writeSharedWordMasteryStore(merged);
-  Object.entries(entries).forEach(([key, state]) => {
-    const word = [
-      ...readWordsFromStorage('normal'),
-      ...customWorlds.flatMap(world => readCustomWorldWordsFromStorage(world.id))
-    ].find(item => getWordMasteryKey(item) === key);
-    if (word) propagateMasteryStateAcrossAccount(word.word || word.text, merged[key], { skipMetaSave: true, skipCloudCopies: true });
+  let local = { localWordWrites: 0, fullDatasetPasses: 0 };
+  if (changed.size > 0) {
+    local = applyMasteryUpdatesAcrossLocalCopies(changed, { uid, currentMastery: current });
+    if (isEditableDictionaryView()) render();
+  }
+  window.LootLinguaOperations?.diagnostic?.('mastery-snapshot-callback', {
+    ownerId,
+    receivedKeys: Object.keys(entries).length,
+    changedKeys: changed.size,
+    localWordWrites: local.localWordWrites,
   });
-  if (isEditableDictionaryView()) render();
   window.dispatchEvent(new CustomEvent('lootlingua:word-mastery-snapshot', {
-    detail: { wordKeys: Object.keys(entries) },
+    detail: { wordKeys: [...changed.keys()], uid: ownerId },
   }));
 };
 

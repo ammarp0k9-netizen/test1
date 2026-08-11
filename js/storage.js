@@ -29,6 +29,61 @@ const GUEST_PROFILE_DIRTY_KEYS = new Set([
 ]);
 const GUEST_PROFILE_DIRTY_PREFIXES = ['lootlinguaDailyQuests_'];
 
+let quizSourceDataChangeBatch = null;
+let quizSourceDataChangeGeneration = 0;
+
+function dispatchQuizSourceDataChanged(detail = {}) {
+  const ownerId = String(detail.ownerId || getStorageUserId());
+  const scope = String(detail.scope || 'personal');
+  if (quizSourceDataChangeBatch && quizSourceDataChangeBatch.ownerId === ownerId) {
+    quizSourceDataChangeBatch.scopes.add(scope);
+    return;
+  }
+  window.dispatchEvent?.(new CustomEvent('lootlingua:quiz-source-data-changed', {
+    detail: { ...detail, ownerId, scope },
+  }));
+}
+
+function beginQuizSourceDataChangeBatch(uid) {
+  const ownerId = getStorageUserId(uid);
+  if (!quizSourceDataChangeBatch || quizSourceDataChangeBatch.ownerId !== ownerId) {
+    quizSourceDataChangeGeneration += 1;
+    quizSourceDataChangeBatch = {
+      generation: quizSourceDataChangeGeneration,
+      ownerId,
+      depth: 0,
+      scopes: new Set(),
+    };
+  }
+  quizSourceDataChangeBatch.depth += 1;
+  return {
+    generation: quizSourceDataChangeBatch.generation,
+    ownerId,
+  };
+}
+
+function endQuizSourceDataChangeBatch(token) {
+  const batch = quizSourceDataChangeBatch;
+  if (!batch || token?.generation !== batch.generation || token?.ownerId !== batch.ownerId) return;
+  batch.depth = Math.max(0, batch.depth - 1);
+  if (batch.depth > 0) return;
+  quizSourceDataChangeBatch = null;
+  if (!batch.scopes.size) return;
+  dispatchQuizSourceDataChanged({
+    ownerId: batch.ownerId,
+    scope: batch.scopes.size === 1 ? [...batch.scopes][0] : 'multiple',
+    scopes: [...batch.scopes],
+    source: 'quiz-learning-batch',
+  });
+}
+
+window.beginQuizSourceDataChangeBatch = beginQuizSourceDataChangeBatch;
+window.endQuizSourceDataChangeBatch = endQuizSourceDataChangeBatch;
+window.addEventListener?.('lootlingua:auth-state', () => {
+  quizSourceDataChangeGeneration += 1;
+  quizSourceDataChangeBatch = null;
+});
+
 function hasSignedInUser() {
   return Boolean(window.auth?.currentUser);
 }
@@ -328,13 +383,20 @@ function readWordsFromStorage(type = 'normal', uid) {
 }
 
 function writeWordsToStorage(words = window.words, type = 'normal', uid) {
-  localStorage.setItem(getWordsStorageKey(type, uid), JSON.stringify(Array.isArray(words) ? words : []));
-  if (getStorageUserId(uid) === 'guest' && Array.isArray(words) && words.length > 0) {
+  const ownerId = getStorageUserId(uid);
+  const key = getWordsStorageKey(type, uid);
+  const serialized = JSON.stringify(Array.isArray(words) ? words : []);
+  if (ownerId === 'guest' && Array.isArray(words) && words.length > 0) {
     markGuestDataDirty();
   }
-  window.dispatchEvent?.(new CustomEvent('lootlingua:quiz-source-data-changed', {
-    detail: { ownerId: getStorageUserId(uid), scope: type === 'normal' ? 'personal' : type, source: 'local-write' },
-  }));
+  if (localStorage.getItem(key) === serialized) return false;
+  localStorage.setItem(key, serialized);
+  dispatchQuizSourceDataChanged({
+    ownerId,
+    scope: type === 'normal' ? 'personal' : type,
+    source: 'local-write',
+  });
+  return true;
 }
 
 function getCustomWorldsStorageKey(uid) {
@@ -462,18 +524,21 @@ function readCustomWorldWordsFromStorage(worldId, uid) {
 }
 
 function writeCustomWorldWordsToStorage(worldId, words = window.words, uid) {
-  if (!worldId) return;
-  localStorage.setItem(getCustomWorldWordsStorageKey(worldId, uid), JSON.stringify(Array.isArray(words) ? words : []));
-  if (getStorageUserId(uid) === 'guest' && Array.isArray(words) && words.length > 0) {
+  if (!worldId) return false;
+  const ownerId = getStorageUserId(uid);
+  const key = getCustomWorldWordsStorageKey(worldId, uid);
+  const serialized = JSON.stringify(Array.isArray(words) ? words : []);
+  if (ownerId === 'guest' && Array.isArray(words) && words.length > 0) {
     markGuestDataDirty();
   }
-  window.dispatchEvent?.(new CustomEvent('lootlingua:quiz-source-data-changed', {
-    detail: {
-      ownerId: getStorageUserId(uid),
-      scope: `custom:${String(worldId)}`,
-      source: 'local-write',
-    },
-  }));
+  if (localStorage.getItem(key) === serialized) return false;
+  localStorage.setItem(key, serialized);
+  dispatchQuizSourceDataChanged({
+    ownerId,
+    scope: `custom:${String(worldId)}`,
+    source: 'local-write',
+  });
+  return true;
 }
 
 function removeCustomWorldWordsFromStorage(worldId, uid) {

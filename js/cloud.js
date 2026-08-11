@@ -1090,6 +1090,11 @@
       (snapshot) => {
         if (auth.currentUser?.uid !== listenerUid) return;
         const entries = snapshot.exists() ? snapshot.data()?.entries : null;
+        window.LootLinguaOperations?.diagnostic?.('cloud-mastery-listener-callback', {
+          ownerId: listenerUid,
+          entryCount: entries && typeof entries === 'object' ? Object.keys(entries).length : 0,
+          pendingWrites: snapshot.metadata?.hasPendingWrites === true,
+        });
         window.__lootlinguaMasterySnapshot = {
           uid: listenerUid,
           exists: snapshot.exists(),
@@ -1139,6 +1144,116 @@
     } catch (error) {
       console.warn('saveGlobalWordMasteryToCloud:', error.code || error.message);
       return false;
+    }
+  };
+
+  function sanitizeMasteryCloudState(state = {}) {
+    const cloudState = { ...state };
+    if (cloudState.mastered_once !== true && cloudState.masteredOnce !== true) {
+      delete cloudState.mastered_once;
+      delete cloudState.masteredOnce;
+    }
+    return cloudState;
+  }
+
+  function buildQuizLearningCloudUpdate(data = {}, uid) {
+    const update = { userId: uid };
+    if ('word' in data) update.text = data.word;
+    if ('meaning' in data) update.meaning = data.meaning;
+    if ('example' in data) update.example = data.example;
+    if ('category' in data) update.category = data.category;
+    if ('starred' in data) update.starred = data.starred;
+    if ('forgetCount' in data) update.forgetCount = data.forgetCount;
+    if ('xpValue' in data) update.xpValue = data.xpValue;
+    if ('order' in data) update.order = data.order;
+    if ('mastery_status' in data) update.mastery_status = data.mastery_status;
+    if ('mastery_streak' in data) update.mastery_streak = data.mastery_streak;
+    if ('last_recalled_at' in data) update.last_recalled_at = data.last_recalled_at;
+    if ('first_recalled_at' in data) update.first_recalled_at = data.first_recalled_at;
+    if ('last_recall_day' in data) update.last_recall_day = data.last_recall_day;
+    if ('last_recall_session_id' in data) update.last_recall_session_id = data.last_recall_session_id;
+    if ('last_quizzed_at' in data) update.last_quizzed_at = data.last_quizzed_at;
+    if ('quiz_seen_count' in data) update.quiz_seen_count = data.quiz_seen_count;
+    if ('mastered_once' in data) update.mastered_once = data.mastered_once;
+    if ('firstMasteredAt' in data) update.firstMasteredAt = data.firstMasteredAt;
+    if ('hasEarnedMasteryXP' in data) update.hasEarnedMasteryXP = data.hasEarnedMasteryXP;
+    if ('earnedTransitions' in data) update.earnedTransitions = data.earnedTransitions;
+    if ('remasteryAwardCount' in data) update.remasteryAwardCount = data.remasteryAwardCount;
+    if ('xpEconomyVersion' in data) update.xpEconomyVersion = data.xpEconomyVersion;
+    return update;
+  }
+
+  window.commitQuizLearningBatchToCloud = async function(payload = {}) {
+    const user = auth.currentUser;
+    const ownerId = String(payload.ownerId || '');
+    if (!user || !ownerId || user.uid !== ownerId) {
+      return { saved: false, stale: true, firestoreWrites: 0 };
+    }
+    const operations = new Map();
+    (Array.isArray(payload.personalWords) ? payload.personalWords : []).forEach((item) => {
+      if (!item?.id) return;
+      operations.set(`personal:${String(item.id)}`, {
+        ref: doc(db, 'users', ownerId, 'words', String(item.id)),
+        data: buildQuizLearningCloudUpdate(item.data || {}, ownerId),
+      });
+    });
+    (Array.isArray(payload.customWords) ? payload.customWords : []).forEach((item) => {
+      if (!item?.worldId || !item?.id) return;
+      operations.set(`custom:${String(item.worldId)}:${String(item.id)}`, {
+        ref: doc(db, 'users', ownerId, 'customWorlds', String(item.worldId), 'words', String(item.id)),
+        data: buildQuizLearningCloudUpdate(item.data || {}, ownerId),
+      });
+    });
+    const masteryEntries = Object.fromEntries(
+      Object.entries(payload.masteryEntries && typeof payload.masteryEntries === 'object'
+        ? payload.masteryEntries
+        : {}).map(([key, state]) => [String(key), sanitizeMasteryCloudState(state)])
+    );
+    const wordOperations = [...operations.values()];
+    const hasMastery = Object.keys(masteryEntries).length > 0;
+    const maxWordWritesPerBatch = 400;
+    let firestoreWrites = 0;
+    let offset = 0;
+    let firstBatch = true;
+    window.LootLinguaOperations?.diagnostic?.('quiz-cloud-batch-start', {
+      ownerId,
+      wordWrites: wordOperations.length,
+      masteryKeys: Object.keys(masteryEntries).length,
+    });
+    try {
+      do {
+        if (auth.currentUser?.uid !== ownerId) {
+          return { saved: false, stale: true, firestoreWrites };
+        }
+        const batch = writeBatch(db);
+        const chunk = wordOperations.slice(offset, offset + maxWordWritesPerBatch);
+        if (firstBatch && hasMastery) {
+          batch.set(doc(db, 'users', ownerId, 'meta', 'word_mastery'), {
+            entries: masteryEntries,
+            updatedAt: new Date(),
+          }, { merge: true });
+          firestoreWrites += 1;
+        }
+        chunk.forEach((operation) => {
+          batch.update(operation.ref, operation.data);
+          firestoreWrites += 1;
+        });
+        if (chunk.length || (firstBatch && hasMastery)) await batch.commit();
+        offset += chunk.length;
+        firstBatch = false;
+      } while (offset < wordOperations.length);
+      window.LootLinguaOperations?.diagnostic?.('quiz-cloud-batch-end', {
+        ownerId,
+        firestoreWrites,
+      });
+      return { saved: true, stale: false, firestoreWrites };
+    } catch (error) {
+      window.LootLinguaOperations?.diagnostic?.('quiz-cloud-batch-error', {
+        ownerId,
+        code: error?.code || '',
+      });
+      console.warn('commitQuizLearningBatchToCloud:', error.code || error.message);
+      throw error;
     }
   };
 
@@ -1435,29 +1550,7 @@
   window.updateCustomWorldWordInCloud = async function(worldId, docId, data) {
     const user = auth.currentUser;
     if (!user || !worldId || !docId) return;
-    const update = { userId: user.uid };
-    if ('word'        in data) update.text        = data.word;
-    if ('meaning'     in data) update.meaning     = data.meaning;
-    if ('example'     in data) update.example     = data.example;
-    if ('category'    in data) update.category    = data.category;
-    if ('starred'     in data) update.starred     = data.starred;
-    if ('forgetCount' in data) update.forgetCount = data.forgetCount;
-    if ('xpValue'     in data) update.xpValue     = data.xpValue;
-    if ('order'       in data) update.order       = data.order;
-    if ('mastery_status' in data) update.mastery_status = data.mastery_status;
-    if ('mastery_streak' in data) update.mastery_streak = data.mastery_streak;
-    if ('last_recalled_at' in data) update.last_recalled_at = data.last_recalled_at;
-    if ('first_recalled_at' in data) update.first_recalled_at = data.first_recalled_at;
-    if ('last_recall_day' in data) update.last_recall_day = data.last_recall_day;
-    if ('last_recall_session_id' in data) update.last_recall_session_id = data.last_recall_session_id;
-    if ('last_quizzed_at' in data) update.last_quizzed_at = data.last_quizzed_at;
-    if ('quiz_seen_count' in data) update.quiz_seen_count = data.quiz_seen_count;
-    if ('mastered_once' in data) update.mastered_once = data.mastered_once;
-    if ('firstMasteredAt' in data) update.firstMasteredAt = data.firstMasteredAt;
-    if ('hasEarnedMasteryXP' in data) update.hasEarnedMasteryXP = data.hasEarnedMasteryXP;
-    if ('earnedTransitions' in data) update.earnedTransitions = data.earnedTransitions;
-    if ('remasteryAwardCount' in data) update.remasteryAwardCount = data.remasteryAwardCount;
-    if ('xpEconomyVersion' in data) update.xpEconomyVersion = data.xpEconomyVersion;
+    const update = buildQuizLearningCloudUpdate(data, user.uid);
     try { await updateDoc(doc(db, "users", user.uid, "customWorlds", String(worldId), "words", docId), update); }
     catch (e) { console.error("updateCustomWorldWordInCloud:", e); }
   };
@@ -1519,29 +1612,7 @@
   window.updateWordInCloud = async function(docId, data) {
     const user = auth.currentUser;
     if (!user || !docId) return;
-    const update = { userId: user.uid };
-    if ('word'        in data) update.text        = data.word;
-    if ('meaning'     in data) update.meaning     = data.meaning;
-    if ('example'     in data) update.example     = data.example;
-    if ('category'    in data) update.category    = data.category;
-    if ('starred'     in data) update.starred     = data.starred;
-    if ('forgetCount' in data) update.forgetCount = data.forgetCount;
-    if ('xpValue'     in data) update.xpValue     = data.xpValue;
-    if ('order'       in data) update.order       = data.order;
-    if ('mastery_status' in data) update.mastery_status = data.mastery_status;
-    if ('mastery_streak' in data) update.mastery_streak = data.mastery_streak;
-    if ('last_recalled_at' in data) update.last_recalled_at = data.last_recalled_at;
-    if ('first_recalled_at' in data) update.first_recalled_at = data.first_recalled_at;
-    if ('last_recall_day' in data) update.last_recall_day = data.last_recall_day;
-    if ('last_recall_session_id' in data) update.last_recall_session_id = data.last_recall_session_id;
-    if ('last_quizzed_at' in data) update.last_quizzed_at = data.last_quizzed_at;
-    if ('quiz_seen_count' in data) update.quiz_seen_count = data.quiz_seen_count;
-    if ('mastered_once' in data) update.mastered_once = data.mastered_once;
-    if ('firstMasteredAt' in data) update.firstMasteredAt = data.firstMasteredAt;
-    if ('hasEarnedMasteryXP' in data) update.hasEarnedMasteryXP = data.hasEarnedMasteryXP;
-    if ('earnedTransitions' in data) update.earnedTransitions = data.earnedTransitions;
-    if ('remasteryAwardCount' in data) update.remasteryAwardCount = data.remasteryAwardCount;
-    if ('xpEconomyVersion' in data) update.xpEconomyVersion = data.xpEconomyVersion;
+    const update = buildQuizLearningCloudUpdate(data, user.uid);
     try { await updateDoc(doc(db, "users", user.uid, "words", docId), update); }
     catch (e) { console.error("خطأ في التحديث:", e); }
   };

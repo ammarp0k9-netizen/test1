@@ -596,27 +596,45 @@ async function ensureQuizSourceReady(scope = currentQuizSource, options = {}) {
 window.resolveQuizSourceSnapshot = resolveQuizSourceSnapshot;
 window.ensureQuizSourceReady = ensureQuizSourceReady;
 
+let quizSourceRefreshScheduled = false;
+let quizSourceRefreshOwnerId = '';
+
+function scheduleQuizSourceRefresh(reason = 'source-change') {
+  const ownerId = getQuizSourceOwnerId();
+  if (quizSourceRefreshScheduled && quizSourceRefreshOwnerId === ownerId) return;
+  quizSourceRefreshScheduled = true;
+  quizSourceRefreshOwnerId = ownerId;
+  const run = () => {
+    quizSourceRefreshScheduled = false;
+    if (ownerId !== getQuizSourceOwnerId() || currentView !== 'quiz') return;
+    window.LootLinguaOperations?.diagnostic?.('quiz-source-refresh', { ownerId, reason });
+    refreshQuizAvailableCount();
+    refreshQuizSettingsSummary();
+  };
+  if (typeof queueMicrotask === 'function') queueMicrotask(run);
+  else Promise.resolve().then(run);
+}
+
 window.addEventListener('lootlingua:auth-state', () => {
   quizSourceRequestCoordinator.invalidate();
   quizSourceLoadStates.clear();
   currentQuizSelectionPlan = null;
+  quizSourceRefreshScheduled = false;
+  quizSourceRefreshOwnerId = '';
   if (currentView === 'quiz') {
-    refreshQuizAvailableCount();
-    refreshQuizSettingsSummary();
+    scheduleQuizSourceRefresh('auth-state');
   }
 });
 
 window.addEventListener('lootlingua:quiz-source-data-changed', (event) => {
   if (String(event?.detail?.ownerId || '') !== getQuizSourceOwnerId()) return;
   if (currentView !== 'quiz') return;
-  refreshQuizAvailableCount();
-  refreshQuizSettingsSummary();
+  scheduleQuizSourceRefresh(event?.detail?.source || 'source-change');
 });
 
 window.addEventListener('lootlingua:learning-data-changed', () => {
   if (currentView !== 'quiz') return;
-  refreshQuizAvailableCount();
-  refreshQuizSettingsSummary();
+  scheduleQuizSourceRefresh('learning-data-change');
 });
 
 function getQuizSourceParts(source = 'personal') {
@@ -658,7 +676,12 @@ function updateQuizWordInSource(wordId, updater, source = 'personal') {
   }
   propagateMasteryStateAcrossAccount(
     updatedWord.word || updatedWord.text,
-    getInlineWordMasteryState(updatedWord)
+    getInlineWordMasteryState(updatedWord),
+    {
+      cloudOwner: type === 'custom'
+        ? { type: 'custom', worldId, id: wordId }
+        : { type: 'personal', id: wordId },
+    }
   );
   return updatedWord;
 }
