@@ -12,6 +12,11 @@
   ]);
   const JOURNEY_STATUSES = Object.freeze(['active', 'paused']);
   const CONTENT_JOURNEY_STATUSES = Object.freeze(['in-progress', 'completed-current-content']);
+  const DESTINATION_CLASSIFICATIONS = Object.freeze([
+    'actionable-journey',
+    'world-completed',
+    'no-actionable-journey',
+  ]);
   const GATE_STATUSES = Object.freeze([
     'locked',
     'available',
@@ -212,6 +217,21 @@
         session: input?.legacyPlacementSession || null,
       };
     }
+    const worldProgress = deriveWorldProgressView({
+      worldId: journey?.worldId || input?.worldId,
+      journey,
+      ranks,
+      gatesByRank,
+      progressByRank,
+    });
+    if (worldProgress.currentContentTerminal) {
+      return {
+        type: 'completed-current-content',
+        reason: 'terminal-progress',
+        worldId: String(journey?.worldId || input?.worldId || ''),
+        worldProgress,
+      };
+    }
     const unassessed = new Set((input?.unassessedRankIds || []).map(String));
     const newTarget = orderedTargets.find((target) =>
       unassessed.has(itemId(target.rank, 'rankId'))
@@ -246,16 +266,17 @@
       )
     );
     if (available) return { type: 'gate', reason: 'available', ...available };
-    const allCleared = orderedTargets.length > 0 && orderedTargets.every((target) =>
-      targetProgressState(target, journey) === 'cleared'
-    );
-    if (journey?.contentJourneyStatus === 'completed-current-content' || allCleared) {
-      return { type: 'completed-current-content' };
-    }
     return { type: 'unavailable' };
   }
 
   const resolveActiveJourneyDestination = resolveJourneyDestination;
+
+  function classifyJourneyDestination(destination) {
+    const type = String(destination?.type || 'unavailable');
+    if (type === 'completed-current-content') return 'world-completed';
+    if (type === 'unavailable') return 'no-actionable-journey';
+    return 'actionable-journey';
+  }
 
   function resolveLevelPlacementResultDestination(input) {
     const session = input?.session || {};
@@ -787,12 +808,27 @@
       Number(journey.worldCompletion.version) === WORLD_COMPLETION_VERSION
       ? journey.worldCompletion
       : null;
+    const completionWorldId = String(journey?.worldId || input?.worldId || '');
+    const currentCompletionId = snapshot.requiredRankIds.length && completionWorldId
+      ? worldCompletionId(completionWorldId, snapshot)
+      : '';
+    const achievementMatchesCurrentContent = Boolean(
+      storedAchievement &&
+      String(storedAchievement.completionId || '') === currentCompletionId
+    );
     const legacyCompleted = Boolean(
       !storedAchievement &&
       journey?.contentJourneyStatus === 'completed-current-content' &&
       currentContentCompleted
     );
     const completed = Boolean(storedAchievement || legacyCompleted || currentContentCompleted);
+    const currentContentTerminal = Boolean(
+      currentContentCompleted ||
+      (
+        journey?.contentJourneyStatus === 'completed-current-content' &&
+        achievementMatchesCurrentContent
+      )
+    );
     const mastered = Boolean(
       currentContentCompleted &&
       rankProgress.length > 0 &&
@@ -804,10 +840,12 @@
       storedAchievement,
       legacyCompleted,
       currentContentCompleted,
-      hasNewContent: completed && !currentContentCompleted,
+      currentContentTerminal,
+      achievementMatchesCurrentContent,
+      hasNewContent: completed && !currentContentTerminal,
       completionId: String(
         storedAchievement?.completionId ||
-        (completed ? worldCompletionId(journey?.worldId || input?.worldId, snapshot) : '')
+        (completed && completionWorldId ? worldCompletionId(completionWorldId, snapshot) : '')
       ),
       completedBy: String(storedAchievement?.completedBy || (legacyCompleted ? 'legacy' : 'derived')),
       requiredRankCount: snapshot.requiredRankIds.length,
@@ -855,6 +893,7 @@
     PLACEMENT_STATUSES,
     JOURNEY_STATUSES,
     CONTENT_JOURNEY_STATUSES,
+    DESTINATION_CLASSIFICATIONS,
     GATE_STATUSES,
     WRITABLE_GATE_STATUSES,
     journeyError,
@@ -868,6 +907,7 @@
     getJourneyGateState,
     resolveJourneyDestination,
     resolveActiveJourneyDestination,
+    classifyJourneyDestination,
     resolveLevelPlacementResultDestination,
     planPlacementOutcome,
     selectJourneyStart,

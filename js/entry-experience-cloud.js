@@ -19,11 +19,39 @@ function contract() {
   return api;
 }
 
-function entryError(code, message, cause) {
+function entryError(code, message, cause, diagnostic) {
   const error = new Error(message || code);
   error.code = code;
   if (cause) error.cause = cause;
+  if (diagnostic) error.diagnostic = diagnostic;
   return error;
+}
+
+function firebaseErrorCode(error) {
+  const code = String(error?.code || error?.name || 'unknown').trim();
+  return code || 'unknown';
+}
+
+function entryDocumentPath(version = contract().EXPERIENCE_VERSION) {
+  return `users/{account}/entryExperiences/v${version}`;
+}
+
+function entryFailureDiagnostic(operation, phase, error) {
+  return Object.freeze({
+    operation: String(operation || 'entry-state-write'),
+    phase: String(phase || 'unknown'),
+    documentPath: entryDocumentPath(),
+    firebaseCode: firebaseErrorCode(error),
+  });
+}
+
+function reportEntryFailure(operation, phase, error) {
+  const diagnostic = entryFailureDiagnostic(operation, phase, error);
+  console.error('[LootLingua Entry persistence]', diagnostic);
+  window.dispatchEvent(new CustomEvent('lootlingua:entry-persistence-error', {
+    detail: diagnostic,
+  }));
+  return diagnostic;
 }
 
 function requireUser(expectedUser) {
@@ -106,16 +134,76 @@ async function loadLegacyPreferences(user) {
   }
 }
 
-async function save(state, user) {
-  if (!db) throw entryError('entry/storage-unavailable', 'Entry Experience storage is unavailable.');
-  const current = requireUser(user);
+function verifySavedState(expected, snapshot) {
+  if (!snapshot.exists()) {
+    throw entryError(
+      'entry/verification-missing',
+      'Entry Experience write was acknowledged but the document could not be read back.'
+    );
+  }
+  const observed = contract().normalizeEntryState(snapshot.data());
+  if (!observed) {
+    throw entryError(
+      'entry/verification-invalid',
+      'Entry Experience write was acknowledged but the stored state is invalid.'
+    );
+  }
+  const fields = [
+    'contractVersion', 'experienceVersion', 'status', 'currentStep',
+    'journeyStatus', 'audience', 'classification',
+  ];
+  const mismatch = fields.find((field) => observed[field] !== expected[field]);
+  if (mismatch || (
+    expected.status === 'completed' && !contract().isTerminalState(observed)
+  )) {
+    throw entryError(
+      'entry/verification-mismatch',
+      'Entry Experience write was acknowledged but its completion proof did not round-trip.'
+    );
+  }
+  return observed;
+}
+
+async function save(state, user, options) {
+  const operation = String(options?.operation || 'entry-state-write');
+  let phase = 'storage-readiness';
   try {
-    await setDoc(entryRef(current.uid), cloudPayload(state));
+    if (!db) {
+      throw entryError('entry/storage-unavailable', 'Entry Experience storage is unavailable.');
+    }
+    phase = 'auth-readiness';
+    const current = requireUser(user);
+    phase = 'local-validation';
+    const normalized = contract().normalizeEntryState(state);
+    if (!normalized) {
+      throw entryError('entry/invalid-state', 'Entry Experience state is invalid.');
+    }
+    const payload = cloudPayload(normalized);
+    phase = 'firestore-write';
+    await setDoc(entryRef(current.uid), payload);
+    phase = 'auth-readiness';
     requireUser(current);
-    return contract().normalizeEntryState({ ...state, updatedAt: Date.now() });
+    if (options?.verify === true) {
+      phase = 'post-write-verification';
+      const snapshot = await getDoc(entryRef(current.uid));
+      phase = 'auth-readiness';
+      requireUser(current);
+      phase = 'post-write-verification';
+      return verifySavedState(normalized, snapshot);
+    }
+    return contract().normalizeEntryState({ ...normalized, updatedAt: Date.now() });
   } catch (error) {
-    if (error?.code === 'entry/auth-changed') throw error;
-    throw entryError('entry/write-failed', 'Could not save Entry Experience.', error);
+    const diagnostic = reportEntryFailure(operation, phase, error);
+    if (['entry/auth-required', 'entry/auth-changed', 'entry/storage-unavailable'].includes(error?.code)) {
+      error.diagnostic = diagnostic;
+      throw error;
+    }
+    const code = phase === 'local-validation'
+      ? 'entry/validation-failed'
+      : (phase === 'post-write-verification'
+        ? 'entry/verification-failed'
+        : 'entry/write-failed');
+    throw entryError(code, 'Could not save Entry Experience.', error, diagnostic);
   }
 }
 

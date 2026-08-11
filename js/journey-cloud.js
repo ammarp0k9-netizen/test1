@@ -320,17 +320,96 @@ async function getJourney(worldId, options) {
   return value;
 }
 
-async function getActiveJourney(options) {
+async function getPointedJourney(options) {
   const user = requireUser();
-  if (!options?.force && cache.active !== undefined) return cache.active;
   const pointer = await getDoc(activeJourneyRef(user.uid));
   const worldId = pointer.exists() ? String(pointer.data()?.worldId || '') : '';
-  if (!worldId) {
-    cache.active = null;
-    return null;
+  return worldId ? getJourney(worldId, options) : null;
+}
+
+async function listJourneyRecords(options) {
+  const user = requireUser();
+  const snapshot = await getDocs(collection(db, 'users', user.uid, 'contentProgress'));
+  const journeys = snapshot.docs.map((item) => ({
+    ...(item.data() || {}),
+    worldId: item.id,
+  }));
+  journeys.forEach((journey) => {
+    cache.journeys.set(String(journey.worldId || ''), journey);
+  });
+  return journeys.sort((left, right) => (
+    timestampMillis(right?.updatedAt) - timestampMillis(left?.updatedAt)
+  ));
+}
+
+function accountDestination(destination, journey, pointerWorldId, source) {
+  const resolved = destination || { type: 'unavailable' };
+  return {
+    ...resolved,
+    classification: core().classifyJourneyDestination(resolved),
+    worldId: String(resolved.worldId || journey?.worldId || ''),
+    journey: journey || null,
+    pointerWorldId: String(pointerWorldId || ''),
+    source: String(source || 'active-pointer'),
+  };
+}
+
+async function resolveAccountJourneyDestination(options) {
+  const pointedJourney = await getPointedJourney(options);
+  const pointerWorldId = String(pointedJourney?.worldId || '');
+  let resolvedPointer = null;
+  if (pointedJourney) {
+    const pointerDestination = await resolveActiveJourneyDestination(pointerWorldId, options);
+    resolvedPointer = accountDestination(
+      pointerDestination,
+      pointedJourney,
+      pointerWorldId,
+      'active-pointer'
+    );
+    if (resolvedPointer.classification === 'actionable-journey') {
+      return resolvedPointer;
+    }
   }
-  const journey = await getJourney(worldId, options);
-  cache.active = journey?.status === 'active' ? journey : null;
+
+  const journeys = await listJourneyRecords(options);
+  const activeCandidates = journeys.filter((journey) => (
+    journey?.status === 'active' &&
+    String(journey.worldId || '') !== pointerWorldId
+  ));
+  let terminalCandidate = null;
+  for (const candidate of activeCandidates) {
+    const destination = await resolveActiveJourneyDestination(candidate.worldId, options);
+    const resolved = accountDestination(
+      destination,
+      candidate,
+      pointerWorldId,
+      'active-journey-scan'
+    );
+    if (resolved.classification === 'actionable-journey') return resolved;
+    if (!terminalCandidate && resolved.classification === 'world-completed') {
+      terminalCandidate = { ...resolved, source: 'terminal-journey-scan' };
+    }
+  }
+
+  if (resolvedPointer?.classification === 'world-completed') {
+    return { ...resolvedPointer, source: 'terminal-pointer' };
+  }
+  if (terminalCandidate) return terminalCandidate;
+  if (resolvedPointer) return { ...resolvedPointer, source: 'inactive-pointer' };
+  return accountDestination(
+    { type: 'unavailable', reason: 'no-actionable-journey' },
+    null,
+    pointerWorldId,
+    'journey-scan'
+  );
+}
+
+async function getActiveJourney(options) {
+  if (!options?.force && cache.active !== undefined) return cache.active;
+  const destination = await resolveAccountJourneyDestination(options);
+  cache.active = destination.classification === 'actionable-journey'
+    ? destination.journey
+    : null;
   return cache.active;
 }
 
@@ -1534,7 +1613,7 @@ async function finalizeGateClearAttempt(worldId, rankId, gateId, attemptId) {
       gateId: String(gateId),
       nextRankId: String(committed?.nextTarget?.rank?.rankId || ''),
       nextGateId: String(committed?.nextTarget?.gate?.gateId || ''),
-      type: 'gate-clear',
+      type: committed?.completedCurrentContent ? 'world-completed' : 'gate-clear',
     },
   }));
   return committed;
@@ -3751,7 +3830,9 @@ async function applyPlacementOutcome(worldId, assessmentId) {
   const journey = committedJourney;
   const savedSession = committedSession;
   cache.journeys.set(world, journey);
-  cache.active = journey;
+  cache.active = journey.contentJourneyStatus === 'completed-current-content'
+    ? undefined
+    : journey;
   cache.levelPlacementSessions.set(`${world}/${assessment}`, savedSession);
   logJourneyOperationStage({
     operation: 'apply-placement-outcome',
@@ -3792,6 +3873,14 @@ async function applyPlacementOutcome(worldId, assessmentId) {
       cefrLevel: savedSession.cefrLevel,
       passedLevel: Boolean(savedSession.passedLevel),
       recommendedStartRankId: savedSession.recommendedStartRankId || '',
+    },
+  }));
+  window.dispatchEvent(new CustomEvent('lootlingua:journey-changed', {
+    detail: {
+      worldId: world,
+      type: savedSession.completedCurrentContent
+        ? 'world-completed'
+        : 'level-placement-completed',
     },
   }));
   return makeCommittedLevelPlacementBundle(journey, savedSession, {
@@ -4162,7 +4251,9 @@ async function finishLevelPlacement(worldId, assessmentId, action) {
     });
   });
   cache.journeys.set(world, savedJourney);
-  cache.active = savedJourney?.status === 'active' ? savedJourney : null;
+  cache.active = savedJourney?.contentJourneyStatus === 'completed-current-content'
+    ? undefined
+    : (savedJourney?.status === 'active' ? savedJourney : null);
   cache.levelPlacementSessions.set(`${world}/${assessment}`, savedSession);
   window.dispatchEvent(new CustomEvent('lootlingua:journey-changed', {
     detail: { worldId: world, type: pause ? 'level-placement-paused' : 'level-placement-completed' },
@@ -4345,6 +4436,7 @@ function installQuizEvidenceBeforeRewardHook() {
 
 const API = Object.freeze({
   getActiveJourney,
+  resolveAccountJourneyDestination,
   hasAnyJourneyProgress,
   getJourney,
   startJourney,

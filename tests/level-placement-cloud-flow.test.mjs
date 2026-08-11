@@ -508,6 +508,55 @@ test('actual no-next-level flow persists completed-current-content without reviv
   harness.api.invalidate('all');
   const destination = await harness.api.resolveActiveJourneyDestination('world-a', { force: true });
   assert.equal(destination.type, 'completed-current-content');
+  const accountDestination = await harness.api.resolveAccountJourneyDestination({ force: true });
+  assert.equal(accountDestination.classification, 'world-completed');
+  assert.equal(accountDestination.worldId, 'world-a');
+  assert.equal(await harness.api.getActiveJourney({ force: true }), null);
+
+  harness.values.delete('users/flow-user/meta/active_content_journey');
+  harness.api.invalidate('all');
+  const hydratedWithoutPointer = await harness.api.resolveAccountJourneyDestination({ force: true });
+  assert.equal(hydratedWithoutPointer.classification, 'world-completed');
+  assert.equal(hydratedWithoutPointer.worldId, 'world-a');
+  assert.equal(hydratedWithoutPointer.source, 'terminal-journey-scan');
+});
+
+test('a stale completed pointer yields to another genuinely actionable active World', async () => {
+  const harness = createHarness({ noNextLevel: true });
+  await harness.api.applyPlacementOutcome('world-a', 'assessment-a2');
+  const worldBPath = 'users/flow-user/contentProgress/world-b';
+  harness.values.set(worldBPath, {
+    worldId: 'world-b', activeRankId: 'rank-b', activeGateId: 'gate-b',
+    status: 'active', contentJourneyStatus: 'in-progress', journeyVersion: 1,
+    placementStatus: 'not-started', activePlacementAssessmentId: '',
+    unlockedRankIds: ['rank-b'], unlockedGateIds: ['gate-b'],
+    completedRankIds: [], rankCompletionVersions: {}, updatedAt: new Date(2000),
+  });
+  harness.values.set(`${worldBPath}/ranks/rank-b/gates/gate-b`, {
+    worldId: 'world-b', rankId: 'rank-b', gateId: 'gate-b', status: 'learning',
+  });
+  const content = harness.root.LootLinguaPublishedContent;
+  const originalRanks = content.listPublishedRanks;
+  const originalGates = content.listPublishedGates;
+  content.listPublishedRanks = async (worldId, options) => worldId === 'world-b'
+    ? [{
+      worldId: 'world-b', rankId: 'rank-b', order: 0, status: 'published',
+      unlockConfig: { initialStatus: 'available' },
+    }]
+    : originalRanks(worldId, options);
+  content.listPublishedGates = async (worldId, rankId, options) => worldId === 'world-b'
+    ? [{
+      worldId: 'world-b', rankId, gateId: 'gate-b', order: 0, status: 'published',
+      unlockConfig: { initialStatus: 'available' },
+    }]
+    : originalGates(worldId, rankId, options);
+
+  harness.api.invalidate('all');
+  const destination = await harness.api.resolveAccountJourneyDestination({ force: true });
+  assert.equal(destination.classification, 'actionable-journey');
+  assert.equal(destination.worldId, 'world-b');
+  assert.equal(destination.type, 'gate');
+  assert.equal((await harness.api.getActiveJourney({ force: true })).worldId, 'world-b');
 });
 
 test('ordinary quiz evidence success is not reported as result failure when readiness projection fails', async () => {

@@ -6,6 +6,7 @@ import {
   initializeTestEnvironment
 } from '@firebase/rules-unit-testing';
 import {
+  Timestamp,
   collection,
   collectionGroup,
   deleteField,
@@ -784,6 +785,32 @@ try {
       ...entryExperienceV2State(),
       journeyProgress: { gateId: 'forged-progress' }
     }));
+
+    const completedJourneyUid = 'entry-v2-completed-journey';
+    const completedJourneyDb = environment.authenticatedContext(completedJourneyUid).firestore();
+    const completedJourneyReference = doc(
+      completedJourneyDb,
+      `users/${completedJourneyUid}/entryExperiences/v2`
+    );
+    const completedJourneyStartedAt = Timestamp.fromMillis(1000);
+    await assertSucceeds(setDoc(completedJourneyReference, entryExperienceV2State({
+      status: 'in-progress',
+      audience: 'returning',
+      classification: 'returning-with-progress',
+      currentStep: 'return',
+      journeyStatus: 'pending',
+      startedAt: completedJourneyStartedAt
+    })));
+    await assertSucceeds(setDoc(completedJourneyReference, entryExperienceV2State({
+      status: 'completed',
+      audience: 'returning',
+      classification: 'returning-with-progress',
+      currentStep: 'destination',
+      journeyStatus: 'return-reviewed',
+      selectedWorldId: '',
+      startedAt: completedJourneyStartedAt,
+      completedAt: serverTimestamp()
+    })));
   });
 
   await test('legacy completed/skipped v1 without first-action proof can migrate once', async () => {

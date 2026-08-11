@@ -548,11 +548,42 @@
     ].includes(type);
   }
 
+  function isWorldCompletedDestination(destination) {
+    return destination?.classification === 'world-completed' ||
+      cleanString(destination?.type, 80) === 'completed-current-content';
+  }
+
+  function alignStateToJourneyDestination(state, destination, nowValue) {
+    const normalized = normalizeEntryState(state);
+    if (!normalized || normalized.status !== 'in-progress' ||
+      !isWorldCompletedDestination(destination)) {
+      return normalized;
+    }
+    return normalizeEntryState({
+      ...normalized,
+      currentStep: 'destination',
+      journeyStatus: 'return-reviewed',
+      selectedWorldId: '',
+      gamerStatus: 'not-applicable',
+      updatedAt: timestampMillis(nowValue) || Date.now(),
+    });
+  }
+
   function resolveNextAction(input, contextInput) {
     const signals = input && input.profileSignals ? input : normalizeSignals(input || {});
     const context = isPlainObject(contextInput) ? contextInput : {};
     const selectedWorldId = cleanString(context.selectedWorldId, 128);
     const destination = signals.journeyDestination;
+    if (isWorldCompletedDestination(destination)) {
+      return {
+        id: 'explore-worlds',
+        label: 'استكشف العوالم',
+        hint: 'أنهيت هذا العالم بالكامل. اختر عالمًا جديدًا عندما تكون مستعدًا لمواصلة التعلّم.',
+        worldId: cleanString(destination?.worldId, 128),
+        completedWorld: true,
+        primary: true,
+      };
+    }
     if (signals.activeJourney && isJourneySessionDestination(destination)) {
       return {
         id: 'resume-journey-session',
@@ -1005,6 +1036,8 @@
     normalizeSignals,
     classifyUser,
     entryCopy,
+    isWorldCompletedDestination,
+    alignStateToJourneyDestination,
     resolveNextAction,
     ctaContradictsSignals,
     mergeEntryStates,

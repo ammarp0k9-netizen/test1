@@ -2,10 +2,11 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 
-const [cloudSource, controllerSource, scriptSource] = await Promise.all([
+const [cloudSource, controllerSource, scriptSource, worldsSource] = await Promise.all([
   readFile(new URL('../js/cloud.js', import.meta.url), 'utf8'),
   readFile(new URL('../js/entry-experience-controller.js', import.meta.url), 'utf8'),
   readFile(new URL('../js/script.js', import.meta.url), 'utf8'),
+  readFile(new URL('../js/worlds.js', import.meta.url), 'utf8'),
 ]);
 
 function functionBlock(source, name, nextName) {
@@ -26,11 +27,19 @@ test('authenticated Entry waits for words, profile, and SRS mastery before class
 
 test('Entry waits for JourneyCloud and passes its central destination to CTA resolution', () => {
   assert.match(controllerSource, /__lootlinguaAuthUser\s*&&\s*!root\.LootLinguaJourneyCloud/);
-  assert.match(controllerSource, /resolveActiveJourneyDestination\(/);
+  assert.match(controllerSource, /resolveAccountJourneyDestination\(/);
   assert.match(controllerSource, /resumePausedLevelPlacement:\s*true/);
   assert.match(controllerSource, /journeyDestination:\s*learning\.journeyDestination/);
   assert.match(controllerSource, /addEventListener\('lootlingua:journey-cloud-ready'/);
   assert.match(controllerSource, /learning\.learningReadFailed/);
+});
+
+test('Worlds root and Product Entry consume the same account destination classification', () => {
+  assert.match(controllerSource, /resolveAccountJourneyDestination\(/);
+  assert.match(worldsSource, /readPublishedAccountJourneyDestination/);
+  assert.match(worldsSource, /resolveAccountJourneyDestination\(/);
+  assert.match(worldsSource, /accountDestination\.classification === 'actionable-journey'/);
+  assert.match(controllerSource, /journeyDestination\?\.classification === 'actionable-journey'/);
 });
 
 test('theme intro decisions use the versioned once-only contract and persist through profile sync', () => {

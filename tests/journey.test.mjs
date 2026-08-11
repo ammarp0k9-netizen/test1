@@ -245,6 +245,41 @@ test('active destination resolves new ranks before the completed-current-content
   assert.equal(destination.gate.gateId, 'gate-new');
 });
 
+test('terminal progress defeats stale local active IDs and missing Gate snapshots', () => {
+  const ranks = [rank('rank-a', 0, 'available')];
+  const gatesByRank = new Map([
+    ['rank-a', [gate('rank-a', 'gate-a', 0)]],
+  ]);
+  const worldCompletion = journey.createWorldCompletionAchievement({
+    worldId: 'world-a',
+    ranks,
+    completedBy: 'gate-clear',
+    completedAt: 123,
+  });
+  const destination = journey.resolveActiveJourneyDestination({
+    worldId: 'world-a',
+    journey: {
+      worldId: 'world-a',
+      activeRankId: 'rank-a',
+      activeGateId: 'gate-a',
+      status: 'active',
+      contentJourneyStatus: 'completed-current-content',
+      unlockedRankIds: ['rank-a'],
+      unlockedGateIds: ['gate-a'],
+      completedRankIds: ['rank-a'],
+      rankCompletionVersions: { 'rank-a': 1 },
+      worldCompletion,
+    },
+    currentPointer: { activeRankId: 'rank-a', activeGateId: 'gate-a' },
+    ranks,
+    gatesByRank,
+    progressByRank: new Map([['rank-a', new Map()]]),
+  });
+  assert.equal(destination.type, 'completed-current-content');
+  assert.equal(destination.reason, 'terminal-progress');
+  assert.equal(journey.classifyJourneyDestination(destination), 'world-completed');
+});
+
 test('pending new ranks route before an older learning gate', () => {
   const ranks = [rank('rank-old', 0, 'available'), rank('rank-new', 1, 'locked')];
   const gatesByRank = new Map([

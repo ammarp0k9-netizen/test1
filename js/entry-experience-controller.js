@@ -259,14 +259,25 @@
     if (user) {
       const journeyApi = root.LootLinguaJourneyCloud;
       try {
-        if (journeyApi?.getActiveJourney) activeJourney = await journeyApi.getActiveJourney();
+        if (journeyApi?.resolveAccountJourneyDestination) {
+          journeyDestination = await journeyApi.resolveAccountJourneyDestination({
+            resumePausedLevelPlacement: true,
+          });
+          activeJourney = journeyDestination?.classification === 'actionable-journey'
+            ? journeyDestination.journey
+            : null;
+        } else if (journeyApi?.getActiveJourney) {
+          activeJourney = await journeyApi.getActiveJourney();
+        }
         if (token !== runtime.bootToken) return null;
-        hasJourneyProgress = Boolean(activeJourney);
+        hasJourneyProgress = Boolean(
+          activeJourney || journeyDestination?.classification === 'world-completed'
+        );
         if (!hasJourneyProgress && journeyApi?.hasAnyJourneyProgress) {
           hasJourneyProgress = await journeyApi.hasAnyJourneyProgress();
         }
         if (token !== runtime.bootToken) return null;
-        if (activeJourney?.worldId && journeyApi?.resolveActiveJourneyDestination) {
+        if (!journeyDestination && activeJourney?.worldId && journeyApi?.resolveActiveJourneyDestination) {
           try {
             journeyDestination = await journeyApi.resolveActiveJourneyDestination(
               activeJourney.worldId,
@@ -546,6 +557,11 @@
     runtime.state = entryState || api().createEntryDraft(
       runtime.presentation,
       existingPreferences(user, entryState, profileSnapshot)
+    );
+    runtime.state = api().alignStateToJourneyDestination(
+      runtime.state,
+      signals.journeyDestination,
+      Date.now()
     );
     announceEntryState();
     open();
@@ -1058,6 +1074,20 @@
     const panel = panelElement();
     if (!panel || !runtime.state) return;
     const action = currentNextAction();
+    if (action.completedWorld === true) {
+      panel.innerHTML = `
+        <div class="entry-action-screen entry-destination-screen entry-completed-world-screen">
+          <header class="entry-header entry-action-header"><span class="entry-eyebrow">رحلتك هنا مكتملة</span><span class="entry-step-label">إنجاز محفوظ</span></header>
+          <span class="entry-action-icon"><i class="fa-solid fa-trophy" aria-hidden="true"></i></span>
+          <h1 id="entryExperienceTitle">أنهيت هذا العالم 🎉</h1>
+          <p>${escapeHtml(action.hint)}</p>
+          <div class="entry-action-destinations">
+            <button type="button" class="entry-primary entry-action-primary" data-entry-cta="${action.id}">${escapeHtml(action.label)} <i class="fa-solid fa-compass" aria-hidden="true"></i></button>
+          </div>
+        </div>`;
+      bindPanelActions();
+      return;
+    }
     const selectedWorld = selectedWorldPreview();
     panel.innerHTML = `
       <div class="entry-action-screen entry-destination-screen">
@@ -1491,7 +1521,10 @@
             code: 'entry/write-failed',
           });
         }
-        committed = await cloud().save(normalized, runtime.user) || normalized;
+        committed = await cloud().save(normalized, runtime.user, {
+          operation: 'entry-completion',
+          verify: true,
+        }) || normalized;
       }
       runtime.state = committed;
       persistLocalState(committed, runtime.user);
@@ -1949,10 +1982,14 @@
       setBusy(false);
       const status = document.getElementById('entryExperienceStatus');
       if (status) status.textContent = error?.code === 'entry/write-failed'
-        ? 'وصلنا إلى وجهتك، لكن تعذّر تأكيد اكتمال التجربة في حسابك. أبقيناها مفتوحة للمحاولة مرة أخرى.'
+        ? `وصلنا إلى وجهتك، لكن تعذّر تأكيد اكتمال التجربة في حسابك. أبقيناها مفتوحة للمحاولة مرة أخرى.${error?.diagnostic?.firebaseCode ? ` (${error.diagnostic.firebaseCode} / ${error.diagnostic.phase})` : ''}`
+        : (error?.code === 'entry/validation-failed'
+          ? `تعذّر التحقق من حالة اكتمال التجربة محليًا.${error?.diagnostic?.firebaseCode ? ` (${error.diagnostic.firebaseCode})` : ''}`
+          : (error?.code === 'entry/verification-failed'
+            ? `تمت كتابة حالة التجربة، لكن تعذّر التحقق منها بعد الحفظ.${error?.diagnostic?.firebaseCode ? ` (${error.diagnostic.firebaseCode} / ${error.diagnostic.phase})` : ''}`
         : (error?.code === 'entry/profile-write-failed'
           ? 'تعذّر حفظ المظهر في حسابك. لم نغلق التجربة ولم نعتبرها مكتملة.'
-          : 'تعذّر فتح الوجهة المطلوبة. بقيت التجربة مفتوحة ولم تُعتبر مكتملة.');
+          : 'تعذّر فتح الوجهة المطلوبة. بقيت التجربة مفتوحة ولم تُعتبر مكتملة.')));
     }
   }
 

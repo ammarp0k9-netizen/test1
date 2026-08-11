@@ -506,6 +506,9 @@ async function createHarness(options = {}) {
       getActiveJourney: async () => clone(options.activeJourney || null),
       hasAnyJourneyProgress: async () => options.hasJourneyProgress === true,
       resolveActiveJourneyDestination: async () => clone(options.journeyDestination || null),
+      ...(options.accountJourneyDestination ? {
+        resolveAccountJourneyDestination: async () => clone(options.accountJourneyDestination),
+      } : {}),
     },
     LootLinguaEntryExperienceCloud: {
       async load(user) {
@@ -763,6 +766,12 @@ test('an Entry cloud failure keeps an authenticated experience resumable and non
       if (contract.isTerminalState(state)) {
         const error = new Error('offline');
         error.code = 'entry/write-failed';
+        error.diagnostic = {
+          operation: 'entry-completion',
+          phase: 'firestore-write',
+          documentPath: 'users/{account}/entryExperiences/v2',
+          firebaseCode: 'unavailable',
+        };
         throw error;
       }
       cloudState = clone(state);
@@ -777,6 +786,7 @@ test('an Entry cloud failure keeps an authenticated experience resumable and non
   assert.equal(harness.controller.isActive(), true);
   assert.notEqual(persistedState(storage, localKey)?.status, 'completed');
   assert.notEqual(persistedState(storage, localKey)?.status, 'skipped');
+  assert.match(harness.status.textContent, /unavailable \/ firestore-write/);
 
   const refreshed = await createHarness({
     user,
@@ -1076,6 +1086,43 @@ test('matrix: an account with a real active Journey gets the short truthful retu
   assert.deepEqual(harness.calls.openedWorlds, ['world-active']);
   assert.equal(harness.controller.getState().status, 'completed');
   assert.equal(harness.controller.isActive(), false);
+});
+
+test('matrix: a completed-only World gets the terminal shortcut with no fake Journey preview', async () => {
+  const user = oldUser('completed-world-only');
+  let cloudState = null;
+  const harness = await createHarness({
+    user,
+    hasJourneyProgress: true,
+    accountJourneyDestination: {
+      type: 'completed-current-content',
+      classification: 'world-completed',
+      worldId: 'world-complete',
+      journey: {
+        worldId: 'world-complete',
+        status: 'active',
+        contentJourneyStatus: 'completed-current-content',
+      },
+    },
+    entryLoad: async () => ({ exists: Boolean(cloudState), state: clone(cloudState) }),
+    entrySave: async (state) => {
+      cloudState = clone(state);
+      return clone(state);
+    },
+  });
+
+  assert.equal(harness.controller.getPresentation().classification, 'returning-with-progress');
+  assert.equal(harness.controller.getState().currentStep, 'destination');
+  assert.equal(harness.controller.getState().journeyStatus, 'return-reviewed');
+  assert.ok(harness.panel.querySelector('[data-entry-cta="explore-worlds"]'));
+  assert.equal(harness.panel.querySelector('[data-entry-action="continue-return"]'), null);
+  assert.equal(harness.panel.querySelector('.entry-journey-recap'), null);
+
+  await harness.click('[data-entry-cta="explore-worlds"]');
+  assert.equal(harness.calls.worlds, 1);
+  assert.equal(harness.calls.openedWorlds.length, 0);
+  assert.equal(harness.controller.getState().status, 'completed');
+  assert.equal(cloudState.status, 'completed');
 });
 
 test('migration: completed v1 contributes preferences but never suppresses the full v2 path', async () => {

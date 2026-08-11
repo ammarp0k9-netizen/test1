@@ -239,6 +239,8 @@ test('Gate Clear and Level Placement own the atomic World completion writes', ()
   assert.match(gateFinalize, /createWorldCompletionAchievement/);
   assert.match(gateFinalize, /worldCompletionRecorded/);
   assert.match(placementApply, /createWorldCompletionAchievement/);
+  assert.match(gateFinalize, /completedCurrentContent \? 'world-completed' : 'gate-clear'/);
+  assert.match(placementApply, /savedSession\.completedCurrentContent[\s\S]*'world-completed'/);
   assert.match(rulesSource, /validWorldCompletionAppend/);
   assert.match(rulesSource, /achievement\.completedAt == request\.time/);
   assert.doesNotMatch(gateFinalize, /awardXP|claimXP|httpsCallable|getFunctions/);
@@ -252,6 +254,22 @@ test('World completion CTA remains routed through the central Journey resolver',
   );
   assert.match(resultUi, /openPublishedJourneyDestination/);
   assert.doesNotMatch(resultUi, /activeRankId\s*=|activeGateId\s*=/);
+});
+
+test('Worlds root classifies the shared terminal destination without a fake resume CTA', () => {
+  const rootLoader = worldsSource.slice(
+    worldsSource.indexOf('async function loadPublishedWorlds'),
+    worldsSource.indexOf('window.showPublishedWorldsTab')
+  );
+  const banner = worldsSource.slice(
+    worldsSource.indexOf('function makeActiveJourneyBanner'),
+    worldsSource.indexOf('async function beginPublishedGateClear')
+  );
+  assert.match(rootLoader, /readPublishedAccountJourneyDestination/);
+  assert.match(rootLoader, /accountDestination\.classification === 'actionable-journey'/);
+  assert.match(banner, /destination\.classification === 'world-completed'/);
+  assert.match(banner, /استكشف العوالم/);
+  assert.match(banner, /completed \? 'استكشف العوالم' : 'متابعة'/);
 });
 
 test('the phase adds no Function export, callable, or trigger', () => {

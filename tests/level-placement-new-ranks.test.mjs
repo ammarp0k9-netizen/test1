@@ -320,7 +320,7 @@ test('continue routing opens the first pending new rank CTA without writing prog
     worldsSource.indexOf('function makePublishedJourneyStartPanel')
   );
   assert.match(routeBlock, /destination\.type === 'new-rank-assessment'/);
-  assert.match(routeBlock, /openPublishedRank\(worldId, destination\.rank\.rankId\)/);
+  assert.match(routeBlock, /openPublishedRank\(destinationWorldId, destination\.rank\.rankId\)/);
   assert.doesNotMatch(routeBlock, /startLevelPlacement|runTransaction|\.update\(/);
   assert.match(continueBlock, /const sameActiveWorld = activeJourney/);
   assert.match(continueBlock, /const resumed = sameActiveWorld[\s\S]*publishedContentState\.journey \|\| activeJourney/);

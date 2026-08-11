@@ -262,6 +262,33 @@ test('central Journey destination types map to session resume without changing d
   }
 });
 
+test('World-completed destination aligns Product Entry to the terminal shortcut contract', () => {
+  const destination = {
+    type: 'completed-current-content',
+    classification: 'world-completed',
+    worldId: 'world-complete',
+  };
+  const signals = entry.normalizeSignals({
+    isAuthenticated: true,
+    uid: 'completed-user',
+    hasJourneyProgress: true,
+    journeyDestination: destination,
+  });
+  const action = entry.resolveNextAction(signals);
+  assert.equal(action.id, 'explore-worlds');
+  assert.equal(action.completedWorld, true);
+  assert.equal(action.worldId, 'world-complete');
+
+  const draft = entry.createEntryDraft(
+    { audience: 'returning', classification: 'returning-with-progress' },
+    {}
+  );
+  const aligned = entry.alignStateToJourneyDestination(draft, destination, FIXED_NOW);
+  assert.equal(aligned.currentStep, 'destination');
+  assert.equal(aligned.journeyStatus, 'return-reviewed');
+  assert.equal(aligned.status, 'in-progress');
+});
+
 test('copy respects returning progress, local guest data, and the new-user boundary', () => {
   const words = fixtureResult(legacyEntryFixtures.accountWordsAndXpNoJourney);
   const wordsCopy = entry.entryCopy(words.classified.classification, words.classified.signals);

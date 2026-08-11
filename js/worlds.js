@@ -1583,6 +1583,23 @@ async function readActivePublishedJourney(options) {
   }
 }
 
+async function readPublishedAccountJourneyDestination(options) {
+  if (!window.auth?.currentUser) {
+    return {
+      type: 'unavailable',
+      classification: 'no-actionable-journey',
+      journey: null,
+      worldId: '',
+    };
+  }
+  try {
+    return await getJourneyCloudApi().resolveAccountJourneyDestination(options);
+  } catch (error) {
+    logPublishedContentError('account-journey-destination', error);
+    throw error;
+  }
+}
+
 async function readPublishedRankGateProgress(worldId, rankId, journey, options) {
   if (!journey || !window.auth?.currentUser) return new Map();
   try {
@@ -1716,7 +1733,11 @@ function canRevealPublishedGateWords(gateState, journey) {
 function rerenderPublishedRoute() {
   const routeKey = publishedContentState.route?.key;
   if (routeKey === 'worlds' && publishedContentState.worlds.length) {
-    renderPublishedWorlds(publishedContentState.worlds, publishedContentState.activeJourney);
+    renderPublishedWorlds(
+      publishedContentState.worlds,
+      publishedContentState.activeJourney,
+      publishedContentState.activeJourneyDestination
+    );
   } else if (routeKey === 'world' && publishedContentState.world) {
     renderPublishedRanks(
       publishedContentState.world,
@@ -1987,18 +2008,19 @@ async function retryPublishedJourneyError() {
 }
 
 async function openPublishedJourneyDestination(worldId, options) {
-  const destination = await getJourneyCloudApi().resolveActiveJourneyDestination(
-    worldId,
-    { resumePausedLevelPlacement: options?.resumePausedLevelPlacement === true }
-  );
+  const destination = await getJourneyCloudApi().resolveAccountJourneyDestination({
+    force: options?.force === true,
+    resumePausedLevelPlacement: options?.resumePausedLevelPlacement === true,
+  });
+  const destinationWorldId = String(destination.worldId || worldId || '');
   publishedContentState.activeJourneyDestination = destination;
   if (destination.type === 'level-placement') {
-    return showPublishedLevelPlacementResume(worldId);
+    return showPublishedLevelPlacementResume(destinationWorldId);
   }
   if (destination.type === 'level-placement-result' && destination.requiresApply) {
     try {
       const bundle = await getJourneyCloudApi().applyPlacementOutcome(
-        worldId,
+        destinationWorldId,
         destination.session.assessmentId
       );
       publishedContentState.levelPlacementBundle = bundle;
@@ -2011,8 +2033,8 @@ async function openPublishedJourneyDestination(worldId, options) {
       const journeyError = setPublishedJourneyError(
         error,
         'apply-level-placement-result',
-        () => openPublishedJourneyDestination(worldId, options),
-        worldId
+        () => openPublishedJourneyDestination(destinationWorldId, options),
+        destinationWorldId
       );
       rerenderPublishedRoute();
       showToast(journeyError.text, 'danger', 5200);
@@ -2020,25 +2042,25 @@ async function openPublishedJourneyDestination(worldId, options) {
     }
   }
   if (destination.type === 'placement') {
-    return showPublishedPlacementResume(worldId);
+    return showPublishedPlacementResume(destinationWorldId);
   }
   if (destination.type === 'new-rank-assessment') {
-    window.openPublishedRank(worldId, destination.rank.rankId);
+    window.openPublishedRank(destinationWorldId, destination.rank.rankId);
     return destination;
   }
   if (destination.type === 'gate' || destination.type === 'gate-clear') {
     window.openPublishedGate(
-      worldId,
+      destinationWorldId,
       destination.rank.rankId,
       destination.gate.gateId
     );
     return destination;
   }
   if (destination.type === 'completed-current-content') {
-    window.openPublishedWorld(worldId);
+    await loadPublishedWorlds({ force: true });
     return destination;
   }
-  window.openPublishedWorld(worldId);
+  await loadPublishedWorlds({ force: true });
   return destination;
 }
 
@@ -2665,7 +2687,7 @@ function renderPublishedLevelPlacementResult(bundle) {
     ));
   } else if (session.completedCurrentContent) {
     actions.append(publishedButton(
-      'العودة إلى العالم',
+      'استكشف العوالم',
       'published-action-btn published-placement-primary',
       () => openPublishedJourneyDestination(bundle.journey.worldId, {
         resumePausedLevelPlacement: true,
@@ -4353,27 +4375,52 @@ function makePublishedJourneyPanel(world, ranks, journey, activeJourney) {
   return panel;
 }
 
-function makeActiveJourneyBanner(activeJourney, worlds) {
-  if (!activeJourney) return null;
-  const world = (Array.isArray(worlds) ? worlds : []).find(
-    (item) => String(item.worldId) === String(activeJourney.worldId)
+function focusPublishedWorldChoices() {
+  const grid = document.querySelector('.published-card-grid');
+  grid?.scrollIntoView?.({ behavior: 'smooth', block: 'start' });
+  const firstChoice = grid?.querySelector('button, [tabindex="0"]');
+  firstChoice?.focus?.({ preventScroll: true });
+}
+
+function makeActiveJourneyBanner(activeJourney, worlds, accountDestination) {
+  const destination = accountDestination || (
+    activeJourney
+      ? { classification: 'actionable-journey', journey: activeJourney, worldId: activeJourney.worldId }
+      : null
   );
-  const banner = publishedElement('section', 'published-active-journey');
+  if (!destination || destination.classification === 'no-actionable-journey') return null;
+  const journey = destination.journey || activeJourney;
+  const world = (Array.isArray(worlds) ? worlds : []).find(
+    (item) => String(item.worldId) === String(destination.worldId || journey?.worldId || '')
+  );
+  const completed = destination.classification === 'world-completed';
+  const banner = publishedElement(
+    'section',
+    `published-active-journey${completed ? ' is-completed' : ''}`
+  );
   const copy = publishedElement('span', 'published-active-journey-copy');
   copy.append(
-    publishedElement('small', '', 'الرحلة النشطة'),
-    publishedElement('strong', '', world?.title || 'عالم المحتوى الجاهز')
+    publishedElement('small', '', completed ? 'أنهيت هذا العالم 🎉' : 'الرحلة النشطة'),
+    publishedElement(
+      'strong',
+      '',
+      completed
+        ? `${world?.title || 'العالم'} مكتمل — اختر عالمك التالي`
+        : (world?.title || 'عالم المحتوى الجاهز')
+    )
   );
   banner.append(
-    publishedIcon('fa-solid fa-route'),
+    publishedIcon(completed ? 'fa-solid fa-trophy' : 'fa-solid fa-route'),
     copy,
     publishedButton(
-      'متابعة',
+      completed ? 'استكشف العوالم' : 'متابعة',
       'published-action-btn',
-      () => openPublishedJourneyDestination(activeJourney.worldId, {
-        resumePausedLevelPlacement: true,
-      }),
-      'fa-solid fa-arrow-left'
+      completed
+        ? () => focusPublishedWorldChoices()
+        : () => openPublishedJourneyDestination(destination.worldId, {
+          resumePausedLevelPlacement: true,
+        }),
+      completed ? 'fa-solid fa-compass' : 'fa-solid fa-arrow-left'
     )
   );
   return banner;
@@ -4549,7 +4596,7 @@ function renderPublishedGateClearResult(world, rank, gate, bundle) {
   );
   section.append(publishedButton(
     passed
-      ? (worldCompleted ? 'عرض إنجاز العالم' : (rankCompleted ? 'متابعة الوجهة التالية' : 'متابعة الرحلة'))
+      ? (worldCompleted ? 'استكشف العوالم' : (rankCompleted ? 'متابعة الوجهة التالية' : 'متابعة الرحلة'))
       : 'العودة إلى البوابة',
     'published-action-btn published-placement-primary',
     () => {
@@ -4987,7 +5034,7 @@ function appendPublishedHeader(root, options) {
   root.append(header);
 }
 
-function renderPublishedWorlds(items, activeJourney) {
+function renderPublishedWorlds(items, activeJourney, accountDestination) {
   const root = publishedViewRoot();
   if (!root) return;
   const content = document.createDocumentFragment();
@@ -4997,7 +5044,7 @@ function renderPublishedWorlds(items, activeJourney) {
       'fa-solid fa-earth-americas'
     ));
   } else {
-    const activeBanner = makeActiveJourneyBanner(activeJourney, items);
+    const activeBanner = makeActiveJourneyBanner(activeJourney, items, accountDestination);
     if (activeBanner) content.append(activeBanner);
     const intro = publishedElement('header', 'published-hub-intro');
     const introIcon = publishedElement('span', 'published-hub-icon');
@@ -5742,14 +5789,18 @@ async function loadPublishedWorlds(options) {
   publishedContentState.loading = true;
   renderPublishedLoading('جارٍ تحميل العوالم الجاهزة...');
   try {
-    const [items, activeJourney] = await Promise.all([
+    const [items, accountDestination] = await Promise.all([
       getPublishedContentApi().listPublishedWorlds({ force: settings.force }),
-      readActivePublishedJourney({ force: settings.force }),
+      readPublishedAccountJourneyDestination({ force: settings.force }),
     ]);
     if (generation !== publishedContentState.generation) return;
+    const activeJourney = accountDestination.classification === 'actionable-journey'
+      ? accountDestination.journey
+      : null;
     publishedContentState.activeJourney = activeJourney;
+    publishedContentState.activeJourneyDestination = accountDestination;
     publishedContentState.worlds = items;
-    renderPublishedWorlds(items, activeJourney);
+    renderPublishedWorlds(items, activeJourney, accountDestination);
   } catch (error) {
     if (generation !== publishedContentState.generation) return;
     logPublishedContentError('worlds', error);
