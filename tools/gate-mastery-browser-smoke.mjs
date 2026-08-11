@@ -4,6 +4,8 @@ import path from 'node:path';
 import { spawn } from 'node:child_process';
 
 const root = path.resolve(import.meta.dirname, '..');
+const evidenceDir = path.join(root, 'reports', 'journey-ui-evidence');
+const screenshotPrefix = String(process.env.JOURNEY_UI_SCREENSHOT_PREFIX || '').trim();
 const browserPath = [
   'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
   'C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe',
@@ -23,11 +25,13 @@ const server = spawn(process.execPath, [path.join(root, 'tools', 'static-server.
 });
 const browser = spawn(browserPath, [
   '--headless=new',
+  '--no-sandbox',
   '--no-first-run',
   '--disable-extensions',
   '--disable-default-apps',
   '--disable-gpu',
   '--disable-dev-shm-usage',
+  '--remote-allow-origins=*',
   `--remote-debugging-port=${debugPort}`,
   `--user-data-dir=${profileDir}`,
   'about:blank',
@@ -62,6 +66,80 @@ function send(method, params = {}) {
     delay(7000).then(() => { throw new Error(`CDP timeout: ${method}`); }),
   ]);
 }
+
+async function captureScreenshot(name) {
+  if (!screenshotPrefix) return '';
+  fs.mkdirSync(evidenceDir, { recursive: true });
+  await send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: 1, y: 1 });
+  await delay(180);
+  const result = await send('Page.captureScreenshot', {
+    format: 'png',
+    fromSurface: true,
+    captureBeyondViewport: false,
+  });
+  const target = path.join(evidenceDir, `${screenshotPrefix}-${name}.png`);
+  fs.writeFileSync(target, Buffer.from(result.data, 'base64'));
+  return path.relative(root, target).replaceAll('\\', '/');
+}
+
+const visualFixtureProbe = `(() => {
+  window.SmartLoadingOverlay?.forceHide?.();
+  document.getElementById('smartLoadingOverlay')?.remove();
+  document.body.classList.remove('smart-loading-active');
+  document.body.style.overflow = '';
+  setPublishedPlacementMode(false);
+  prepareWorldsShell();
+  setPublishedTabsVisible(false);
+  document.getElementById('notificationsPanel')?.classList.remove('open');
+  document.getElementById('toastMessage')?.classList.remove('show');
+  const world = {
+    worldId: 'visual-world', title: 'عالم المغامرة',
+    description: 'مفردات تساعدك على فهم المهمات والخرائط والتحديات.',
+  };
+  const ranks = [
+    { worldId: world.worldId, rankId: 'rank-scout', title: 'المستكشف', description: 'البداية وفهم الإشارات الأساسية.', status: 'published', order: 0, version: 1, cefrLevel: 'A1', gateCount: 3, wordCount: 36, unlockConfig: { initialStatus: 'available' } },
+    { worldId: world.worldId, rankId: 'rank-pathfinder', title: 'دليل الطريق', description: 'مفردات الحركة والتخطيط والتعاون.', status: 'published', order: 1, version: 1, cefrLevel: 'A1', gateCount: 5, wordCount: 68 },
+    { worldId: world.worldId, rankId: 'rank-vanguard', title: 'الطليعة', description: 'تحديات أكثر عمقًا ومفردات متقدمة.', status: 'published', order: 2, version: 1, cefrLevel: 'A2', gateCount: 4, wordCount: 54 },
+  ];
+  const gates = [
+    { worldId: world.worldId, rankId: 'rank-pathfinder', gateId: 'gate-cleared', title: 'التحرك', description: 'الاتجاهات والحركة داخل الخريطة.', status: 'published', order: 0, wordCount: 12 },
+    { worldId: world.worldId, rankId: 'rank-pathfinder', gateId: 'gate-learning', title: 'العتاد', description: 'الأدوات والموارد التي تستخدمها.', status: 'published', order: 1, wordCount: 14 },
+    { worldId: world.worldId, rankId: 'rank-pathfinder', gateId: 'gate-ready', title: 'الفريق', description: 'التنسيق والأدوار أثناء اللعب.', status: 'published', order: 2, wordCount: 15 },
+    { worldId: world.worldId, rankId: 'rank-pathfinder', gateId: 'gate-available', title: 'المهمة', description: 'الأهداف والتعليمات والمكافآت.', status: 'published', order: 3, wordCount: 13 },
+    { worldId: world.worldId, rankId: 'rank-pathfinder', gateId: 'gate-locked', title: 'المواجهة', description: 'مفردات المواجهات المتقدمة.', status: 'published', order: 4, wordCount: 14 },
+  ];
+  const journey = {
+    worldId: world.worldId,
+    activeRankId: 'rank-pathfinder',
+    activeGateId: 'gate-learning',
+    unlockedRankIds: ['rank-scout', 'rank-pathfinder'],
+    unlockedGateIds: ['gate-cleared', 'gate-learning', 'gate-ready', 'gate-available'],
+    completedRankIds: ['rank-scout'],
+    rankCompletionVersions: { 'rank-scout': 1 },
+  };
+  const progress = new Map([
+    ['gate-cleared', { worldId: world.worldId, rankId: 'rank-pathfinder', gateId: 'gate-cleared', status: 'cleared', loadedAt: Date.now(), loadedWordKeys: ['move'] }],
+    ['gate-learning', { worldId: world.worldId, rankId: 'rank-pathfinder', gateId: 'gate-learning', status: 'learning', loadedAt: Date.now(), readyWordCount: 6, requiredWordCount: 14, loadedWordKeys: ['gear'] }],
+    ['gate-ready', { worldId: world.worldId, rankId: 'rank-pathfinder', gateId: 'gate-ready', status: 'ready', loadedAt: Date.now(), readyWordCount: 15, requiredWordCount: 15, loadedWordKeys: ['team'] }],
+  ]);
+  publishedContentState.world = world;
+  publishedContentState.rank = ranks[1];
+  publishedContentState.gate = gates[2];
+  publishedContentState.ranks = ranks;
+  publishedContentState.gates = gates;
+  publishedContentState.journey = journey;
+  publishedContentState.activeJourney = journey;
+  publishedContentState.journeyGraph = null;
+  publishedContentState.gateProgressById = progress;
+  publishedContentState.gateProgress = progress.get('gate-ready');
+  publishedContentState.gateMasteryView = { derivedState: 'ready', gapCount: 0, gapWordKeys: [] };
+  publishedContentState.levelPlacementOverviews = new Map();
+  publishedContentState.newGateWords = [];
+  publishedContentState.journeyAction = null;
+  publishedContentState.journeyError = null;
+  window.__journeyVisualFixture = { world, ranks, gates, journey, progress };
+  return true;
+})()`;
 
 const probe = `(() => {
   const world = { worldId: 'smoke-world', title: 'عالم الاختبار' };
@@ -114,7 +192,7 @@ const probe = `(() => {
   });
   gap.querySelector('button')?.click();
   const gapResult = {
-    copy: gap.textContent.includes('مجتازة — بقي 3 كلمات لإتقانها'),
+    copy: gap.textContent.includes('مكتملة — بقي 3 كلمات لإتقانها'),
     action: gap.textContent.includes('راجع الكلمات المتبقية'),
     noCrown: !gap.querySelector('.fa-crown'),
     exactKeys: reviewCall?.keys?.join(',') === 'one,two,three',
@@ -132,7 +210,7 @@ const probe = `(() => {
   const masteredResult = {
     label: mastered.textContent.includes('متقنة'),
     crown: Boolean(mastered.querySelector('.fa-crown')),
-    contentNotice: mastered.textContent.includes('لا يغيّر Crown المحفوظ'),
+    contentNotice: mastered.textContent.includes('وشارة إتقانك محفوظة'),
     noGapAction: !mastered.textContent.includes('راجع الكلمات المتبقية'),
   };
 
@@ -143,7 +221,7 @@ const probe = `(() => {
     placementClearedWithoutLoad: true,
   }, null);
   const withoutLoadResult = {
-    copy: withoutLoad.textContent.includes('مجتازة عبر اختبار المستوى — الكلمات غير محمّلة'),
+    copy: withoutLoad.textContent.includes('مكتملة باختبار المستوى — الكلمات غير مضافة'),
     noCrown: !withoutLoad.querySelector('.fa-crown'),
   };
 
@@ -298,14 +376,14 @@ const probe = `(() => {
   renderPublishedGateClearResult(world, rankForProgress, secondGate, worldCompletionBundle);
   const worldResultPanel = document.querySelector('.published-placement-result');
   worldResultPanel?.querySelector('.published-placement-primary')?.click();
-  const worldNotification = (window.__notifications || []).find((item) =>
-    item.meta?.dedupeKey === 'wc1-smoke-world'
+  const worldNotification = (window.LootLinguaNotificationStore?.getAll?.() || window.__notifications || []).find((item) =>
+    item.occurrenceKey === 'legacy:wc1-smoke-world' || item.meta?.dedupeKey === 'wc1-smoke-world'
   );
   const worldCompletionResult = {
-    panel: worldResultPanel?.textContent.includes('World Completed') === true,
+    panel: worldResultPanel?.textContent.includes('اكتمل عالم') === true,
     globe: Boolean(worldResultPanel?.querySelector('.fa-earth-americas')),
     oncePerCommit: confettiCount === 1,
-    permanentNotification: Boolean(worldNotification?.msg),
+    permanentNotification: Boolean(worldNotification?.message || worldNotification?.msg),
     resolverAuthority: resolverCalls.length === resolverCountBeforeWorld + 1,
   };
 
@@ -437,6 +515,104 @@ try {
     Object.values(group || {}).every((value) => value === true)
   );
   if (!passed) process.exitCode = 1;
+  if (screenshotPrefix) {
+    await send('Emulation.setDeviceMetricsOverride', {
+      width: 1440,
+      height: 900,
+      deviceScaleFactor: 1,
+      mobile: false,
+    });
+    await send('Runtime.evaluate', { expression: visualFixtureProbe });
+    await send('Runtime.evaluate', {
+      expression: `(() => {
+        const fixture = window.__journeyVisualFixture;
+        publishedContentState.route = { key: 'world', params: { worldId: fixture.world.worldId } };
+        renderPublishedRanks(fixture.world, fixture.ranks, fixture.journey, fixture.journey);
+        window.scrollTo(0, 0);
+      })()`,
+    });
+    await captureScreenshot('world-ranks-desktop');
+    await send('Runtime.evaluate', {
+      expression: `(() => {
+        const fixture = window.__journeyVisualFixture;
+        publishedContentState.route = { key: 'rank', params: { worldId: fixture.world.worldId, rankId: fixture.ranks[1].rankId } };
+        renderPublishedGates(fixture.world, fixture.ranks[1], fixture.gates, fixture.ranks, fixture.journey, fixture.journey, fixture.progress);
+        window.scrollTo(0, 0);
+      })()`,
+    });
+    await captureScreenshot('rank-gates-desktop');
+    await send('Runtime.evaluate', {
+      expression: `(() => {
+        const fixture = window.__journeyVisualFixture;
+        publishedContentState.route = { key: 'gate', params: { worldId: fixture.world.worldId, rankId: fixture.ranks[1].rankId, gateId: fixture.gates[2].gateId } };
+        const snapshot = {
+          currentPageIndex: 0,
+          pageSize: 25,
+          currentPage: {
+            items: [
+              { contentWordId: 'squad', word: 'squad', translation: 'فريق', level: 'A1', partOfSpeech: 'noun' },
+              { contentWordId: 'revive', word: 'revive', translation: 'ينقذ زميلًا', level: 'A1', partOfSpeech: 'verb' },
+              { contentWordId: 'cover', word: 'cover', translation: 'غطاء أو حماية', level: 'A1', partOfSpeech: 'noun' },
+            ],
+            hasNext: false,
+            hasPrevious: false,
+          },
+        };
+        renderPublishedGateWords(fixture.world, fixture.ranks[1], fixture.gates[2], snapshot);
+        window.scrollTo(0, 0);
+      })()`,
+    });
+    await captureScreenshot('gate-ready-desktop');
+
+    for (const viewport of [{ width: 390, height: 844 }, { width: 320, height: 568 }]) {
+      await send('Emulation.setDeviceMetricsOverride', {
+        width: viewport.width,
+        height: viewport.height,
+        deviceScaleFactor: 1,
+        mobile: true,
+      });
+      await send('Runtime.evaluate', { expression: visualFixtureProbe });
+      await send('Runtime.evaluate', {
+        expression: `(() => {
+          const fixture = window.__journeyVisualFixture;
+          publishedContentState.route = { key: 'rank', params: { worldId: fixture.world.worldId, rankId: fixture.ranks[1].rankId } };
+          renderPublishedGates(fixture.world, fixture.ranks[1], fixture.gates, fixture.ranks, fixture.journey, fixture.journey, fixture.progress);
+          window.scrollTo(0, 0);
+        })()`,
+      });
+      await captureScreenshot(`rank-gates-${viewport.width}`);
+      await send('Runtime.evaluate', {
+        expression: `(() => {
+          const fixture = window.__journeyVisualFixture;
+          publishedContentState.route = { key: 'gate', params: { worldId: fixture.world.worldId, rankId: fixture.ranks[1].rankId, gateId: fixture.gates[2].gateId } };
+          const snapshot = {
+            currentPageIndex: 0,
+            pageSize: 25,
+            currentPage: {
+              items: [{ contentWordId: 'squad', word: 'squad', translation: 'فريق', level: 'A1', partOfSpeech: 'noun' }],
+              hasNext: false,
+              hasPrevious: false,
+            },
+          };
+          renderPublishedGateWords(fixture.world, fixture.ranks[1], fixture.gates[2], snapshot);
+          window.scrollTo(0, 0);
+        })()`,
+      });
+      const mobileLayout = await send('Runtime.evaluate', {
+        expression: `(() => ({
+          noHorizontalOverflow: document.documentElement.scrollWidth <= innerWidth,
+          selectVisible: getComputedStyle(document.querySelector('.published-gate-switcher-select')).display !== 'none',
+          railHidden: getComputedStyle(document.querySelector('.published-gate-switcher-rail')).display === 'none'
+        }))()`,
+        returnByValue: true,
+      });
+      if (!Object.values(mobileLayout.result?.value || {}).every(Boolean)) {
+        process.exitCode = 1;
+        console.error(`Mobile gate layout failed at ${viewport.width}px`, mobileLayout.result?.value);
+      }
+      await captureScreenshot(`gate-ready-${viewport.width}`);
+    }
+  }
 } finally {
   try { socket?.close(); } catch {}
   browser.kill();

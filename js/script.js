@@ -1558,6 +1558,17 @@ function hideModal(id) {
   else close();
 }
 
+function findInFlightToast(toastDedupeKey, { includeDeferred = true } = {}) {
+  if (!toastDedupeKey) return null;
+  const active = window.__toastActive;
+  if (active?.toastDedupeKey === toastDedupeKey) return active;
+  const queued = window.__toastQueue || [];
+  const queuedMatch = queued.find((entry) => entry?.toastDedupeKey === toastDedupeKey);
+  if (queuedMatch || !includeDeferred) return queuedMatch || null;
+  const deferred = window.__entryDeferredToastQueue || [];
+  return deferred.find((entry) => entry?.toastDedupeKey === toastDedupeKey) || null;
+}
+
 function displayNextToast() {
   const t = document.getElementById('toastMessage');
   const queue = window.__toastQueue || (window.__toastQueue = []);
@@ -1580,6 +1591,7 @@ function displayNextToast() {
   }
   t.classList.toggle('toast-interactive', Boolean(entry.notificationId));
   t.classList.remove(
+    'show',
     'toast-success', 'toast-warning', 'toast-danger', 'toast-info',
     'toast-attention-shake'
   );
@@ -1588,9 +1600,11 @@ function displayNextToast() {
       entry.type === 'danger' ? 'toast-danger' :
         entry.type === 'warning' ? 'toast-warning' : 'toast-info'
   );
+  // Commit the centered, off-screen state before starting the vertical entrance.
+  // This also makes queued toasts restart the same animation reliably.
+  void t.offsetWidth;
   t.classList.add('show');
   if (entry.type === 'warning' || entry.type === 'danger') {
-    void t.offsetWidth;
     t.classList.add('toast-attention-shake');
     triggerAttentionFeedback(document.querySelector('.main-content') || document.body);
   }
@@ -1614,17 +1628,25 @@ function showToast(msg, type = 'info', duration = 2500, options = {}) {
     : Number(duration);
   const fullText = String(settings.fullText || settings.details || msg || '').trim();
   if (!fullText) return '';
+  const toastDedupeKey = window.LootLinguaNotificationPolicy?.toastDedupeKey(fullText, type, settings) || (
+    settings.toastDedupe === false
+      ? ''
+      : `toast:${String(settings.toastDedupeKey || `${type}:${fullText}`).replace(/\s+/g, ' ').trim().toLowerCase()}`
+  );
   const notificationId = window.recordNotificationForToast?.(
     fullText,
     type,
     settings
   ) || '';
+  const duplicate = findInFlightToast(toastDedupeKey);
+  if (duplicate) return notificationId || duplicate.notificationId || '';
   const preview = window.LootLinguaNotificationPolicy?.toastPreview(fullText) || fullText;
   const queuedEntry = {
     preview,
     type,
     duration: Math.min(12000, Math.max(1200, displayDuration || 2500)),
     notificationId,
+    toastDedupeKey,
   };
   if (window.__entryExperienceActive && type !== 'danger' && settings.critical !== true) {
     const deferred = window.__entryDeferredToastQueue || (window.__entryDeferredToastQueue = []);
@@ -1645,7 +1667,10 @@ window.flushDeferredEntryToasts = function() {
   const queue = window.__toastQueue || (window.__toastQueue = []);
   // The full messages already live in Notification Center. Surface only one
   // low-priority preview after Entry so completion never releases a toast storm.
-  const [first] = deferred.splice(0, deferred.length);
+  const pending = deferred.splice(0, deferred.length);
+  const first = pending.find(
+    (candidate) => !findInFlightToast(candidate?.toastDedupeKey, { includeDeferred: false })
+  );
   if (first) queue.push(first);
   if (queue.length > 20) queue.splice(0, queue.length - 20);
   displayNextToast();
@@ -1664,7 +1689,27 @@ function saveJSON(k,v) {
   localStorage.setItem(k,JSON.stringify(v));
   markGuestProfileDataDirty(k);
 }
-function todayStr()    { return new Date().toISOString().slice(0,10); }
+function localDateKey(value = new Date()) {
+  const date = value instanceof Date ? value : new Date(value);
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+function previousLocalDateKey(value = new Date()) {
+  const date = value instanceof Date ? new Date(value) : new Date(value);
+  date.setDate(date.getDate() - 1);
+  return localDateKey(date);
+}
+function localDayBounds(value = new Date()) {
+  const start = value instanceof Date ? new Date(value) : new Date(value);
+  start.setHours(0, 0, 0, 0);
+  const end = new Date(start);
+  end.setDate(end.getDate() + 1);
+  return { startAt: start.getTime(), endAt: end.getTime() };
+}
+function todayStr() { return localDateKey(new Date()); }
+window.LootLinguaLocalTime = Object.freeze({ localDateKey, previousLocalDateKey, localDayBounds });
 
 function requestProfileCloudSave() {
   if (!window.saveProfileToCloud) return;
@@ -2188,6 +2233,12 @@ window.confirmGuestMigration = async function() {
       const profileError = new Error('guest-profile-commit-failed');
       profileError.code = window.__lootlinguaLastProfileSaveFailure?.code || 'profile/commit-failed';
       throw profileError;
+    }
+    const notificationsMigrated = await window.LootLinguaNotificationStore?.migrateGuestToOwner?.(user.uid);
+    if (notificationsMigrated === false) {
+      const notificationError = new Error('guest-notification-migration-failed');
+      notificationError.code = 'notification/migration-failed';
+      throw notificationError;
     }
     markGuestMigrationCompleteFlag(user, 'accepted', summary.guestSnapshotId);
     purgeStaleGuestLocalData();

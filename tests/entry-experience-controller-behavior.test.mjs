@@ -546,6 +546,24 @@ async function createHarness(options = {}) {
           gates: [{ gateId: 'gate-1', title: 'البداية', wordCount: 12 }],
         };
       },
+      async loadRankPreview(worldId, rankId) {
+        return {
+          rank: { rankId, title: rankId === 'rank-a2' ? 'المستكشف' : 'المبتدئ' },
+          gates: [
+            { gateId: `${rankId}-gate-1`, title: 'البداية', wordCount: 12 },
+            { gateId: `${rankId}-gate-2`, title: 'التطبيق', wordCount: 15 },
+          ],
+        };
+      },
+      async loadGatePreview(worldId, rankId, gateId) {
+        return {
+          gate: { gateId, title: gateId.endsWith('-2') ? 'التطبيق' : 'البداية', wordCount: 12 },
+          words: [
+            { word: 'explore', translation: 'يستكشف' },
+            { word: 'path', translation: 'طريق' },
+          ],
+        };
+      },
       async loadJourneyContext(journey) {
         return {
           world: { worldId: journey.worldId, title: 'رحلتك المنشورة' },

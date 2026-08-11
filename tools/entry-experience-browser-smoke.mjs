@@ -9,9 +9,11 @@ const evidenceDir = path.join(root, 'reports', 'product-entry-evidence');
 const evidenceScreenshotNames = new Set([
   'guest-new-desktop-worlds',
   'guest-new-desktop-journey-structure',
+  'guest-new-desktop-journey-gate-preview',
   'guest-new-desktop-personalized-destination',
   'guest-new-320-worlds',
   'guest-new-320-journey-structure',
+  'guest-new-320-journey-gate-preview',
   'account-journey-short-return',
   'guest-games-success-real-general-search',
   'guest-games-success-real-gamer-button',
@@ -363,6 +365,28 @@ function browserHarness() {
         ],
       };
     },
+    async loadRankPreview(worldId, rankId) {
+      pushEvent('entry-rank-preview-read', { worldId, rankId });
+      return {
+        rank: { rankId, title: rankId === 'rank-a2' ? 'المغامر' : 'المستكشف' },
+        gates: [
+          { gateId: `${rankId}-gate-1`, title: 'بوابة البداية', wordCount: 12 },
+          { gateId: `${rankId}-gate-2`, title: 'بوابة الفهم', wordCount: 15 },
+          { gateId: `${rankId}-gate-3`, title: 'بوابة الإتقان', wordCount: 18 },
+        ],
+      };
+    },
+    async loadGatePreview(worldId, rankId, gateId) {
+      pushEvent('entry-gate-preview-read', { worldId, rankId, gateId });
+      return {
+        gate: { gateId, title: gateId.endsWith('-2') ? 'بوابة الفهم' : 'بوابة البداية', wordCount: 12 },
+        words: [
+          { word: 'explore', translation: 'يستكشف' },
+          { word: 'path', translation: 'طريق' },
+          { word: 'master', translation: 'يتقن' },
+        ],
+      };
+    },
     async loadJourneyContext(journey) {
       pushEvent('entry-return-read', { worldId: journey.worldId });
       return {
@@ -670,6 +694,7 @@ async function snapshot() {
 
 async function screenshot(name) {
   if (process.env.ENTRY_SMOKE_SCREENSHOTS !== 'all' && !evidenceScreenshotNames.has(name)) return null;
+  await send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: 1, y: 1 });
   await delay(120);
   const result = await send('Page.captureScreenshot', {
     format: 'png',
@@ -746,6 +771,7 @@ async function reachAction(options = {}) {
     if (current.stage === 'journey') {
       if (options.captureStages) options.captureStages.push(await screenshot(`${options.screenshotPrefix || activeCase}-journey-structure`));
       if (current.journeyStatus !== 'structure-explored') await click('[data-entry-route-node]');
+      if (options.captureStages) options.captureStages.push(await screenshot(`${options.screenshotPrefix || activeCase}-journey-gate-preview`));
       await click('[data-entry-action="continue-journey"]');
       await waitFor(`window.LootLinguaEntryExperienceController?.getState?.()?.currentStep !== 'journey'`, 'post-Journey step');
       continue;

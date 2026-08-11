@@ -203,6 +203,14 @@ function finishQuizRun() {
   if (fullyCompleted && commit.total > 0) {
     incrementDailyCountBy(commit.total);
     checkAndUpdateStreak({ learningEvent: true });
+    window.dispatchEvent(new CustomEvent('lootlingua:trusted-quiz-completed', {
+      detail: {
+        sessionId: String(activeQuizSession?.id || ''),
+        completedAt: Date.now(),
+        correctCount: Number(commit.correctCount) || 0,
+        total: Number(commit.total) || 0,
+      },
+    }));
   }
   if (fullyCompleted && accuracy >= 0.9) recordHighAccuracyVerifiedQuiz(activeQuizSession.id);
   if (currentQuizMistakes === 0 && currentQuizWords.length > 0 && verified) {

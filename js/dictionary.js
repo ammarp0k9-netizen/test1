@@ -99,6 +99,9 @@ function persistDictionary() {
     reindexWordOrder(window.words);
   }
   writeActiveWordsToStorage(window.words);
+  window.dispatchEvent(new CustomEvent('lootlingua:learning-data-changed', {
+    detail: { source: 'dictionary-save' },
+  }));
   if (typeof evaluateTitleUnlocks === 'function') evaluateTitleUnlocks(false);
   refreshFeatureUnlockUI();
 }
@@ -466,7 +469,7 @@ window.addWord = async function() {
       showToast(`تمت استعادة كلمة ”${w}“، وتقدمها السابق محفوظ.`, 'success', 4800);
       return;
     }
-    const newWord = applyKnownSharedMastery({ id:Date.now().toString(), word:w, meaning:m, example:ex, category:c, starred:false, forgetCount:0, xpValue:0, order:0 });
+    const newWord = applyKnownSharedMastery({ id:Date.now().toString(), word:w, meaning:m, example:ex, category:c, starred:false, forgetCount:0, xpValue:0, order:0, createdAt:new Date().toISOString() });
     window.words.unshift(newWord);
     reindexWordOrder(window.words);
     const realId = await saveActiveWordToCloud(newWord);
@@ -1190,7 +1193,7 @@ async function addAiMeaningCore({ word, ar, pos, ex, game }, btn) {
       pushNotification(`تمت استعادة كلمة ”${word}“. كانت مرتبطة برحلة تعليمية، وتقدمها السابق محفوظ.`, 'success');
       added = true;
     } else if (window.auth?.currentUser) {
-      const tempWord = applyKnownSharedMastery({ id: Date.now().toString(), word, meaning: ar, example: ex || '', category, starred: false, forgetCount: 0, xpValue: xpGain });
+      const tempWord = applyKnownSharedMastery({ id: Date.now().toString(), word, meaning: ar, example: ex || '', category, starred: false, forgetCount: 0, xpValue: xpGain, createdAt: new Date().toISOString() });
       const realId = isCustomWorldView()
         ? await saveActiveWordToCloud(tempWord)
         : await window.saveWordToCloud?.(
@@ -1204,7 +1207,7 @@ async function addAiMeaningCore({ word, ar, pos, ex, game }, btn) {
       if (realId) {
         window.words.unshift(applyKnownSharedMastery({
           id: realId, word, meaning: ar, example: ex || '', category,
-          starred: false, forgetCount: 0, xpValue: xpGain,
+          starred: false, forgetCount: 0, xpValue: xpGain, createdAt: tempWord.createdAt,
         }));
         persistDictionary();
         if (isEditableDictionaryView()) render();
@@ -1212,7 +1215,7 @@ async function addAiMeaningCore({ word, ar, pos, ex, game }, btn) {
         pushNotification(`تمت الإضافة إلى ${getActiveDictionaryMessageLabel()}!`, 'success');
         added = true;
       } else {
-        const nw = applyKnownSharedMastery({ id: Date.now().toString(), word, meaning: ar, example: ex || '', category, starred: false, forgetCount: 0, xpValue: xpGain });
+        const nw = applyKnownSharedMastery({ id: Date.now().toString(), word, meaning: ar, example: ex || '', category, starred: false, forgetCount: 0, xpValue: xpGain, createdAt: new Date().toISOString() });
         window.words.unshift(nw);
         persistDictionary();
         if (isEditableDictionaryView()) render();
@@ -1221,7 +1224,7 @@ async function addAiMeaningCore({ word, ar, pos, ex, game }, btn) {
         added = true;
       }
     } else {
-      const nw = applyKnownSharedMastery({ id: Date.now().toString(), word, meaning: ar, example: ex || '', category, starred: false, forgetCount: 0, xpValue: xpGain });
+      const nw = applyKnownSharedMastery({ id: Date.now().toString(), word, meaning: ar, example: ex || '', category, starred: false, forgetCount: 0, xpValue: xpGain, createdAt: new Date().toISOString() });
       window.words.unshift(nw);
       persistDictionary();
       if (isEditableDictionaryView()) render();

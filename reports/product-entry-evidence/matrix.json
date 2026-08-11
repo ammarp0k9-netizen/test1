@@ -1,7 +1,7 @@
 {
-  "generatedAt": "2026-08-08T16:29:32.188Z",
+  "generatedAt": "2026-08-09T13:10:53.502Z",
   "browser": "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",
-  "appUrl": "http://127.0.0.1:9189/app",
+  "appUrl": "http://127.0.0.1:9129/app",
   "harness": "real Chrome DOM/input/reload with Firebase replaced by an in-page deterministic adapter",
   "passed": true,
   "caseCount": 18,
@@ -41,6 +41,7 @@
       "images": [
         "reports/product-entry-evidence/guest-new-desktop-worlds.png",
         "reports/product-entry-evidence/guest-new-desktop-journey-structure.png",
+        "reports/product-entry-evidence/guest-new-desktop-journey-gate-preview.png",
         "reports/product-entry-evidence/guest-new-desktop-personalized-destination.png"
       ],
       "failures": [],
@@ -110,7 +111,8 @@
       },
       "images": [
         "reports/product-entry-evidence/guest-new-320-worlds.png",
-        "reports/product-entry-evidence/guest-new-320-journey-structure.png"
+        "reports/product-entry-evidence/guest-new-320-journey-structure.png",
+        "reports/product-entry-evidence/guest-new-320-journey-gate-preview.png"
       ],
       "failures": [],
       "passed": true

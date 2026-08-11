@@ -338,6 +338,14 @@ test('published presentation has compact words, polished states, and responsive 
   assert.doesNotMatch(publishedUi, /innerHTML/);
   assert.match(styleSource, /@media \(max-width: 640px\)/);
   assert.match(styleSource, /@media \(prefers-reduced-motion: reduce\)/);
+  assert.match(worldsSource, /ready: Object\.freeze\(\{ label: 'جاهزة للاجتياز'/);
+  assert.match(worldsSource, /cleared: Object\.freeze\(\{ label: 'مكتملة'/);
+  assert.match(worldsSource, /ready: 'ابدأ اختبار الاجتياز'/);
+  assert.match(worldsSource, /cleared: 'راجع الكلمات'/);
+  assert.match(styleSource, /\.published-journey-node\.is-ready[\s\S]*#f59e0b/);
+  assert.match(styleSource, /\.published-journey-node\.is-cleared[\s\S]*var\(--success\)/);
+  assert.match(styleSource, /\.published-gate-switcher-rail \{ display: none; \}/);
+  assert.match(styleSource, /\.published-gate-switcher-select \{ display: block; \}/);
 });
 
 test('published pagination clicks replace items and return to the cached first page', async () => {

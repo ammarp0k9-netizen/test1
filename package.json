@@ -2,7 +2,8 @@
   "name": "lootlingua-content-system-tests",
   "private": true,
   "scripts": {
-    "test:landing": "node --test tests/landing-routing.test.mjs",
+    "test:landing": "node --test tests/landing-routing.test.mjs tests/landing-auth.test.mjs tests/logout-flow.test.mjs",
+    "test:landing:browser": "node tools/landing-browser-smoke.mjs",
     "test:entry:contract": "node --test tests/entry-experience-contract.test.mjs",
     "test:entry:integration": "node --test tests/entry-experience-controller-behavior.test.mjs tests/entry-experience-integration-static.test.mjs tests/entry-readiness-orchestration-static.test.mjs tests/guest-entry-migration-static.test.mjs tests/legacy-entry-removal-static.test.mjs",
     "test:entry:browser": "node tools/entry-experience-browser-smoke.mjs",
@@ -27,6 +28,8 @@
     "set-test-clock-claim": "node tools/set-test-clock-claim.mjs",
     "test:quiz": "node --test tests/quiz-lifecycle.test.mjs tests/quiz-finish-transaction.test.mjs",
     "test:srs": "node --test tests/srs-lifecycle.test.mjs",
+    "test:notifications": "node --test tests/notification-system.test.mjs tests/smart-notification-system.test.mjs",
+    "test:notifications:browser": "node tools/notification-browser-smoke.mjs",
     "test:performance": "node --test tests/performance-regression.test.mjs",
     "test:gate-mastery:browser": "node tools/gate-mastery-browser-smoke.mjs",
     "test:rank-completion:browser": "node tools/gate-mastery-browser-smoke.mjs",

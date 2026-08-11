@@ -221,6 +221,7 @@ function purgeStaleGuestLocalData() {
     }
   });
   if (typeof clearGuestSearchLocks === 'function') clearGuestSearchLocks();
+  window.LootLinguaNotificationStore?.purgeOwner?.('guest');
 }
 window.purgeStaleGuestLocalData = purgeStaleGuestLocalData;
 

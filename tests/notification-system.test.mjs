@@ -63,6 +63,25 @@ test('one root toast host sits above app overlays without blocking pointer input
   assert.match(scriptSource, /window\.__toastQueue/);
 });
 
+test('toast presentation stays centered and suppresses only identical in-flight copies', () => {
+  const repeated = policy.toastDedupeKey('  Locked   gate  ', 'info', {});
+  assert.equal(repeated, policy.toastDedupeKey('Locked gate', 'info', {}));
+  assert.notEqual(repeated, policy.toastDedupeKey('Different message', 'info', {}));
+  assert.notEqual(repeated, policy.toastDedupeKey('Locked gate', 'warning', {}));
+  assert.equal(policy.toastDedupeKey('Locked gate', 'info', { toastDedupe: false }), '');
+  assert.equal(
+    policy.toastDedupeKey('First copy', 'info', { toastDedupeKey: 'locked-gate' }),
+    policy.toastDedupeKey('Updated copy', 'warning', { toastDedupeKey: 'locked-gate' }),
+  );
+  assert.match(scriptSource, /findInFlightToast\(toastDedupeKey\)/);
+  assert.match(scriptSource, /window\.__toastActive/);
+  assert.match(scriptSource, /window\.__entryDeferredToastQueue/);
+  assert.match(styleSource, /\.toast-msg\.show\s*\{[\s\S]*?opacity:\s*1;[\s\S]*?transform:\s*translate3d\(0,\s*0,\s*0\)/);
+  assert.match(styleSource, /\.toast-msg\.toast-attention-shake \.toast-text/);
+  const shakeFrames = styleSource.match(/@keyframes toastAttentionShake\s*\{([\s\S]*?)\n\}/)?.[1] || '';
+  assert.doesNotMatch(shakeFrames, /translateX\(-50%\)/);
+});
+
 test('World completion emits a persistent, deduplicated details-capable message', () => {
   assert.match(worldsSource, /importance:\s*'achievement'/);
   assert.match(worldsSource, /dedupeKey:\s*completionId/);

@@ -68,7 +68,7 @@
   <meta property="og:title" content="LootLingua | قاموس الأساطير">
   <meta property="og:description" content="قاموس إنجليزي عربي مع قواميس Minecraft وPUBG، كويزات، XP، مستويات، وصندوق كنز يومي.">
   <meta property="og:type" content="website">
-  <meta property="og:url" content="https://lootlingua.vercel.app/">
+  <meta property="og:url" content="https://loot-lingua.vercel.app/">
   <meta name="twitter:card" content="summary">
   <meta name="twitter:title" content="LootLingua | قاموس الأساطير">
   <meta name="twitter:description" content="تعلم الكلمات الإنجليزية عبر قاموس ألعاب، كويزات، XP، مستويات، وصندوق كنز يومي.">
@@ -86,8 +86,8 @@
     content="#090c0f"
   >
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
-  <link rel="stylesheet" href="style.css?v=20260729-3">
-  <link rel="stylesheet" href="entry-experience.css?v=20260808-1">
+  <link rel="stylesheet" href="style.css?v=20260811-1">
+  <link rel="stylesheet" href="entry-experience.css?v=20260809-1">
 </head>
 <body class="legend-dock-visible">
 
@@ -134,7 +134,7 @@
         <div class="notif-panel-header">
           <span><i class="fa-solid fa-bell"></i> الإشعارات</span>
           <div class="notif-header-actions">
-            <button type="button" id="notifClearAllBtn" onclick="clearAllNotifications(event)" class="notif-clear-all" style="display:none;" aria-label="حذف جميع الإشعارات">حذف الكل</button>
+            <button type="button" id="notifClearAllBtn" onclick="clearAllNotifications(event)" class="notif-clear-all" style="display:none;" aria-label="إخفاء جميع الإشعارات الحالية">إخفاء الكل</button>
             <button type="button" onclick="toggleNotificationsPanel(event)" class="notif-close" aria-label="إغلاق"><i class="fa-solid fa-xmark"></i></button>
           </div>
         </div>
@@ -973,7 +973,7 @@
     <div class="modal-icon"><i class="fa-solid fa-route" aria-hidden="true"></i></div>
     <h2 id="gateReadinessInfoTitle">ما معنى الاستعداد؟</h2>
     <p>الاستعداد لاجتياز البوابة يقيس مراجعات قصيرة وموثوقة لكلمات البوابة خلال يومين، حتى يظهر اختبار الاجتياز في الوقت المناسب.</p>
-    <p>ألوان الكلمات وحالة SRS تنظّم مواعيد مراجعتك الطويلة، أما الإتقان فهو هدف أبعد. لذلك لا يضيف هذا النظام مؤشرًا جديدًا إلى كل كلمة.</p>
+    <p>ألوان الكلمات تساعدك على متابعة مواعيد المراجعة، أما الإتقان فيأتي بعد ترسيخ الكلمات. لذلك يكفيك شريط الاستعداد على مستوى البوابة.</p>
     <div class="modal-buttons">
       <button type="button" class="btn-confirm" onclick="hideModal('gateReadinessInfoModal')">فهمت</button>
     </div>
@@ -1075,8 +1075,8 @@
 
 <!-- ══ FIREBASE ══ -->
   <script src="js/entry-experience-contract.js?v=20260808-1"></script>
-<script src="js/entry-experience-controller.js?v=20260808-1"></script>
-<script type="module" src="js/cloud.js?v=20260729-2"></script>
+<script src="js/entry-experience-controller.js?v=20260809-1"></script>
+<script type="module" src="js/cloud.js?v=20260811-1"></script>
 <script type="module" src="js/entry-experience-cloud.js?v=20260808-1"></script>
 
 <!-- ══ STATS PANEL ══ -->
@@ -1114,11 +1114,14 @@
   <script type="module" src="js/profile-cloud.js?v=20260801-2"></script>
 <script type="module" src="js/published-content.js?v=20260722-1"></script>
 <script type="module" src="js/journey-cloud.js?v=20260729-7"></script>
+<script type="module" src="js/notification-cloud.js?v=20260811-1"></script>
   <script type="module" src="js/admin-cloud.js?v=20260729-1"></script>
   <script type="module" src="js/test-clock.js?v=20260729-2"></script>
 
 <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
-  <script src="js/notification-policy.js?v=20260729-2"></script>
+  <script src="js/notification-policy.js?v=20260811-1"></script>
+  <script src="js/notification-store.js?v=20260811-1"></script>
+  <script src="js/notification-engine.js?v=20260811-1"></script>
   <script src="js/test-clock-contract.js?v=20260729-2"></script>
   <script src="js/core.js?v=20260729-1"></script>
 <script src="js/operation-runtime.js?v=20260722-1"></script>
@@ -1132,11 +1135,11 @@
 <script src="js/level-placement.js?v=20260728-1"></script>
 <script src="js/admin-word-import.js"></script>
 <script src="js/word-list-data.js?v=20260719-3"></script>
-<script src="js/script.js?v=20260801-1"></script>
+<script src="js/script.js?v=20260811-1"></script>
 <script src="js/xp.js"></script>
 <script src="js/xp-batch.js?v=20260722-1"></script>
 <script src="js/dictionary.js?v=20260808-1"></script>
-<script src="js/worlds.js?v=20260808-1"></script>
+<script src="js/worlds.js?v=20260809-1"></script>
 <script src="js/admin.js?v=20260729-1"></script>
 <script src="js/dictionary-render.js?v=20260720-1"></script>
 <script src="js/srs.js?v=20260729-2"></script>
@@ -1144,6 +1147,8 @@
 <script src="js/srs-transitions.js"></script>
 <script src="js/srs-transition-batch.js?v=20260722-1"></script>
 <script src="js/quiz-runtime.js?v=20260729-1"></script>
+<script src="js/notification-sources.js?v=20260811-1"></script>
+<script src="js/notification-runtime.js?v=20260811-1"></script>
 <script src="js/core-runtime.js"></script>
 <script src="js/theme-favicon.js" defer></script>
 <script src="js/oasis-preview-animation.js" defer></script>

@@ -1084,6 +1084,30 @@ window.startGateGapReview = function(wordKeys, context = {}) {
   return true;
 };
 
+window.startNotificationWordReview = function(wordKeys, context = {}) {
+  if (!isFeatureUnlocked('quiz')) {
+    window.loadQuizView();
+    return false;
+  }
+  const wanted = new Set((Array.isArray(wordKeys) ? wordKeys : []).map(String).filter(Boolean));
+  const reviewWords = getQuizSourceWords('personal')
+    .map((word, index) => normalizeQuizWord(word, 'personal', index))
+    .filter((word) => word && wanted.has(String(getWordMasteryKey(word))));
+  if (!reviewWords.length) {
+    showToast('لا توجد كلمات مؤهلة لهذا التذكير الآن.', 'info', 3600);
+    return false;
+  }
+  clearActiveQuizSessionStorage();
+  window.__pendingQuizResumeSession = null;
+  window.loadQuizView({ skipResume: true });
+  startActualQuiz('scramble', {
+    words: reviewWords,
+    source: `notification:${String(context.kind || 'review')}`.slice(0, 500),
+    skipAvailabilityCheck: true,
+  });
+  return true;
+};
+
 function updateCard() {
   if (quizIndex >= currentQuizWords.length) {
     showToast("أبدعت! أنهيت الكلمات 👏");

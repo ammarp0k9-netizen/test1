@@ -1475,6 +1475,8 @@ async function finalizeGateClearAttempt(worldId, rankId, gateId, attemptId) {
           gateId: nextGateId,
           status: 'available',
           journeyVersion: core().JOURNEY_VERSION,
+          unlockedByGateId: String(gateId),
+          unlockedAt: serverTimestamp(),
           lastActivityAt: serverTimestamp(),
           readyEvidenceCount: 0,
           clearAttempts: 0,
@@ -1526,7 +1528,14 @@ async function finalizeGateClearAttempt(worldId, rankId, gateId, attemptId) {
     ));
   }
   window.dispatchEvent(new CustomEvent('lootlingua:journey-changed', {
-    detail: { worldId: String(worldId), rankId: String(rankId), gateId: String(gateId), type: 'gate-clear' },
+    detail: {
+      worldId: String(worldId),
+      rankId: String(rankId),
+      gateId: String(gateId),
+      nextRankId: String(committed?.nextTarget?.rank?.rankId || ''),
+      nextGateId: String(committed?.nextTarget?.gate?.gateId || ''),
+      type: 'gate-clear',
+    },
   }));
   return committed;
 }
@@ -1961,6 +1970,52 @@ async function getGateMasteryView(worldId, rankId, gateId, options) {
     ...view,
     newContentWords: words.filter((word) =>
       newContentWordIds.has(String(word?.contentWordId || ''))
+    ),
+  };
+}
+
+// Read-only notification projection. Practice is derived from the canonical
+// trusted-evidence counter and the exact published source link.
+async function getGateNotificationFacts(worldId, rankId, gateId, options) {
+  const user = requireUser();
+  const progress = options?.progress || await getGateProgress(worldId, rankId, gateId, options);
+  if (!progress?.loadedAt || !['learning', 'ready', 'cleared'].includes(String(progress.status || ''))) {
+    return { unpracticedCount: 0, unpracticedWordKeys: [], newestLinkedAt: 0 };
+  }
+  const words = await listAllGateWords(worldId, rankId, gateId, options);
+  const loadedKeys = new Set((progress.loadedWordKeys || []).map(String));
+  const loadedIds = new Set((progress.loadedContentWordIds || []).map(String));
+  const effective = words.filter((word) => (
+    loadedKeys.has(String(word?.wordKey || '')) || loadedIds.has(String(word?.contentWordId || ''))
+  ));
+  const evidence = await Promise.all(effective.map(async (word) => {
+    const wordKey = String(word?.wordKey || '');
+    const source = {
+      worldId: core().cleanId(worldId, 'World'),
+      rankId: core().cleanId(rankId, 'Rank'),
+      gateId: core().cleanId(gateId, 'Gate'),
+      contentWordId: core().cleanId(word?.contentWordId, 'Word'),
+    };
+    const sourceId = core().contentSourceId(source);
+    const [canonical, link] = await Promise.all([
+      getDoc(doc(db, 'users', user.uid, 'contentWords', core().cleanId(wordKey, 'Word key'))),
+      getDoc(doc(db, 'users', user.uid, 'contentWords', core().cleanId(wordKey, 'Word key'), 'sources', sourceId)),
+    ]);
+    if (!canonical.exists() || !link.exists()) return null;
+    return {
+      wordKey,
+      eligibleEvidenceCount: Math.max(0, Number(canonical.data()?.eligibleEvidenceCount) || 0),
+      linkedAt: timestampMillis(link.data()?.linkedAt),
+    };
+  }));
+  const trustedLinks = evidence.filter(Boolean);
+  const unpracticed = trustedLinks.filter((item) => item.eligibleEvidenceCount < 1);
+  return {
+    unpracticedCount: unpracticed.length,
+    unpracticedWordKeys: unpracticed.map((item) => item.wordKey),
+    newestLinkedAt: trustedLinks.reduce(
+      (latest, item) => Math.max(latest, item.linkedAt),
+      timestampMillis(progress.loadedAt)
     ),
   };
 }
@@ -4330,6 +4385,7 @@ const API = Object.freeze({
   updateGateProgress,
   findNewGateWords,
   getGateMasteryView,
+  getGateNotificationFacts,
   subscribeGateProgress,
   recordQuizEvidenceBatch,
   evaluateActiveJourneyReadiness,

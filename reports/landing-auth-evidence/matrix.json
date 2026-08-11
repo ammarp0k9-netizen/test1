@@ -1,0 +1,249 @@
+{
+  "generatedAt": "2026-08-11T08:47:50.050Z",
+  "browser": "chrome.exe",
+  "firebaseMode": "deterministic-offline-fallback",
+  "matrix": [
+    {
+      "id": "landing-desktop-1440",
+      "viewport": {
+        "width": 1440,
+        "height": 1000
+      },
+      "image": "reports/landing-auth-evidence/landing-desktop-1440.png",
+      "audit": {
+        "clientWidth": 1440,
+        "clientHeight": 1000,
+        "scrollWidth": 1440,
+        "overflow": false,
+        "elementsInside": true,
+        "outside": [],
+        "authState": "guest",
+        "authProvider": "offline",
+        "dialogOpen": false,
+        "dialogLeft": 0,
+        "dialogRight": 0,
+        "reducedMotion": false,
+        "activeElement": "BODY",
+        "heroCta": "ابدأ رحلتك",
+        "authMessage": "",
+        "emailAutocomplete": "email",
+        "passwordAutocomplete": "current-password",
+        "confirmationAutocomplete": "new-password",
+        "firebaseResources": [
+          "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js",
+          "https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js"
+        ]
+      }
+    },
+    {
+      "id": "landing-tablet-834",
+      "viewport": {
+        "width": 834,
+        "height": 1112
+      },
+      "image": "reports/landing-auth-evidence/landing-tablet-834.png",
+      "audit": {
+        "clientWidth": 834,
+        "clientHeight": 1112,
+        "scrollWidth": 834,
+        "overflow": false,
+        "elementsInside": true,
+        "outside": [],
+        "authState": "guest",
+        "authProvider": "offline",
+        "dialogOpen": false,
+        "dialogLeft": 0,
+        "dialogRight": 0,
+        "reducedMotion": false,
+        "activeElement": "BODY",
+        "heroCta": "ابدأ رحلتك",
+        "authMessage": "",
+        "emailAutocomplete": "email",
+        "passwordAutocomplete": "current-password",
+        "confirmationAutocomplete": "new-password",
+        "firebaseResources": [
+          "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js",
+          "https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js"
+        ]
+      }
+    },
+    {
+      "id": "landing-mobile-390",
+      "viewport": {
+        "width": 390,
+        "height": 844
+      },
+      "image": "reports/landing-auth-evidence/landing-mobile-390.png",
+      "audit": {
+        "clientWidth": 390,
+        "clientHeight": 844,
+        "scrollWidth": 390,
+        "overflow": false,
+        "elementsInside": true,
+        "outside": [],
+        "authState": "guest",
+        "authProvider": "offline",
+        "dialogOpen": false,
+        "dialogLeft": 0,
+        "dialogRight": 0,
+        "reducedMotion": false,
+        "activeElement": "BODY",
+        "heroCta": "ابدأ رحلتك",
+        "authMessage": "",
+        "emailAutocomplete": "email",
+        "passwordAutocomplete": "current-password",
+        "confirmationAutocomplete": "new-password",
+        "firebaseResources": [
+          "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js",
+          "https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js"
+        ]
+      }
+    },
+    {
+      "id": "landing-mobile-320",
+      "viewport": {
+        "width": 320,
+        "height": 568
+      },
+      "image": "reports/landing-auth-evidence/landing-mobile-320.png",
+      "audit": {
+        "clientWidth": 320,
+        "clientHeight": 568,
+        "scrollWidth": 320,
+        "overflow": false,
+        "elementsInside": true,
+        "outside": [],
+        "authState": "guest",
+        "authProvider": "offline",
+        "dialogOpen": false,
+        "dialogLeft": 0,
+        "dialogRight": 0,
+        "reducedMotion": false,
+        "activeElement": "BODY",
+        "heroCta": "ابدأ رحلتك",
+        "authMessage": "",
+        "emailAutocomplete": "email",
+        "passwordAutocomplete": "current-password",
+        "confirmationAutocomplete": "new-password",
+        "firebaseResources": [
+          "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js",
+          "https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js"
+        ]
+      }
+    },
+    {
+      "id": "auth-dialog-desktop",
+      "viewport": {
+        "width": 1440,
+        "height": 1000
+      },
+      "image": "reports/landing-auth-evidence/auth-dialog-desktop.png",
+      "audit": {
+        "clientWidth": 1440,
+        "clientHeight": 1000,
+        "scrollWidth": 1440,
+        "overflow": false,
+        "elementsInside": true,
+        "outside": [],
+        "authState": "guest",
+        "authProvider": "offline",
+        "dialogOpen": true,
+        "dialogLeft": 500,
+        "dialogRight": 940,
+        "reducedMotion": false,
+        "activeElement": "authEmail",
+        "heroCta": "ابدأ رحلتك",
+        "authMessage": "",
+        "emailAutocomplete": "email",
+        "passwordAutocomplete": "current-password",
+        "confirmationAutocomplete": "new-password",
+        "firebaseResources": [
+          "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js",
+          "https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js"
+        ]
+      },
+      "authInteractions": {
+        "signupState": {
+          "passwordAutocomplete": "new-password",
+          "confirmationAutocomplete": "new-password",
+          "confirmationVisible": true
+        },
+        "passwordRevealWorks": true,
+        "closesAndClearsPasswords": true
+      }
+    },
+    {
+      "id": "auth-sheet-mobile",
+      "viewport": {
+        "width": 390,
+        "height": 844
+      },
+      "image": "reports/landing-auth-evidence/auth-sheet-mobile.png",
+      "audit": {
+        "clientWidth": 390,
+        "clientHeight": 844,
+        "scrollWidth": 390,
+        "overflow": false,
+        "elementsInside": true,
+        "outside": [],
+        "authState": "guest",
+        "authProvider": "offline",
+        "dialogOpen": true,
+        "dialogLeft": 0,
+        "dialogRight": 390,
+        "reducedMotion": false,
+        "activeElement": "authEmail",
+        "heroCta": "ابدأ رحلتك",
+        "authMessage": "",
+        "emailAutocomplete": "email",
+        "passwordAutocomplete": "current-password",
+        "confirmationAutocomplete": "new-password",
+        "firebaseResources": [
+          "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js",
+          "https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js"
+        ]
+      },
+      "authInteractions": {
+        "signupState": {
+          "passwordAutocomplete": "new-password",
+          "confirmationAutocomplete": "new-password",
+          "confirmationVisible": true
+        },
+        "passwordRevealWorks": true,
+        "closesAndClearsPasswords": true
+      }
+    },
+    {
+      "id": "landing-reduced-motion",
+      "viewport": {
+        "width": 390,
+        "height": 844
+      },
+      "image": "reports/landing-auth-evidence/landing-reduced-motion.png",
+      "audit": {
+        "clientWidth": 390,
+        "clientHeight": 844,
+        "scrollWidth": 390,
+        "overflow": false,
+        "elementsInside": true,
+        "outside": [],
+        "authState": "guest",
+        "authProvider": "offline",
+        "dialogOpen": false,
+        "dialogLeft": 0,
+        "dialogRight": 0,
+        "reducedMotion": true,
+        "activeElement": "BODY",
+        "heroCta": "ابدأ رحلتك",
+        "authMessage": "",
+        "emailAutocomplete": "email",
+        "passwordAutocomplete": "current-password",
+        "confirmationAutocomplete": "new-password",
+        "firebaseResources": [
+          "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js",
+          "https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js"
+        ]
+      }
+    }
+  ]
+}

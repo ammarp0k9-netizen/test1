@@ -3,18 +3,24 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <meta name="theme-color" content="#111827">
-  <meta name="description" content="LootLingua قاموسك الشخصي لتعلّم الإنجليزية عبر الكلمات، المراجعة الذكية، والعوالم التعليمية.">
+  <meta name="theme-color" content="#070b14">
+  <meta name="description" content="تعلّم الإنجليزية من اهتماماتك عبر قاموس يوضح السياق، وعوالم تتقدم فيها كلمة بعد كلمة، ومراجعة تعيد الكلمات في وقتها.">
   <meta name="robots" content="index, follow">
-  <meta property="og:title" content="LootLingua | تعلّم الكلمات بطريقتك">
-  <meta property="og:description" content="ابنِ قاموسك، راجع بذكاء، وتقدّم في عوالم تعليمية ممتعة.">
+  <link rel="canonical" href="https://loot-lingua.vercel.app/">
+  <meta property="og:title" content="LootLingua | تعلّم الإنجليزية من الأشياء اللي تحبها">
+  <meta property="og:description" content="اهتماماتك تتحول إلى عوالم تتقدم فيها كلمة بعد كلمة، مع قاموس يوضح السياق ومراجعة ترجع لك بالكلمات في وقتها.">
   <meta property="og:type" content="website">
+  <meta property="og:url" content="https://loot-lingua.vercel.app/">
+  <meta property="og:locale" content="ar_AR">
   <meta name="twitter:card" content="summary">
-  <title>LootLingua | تعلّم الكلمات بطريقتك</title>
-  <link rel="stylesheet" href="landing.css">
-  <script type="module" src="js/landing.js"></script>
+  <meta name="twitter:title" content="LootLingua | تعلّم الإنجليزية من الأشياء اللي تحبها">
+  <meta name="twitter:description" content="اهتماماتك تتحول إلى عوالم تتقدم فيها كلمة بعد كلمة.">
+  <link rel="icon" type="image/png" href="Lootlingua_LOGO_2.png">
+  <title>LootLingua | تعلّم الإنجليزية من الأشياء اللي تحبها</title>
+  <link rel="stylesheet" href="landing.css?v=20260811-1">
+  <script type="module" src="js/landing.js?v=20260811-1"></script>
 </head>
-<body>
+<body data-auth-state="pending">
   <a class="skip-link" href="#mainContent">انتقل إلى المحتوى</a>
 
   <header class="site-header" aria-label="الترويسة الرئيسية">
@@ -26,209 +32,148 @@
             <path d="m16 19 8 4.5 8-4.5M24 23.5V33"/>
           </svg>
         </span>
-        <span class="brand-copy"><b>LootLingua</b><small>قاموس الأساطير</small></span>
+        <span class="brand-copy"><b>LootLingua</b><small>كل كلمة تفتح طريقًا</small></span>
       </a>
 
       <nav class="header-nav" aria-label="التنقل الرئيسي">
-        <a href="#howItWorks">كيف يعمل؟</a>
-        <a href="#features">المميزات</a>
+        <a href="#context">فهم السياق</a>
+        <a href="#journey">رحلة التعلّم</a>
+        <a href="#review">المراجعة</a>
       </nav>
 
       <div class="header-actions">
-        <button class="button button-quiet button-compact" type="button" data-google-sign-in disabled>
-          <svg class="google-mark" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-            <path fill="#4285f4" d="M21.6 12.2c0-.7-.1-1.4-.2-2H12v3.9h5.4a4.6 4.6 0 0 1-2 3v2.6h3.3c1.9-1.8 2.9-4.4 2.9-7.5Z"/>
-            <path fill="#34a853" d="M12 22c2.7 0 5-.9 6.7-2.3l-3.3-2.6c-.9.6-2.1 1-3.4 1a5.9 5.9 0 0 1-5.6-4.1H3v2.7A10 10 0 0 0 12 22Z"/>
-            <path fill="#fbbc05" d="M6.4 14a6 6 0 0 1 0-3.9V7.4H3A10 10 0 0 0 3 16.7Z"/>
-            <path fill="#ea4335" d="M12 6c1.5 0 2.9.5 3.9 1.5l2.9-2.8A9.7 9.7 0 0 0 3 7.4l3.4 2.7A5.9 5.9 0 0 1 12 6Z"/>
-          </svg>
-          <span data-auth-button-label>تسجيل الدخول</span>
+        <button class="button button-quiet button-compact auth-entry" type="button" data-auth-open="login">
+          تسجيل الدخول
         </button>
-        <a class="button button-primary button-compact" href="./app" data-app-link><span class="header-start-long">ابدأ الآن</span><span class="header-start-short">ابدأ</span></a>
+        <a class="button button-primary button-compact" href="./app" data-app-link data-journey-cta>
+          <span data-journey-label>فتح التطبيق</span>
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m14 6-6 6 6 6"/></svg>
+        </a>
       </div>
     </div>
   </header>
 
   <main id="mainContent">
     <section class="hero" id="top" aria-labelledby="heroTitle">
-      <div class="hero-glow hero-glow-one" aria-hidden="true"></div>
-      <div class="hero-glow hero-glow-two" aria-hidden="true"></div>
+      <div class="hero-glow" aria-hidden="true"></div>
       <div class="shell hero-grid">
-        <div class="hero-copy">
-          <p class="eyebrow"><span aria-hidden="true">✦</span> تعلّم الكلمات التي تهمّك فعلًا</p>
-          <h1 id="heroTitle">حوّل كل كلمة جديدة إلى <span>تقدّم حقيقي.</span></h1>
-          <p class="hero-lead">ابنِ قاموسك الشخصي، راجع بذكاء، وتقدّم في عوالم تعليمية مصممة لتبقي رحلتك واضحة وممتعة.</p>
+        <div class="hero-copy reveal">
+          <p class="eyebrow"><span aria-hidden="true">✦</span> اهتماماتك هي نقطة البداية</p>
+          <h1 id="heroTitle">تعلّم الإنجليزية من الأشياء <span>اللي تحبها.</span></h1>
+          <p class="hero-lead">ألعاب، أفلام، واهتمامات تتحول إلى عوالم تتقدّم فيها كلمة بعد كلمة — مع قاموس يوضح السياق، ومراجعة ترجع لك بالكلمات في وقتها.</p>
 
           <div class="hero-actions" aria-label="خيارات بدء الاستخدام">
-            <a class="button button-primary button-large" href="./app" data-app-link>
-              ابدأ الآن
+            <a class="button button-primary button-large" href="./app" data-app-link data-journey-cta>
+              <span data-journey-label>فتح التطبيق</span>
               <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m14 6-6 6 6 6"/></svg>
             </a>
-            <a class="button button-secondary button-large" href="#howItWorks">شاهد كيف يعمل</a>
+            <button class="button button-secondary button-large auth-entry" type="button" data-auth-open="login">لدي حساب</button>
           </div>
 
-          <p class="guest-note">يمكنك الاستكشاف كضيف الآن، وتسجيل الدخول فقط عندما تحتاج إلى حفظ رحلتك على حسابك.</p>
-          <div class="auth-status" data-auth-status role="status" aria-live="polite">جارٍ التحقق من حالة تسجيل الدخول…</div>
+          <p class="guest-note" data-guest-only><span aria-hidden="true">✓</span> تقدر تبدأ كضيف، وتسجّل لاحقًا لحفظ تقدّمك.</p>
+          <p class="return-note" data-user-only hidden><span aria-hidden="true">✓</span> أنت مسجّل بالفعل؛ سيفتح التطبيق رحلتك المحفوظة.</p>
+          <p class="auth-inline-status" data-auth-inline-status role="status" aria-live="polite"></p>
         </div>
 
-        <div class="product-preview" aria-label="معاينة لتجربة LootLingua">
-          <div class="preview-orbit orbit-one" aria-hidden="true"></div>
-          <div class="preview-orbit orbit-two" aria-hidden="true"></div>
-          <article class="preview-window">
-            <header class="preview-topbar">
-              <span class="preview-avatar" aria-hidden="true">L</span>
-              <div>
-                <small>مستواك الحالي</small>
-                <strong>Explorer</strong>
-              </div>
-              <span class="xp-pill">80 XP</span>
+        <div class="hero-visual reveal" aria-label="معاينة لعالم تعلّم داخل LootLingua">
+          <div class="journey-halo" aria-hidden="true"></div>
+          <article class="world-preview-card">
+            <header class="world-preview-head">
+              <span class="world-symbol" aria-hidden="true">✦</span>
+              <div><small>عالم من اهتماماتك</small><strong>عالم الأفلام</strong></div>
+              <span class="world-level">المستوى 2</span>
             </header>
-            <div class="preview-progress" aria-label="تقدم المستوى: 62 بالمئة"><span></span></div>
 
-            <div class="word-card">
-              <div class="word-icon" aria-hidden="true">A</div>
+            <div class="world-focus-word">
               <div>
-                <small>كلمة اليوم</small>
-                <h2>Adventure</h2>
-                <p>مغامرة · تجربة مليئة بالاكتشاف</p>
+                <span class="context-chip">في سياق فيلم</span>
+                <strong lang="en" dir="ltr">plot</strong>
+                <p>حبكة · تسلسل أحداث القصة</p>
               </div>
-              <span class="sound-chip" aria-hidden="true">
-                <svg viewBox="0 0 24 24"><path d="M5 9v6h4l5 4V5L9 9H5Zm12.5.5a4 4 0 0 1 0 5"/></svg>
-              </span>
+              <span class="word-progress" aria-label="أتقنت 6 من 10 كلمات"><b>6</b>/10</span>
             </div>
 
-            <div class="preview-grid">
-              <div class="mini-card mini-card-world">
-                <span class="mini-icon" aria-hidden="true">◆</span>
-                <small>رحلتك</small>
-                <b>عالم الاستكشاف</b>
-                <span>3 من 8 بوابات</span>
-              </div>
-              <div class="mini-card">
-                <span class="mini-icon mini-icon-gold" aria-hidden="true">✦</span>
-                <small>مراجعة اليوم</small>
-                <b>12 كلمة</b>
-                <span>جاهزة للمراجعة</span>
-              </div>
+            <div class="journey-path" aria-label="مسار التعلّم: كلمات، مراجعة، ثم بوابة جديدة">
+              <span class="path-line" aria-hidden="true"></span>
+              <div class="path-node complete"><span aria-hidden="true">✓</span><small>كلمات</small></div>
+              <div class="path-node current"><span aria-hidden="true">↻</span><small>مراجعة</small></div>
+              <div class="path-node"><span aria-hidden="true">◇</span><small>بوابة جديدة</small></div>
             </div>
           </article>
-          <div class="floating-chip chip-streak"><span aria-hidden="true">🔥</span><b>7 أيام</b><small>سلسلتك</small></div>
-          <div class="floating-chip chip-mastery"><span aria-hidden="true">✓</span><b>متقنة</b><small>كلمة جديدة</small></div>
+          <span class="visual-caption"><i aria-hidden="true"></i> خطوة واضحة، ثم التي بعدها</span>
         </div>
       </div>
     </section>
 
-    <section class="section how-section" id="howItWorks" aria-labelledby="howTitle">
-      <div class="shell">
-        <div class="section-heading">
-          <p class="eyebrow">ثلاث خطوات بسيطة</p>
-          <h2 id="howTitle">رحلة واضحة من أول كلمة</h2>
-          <p>لا محاضرات طويلة ولا إعدادات معقدة؛ اختر ما يناسبك وابدأ.</p>
+    <section class="product-story" aria-label="كيف يعمل LootLingua">
+      <article class="product-moment shell" id="context" aria-labelledby="contextTitle">
+        <div class="moment-copy reveal">
+          <p class="eyebrow">المعنى داخل سياقه</p>
+          <h2 id="contextTitle">افهم المعنى، ثم افهم استخدامه.</h2>
+          <p>الترجمة تعطيك البداية، والسياق يوضح لك كيف تظهر الكلمة في الأشياء اللي تهتم فيها.</p>
+          <p class="moment-note">«معنى الألعاب» مثال واضح على ذلك: معنى إضافي عند الحاجة، وليس بديلًا عن الترجمة العامة.</p>
         </div>
 
-        <ol class="steps-list">
-          <li>
-            <span class="step-number">١</span>
-            <div class="step-icon" aria-hidden="true">
-              <svg viewBox="0 0 24 24"><path d="M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18Zm0-13v8m-4-4h8"/></svg>
-            </div>
-            <h3>اختر ما يهمك</h3>
-            <p>حدّد اهتماماتك ليصبح الاستكشاف أقرب إلى ذوقك وأهدافك.</p>
-          </li>
-          <li>
-            <span class="step-number">٢</span>
-            <div class="step-icon" aria-hidden="true">
-              <svg viewBox="0 0 24 24"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20V4H6.5A2.5 2.5 0 0 0 4 6.5v13Zm0 0A2.5 2.5 0 0 0 6.5 22H20v-5"/></svg>
-            </div>
-            <h3>تعلّم وراجع</h3>
-            <p>أضف كلماتك واستخدم الاختبارات والمراجعة الذكية لتثبيتها.</p>
-          </li>
-          <li>
-            <span class="step-number">٣</span>
-            <div class="step-icon" aria-hidden="true">
-              <svg viewBox="0 0 24 24"><path d="M5 20V10m7 10V4m7 16v-7M3 20h18"/></svg>
-            </div>
-            <h3>تقدّم في رحلتك</h3>
-            <p>تابع تقدّمك خطوة بخطوة وافتح محتوى جديدًا عندما تصبح جاهزًا.</p>
-          </li>
-        </ol>
-      </div>
-    </section>
-
-    <section class="section features-section" id="features" aria-labelledby="featuresTitle">
-      <div class="shell">
-        <div class="section-heading section-heading-inline">
-          <div>
-            <p class="eyebrow">كل ما تحتاجه في مكان واحد</p>
-            <h2 id="featuresTitle">تجربة تتكيّف مع طريقة تعلّمك</h2>
+        <div class="context-preview reveal" aria-label="مثال على معنى كلمة loot في سياق الألعاب">
+          <div class="search-preview"><span lang="en" dir="ltr">loot</span><span aria-hidden="true">⌕</span></div>
+          <div class="translation-result">
+            <div><small>المعنى العام</small><strong>غنيمة، مسروقات</strong></div>
+            <button type="button" tabindex="-1" aria-hidden="true">معنى الألعاب <span>←</span></button>
           </div>
-          <p>أدوات عملية تساعدك على جمع الكلمات وفهمها ومراجعتها، من دون تشتيت.</p>
+          <div class="context-result">
+            <span class="context-result-icon" aria-hidden="true">◇</span>
+            <div><small>في سياق الألعاب</small><strong>أغراض أو مكافآت تجمعها داخل اللعبة</strong></div>
+          </div>
+        </div>
+      </article>
+
+      <article class="product-moment product-moment-reverse shell" id="journey" aria-labelledby="journeyTitle">
+        <div class="moment-copy reveal">
+          <p class="eyebrow">من اهتمام إلى عالم</p>
+          <h2 id="journeyTitle">حوّل الكلمات إلى رحلة.</h2>
+          <p>تعلّم مجموعة، راجعها، اختبر نفسك، وافتح الطريق للمرحلة التالية.</p>
+          <p class="moment-note">كل عالم ينظم الكلمات في رتب وبوابات، حتى تعرف أين وصلت وما خطوتك التالية.</p>
         </div>
 
-        <div class="feature-grid">
-          <article class="feature-card feature-card-wide">
-            <span class="feature-icon" aria-hidden="true">
-              <svg viewBox="0 0 24 24"><path d="M5 4h11a3 3 0 0 1 3 3v13H8a3 3 0 0 1-3-3V4Zm0 13a3 3 0 0 1 3-3h11M9 8h6"/></svg>
-            </span>
-            <div><h3>قاموسك الشخصي</h3><p>احفظ الكلمات التي تقابلها مع معناها وأمثلتها، ثم ارجع إليها في أي وقت.</p></div>
-          </article>
-          <article class="feature-card">
-            <span class="feature-icon feature-icon-purple" aria-hidden="true">
-              <svg viewBox="0 0 24 24"><path d="M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18Zm0-18c2.2 2.5 3.3 5.5 3.3 9S14.2 18.5 12 21m0-18C9.8 5.5 8.7 8.5 8.7 12s1.1 6.5 3.3 9M3 12h18"/></svg>
-            </span>
-            <h3>عوالم تعليمية</h3>
-            <p>رحلات جاهزة تتقدم فيها عبر رتب وبوابات واضحة.</p>
-          </article>
-          <article class="feature-card">
-            <span class="feature-icon feature-icon-blue" aria-hidden="true">
-              <svg viewBox="0 0 24 24"><path d="M4 19h16M6 16l4-4 3 3 5-7M18 8h-4m4 0v4"/></svg>
-            </span>
-            <h3>اختبار تحديد المستوى</h3>
-            <p>اكتشف نقطة بداية مناسبة قبل الرحلة عندما يكون الاختبار متاحًا لك.</p>
-          </article>
-          <article class="feature-card">
-            <span class="feature-icon feature-icon-gold" aria-hidden="true">
-              <svg viewBox="0 0 24 24"><path d="m12 3 2.2 4.6 5 .7-3.6 3.6.8 5.1-4.4-2.4L7.6 17l.8-5.1-3.6-3.6 5-.7L12 3Z"/></svg>
-            </span>
-            <h3>مراجعة ذكية</h3>
-            <p>راجع الكلمات في الوقت المناسب وثبّت ما تعلمته تدريجيًا.</p>
-          </article>
-          <article class="feature-card">
-            <span class="feature-icon feature-icon-green" aria-hidden="true">
-              <svg viewBox="0 0 24 24"><path d="M7 4h10v4a5 5 0 0 1-10 0V4Zm0 2H4v1a4 4 0 0 0 4 4m9-5h3v1a4 4 0 0 1-4 4m-4 2v4m-4 3h8"/></svg>
-            </span>
-            <h3>تقدّم وإنجازات</h3>
-            <p>شاهد أثر التزامك عبر XP والمستويات والإنجازات.</p>
-          </article>
-          <article class="feature-card feature-card-wide">
-            <span class="feature-icon feature-icon-blue" aria-hidden="true">
-              <svg viewBox="0 0 24 24"><path d="M8 18H6a4 4 0 0 1-.5-8A7 7 0 0 1 19 12a3 3 0 0 1-1 6h-2m-4-7v10m-3-3 3 3 3-3"/></svg>
-            </span>
-            <div><h3>حفظ على حسابك</h3><p>سجّل الدخول عندما تريد مزامنة كلماتك وتقدّمك والوصول إليهما من أجهزتك.</p></div>
-          </article>
+        <div class="route-preview reveal" aria-label="معاينة لمسار عالم يتكون من رتب وبوابات">
+          <div class="route-world"><span aria-hidden="true">✦</span><div><small>عالمك الحالي</small><strong>الحكايات والشاشة</strong></div></div>
+          <ol class="route-steps">
+            <li class="done"><span>1</span><div><small>الرتبة الأولى</small><strong>الكلمات الأساسية</strong></div><i aria-hidden="true">✓</i></li>
+            <li class="active"><span>2</span><div><small>أنت هنا</small><strong>بوابة الوصف</strong></div><i aria-hidden="true">3/5</i></li>
+            <li><span>3</span><div><small>الخطوة التالية</small><strong>بوابة الحوار</strong></div><i aria-hidden="true">◇</i></li>
+          </ol>
         </div>
-      </div>
+      </article>
+
+      <article class="product-moment shell" id="review" aria-labelledby="reviewTitle">
+        <div class="moment-copy reveal">
+          <p class="eyebrow">مراجعة في وقتها</p>
+          <h2 id="reviewTitle">المراجعة تعرف متى ترجع لك.</h2>
+          <p>الكلمات الجديدة والصعبة وما يحتاج مراجعة… كل واحدة ترجع في وقتها، بدل الحفظ العشوائي.</p>
+          <p class="moment-note">اختبار قصير يساعدك تعرف ما ثبت معك وما يستحق جولة أخرى.</p>
+        </div>
+
+        <div class="review-preview reveal" aria-label="معاينة لمراجعة كلمة">
+          <header><span>مراجعة اليوم</span><strong>4 كلمات</strong></header>
+          <div class="review-word"><small>اختر المعنى الأقرب</small><strong lang="en" dir="ltr">curious</strong><span>فضولي</span></div>
+          <div class="review-options" aria-hidden="true"><span class="selected">فضولي</span><span>هادئ</span><span>واضح</span></div>
+          <div class="review-footer"><span>2 من 4</span><i><b></b></i></div>
+        </div>
+      </article>
     </section>
 
     <section class="final-cta" aria-labelledby="ctaTitle">
-      <div class="shell final-cta-inner">
+      <div class="shell final-cta-inner reveal">
         <div>
-          <p class="eyebrow">جاهز لأول خطوة؟</p>
-          <h2 id="ctaTitle">ابدأ رحلتك مع الإنجليزية اليوم.</h2>
-          <p>استكشف كضيف أو سجّل الدخول لحفظ تجربتك على حسابك.</p>
+          <p class="eyebrow">ابدأ بخطوة واحدة</p>
+          <h2 id="ctaTitle">جاهز تبدأ عالمك الأول؟</h2>
+          <p data-guest-only>تقدر تبدأ كضيف، وتسجّل لاحقًا لحفظ تقدّمك.</p>
+          <p data-user-only hidden>رحلتك محفوظة وجاهزة لتكمل من مكانك.</p>
         </div>
-        <div class="final-actions">
-          <a class="button button-primary button-large" href="./app" data-app-link>الدخول إلى التطبيق</a>
-          <button class="button button-secondary button-large" type="button" data-google-sign-in disabled>
-            <svg class="google-mark" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-              <path fill="#4285f4" d="M21.6 12.2c0-.7-.1-1.4-.2-2H12v3.9h5.4a4.6 4.6 0 0 1-2 3v2.6h3.3c1.9-1.8 2.9-4.4 2.9-7.5Z"/>
-              <path fill="#34a853" d="M12 22c2.7 0 5-.9 6.7-2.3l-3.3-2.6c-.9.6-2.1 1-3.4 1a5.9 5.9 0 0 1-5.6-4.1H3v2.7A10 10 0 0 0 12 22Z"/>
-              <path fill="#fbbc05" d="M6.4 14a6 6 0 0 1 0-3.9V7.4H3A10 10 0 0 0 3 16.7Z"/>
-              <path fill="#ea4335" d="M12 6c1.5 0 2.9.5 3.9 1.5l2.9-2.8A9.7 9.7 0 0 0 3 7.4l3.4 2.7A5.9 5.9 0 0 1 12 6Z"/>
-            </svg>
-            <span data-auth-button-label>تسجيل الدخول بـ Google</span>
-          </button>
-        </div>
+        <a class="button button-primary button-large" href="./app" data-app-link data-journey-cta>
+          <span data-journey-label>فتح التطبيق</span>
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m14 6-6 6 6 6"/></svg>
+        </a>
       </div>
     </section>
   </main>
@@ -249,8 +194,68 @@
     </div>
   </footer>
 
+  <div class="auth-dialog-shell" data-auth-dialog hidden>
+    <button class="auth-backdrop" type="button" data-auth-close tabindex="-1" aria-label="إغلاق نافذة تسجيل الدخول"></button>
+    <section class="auth-dialog" role="dialog" aria-modal="true" aria-labelledby="authDialogTitle" aria-describedby="authDialogIntro">
+      <button class="auth-close" type="button" data-auth-close aria-label="إغلاق"><span aria-hidden="true">×</span></button>
+      <div class="auth-brand" aria-hidden="true"><span class="brand-mark"><svg viewBox="0 0 48 48"><path d="M9 16.5 24 8l15 8.5v15L24 40 9 31.5z"/><path d="m16 19 8 4.5 8-4.5M24 23.5V33"/></svg></span></div>
+      <div class="auth-heading">
+        <p class="eyebrow" data-auth-eyebrow>العودة إلى رحلتك</p>
+        <h2 id="authDialogTitle" data-auth-title tabindex="-1">أهلًا بعودتك</h2>
+        <p id="authDialogIntro" data-auth-intro>سجّل دخولك، وسنكمل من المكان المحفوظ في حسابك.</p>
+      </div>
+
+      <button class="google-button" type="button" data-auth-google>
+        <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+          <path fill="#4285f4" d="M21.6 12.2c0-.7-.1-1.4-.2-2H12v3.9h5.4a4.6 4.6 0 0 1-2 3v2.6h3.3c1.9-1.8 2.9-4.4 2.9-7.5Z"/>
+          <path fill="#34a853" d="M12 22c2.7 0 5-.9 6.7-2.3l-3.3-2.6c-.9.6-2.1 1-3.4 1a5.9 5.9 0 0 1-5.6-4.1H3v2.7A10 10 0 0 0 12 22Z"/>
+          <path fill="#fbbc05" d="M6.4 14a6 6 0 0 1 0-3.9V7.4H3A10 10 0 0 0 3 16.7Z"/>
+          <path fill="#ea4335" d="M12 6c1.5 0 2.9.5 3.9 1.5l2.9-2.8A9.7 9.7 0 0 0 3 7.4l3.4 2.7A5.9 5.9 0 0 1 12 6Z"/>
+        </svg>
+        <span data-google-label>المتابعة بحساب Google</span>
+      </button>
+
+      <div class="auth-separator" data-auth-provider-separator><span>أو بالبريد الإلكتروني</span></div>
+
+      <form class="auth-form" data-auth-form novalidate>
+        <label class="auth-field" for="authEmail">
+          <span>البريد الإلكتروني</span>
+          <input id="authEmail" name="email" type="email" inputmode="email" autocomplete="email" dir="ltr" required aria-describedby="authEmailError">
+          <small id="authEmailError" data-field-error="email"></small>
+        </label>
+
+        <label class="auth-field" for="authPassword" data-password-field>
+          <span>كلمة المرور</span>
+          <span class="password-input-wrap">
+            <input id="authPassword" name="password" type="password" autocomplete="current-password" dir="ltr" required aria-describedby="authPasswordError">
+            <button type="button" data-password-toggle="authPassword" aria-pressed="false">إظهار</button>
+          </span>
+          <small id="authPasswordError" data-field-error="password"></small>
+        </label>
+
+        <label class="auth-field" for="authConfirmation" data-confirmation-field hidden>
+          <span>تأكيد كلمة المرور</span>
+          <span class="password-input-wrap">
+            <input id="authConfirmation" name="confirmation" type="password" autocomplete="new-password" dir="ltr" aria-describedby="authConfirmationError">
+            <button type="button" data-password-toggle="authConfirmation" aria-pressed="false">إظهار</button>
+          </span>
+          <small id="authConfirmationError" data-field-error="confirmation"></small>
+        </label>
+
+        <button class="forgot-password" type="button" data-auth-mode="reset">نسيت كلمة المرور؟</button>
+        <p class="auth-message" data-auth-message role="status" aria-live="polite"></p>
+        <button class="button button-primary auth-submit" type="submit" data-auth-submit>
+          <span data-auth-submit-label>تسجيل الدخول</span>
+          <span class="button-spinner" aria-hidden="true"></span>
+        </button>
+      </form>
+
+      <p class="auth-switch" data-auth-switch-wrap>ما عندك حساب؟ <button type="button" data-auth-switch="signup">أنشئ حسابًا</button></p>
+    </section>
+  </div>
+
   <noscript>
-    <div class="noscript-note">يمكنك <a href="./app">الدخول إلى التطبيق</a>، لكن تسجيل الدخول يحتاج إلى تفعيل JavaScript.</div>
+    <div class="noscript-note">تقدر <a href="./app">تبدأ كضيف</a>، لكن تسجيل الدخول يحتاج إلى تفعيل JavaScript.</div>
   </noscript>
 </body>
 </html>

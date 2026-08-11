@@ -16,11 +16,11 @@ const [worlds, quiz, runtime, journeyCloud, rules, journey, srs, globalCloud, fu
 ]);
 
 test('Gate detail exposes the three required clear/mastery presentations', () => {
-  assert.match(worlds, /مجتازة — بقي \$\{gapCount\} كلمات لإتقانها/);
+  assert.match(worlds, /مكتملة — بقي \$\{gapCount\} كلمات لإتقانها/);
   assert.match(worlds, /راجع الكلمات المتبقية/);
   assert.match(worlds, /fa-solid fa-crown/);
   assert.match(worlds, /mastered: 'متقنة'/);
-  assert.match(worlds, /مجتازة عبر اختبار المستوى — الكلمات غير محمّلة/);
+  assert.match(worlds, /مكتملة باختبار المستوى — الكلمات غير مضافة/);
 });
 
 test('gap review starts a verified quiz from only the requested word keys', () => {

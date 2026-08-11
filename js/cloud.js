@@ -9,6 +9,7 @@
     orderBy, deleteDoc, doc, updateDoc, onSnapshot, serverTimestamp,
     getDoc, setDoc, getDocs, runTransaction, writeBatch
   } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
+  import { publicLandingPath, runLogoutSequence } from './logout-flow.js?v=20260811-1';
 
   const firebaseConfig = {
     apiKey:            "AIzaSyDQB5N4wxJw69-tb8suI2T2SfEfCpwFA2c",
@@ -192,19 +193,45 @@
   };
 
   window.confirmLogout = async function() {
-    suppressNextGuestLoad = true;
-    if (typeof window._saveProfileToCloudNow === 'function') {
-      try { await window._saveProfileToCloudNow(); } catch (e) { console.warn('save-before-logout:', e); }
-    }
-    if (typeof window.clearDictionaryState === 'function') window.clearDictionaryState();
-    signOut(auth).then(() => {
-      if (typeof window.clearDictionaryState === 'function') window.clearDictionaryState();
-      if (typeof window.purgeStaleGuestLocalData === 'function') window.purgeStaleGuestLocalData();
-      if (typeof window.resetLootlinguaProfileState === 'function') {
-        window.resetLootlinguaProfileState({ clearDisplayName: true, resetTheme: true });
+    let authStateHandler = null;
+    const waitForAccountCleanup = () => new Promise((resolve) => {
+      if (window.__lootlinguaAuthResolved && !window.__lootlinguaAuthUser) {
+        queueMicrotask(resolve);
+        return;
       }
-      hideModal('logoutModal');
+      authStateHandler = (event) => {
+        if (event.detail?.user) return;
+        window.removeEventListener('lootlingua:auth-state', authStateHandler);
+        authStateHandler = null;
+        // The main Auth callback continues synchronously after dispatching this
+        // event. Promise continuation therefore runs only after its listener
+        // teardown and guest/account branch have finished.
+        resolve();
+      };
+      window.addEventListener('lootlingua:auth-state', authStateHandler);
     });
+
+    try {
+      await runLogoutSequence({
+        savePendingProfile: async () => {
+          if (typeof window._saveProfileToCloudNow !== 'function') return;
+          try { await window._saveProfileToCloudNow(); } catch (e) { console.warn('save-before-logout:', e); }
+        },
+        prepareLogout: () => { suppressNextGuestLoad = true; },
+        waitForAccountCleanup,
+        signOut: () => signOut(auth),
+        clearAccountState: () => window.clearDictionaryState?.(),
+        purgeGuestIsolationState: () => window.purgeStaleGuestLocalData?.(),
+        resetProfileState: () => window.resetLootlinguaProfileState?.({ clearDisplayName: true, resetTheme: true }),
+        closeLogoutUi: () => hideModal('logoutModal'),
+        afterCleanup: () => Promise.resolve(),
+        navigateToLanding: () => location.assign(publicLandingPath(location)),
+      });
+    } catch (error) {
+      if (authStateHandler) window.removeEventListener('lootlingua:auth-state', authStateHandler);
+      console.error(error?.code || 'auth/logout-error', error?.message || error);
+      window.showToast?.('تعذر تسجيل الخروج الآن. جرّب مرة أخرى.', 'danger', 4200, { critical: true });
+    }
   };
 
   function loadWordsFromCloud(user) {

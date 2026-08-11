@@ -1,0 +1,26 @@
+{
+  "generatedAt": "2026-08-11T07:32:28.149Z",
+  "browser": "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",
+  "screenshots": [
+    "reports/notification-system-evidence/notification-center-cta-desktop.png",
+    "reports/notification-system-evidence/notification-center-cta-mobile.png"
+  ],
+  "assertions": {
+    "initialBadge": true,
+    "initialCount": true,
+    "openBadgeZero": true,
+    "openListPreserved": true,
+    "contextualCtas": true,
+    "desktopNoOverflow": true,
+    "contextualCtaAction": true,
+    "newAfterCloseBadgeOne": true,
+    "staleSnapshotKeepsRead": true,
+    "mobileNoOverflow": true,
+    "mobileCtas": true,
+    "toastDuplicateSuppressed": true,
+    "toastDifferentQueuePreserved": true,
+    "toastCenteredFromStart": true,
+    "toastExitsUpward": true
+  },
+  "passed": true
+}

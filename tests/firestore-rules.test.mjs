@@ -5741,8 +5741,50 @@ try {
     }));
   });
 
+  await test('notification lifecycle is owner-bound, read-monotonic, terminal, and non-deletable', async () => {
+    const notificationId = 'nt3_rules_contract';
+    const path = `users/user-a/notifications/${notificationId}`;
+    await assertSucceeds(setDoc(doc(userA, path), {
+      id: notificationId,
+      schemaVersion: 3,
+      ownerId: 'user-a',
+      kind: 'smart',
+      notificationType: 'reminder.review.due',
+      occurrenceKey: 'review:rules-cycle',
+      priority: 78,
+      status: 'active',
+      visualType: 'warning',
+      message: 'لديك كلمات مستحقة للمراجعة.',
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+      showCount: 1,
+      readAt: null,
+    }));
+    await assertSucceeds(getDoc(doc(userA, path)));
+    await assertFails(getDoc(doc(userB, path)));
+    await assertSucceeds(updateDoc(doc(userA, path), {
+      readAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    }));
+    await assertFails(updateDoc(doc(userA, path), {
+      readAt: null,
+      updatedAt: serverTimestamp(),
+    }));
+    await assertSucceeds(updateDoc(doc(userA, path), {
+      status: 'dismissed',
+      dismissedAt: serverTimestamp(),
+      resolutionReason: 'clear-all',
+      updatedAt: serverTimestamp(),
+    }));
+    await assertFails(updateDoc(doc(userA, path), {
+      status: 'active',
+      updatedAt: serverTimestamp(),
+    }));
+    await assertFails(deleteDoc(doc(userA, path)));
+  });
+
   if (testFilter) assert.ok(selected > 0, `No Rules test matched "${testFilter}"`);
-  assert.equal(passed, testFilter ? selected : 79);
+  assert.equal(passed, testFilter ? selected : 80);
   console.log(`# ${passed} Firestore Rules emulator tests passed`);
 } finally {
   await environment.cleanup();

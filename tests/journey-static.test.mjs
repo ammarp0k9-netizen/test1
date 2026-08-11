@@ -165,7 +165,8 @@ test('SRS mastery derives Crown read-only without clearing or advancing the jour
   assert.doesNotMatch(masteryBlock, /masteryComplete|projectionPending/);
   assert.doesNotMatch(masteryBlock, /status: 'cleared'/);
   assert.doesNotMatch(masteryBlock, /unlockedGateIds|activeGateId:/);
-  assert.match(worlds, /blocked: gateState === 'locked'/);
+  assert.match(worlds, /function bindPublishedLockedNode/);
+  assert.match(worlds, /published-journey-node published-gate-node is-\$\{state\}/);
   assert.match(worlds, /if \(!canRevealPublishedGateWords\(gateState, publishedContentState\.journey\)\)/);
   assert.match(worlds, /gateState === 'locked'[\s\S]*أكمل البوابة السابقة لفتح كلمات هذه البوابة/);
 });

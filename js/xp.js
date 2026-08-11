@@ -408,7 +408,8 @@ function checkAndUpdateStreak(options = {}) {
     return;
   }
   const today     = todayStr();
-  const yesterday = new Date(Date.now()-864e5).toISOString().slice(0,10);
+  const yesterday = window.LootLinguaLocalTime?.previousLocalDateKey?.(new Date()) ||
+    (() => { const date = new Date(); date.setDate(date.getDate() - 1); return localDateKey(date); })();
 
   // A streak day now requires a completed verified learning session.
   const map = loadJSON('activityMap', {});

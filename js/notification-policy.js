@@ -47,6 +47,16 @@
     return `${slice.slice(0, boundary > max * 0.6 ? boundary : slice.length).trim()}…`;
   }
 
+  function toastDedupeKey(message, type, options) {
+    const settings = options && typeof options === 'object' ? options : {};
+    if (settings.toastDedupe === false) return '';
+    const explicitKey = text(settings.toastDedupeKey);
+    const identity = explicitKey
+      ? `explicit|${explicitKey}`
+      : `message|${text(type || 'info').toLowerCase()}|${text(settings.fullText || settings.details || message).toLowerCase()}`;
+    return `toast_${hashText(identity)}`;
+  }
+
   function notificationId(message, type, options, now, sequence) {
     const settings = options && typeof options === 'object' ? options : {};
     const dedupeKey = text(settings.dedupeKey || settings.operationId);
@@ -101,6 +111,7 @@
     TOAST_PREVIEW_LIMIT,
     shouldPersist,
     toastPreview,
+    toastDedupeKey,
     notificationId,
     createRecord,
     mergeRecord,

@@ -215,6 +215,9 @@ function saveLootState(state) {
   saveJSON(LOOT_STATE_KEY, state);
   if (!hasSignedInUser()) markGuestDataDirty();
   requestProfileCloudSave();
+  window.dispatchEvent(new CustomEvent('lootlingua:learning-data-changed', {
+    detail: { source: 'loot-state' },
+  }));
 }
 
 function getTitleState() {
@@ -255,7 +258,8 @@ function pickDailyLootReward() {
 
 function updateLootStreak(state) {
   const today = todayStr();
-  const yesterday = new Date(Date.now() - 864e5).toISOString().slice(0, 10);
+  const yesterday = window.LootLinguaLocalTime?.previousLocalDateKey?.(new Date()) ||
+    (() => { const date = new Date(); date.setDate(date.getDate() - 1); return localDateKey(date); })();
   if (state.lastOpenDay === today) return state.streak || 0;
   if (state.lastOpenDay === yesterday) return (state.streak || 0) + 1;
   return 1;
@@ -2696,7 +2700,7 @@ function renderPublishedLevelPlacementResult(bundle) {
       try {
         launchConfetti();
         showToast(
-          `اكتمل عالم ${bundle.world?.title || ''} عبر اختبار المستوى. تم حفظ التقدم دون منح Crown أو إتقان غير مكتسب.`,
+          `اكتمل عالم ${bundle.world?.title || ''} عبر اختبار المستوى. حُفظ تقدمك دون إضافة إتقان لم تحققه.`,
           'success',
           6500,
           {
@@ -3796,6 +3800,28 @@ async function loadEntryWorldStructure(worldId, options) {
   return { world, ranks, rank, gates };
 }
 
+async function loadEntryRankPreview(worldId, rankId, options) {
+  const api = getPublishedContentApi();
+  const settings = { force: Boolean(options?.force) };
+  const [rank, gates] = await Promise.all([
+    api.getPublishedRank(worldId, rankId),
+    api.listPublishedGates(worldId, rankId, settings),
+  ]);
+  return { rank, gates };
+}
+
+async function loadEntryGatePreview(worldId, rankId, gateId) {
+  const api = getPublishedContentApi();
+  const [gate, page] = await Promise.all([
+    api.getPublishedGate(worldId, rankId, gateId),
+    api.listPublishedGateWords(worldId, rankId, gateId, { pageSize: 3 }),
+  ]);
+  return {
+    gate,
+    words: Array.isArray(page?.items) ? page.items.slice(0, 3) : [],
+  };
+}
+
 async function loadEntryJourneyContext(journey, options) {
   const worldId = String(journey?.worldId || '');
   if (!worldId) return { world: null, rank: null, gate: null };
@@ -3812,6 +3838,8 @@ async function loadEntryJourneyContext(journey, options) {
 const ENTRY_PREVIEW_API = Object.freeze({
   loadWorldChoices: loadEntryWorldChoices,
   loadWorldStructure: loadEntryWorldStructure,
+  loadRankPreview: loadEntryRankPreview,
+  loadGatePreview: loadEntryGatePreview,
   loadJourneyContext: loadEntryJourneyContext,
 });
 
@@ -4002,6 +4030,203 @@ function makePublishedHierarchyCard(kind, item, onClick, options) {
   return card;
 }
 
+const PUBLISHED_JOURNEY_PRESENTATION = Object.freeze({
+  locked: Object.freeze({ label: 'مقفلة', icon: 'fa-solid fa-lock' }),
+  available: Object.freeze({ label: 'متاحة', icon: 'fa-solid fa-unlock-keyhole' }),
+  learning: Object.freeze({ label: 'قيد التعلم', icon: 'fa-solid fa-book-open-reader' }),
+  ready: Object.freeze({ label: 'جاهزة للاجتياز', icon: 'fa-solid fa-flag-checkered' }),
+  cleared: Object.freeze({ label: 'مكتملة', icon: 'fa-solid fa-circle-check' }),
+  mastered: Object.freeze({ label: 'متقنة', icon: 'fa-solid fa-crown' }),
+});
+
+function publishedJourneyPresentation(state) {
+  return PUBLISHED_JOURNEY_PRESENTATION[state] || PUBLISHED_JOURNEY_PRESENTATION.locked;
+}
+
+function publishedRankJourneyState(rank, journey, activeJourney, rankProgress) {
+  if (rankProgress?.mastered) return 'mastered';
+  if (rankProgress?.completed) return 'cleared';
+  if (!getJourneyContract().canAccessRank(rank, journey)) return 'locked';
+  if (
+    String(activeJourney?.worldId || '') === String(rank?.worldId || journey?.worldId || '') &&
+    String(activeJourney?.activeRankId || '') === String(rank?.rankId || '')
+  ) return 'learning';
+  return 'available';
+}
+
+function bindPublishedLockedNode(node, message) {
+  node.setAttribute('aria-disabled', 'true');
+  node.addEventListener('click', (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    node.classList.remove('published-journey-node-nudge');
+    void node.offsetWidth;
+    node.classList.add('published-journey-node-nudge');
+    clearTimeout(node.__publishedLockTimer);
+    node.__publishedLockTimer = setTimeout(() => {
+      node.classList.remove('published-journey-node-nudge');
+    }, 360);
+    showToast(message, 'info', 3200);
+  });
+}
+
+function makePublishedRankJourneyNode(world, rank, state, rankProgress, onClick) {
+  const presentation = publishedJourneyPresentation(state);
+  const node = publishedElement('button', `published-journey-node published-rank-node is-${state}`);
+  node.type = 'button';
+  node.dataset.journeyState = state;
+  const marker = publishedElement('span', 'published-journey-node-marker');
+  marker.append(publishedIcon(presentation.icon));
+  const copy = publishedElement('span', 'published-journey-node-copy');
+  const heading = publishedElement('span', 'published-journey-node-heading');
+  heading.append(
+    publishedElement('strong', '', rank.title || 'رتبة بلا اسم'),
+    publishedElement('small', `published-journey-status is-${state}`, presentation.label)
+  );
+  copy.append(heading);
+  const summaryParts = [];
+  if (Number.isFinite(Number(rank.gateCount))) summaryParts.push(`${Number(rank.gateCount)} بوابة`);
+  if (Number.isFinite(Number(rank.wordCount))) summaryParts.push(`${Number(rank.wordCount)} كلمة`);
+  if (rank.description || rank.subtitle) {
+    copy.append(publishedElement('span', 'published-journey-node-description', rank.description || rank.subtitle));
+  }
+  if (summaryParts.length) copy.append(publishedElement('small', 'published-journey-node-meta', summaryParts.join(' · ')));
+  if (rankProgress?.hasNewContent) {
+    copy.append(publishedElement('small', 'published-journey-new-content', 'أضيف محتوى جديد'));
+  }
+  const actionLabels = {
+    locked: 'تُفتح بعد الرتبة السابقة',
+    available: 'عرض البوابات',
+    learning: 'متابعة البوابات',
+    cleared: 'مراجعة البوابات',
+    mastered: 'مراجعة البوابات',
+  };
+  const action = publishedElement('span', 'published-journey-node-action', actionLabels[state] || 'عرض البوابات');
+  if (state !== 'locked') action.append(publishedIcon('fa-solid fa-arrow-left'));
+  node.append(marker, copy, action);
+  if (state === 'locked') {
+    bindPublishedLockedNode(node, 'أكمل الرتبة السابقة لفتح هذه الرتبة.');
+  } else {
+    node.addEventListener('click', onClick);
+  }
+  node.setAttribute('aria-label', `${rank.title || 'الرتبة'} — ${presentation.label}`);
+  return node;
+}
+
+function publishedGateProgressPercent(state, progress) {
+  if (state === 'ready' || state === 'cleared' || state === 'mastered') return 100;
+  if (state !== 'learning') return 0;
+  const ready = Math.max(0, Number(progress?.readyWordCount) || 0);
+  const total = Math.max(ready, Number(progress?.requiredWordCount) || Number(progress?.wordCountAtLoad) || 0);
+  return total ? Math.min(100, Math.round((ready / total) * 100)) : 0;
+}
+
+function makePublishedGateJourneyNode(world, rank, gate, state, progress, activeJourney, onClick) {
+  const presentation = publishedJourneyPresentation(state);
+  const current = String(activeJourney?.worldId || '') === String(world?.worldId || '') &&
+    String(activeJourney?.activeGateId || '') === String(gate?.gateId || '');
+  const node = publishedElement(
+    'button',
+    `published-journey-node published-gate-node is-${state}${current ? ' is-current' : ''}`
+  );
+  node.type = 'button';
+  node.dataset.journeyState = state;
+  const marker = publishedElement('span', 'published-journey-node-marker');
+  marker.append(publishedIcon(presentation.icon));
+  const copy = publishedElement('span', 'published-journey-node-copy');
+  const heading = publishedElement('span', 'published-journey-node-heading');
+  heading.append(
+    publishedElement('strong', '', gate.title || 'بوابة بلا اسم'),
+    publishedElement('small', `published-journey-status is-${state}`, presentation.label)
+  );
+  copy.append(heading);
+  if (gate.description || gate.subtitle) {
+    copy.append(publishedElement('span', 'published-journey-node-description', gate.description || gate.subtitle));
+  }
+  const meta = [];
+  if (Number.isFinite(Number(gate.wordCount))) meta.push(`${Number(gate.wordCount)} كلمة`);
+  if (current) meta.push('موضعك الحالي');
+  if (meta.length) copy.append(publishedElement('small', 'published-journey-node-meta', meta.join(' · ')));
+  const percent = publishedGateProgressPercent(state, progress);
+  if (state === 'learning' || state === 'ready') {
+    const track = publishedElement('span', 'published-journey-node-progress');
+    const fill = publishedElement('span', 'published-journey-node-progress-fill');
+    fill.style.width = `${percent}%`;
+    track.append(fill);
+    copy.append(track);
+  }
+  const actionLabels = {
+    locked: 'أكمل البوابة السابقة',
+    available: 'افتح البوابة',
+    learning: 'تابع التعلم',
+    ready: 'ابدأ اختبار الاجتياز',
+    cleared: 'راجع الكلمات',
+    mastered: 'راجع الكلمات',
+  };
+  const action = publishedElement('span', 'published-journey-node-action', actionLabels[state] || 'افتح البوابة');
+  if (state !== 'locked') action.append(publishedIcon('fa-solid fa-arrow-left'));
+  node.append(marker, copy, action);
+  if (state === 'locked') {
+    bindPublishedLockedNode(node, 'أكمل البوابة السابقة لفتح هذه البوابة.');
+  } else {
+    node.addEventListener('click', onClick);
+  }
+  node.setAttribute('aria-label', `${gate.title || 'البوابة'} — ${presentation.label}`);
+  return node;
+}
+
+function makePublishedGateSwitcher(world, rank, gates, ranks, journey, activeJourney, progressByGate, selectedGateId) {
+  if (!Array.isArray(gates) || gates.length < 2) return null;
+  const section = publishedElement('section', 'published-gate-switcher');
+  const heading = publishedElement('div', 'published-gate-switcher-heading');
+  heading.append(
+    publishedElement('small', '', 'بوابات هذه الرتبة'),
+    publishedElement('strong', '', 'انتقل بينها من هنا')
+  );
+  const rail = publishedElement('div', 'published-gate-switcher-rail');
+  rail.setAttribute('role', 'tablist');
+  rail.setAttribute('aria-label', 'بوابات الرتبة');
+  const select = publishedElement('select', 'published-gate-switcher-select');
+  select.setAttribute('aria-label', 'اختر بوابة من هذه الرتبة');
+  gates.forEach((gate, index) => {
+    const progress = progressByGate?.get(String(gate.gateId)) || null;
+    const state = publishedGateJourneyState(gate, rank, gates, ranks, journey, progress);
+    const presentation = publishedJourneyPresentation(state);
+    const selected = String(gate.gateId || '') === String(selectedGateId || '');
+    const button = publishedElement(
+      'button',
+      `published-gate-switcher-item is-${state}${selected ? ' selected' : ''}`
+    );
+    button.type = 'button';
+    button.setAttribute('role', 'tab');
+    button.setAttribute('aria-selected', String(selected));
+    button.append(
+      publishedElement('span', '', String(index + 1)),
+      publishedElement('strong', '', gate.title || `البوابة ${index + 1}`),
+      publishedIcon(presentation.icon)
+    );
+    if (state === 'locked') {
+      bindPublishedLockedNode(button, 'أكمل البوابة السابقة لفتح هذه البوابة.');
+    } else {
+      button.addEventListener('click', () => window.openPublishedGate(world.worldId, rank.rankId, gate.gateId));
+    }
+    rail.append(button);
+
+    const option = publishedElement('option', '', `${gate.title || `البوابة ${index + 1}`} — ${presentation.label}`);
+    option.value = String(gate.gateId || '');
+    option.selected = selected;
+    option.disabled = state === 'locked';
+    select.append(option);
+  });
+  select.addEventListener('change', () => {
+    if (select.value && select.value !== String(selectedGateId || '')) {
+      window.openPublishedGate(world.worldId, rank.rankId, select.value);
+    }
+  });
+  section.append(heading, rail, select);
+  return section;
+}
+
 function makePublishedJourneyPanel(world, ranks, journey, activeJourney) {
   const panel = publishedElement('section', 'published-journey-panel');
   const copy = publishedElement('div', 'published-journey-copy');
@@ -4035,7 +4260,7 @@ function makePublishedJourneyPanel(world, ranks, journey, activeJourney) {
       'span',
       '',
       worldMastered
-        ? 'أكملت جميع الرتب الحالية، وكل بواباتها المؤهلة تحمل Crown. الإكمال التاريخي مستقل عن الإتقان.'
+        ? 'أكملت جميع الرتب الحالية، وأتقنت كلمات بواباتها.'
         : (worldProgress?.hasNewContent
           ? 'إنجازك التاريخي محفوظ، وهناك رتب منشورة جديدة يمكنك متابعتها دون فقدان الشارة.'
           : (completedCurrentContent
@@ -4057,7 +4282,7 @@ function makePublishedJourneyPanel(world, ranks, journey, activeJourney) {
     );
     achievement.append(
       publishedIcon(worldMastered ? 'fa-solid fa-crown' : 'fa-solid fa-trophy'),
-      publishedElement('strong', '', worldMastered ? 'World Mastered' : 'World Completed'),
+      publishedElement('strong', '', worldMastered ? 'العالم متقن' : 'العالم مكتمل'),
       publishedElement(
         'span',
         '',
@@ -4310,9 +4535,9 @@ function renderPublishedGateClearResult(world, rank, gate, bundle) {
       '',
       passed
         ? (completedCurrentContent
-          ? 'حصلت على World Completed لكل الرتب المنشورة حاليًا. بقيت المراجعات والكلمات غير المتقنة متاحة دون أن تعيق إنجازك.'
+          ? 'أكملت جميع الرتب المنشورة حاليًا. يمكنك متابعة المراجعات والكلمات المتبقية دون أن يتغير إنجازك.'
           : (rankCompleted
-            ? 'حُفظ إنجاز الرتبة وفتح resolver المركزي وجهتك التالية. الكلمات المتبقية للمراجعة لا تعيق التقدم.'
+            ? 'حُفظ إنجاز الرتبة، وأصبحت خطوتك التالية متاحة. الكلمات المتبقية للمراجعة لا تعيق تقدمك.'
             : 'فُتحت الخطوة التالية في رحلتك، ولن تبدأ تلقائيًا.'))
         : 'بقيت البوابة جاهزة، ويمكنك إعادة المحاولة لاحقًا دون فقدان أدلتك.'
     ),
@@ -4347,7 +4572,7 @@ function renderPublishedGateClearResult(world, rank, gate, bundle) {
       try {
         launchConfetti();
         showToast(
-          `اكتمل عالم ${world.title || ''}. إنجاز World Completed محفوظ، ويمكنك متابعة الكلمات غير المتقنة لاحقًا.`,
+          `اكتمل عالم ${world.title || ''}. إنجازك محفوظ، ويمكنك متابعة الكلمات غير المتقنة لاحقًا.`,
           'success',
           6500,
           {
@@ -4477,7 +4702,7 @@ function makePublishedGateJourneyPanel(world, rank, gate) {
   );
   const panel = publishedElement(
     'section',
-    `published-gate-journey published-gate-journey-${state}`
+    `published-gate-journey published-gate-journey-${state} published-gate-state-card`
   );
   const clearedWithoutLoad = Boolean(
     progress?.status === 'cleared' &&
@@ -4489,6 +4714,9 @@ function makePublishedGateJourneyPanel(world, rank, gate) {
     masteryView?.derivedState === 'cleared-with-gap'
   );
   const gapCount = Math.max(0, Number(masteryView?.gapCount) || 0);
+  const presentation = publishedJourneyPresentation(state);
+  const stateIcon = publishedElement('span', `published-gate-state-icon is-${state}`);
+  stateIcon.append(publishedIcon(presentation.icon));
   const copy = publishedElement('div', 'published-journey-copy');
   const stateTitles = {
     locked: 'هذه البوابة مقفلة',
@@ -4501,20 +4729,20 @@ function makePublishedGateJourneyPanel(world, rank, gate) {
   const stateDescriptions = {
     locked: 'أكمل البوابة السابقة لفتحها.',
     available: publishedContentState.journey
-      ? 'حمّل كلمات البوابة إلى قاموسك عندما تكون مستعدًا.'
-      : 'ابدأ الرحلة أولًا، ثم حمّل كلمات البوابة إلى قاموسك.',
-    learning: 'كلمات البوابة مرتبطة بقاموسك وحالة SRS الحالية.',
-    ready: 'أصبحت كل كلمات البوابة جاهزة لاختبار الاجتياز.',
-    cleared: 'اجتزت هذه البوابة وحُفظ تقدمك في الرحلة.',
-    mastered: 'أكملت إتقان كلمات هذه البوابة. يبقى Crown محفوظًا حتى مع مراجعات SRS اللاحقة.',
+      ? 'أضف كلماتها إلى قاموسك عندما تكون مستعدًا.'
+      : 'ابدأ رحلة التعلم أولًا، ثم أضف كلمات البوابة إلى قاموسك.',
+    learning: 'تتعلّم كلمات هذه البوابة الآن، وستعود في مراجعاتك حسب حاجتك.',
+    ready: 'أكملت مراجعاتها المطلوبة، ويمكنك بدء اختبار الاجتياز الآن.',
+    cleared: 'أنجزت هذه البوابة وفتحت الطريق لما بعدها.',
+    mastered: 'أتقنت كلمات هذه البوابة وحصلت على شارة الإتقان.',
   };
   const heading = publishedElement('strong');
   if (state === 'mastered') heading.append(publishedIcon('fa-solid fa-crown'));
   heading.append(document.createTextNode(
     clearedWithoutLoad
-      ? 'مجتازة عبر اختبار المستوى — الكلمات غير محمّلة'
+      ? 'مكتملة باختبار المستوى — الكلمات غير مضافة'
       : clearedWithGap
-        ? `مجتازة — بقي ${gapCount} كلمات لإتقانها`
+        ? `مكتملة — بقي ${gapCount} كلمات لإتقانها`
         : (stateTitles[state] || getJourneyContract().gateStatusLabel(state))
   ));
   copy.append(
@@ -4523,13 +4751,13 @@ function makePublishedGateJourneyPanel(world, rank, gate) {
       'span',
       '',
       clearedWithoutLoad
-        ? 'حمّل كلمات البوابة كاملة اختياريًا لبدء رحلة الإتقان دون تغيير نتيجة الاختبار.'
+        ? 'يمكنك إضافة كلماتها الآن ومتابعة إتقانها دون تغيير نتيجة الاختبار.'
         : clearedWithGap
-          ? 'اجتياز البوابة محفوظ والبوابة التالية مفتوحة. راجع الكلمات المتبقية ضمن SRS الحالي.'
+          ? 'إنجاز البوابة محفوظ والطريق التالي مفتوح. يمكنك متابعة الكلمات المتبقية في مراجعاتك.'
           : (stateDescriptions[state] || '')
     )
   );
-  panel.append(copy);
+  panel.append(stateIcon, copy);
 
   if (state === 'learning' || state === 'ready') {
     const readyWordCount = Math.max(0, Number(progress?.readyWordCount) || 0);
@@ -4555,9 +4783,9 @@ function makePublishedGateJourneyPanel(world, rank, gate) {
     const availableToday = Math.max(0, Number(progress?.availableForReviewNowCount) || 0);
     const waitingToday = Math.max(0, Number(progress?.waitingLaterTodayCount) || 0);
     const waitingTomorrow = Math.max(0, Number(progress?.waitingNextDayCount) || 0);
-    appendMetaChip(counts, `جاهز: ${readyWordCount}`, 'fa-solid fa-circle-check');
-    appendMetaChip(counts, `مراجعة اليوم: ${availableToday + waitingToday}`, 'fa-solid fa-calendar-day');
-    appendMetaChip(counts, `انتظار الغد: ${waitingTomorrow}`, 'fa-regular fa-calendar');
+    appendMetaChip(counts, `اكتملت مراجعتها: ${readyWordCount}`, 'fa-solid fa-circle-check');
+    appendMetaChip(counts, `مراجعات اليوم: ${availableToday + waitingToday}`, 'fa-solid fa-calendar-day');
+    appendMetaChip(counts, `موعدها غدًا: ${waitingTomorrow}`, 'fa-regular fa-calendar');
     const readinessCopy = publishedElement('p', 'published-gate-readiness-copy');
     if (state === 'ready') {
       readinessCopy.textContent = 'أصبحت كل كلمات البوابة جاهزة لاختبار الاجتياز.';
@@ -4568,7 +4796,7 @@ function makePublishedGateJourneyPanel(world, rank, gate) {
     } else if (waitingTomorrow > 0) {
       readinessCopy.textContent = 'تُستكمل مراجعة التأكيد في اليوم التالي.';
     } else {
-      readinessCopy.textContent = `${readyWordCount} من ${requiredWordCount} كلمات جاهزة.`;
+      readinessCopy.textContent = `اكتملت مراجعة ${readyWordCount} من ${requiredWordCount} كلمات.`;
     }
     readiness.append(heading, track, counts, readinessCopy);
     panel.append(readiness);
@@ -4598,7 +4826,7 @@ function makePublishedGateJourneyPanel(world, rank, gate) {
     actions.append(locked);
   } else if (needsPlacementChoice) {
     const beginning = publishedButton(
-      pending ? 'جارٍ تجهيز الرحلة' : 'ابدأ من البداية',
+      pending ? 'نجهّز رحلتك' : 'ابدأ من البداية',
       'published-action-btn published-journey-btn published-journey-cta',
       () => beginPublishedJourneyFromStart(world),
       pending ? 'fa-solid fa-circle-notch fa-spin' : 'fa-solid fa-forward-step'
@@ -4607,7 +4835,7 @@ function makePublishedGateJourneyPanel(world, rank, gate) {
     actions.append(beginning);
   } else if (!publishedContentState.journey || !activeForWorld) {
     const start = publishedButton(
-      pending ? 'جارٍ تجهيز الرحلة' : 'ابدأ الرحلة',
+      pending ? 'نجهّز رحلتك' : 'ابدأ رحلة التعلم',
       'published-action-btn published-journey-btn published-journey-cta',
       () => startOrResumePublishedJourney(world),
       pending ? 'fa-solid fa-circle-notch fa-spin' : 'fa-solid fa-route'
@@ -4616,7 +4844,7 @@ function makePublishedGateJourneyPanel(world, rank, gate) {
     actions.append(start);
   } else if (state === 'available') {
     const load = publishedButton(
-      pending ? 'جارٍ تحميل الكلمات' : 'تحميل البوابة',
+      pending ? 'نضيف الكلمات' : 'أضف كلمات البوابة',
       'published-action-btn published-journey-btn published-journey-cta',
       () => runPublishedGateLoad(false),
       pending ? 'fa-solid fa-circle-notch fa-spin' : 'fa-solid fa-download'
@@ -4651,7 +4879,7 @@ function makePublishedGateJourneyPanel(world, rank, gate) {
     actions.append(clear);
   } else if (clearedWithoutLoad) {
     const learn = publishedButton(
-      pending ? 'جارٍ تحميل الكلمات' : 'تعلّم كلمات هذه البوابة',
+      pending ? 'نضيف الكلمات' : 'تعلّم كلمات هذه البوابة',
       'published-action-btn published-journey-btn',
       () => runPublishedGateLoad(false),
       pending ? 'fa-solid fa-circle-notch fa-spin' : 'fa-solid fa-book-open-reader'
@@ -4688,7 +4916,7 @@ function makePublishedGateJourneyPanel(world, rank, gate) {
       'small',
       'published-journey-message published-journey-new-words',
       state === 'mastered'
-        ? `يوجد محتوى جديد متاح (${publishedContentState.newGateWords.length}) ولا يغيّر Crown المحفوظ.`
+        ? `يوجد محتوى جديد (${publishedContentState.newGateWords.length})، وشارة إتقانك محفوظة.`
         : `توجد كلمات جديدة في هذه البوابة (${publishedContentState.newGateWords.length}).`
     ));
   }
@@ -4719,7 +4947,10 @@ function makePublishedGateJourneyPanel(world, rank, gate) {
 }
 
 function appendPublishedHeader(root, options) {
-  const header = publishedElement('header', 'published-view-header');
+  const header = publishedElement(
+    'header',
+    `published-view-header${options.journey ? ' published-journey-header' : ''}`
+  );
   if (options.back) {
     header.append(publishedButton(
       options.backLabel || 'رجوع',
@@ -4730,7 +4961,7 @@ function appendPublishedHeader(root, options) {
   }
   if (options.breadcrumbs?.length) {
     const breadcrumbs = publishedElement('nav', 'published-breadcrumb');
-    breadcrumbs.setAttribute('aria-label', 'مسار المحتوى');
+    breadcrumbs.setAttribute('aria-label', 'موقعك في العالم');
     options.breadcrumbs.forEach((item, index) => {
       if (index > 0) {
         breadcrumbs.append(publishedElement('span', 'published-breadcrumb-separator', '›'));
@@ -4749,6 +4980,7 @@ function appendPublishedHeader(root, options) {
     header.append(breadcrumbs);
   }
   const heading = publishedElement('div', 'published-heading');
+  if (options.contextLabel) heading.append(publishedElement('small', 'published-heading-context', options.contextLabel));
   heading.append(publishedElement('h3', '', options.title));
   if (options.description) heading.append(publishedElement('p', '', options.description));
   header.append(heading);
@@ -4796,7 +5028,7 @@ function renderPublishedWorlds(items, activeJourney) {
   root.replaceChildren(content);
 }
 
-function makePublishedLevelSection(world, cefrLevel, ranks, journey) {
+function makePublishedLevelSection(world, cefrLevel, ranks, journey, activeJourney) {
   const schema = window.LootLinguaContentSchema;
   const meta = schema.CEFR_LEVEL_META[cefrLevel];
   const state = publishedLevelState(cefrLevel, journey);
@@ -4874,22 +5106,16 @@ function makePublishedLevelSection(world, cefrLevel, ranks, journey) {
   }
   header.append(copy, summary);
   section.append(header);
-  const grid = publishedElement('div', 'published-card-grid published-level-rank-grid');
-  const initialRank = firstJourneyRank(ranks);
+  const grid = publishedElement('div', 'published-journey-rail published-rank-rail');
   ranks.forEach((rank) => {
-    const rankState = (
-      journey
-        ? getJourneyContract().canAccessRank(rank, journey)
-        : String(rank.rankId || '') === String(initialRank?.rankId || '')
-    ) ? 'available' : 'locked';
-    grid.append(makePublishedHierarchyCard(
-      'rank',
+    const rankProgress = publishedRankProgressView(rank, [], journey, new Map(), ranks);
+    const rankState = publishedRankJourneyState(rank, journey, activeJourney, rankProgress);
+    grid.append(makePublishedRankJourneyNode(
+      world,
       rank,
-      () => window.openPublishedRank(world.worldId, rank.rankId),
-      {
-        journeyState: rankState,
-        rankProgress: publishedRankProgressView(rank, [], journey, new Map(), ranks),
-      }
+      rankState,
+      rankProgress,
+      () => window.openPublishedRank(world.worldId, rank.rankId)
     ));
   });
   section.append(grid);
@@ -4902,6 +5128,8 @@ function renderPublishedRanks(world, ranks, journey, activeJourney) {
   const content = document.createDocumentFragment();
   const section = publishedElement('section', 'published-route-view');
   appendPublishedHeader(section, {
+    journey: true,
+    contextLabel: 'رحلة التعلم في هذا العالم',
     title: world.title || 'العالم',
     description: world.description || world.subtitle || '',
     backLabel: 'العودة للعوالم',
@@ -4923,7 +5151,7 @@ function renderPublishedRanks(world, ranks, journey, activeJourney) {
     window.LootLinguaContentSchema.CEFR_LEVELS.forEach((level) => {
       const levelRanks = groups.get(level) || [];
       if (levelRanks.length) {
-        section.append(makePublishedLevelSection(world, level, levelRanks, journey));
+        section.append(makePublishedLevelSection(world, level, levelRanks, journey, activeJourney));
       }
     });
   }
@@ -4944,6 +5172,8 @@ function renderPublishedGates(
   if (!root) return;
   const section = publishedElement('section', 'published-route-view');
   appendPublishedHeader(section, {
+    journey: true,
+    contextLabel: world.title || 'العالم',
     title: rank.title || 'الرتبة',
     description: rank.description || rank.subtitle || '',
     backLabel: 'العودة للرتب',
@@ -4981,7 +5211,7 @@ function renderPublishedGates(
         'span',
         '',
         rankProgress.mastered
-          ? 'جميع بوابات الرتبة تحمل Crown وفق سجل الإتقان الدائم.'
+          ? 'أتقنت كلمات جميع بوابات هذه الرتبة.'
           : (rankProgress.hasNewContent
             ? 'إنجازك التاريخي محفوظ، ويوجد محتوى أحدث من نسخة الإكمال.'
             : 'اجتزت جميع البوابات المطلوبة. الكلمات المتبقية تظل ضمن المراجعات ولا تعيق تقدمك.')
@@ -5013,7 +5243,7 @@ function renderPublishedGates(
   if (!gates.length) {
     section.append(renderPublishedEmpty('لا توجد بوابات منشورة في هذه الرتبة.', 'fa-solid fa-dungeon'));
   } else {
-    const grid = publishedElement('div', 'published-card-grid');
+    const grid = publishedElement('div', 'published-journey-rail published-gate-rail');
     gates.forEach((gate) => {
       const progress = gateProgressById?.get(String(gate.gateId)) || null;
       const gateState = publishedGateJourneyState(
@@ -5024,15 +5254,14 @@ function renderPublishedGates(
         journey,
         progress
       );
-      grid.append(makePublishedHierarchyCard(
-        'gate',
+      grid.append(makePublishedGateJourneyNode(
+        world,
+        rank,
         gate,
-        () => window.openPublishedGate(world.worldId, rank.rankId, gate.gateId),
-        {
-          journeyState: gateState,
-          activeJourney,
-          blocked: gateState === 'locked',
-        }
+        gateState,
+        progress,
+        activeJourney,
+        () => window.openPublishedGate(world.worldId, rank.rankId, gate.gateId)
       ));
     });
     section.append(grid);
@@ -5286,6 +5515,8 @@ function renderPublishedGateWords(world, rank, gate, snapshot) {
   if (!root) return;
   const section = publishedElement('section', 'published-route-view');
   appendPublishedHeader(section, {
+    journey: true,
+    contextLabel: `${world.title || 'العالم'} · ${rank.title || 'الرتبة'}`,
     title: gate.title || 'البوابة',
     description: gate.description || gate.subtitle || '',
     backLabel: 'العودة للبوابات',
@@ -5304,6 +5535,17 @@ function renderPublishedGateWords(world, rank, gate, snapshot) {
       { label: gate.title || 'البوابة' },
     ],
   });
+  const gateSwitcher = makePublishedGateSwitcher(
+    world,
+    rank,
+    publishedContentState.gates,
+    publishedContentState.ranks,
+    publishedContentState.journey,
+    publishedContentState.activeJourney,
+    publishedContentState.gateProgressById,
+    gate.gateId
+  );
+  if (gateSwitcher) section.append(gateSwitcher);
   section.append(makePublishedGateJourneyPanel(world, rank, gate));
   const gateState = publishedGateJourneyState(
     gate,
@@ -5661,13 +5903,21 @@ async function loadPublishedRouteData(route, options) {
       readPublishedJourneyContext(params.worldId, journeyOptions),
     ]);
     if (generation !== publishedContentState.generation) return;
-    const gateProgress = await readPublishedGateProgress(
-      params.worldId,
-      params.rankId,
-      params.gateId,
-      journeyContext.journey,
-      options
-    );
+    const [gateProgress, gateProgressById] = await Promise.all([
+      readPublishedGateProgress(
+        params.worldId,
+        params.rankId,
+        params.gateId,
+        journeyContext.journey,
+        options
+      ),
+      readPublishedRankGateProgress(
+        params.worldId,
+        params.rankId,
+        journeyContext.journey,
+        options
+      ),
+    ]);
     if (generation !== publishedContentState.generation) return;
     publishedContentState.ranks = ranks;
     publishedContentState.gates = gates;
@@ -5675,6 +5925,7 @@ async function loadPublishedRouteData(route, options) {
     publishedContentState.activeJourney = journeyContext.activeJourney;
     publishedContentState.journeyGraph = journeyContext.graph || null;
     publishedContentState.gateProgress = gateProgress;
+    publishedContentState.gateProgressById = gateProgressById;
     if (gateProgress) {
       publishedContentState.gateProgressById.set(String(params.gateId), gateProgress);
     }
@@ -6845,7 +7096,7 @@ window.addFromGame = async function(text, meaning, example, btnEl) {
           ? { ...word, hiddenFromDictionary: false, hiddenFromDictionaryAt: null }
           : word);
       } else {
-        window.words.unshift({id:realId,word:text,meaning,example:example||'',category:'لعبة',starred:false,forgetCount:0,xpValue:xpGain});
+        window.words.unshift({id:realId,word:text,meaning,example:example||'',category:'لعبة',starred:false,forgetCount:0,xpValue:xpGain,createdAt:new Date().toISOString()});
       }
       persistDictionary();
       showToast(existingWord
@@ -6855,7 +7106,7 @@ window.addFromGame = async function(text, meaning, example, btnEl) {
       refreshAfterGameDictionaryAdd();
       if (btnEl) { btnEl.textContent='✓'; btnEl.classList.add('btn-already-added'); }
     } else {
-      const nw={id:Date.now().toString(),word:text,meaning,example:example||'',category:'لعبة',starred:false,forgetCount:0,xpValue:xpGain};
+      const nw={id:Date.now().toString(),word:text,meaning,example:example||'',category:'لعبة',starred:false,forgetCount:0,xpValue:xpGain,createdAt:new Date().toISOString()};
       window.words.unshift(nw);
       persistDictionary();
       showToast('تمت الإضافة محلياً');
@@ -6864,7 +7115,7 @@ window.addFromGame = async function(text, meaning, example, btnEl) {
       if (btnEl) { btnEl.textContent='✓'; btnEl.classList.add('btn-already-added'); }
     }
   } else {
-    const nw={id:Date.now().toString(),word:text,meaning,example:example||'',category:'لعبة',starred:false,forgetCount:0,xpValue:xpGain};
+    const nw={id:Date.now().toString(),word:text,meaning,example:example||'',category:'لعبة',starred:false,forgetCount:0,xpValue:xpGain,createdAt:new Date().toISOString()};
     window.words.unshift(nw);
     persistDictionary();
     showToast('تمت الإضافة للقاموس المحلي');

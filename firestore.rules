@@ -70,6 +70,79 @@ service cloud.firestore {
       return !(field in data) || validTimeValue(data[field]);
     }
 
+    function validNotificationStatus(value) {
+      return value == 'pending' || value == 'active' ||
+        value == 'resolved' || value == 'dismissed';
+    }
+
+    function notificationTerminal(value) {
+      return value == 'resolved' || value == 'dismissed';
+    }
+
+    function validNotificationCta(value) {
+      return value == null || (
+        value is map &&
+        value.keys().hasOnly(['id', 'label', 'args']) &&
+        optionalString(value, 'id', 120) &&
+        optionalString(value, 'label', 120) &&
+        optionalMap(value, 'args', 30)
+      );
+    }
+
+    function validNotification(data, uid, notificationId) {
+      return data.keys().hasOnly([
+          'id', 'schemaVersion', 'ownerId', 'kind', 'notificationType',
+          'occurrenceKey', 'actionGroup', 'priority', 'severity', 'status',
+          'visualType', 'title', 'message', 'cta', 'context',
+          'createdAt', 'updatedAt', 'eligibleSince', 'eligibleAt',
+          'firstShownAt', 'lastShownAt', 'showCount', 'shownSlots',
+          'readAt', 'resolvedAt', 'dismissedAt', 'resolutionReason',
+          'expiresAt', 'policyVersion'
+        ]) &&
+        data.keys().hasAll([
+          'id', 'schemaVersion', 'ownerId', 'kind', 'notificationType',
+          'occurrenceKey', 'priority', 'status', 'visualType', 'message',
+          'createdAt', 'updatedAt', 'showCount', 'readAt'
+        ]) &&
+        data.id == notificationId && data.ownerId == uid &&
+        data.schemaVersion == 3 &&
+        (data.kind == 'smart' || data.kind == 'legacy') &&
+        nonEmptyString(data.notificationType, 120) &&
+        nonEmptyString(data.occurrenceKey, 500) &&
+        optionalString(data, 'actionGroup', 120) &&
+        data.priority is int && data.priority >= 0 && data.priority <= 100 &&
+        optionalString(data, 'severity', 20) &&
+        validNotificationStatus(data.status) &&
+        (data.visualType == 'success' || data.visualType == 'warning' ||
+          data.visualType == 'danger' || data.visualType == 'info') &&
+        optionalString(data, 'title', 240) &&
+        data.message is string && data.message.size() <= 4000 &&
+        validNotificationCta(data.get('cta', null)) &&
+        optionalMap(data, 'context', 40) &&
+        data.createdAt is timestamp && data.updatedAt is timestamp &&
+        optionalTime(data, 'eligibleSince') && optionalTime(data, 'eligibleAt') &&
+        optionalTime(data, 'firstShownAt') && optionalTime(data, 'lastShownAt') &&
+        data.showCount is int && data.showCount >= 0 && data.showCount <= 100 &&
+        optionalList(data, 'shownSlots', 12) &&
+        optionalTime(data, 'readAt') && optionalTime(data, 'resolvedAt') &&
+        optionalTime(data, 'dismissedAt') && optionalTime(data, 'expiresAt') &&
+        optionalString(data, 'resolutionReason', 160) &&
+        optionalNonNegativeInt(data, 'policyVersion');
+    }
+
+    function validNotificationUpdate(before, after, uid, notificationId) {
+      return validNotification(after, uid, notificationId) &&
+        after.id == before.id && after.ownerId == before.ownerId &&
+        after.occurrenceKey == before.occurrenceKey &&
+        after.createdAt == before.createdAt &&
+        after.updatedAt >= before.updatedAt &&
+        (!notificationTerminal(before.status) || after.status == before.status) &&
+        (
+          before.get('readAt', null) == null ||
+          (after.readAt is timestamp && after.readAt >= before.readAt)
+        );
+    }
+
     function validContentStatus(status) {
       return status == 'draft' || status == 'published' || status == 'archived';
     }
@@ -2719,6 +2792,7 @@ service cloud.firestore {
       return data.keys().hasOnly([
           'worldId', 'rankId', 'gateId', 'status', 'journeyVersion',
           'lastActivityAt', 'readyEvidenceCount', 'clearAttempts',
+          'unlockedByGateId', 'unlockedAt',
           'loadedAt', 'wordCountAtLoad', 'contentVersion', 'snapshotVersion',
           'loadedContentWordIds', 'loadedWordKeys', 'nextRankId', 'nextGateId',
           'loadStrategy', 'operationId', 'masteryComplete',
@@ -2761,6 +2835,8 @@ service cloud.firestore {
           data.readinessVersion == 1 || data.readinessVersion == 2) &&
         optionalTime(data, 'readyAt') &&
         optionalString(data, 'activeClearAttemptId', 500) &&
+        optionalString(data, 'unlockedByGateId', 128) &&
+        optionalTime(data, 'unlockedAt') &&
         optionalString(data, 'lastClearAttemptId', 500) &&
         (!('lastClearResult' in data) ||
           data.lastClearResult == 'passed' || data.lastClearResult == 'failed') &&
@@ -2856,12 +2932,17 @@ service cloud.firestore {
     function validAvailableGateProgress(data, worldId, rankId, gateId) {
       return data.keys().hasOnly([
           'worldId', 'rankId', 'gateId', 'status', 'journeyVersion',
-          'lastActivityAt', 'readyEvidenceCount', 'clearAttempts'
-        ]) && data.keys().size() == 8 &&
+          'lastActivityAt', 'readyEvidenceCount', 'clearAttempts',
+          'unlockedByGateId', 'unlockedAt'
+        ]) && (data.keys().size() == 8 || data.keys().size() == 10) &&
         data.worldId == worldId && data.rankId == rankId && data.gateId == gateId &&
         data.status == 'available' && data.journeyVersion == 1 &&
         data.lastActivityAt == request.time &&
         data.readyEvidenceCount == 0 && data.clearAttempts == 0 &&
+        (
+          (!('unlockedByGateId' in data) && !('unlockedAt' in data)) ||
+          (nonEmptyString(data.unlockedByGateId, 128) && data.unlockedAt == request.time)
+        ) &&
         worldPublished(worldId) && rankPublished(worldId, rankId) &&
         gatePublished(worldId, rankId, gateId);
     }
@@ -3650,6 +3731,16 @@ service cloud.firestore {
     match /users/{uid} {
       allow get: if isOwner(uid);
       allow list, create, update, delete: if false;
+
+      match /notifications/{notificationId} {
+        allow read: if isOwner(uid);
+        allow create: if isOwner(uid) &&
+          validNotification(request.resource.data, uid, notificationId);
+        allow update: if isOwner(uid) &&
+          validNotificationUpdate(resource.data, request.resource.data, uid, notificationId);
+        // Lifecycle evidence is intentionally tombstoned, never physically deleted.
+        allow delete: if false;
+      }
 
       match /words/{wordId} {
         allow read: if isOwner(uid);
