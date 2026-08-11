@@ -3367,6 +3367,58 @@ try {
     }));
   });
 
+  await test('Matching learning batch accepts mastery plus SRS-only updates and rejects dictionary drift', async () => {
+    const uid = 'matching-learning-batch-owner';
+    const db = environment.authenticatedContext(uid).firestore();
+    const legacyPath = `users/${uid}/words/matching-learning-word`;
+    await environment.withSecurityRulesDisabled(async (context) => {
+      await setDoc(doc(context.firestore(), legacyPath), {
+        text: 'term',
+        meaning: 'meaning',
+        category: 'general',
+        userId: uid,
+        forgetCount: 1,
+        mastery_status: 'New',
+        mastery_streak: 0,
+        createdAt: timestamp,
+      });
+    });
+    const mixed = writeBatch(db);
+    mixed.set(doc(db, `users/${uid}/meta/word_mastery`), {
+      entries: { term: { mastery_status: 'Learning', mastery_streak: 1 } },
+      updatedAt: serverTimestamp(),
+    }, { merge: true });
+    mixed.update(doc(db, legacyPath), {
+      userId: uid,
+      text: 'term',
+      meaning: 'meaning',
+      category: 'general',
+      order: 0,
+      forgetCount: 0,
+      mastery_status: 'Learning',
+      mastery_streak: 1,
+      last_recall_session_id: 'matching-learning-session',
+      quiz_seen_count: 1,
+      xpEconomyVersion: 2,
+    });
+    await assertFails(mixed.commit());
+
+    const srsOnly = writeBatch(db);
+    srsOnly.set(doc(db, `users/${uid}/meta/word_mastery`), {
+      entries: { term: { mastery_status: 'Learning', mastery_streak: 1 } },
+      updatedAt: serverTimestamp(),
+    }, { merge: true });
+    srsOnly.update(doc(db, legacyPath), {
+      forgetCount: 0,
+      mastery_status: 'Learning',
+      mastery_streak: 1,
+      last_recall_session_id: 'matching-learning-session',
+      quiz_seen_count: 1,
+      xpEconomyVersion: 2,
+    });
+    await assertSucceeds(srsOnly.commit());
+  });
+
   const levelUser = environment.authenticatedContext('level-user').firestore();
   const levelAssessmentId = 'level_placement_v1_A1_rules_test';
   const levelJourneyPath = 'users/level-user/contentProgress/level-world';
@@ -6042,7 +6094,7 @@ try {
   });
 
   if (testFilter) assert.ok(selected > 0, `No Rules test matched "${testFilter}"`);
-  assert.equal(passed, testFilter ? selected : 82);
+  assert.equal(passed, testFilter ? selected : 83);
   console.log(`# ${passed} Firestore Rules emulator tests passed`);
 } finally {
   await environment.cleanup();

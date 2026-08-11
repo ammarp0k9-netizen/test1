@@ -3,13 +3,14 @@ import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 import vm from 'node:vm';
 
-const [storageSource, srsSource, quizSource, runtimeSource, scriptSource, notificationStoreSource] = await Promise.all([
+const [storageSource, srsSource, quizSource, runtimeSource, scriptSource, notificationStoreSource, cloudSource] = await Promise.all([
   readFile(new URL('../js/storage.js', import.meta.url), 'utf8'),
   readFile(new URL('../js/srs.js', import.meta.url), 'utf8'),
   readFile(new URL('../js/quiz.js', import.meta.url), 'utf8'),
   readFile(new URL('../js/quiz-runtime.js', import.meta.url), 'utf8'),
   readFile(new URL('../js/script.js', import.meta.url), 'utf8'),
   readFile(new URL('../js/notification-store.js', import.meta.url), 'utf8'),
+  readFile(new URL('../js/cloud.js', import.meta.url), 'utf8'),
 ]);
 
 function between(source, start, end) {
@@ -336,6 +337,45 @@ test('notification feedback failure after a Matching commit does not hide or rep
   assert.equal(harness.stats.rewardBatches, 1);
   assert.equal(harness.stats.learningBatches, 1);
   assert.equal(harness.stats.projections, 1);
+});
+
+test('Quiz cloud payload contains SRS fields only and cannot introduce dictionary drift', () => {
+  const context = vm.createContext({ Object });
+  const builderSource = between(
+    cloudSource,
+    'function buildQuizLearningCloudUpdate',
+    'window.commitQuizLearningBatchToCloud'
+  );
+  new vm.Script(`${builderSource}\nthis.buildQuizLearningCloudUpdate = buildQuizLearningCloudUpdate;`)
+    .runInContext(context);
+  const update = context.buildQuizLearningCloudUpdate({
+    word: 'term',
+    meaning: 'meaning',
+    category: 'general',
+    starred: true,
+    order: 12,
+    userId: 'uid-a',
+    forgetCount: 0,
+    mastery_status: 'Learning',
+    mastery_streak: 1,
+    last_recall_session_id: 'matching-session',
+    quiz_seen_count: 1,
+    xpEconomyVersion: 2,
+  });
+  assert.deepEqual(Object.keys(update).sort(), [
+    'forgetCount',
+    'last_recall_session_id',
+    'mastery_status',
+    'mastery_streak',
+    'quiz_seen_count',
+    'xpEconomyVersion',
+  ]);
+  assert.equal('text' in update, false);
+  assert.equal('meaning' in update, false);
+  assert.equal('category' in update, false);
+  assert.equal('starred' in update, false);
+  assert.equal('order' in update, false);
+  assert.equal('userId' in update, false);
 });
 
 function createFinishHarness({ fail = false, pending = false, notificationPermissionDenied = false } = {}) {

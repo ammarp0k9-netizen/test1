@@ -1409,16 +1409,14 @@
     return cloudState;
   }
 
-  function buildQuizLearningCloudUpdate(data = {}, uid) {
-    const update = { userId: uid };
-    if ('word' in data) update.text = data.word;
-    if ('meaning' in data) update.meaning = data.meaning;
-    if ('example' in data) update.example = data.example;
-    if ('category' in data) update.category = data.category;
-    if ('starred' in data) update.starred = data.starred;
+  function buildQuizLearningCloudUpdate(data = {}) {
+    // Quiz completion owns SRS state only. Sending lexical/dictionary fields
+    // here turns harmless drift in legacy account documents (for example a
+    // newly introduced order field) into a mixed SRS + dictionary update that
+    // validLegacyWordUpdate correctly rejects.
+    const update = {};
     if ('forgetCount' in data) update.forgetCount = data.forgetCount;
     if ('xpValue' in data) update.xpValue = data.xpValue;
-    if ('order' in data) update.order = data.order;
     if ('mastery_status' in data) update.mastery_status = data.mastery_status;
     if ('mastery_streak' in data) update.mastery_streak = data.mastery_streak;
     if ('last_recalled_at' in data) update.last_recalled_at = data.last_recalled_at;
@@ -1447,14 +1445,14 @@
       if (!item?.id) return;
       operations.set(`personal:${String(item.id)}`, {
         ref: doc(db, 'users', ownerId, 'words', String(item.id)),
-        data: buildQuizLearningCloudUpdate(item.data || {}, ownerId),
+        data: buildQuizLearningCloudUpdate(item.data || {}),
       });
     });
     (Array.isArray(payload.customWords) ? payload.customWords : []).forEach((item) => {
       if (!item?.worldId || !item?.id) return;
       operations.set(`custom:${String(item.worldId)}:${String(item.id)}`, {
         ref: doc(db, 'users', ownerId, 'customWorlds', String(item.worldId), 'words', String(item.id)),
-        data: buildQuizLearningCloudUpdate(item.data || {}, ownerId),
+        data: buildQuizLearningCloudUpdate(item.data || {}),
       });
     });
     const masteryEntries = Object.fromEntries(
