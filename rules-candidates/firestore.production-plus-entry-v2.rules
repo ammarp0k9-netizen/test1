@@ -1,0 +1,4074 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(uid) {
+      return signedIn() && request.auth.uid == uid;
+    }
+
+    function isAdmin() {
+      return signedIn() &&
+        'admin' in request.auth.token &&
+        request.auth.token.admin == true;
+    }
+
+    function canUseTestClock() {
+      return isAdmin() &&
+        'testClock' in request.auth.token &&
+        request.auth.token.testClock == true;
+    }
+
+    function validTestClock(data, uid) {
+      return data.keys().hasOnly([
+          'version', 'offsetMs', 'updatedAt', 'updatedBy'
+        ]) && data.keys().size() == 4 &&
+        data.version == 1 &&
+        data.offsetMs is int &&
+        data.offsetMs >= -31536000000 &&
+        data.offsetMs <= 31536000000 &&
+        data.updatedAt == request.time &&
+        data.updatedBy == uid;
+    }
+
+    function nonEmptyString(value, maxLength) {
+      return value is string && value.size() > 0 && value.size() <= maxLength;
+    }
+
+    function optionalString(data, field, maxLength) {
+      return !(field in data) || (data[field] is string && data[field].size() <= maxLength);
+    }
+
+    function optionalBool(data, field) {
+      return !(field in data) || data[field] is bool;
+    }
+
+    function optionalNumber(data, field) {
+      return !(field in data) || data[field] is number;
+    }
+
+    function optionalNonNegativeInt(data, field) {
+      return !(field in data) || (data[field] is int && data[field] >= 0);
+    }
+
+    function optionalList(data, field, maxItems) {
+      return !(field in data) || (data[field] is list && data[field].size() <= maxItems);
+    }
+
+    function optionalMap(data, field, maxItems) {
+      return !(field in data) || (data[field] is map && data[field].size() <= maxItems);
+    }
+
+    function validTimeValue(value) {
+      return value == null || value is timestamp || value is number || value is string;
+    }
+
+    function optionalTime(data, field) {
+      return !(field in data) || validTimeValue(data[field]);
+    }
+
+    function validContentStatus(status) {
+      return status == 'draft' || status == 'published' || status == 'archived';
+    }
+
+    function validSrsStatus(status) {
+      return status == '' || status == 'New' || status == 'Learning' ||
+        status == 'Reviewing' || status == 'Mastered';
+    }
+
+    function validJourneyStatus(status) {
+      return status == 'active' || status == 'paused';
+    }
+
+    function validJourneyGateStatus(status) {
+      return status == 'available' || status == 'learning' ||
+        status == 'ready' || status == 'cleared';
+    }
+
+    function validPersonalDictionaryState(state) {
+      return state == 'active' || state == 'moved-to-private-world';
+    }
+
+    function validPlacementStatus(status) {
+      return status == 'not-started' || status == 'active' ||
+        status == 'completed' || status == 'declined';
+    }
+
+    function validPlacementSessionStatus(status) {
+      return status == 'active' || status == 'submitting' ||
+        status == 'completed' || status == 'abandoned';
+    }
+
+    function validUnlockConfig(data) {
+      return !('unlockConfig' in data) || (
+        data.unlockConfig is map &&
+        data.unlockConfig.keys().hasOnly([
+          'mode',
+          'initialStatus',
+          'requiredMasteredRatio',
+          'requiredReviewingRatio',
+          'requiredGateCount'
+        ]) &&
+        data.unlockConfig.keys().hasAll([
+          'mode',
+          'initialStatus',
+          'requiredMasteredRatio',
+          'requiredReviewingRatio',
+          'requiredGateCount'
+        ]) &&
+        data.unlockConfig.mode == 'manual_placeholder' &&
+        (data.unlockConfig.initialStatus == 'locked' ||
+          data.unlockConfig.initialStatus == 'available') &&
+        data.unlockConfig.requiredMasteredRatio == null &&
+        data.unlockConfig.requiredReviewingRatio == null &&
+        data.unlockConfig.requiredGateCount == null
+      );
+    }
+
+    function validEntryAssessmentPassRatio(data) {
+      return !('entryAssessmentPassRatio' in data) ||
+        data.entryAssessmentPassRatio == null ||
+        (data.entryAssessmentPassRatio is number &&
+          data.entryAssessmentPassRatio > 0 &&
+          data.entryAssessmentPassRatio <= 1);
+    }
+
+    function validCefrLevelValue(level) {
+      return level == 'A1' || level == 'A2' || level == 'B1' ||
+        level == 'B2' || level == 'C1' || level == 'C2' ||
+        level == 'unclassified';
+    }
+
+    function validOptionalCefrLevel(data) {
+      return !('cefrLevel' in data) || validCefrLevelValue(data.cefrLevel);
+    }
+
+    function validWorldInterestValue(interest) {
+      return interest == 'games' || interest == 'movies' ||
+        interest == 'study' || interest == 'general' ||
+        interest == 'technology' || interest == 'travel';
+    }
+
+    function validOptionalWorldInterest(data) {
+      return !('primaryInterest' in data) ||
+        validWorldInterestValue(data.primaryInterest);
+    }
+
+    function validOptionalWorldInterestTags(data) {
+      return !('interestTags' in data) || (
+        data.interestTags is list &&
+        data.interestTags.size() <= 6 &&
+        data.interestTags.toSet().size() == data.interestTags.size() &&
+        data.interestTags.toSet().hasOnly([
+          'games', 'movies', 'study', 'general', 'technology', 'travel'
+        ].toSet())
+      );
+    }
+
+    function validClassifiedCefrLevel(level) {
+      return level == 'A1' || level == 'A2' || level == 'B1' ||
+        level == 'B2' || level == 'C1' || level == 'C2';
+    }
+
+    function validLevelPlacementStatus(status) {
+      return status == 'active' || status == 'submitting' ||
+        status == 'awaiting-decision' || status == 'completed' ||
+        status == 'paused' || status == 'abandoned';
+    }
+
+    function validLevelPlacementSaveChoice(choice) {
+      return choice == 'undecided' || choice == 'incorrect-only' ||
+        choice == 'all' || choice == 'none';
+    }
+
+    function validPassedCefrLevels(levels) {
+      return levels is list && (
+        levels == [] ||
+        levels == ['A1'] ||
+        levels == ['A1', 'A2'] ||
+        levels == ['A1', 'A2', 'B1'] ||
+        levels == ['A1', 'A2', 'B1', 'B2'] ||
+        levels == ['A1', 'A2', 'B1', 'B2', 'C1'] ||
+        levels == ['A1', 'A2', 'B1', 'B2', 'C1', 'C2']
+      );
+    }
+
+    function validPartialCefrLevels(levels) {
+      return levels is list && levels.size() <= 6 &&
+        levels.toSet().size() == levels.size() &&
+        levels.toSet().hasOnly(['A1', 'A2', 'B1', 'B2', 'C1', 'C2'].toSet());
+    }
+
+    function journeyCanStartCefrLevel(journey, level) {
+      return level == 'A1' ||
+        (level == 'A2' && 'A1' in journey.get('passedCefrLevels', [])) ||
+        (level == 'B1' && 'A2' in journey.get('passedCefrLevels', [])) ||
+        (level == 'B2' && 'B1' in journey.get('passedCefrLevels', [])) ||
+        (level == 'C1' && 'B2' in journey.get('passedCefrLevels', [])) ||
+        (level == 'C2' && 'C1' in journey.get('passedCefrLevels', []));
+    }
+
+    function validCreateAudit(data) {
+      return data.createdAt is timestamp &&
+        data.updatedAt is timestamp &&
+        data.createdAt == request.time &&
+        data.updatedAt == request.time &&
+        data.createdBy == request.auth.uid &&
+        data.updatedBy == request.auth.uid;
+    }
+
+    function validUpdateAudit(before, after) {
+      return after.createdAt == before.createdAt &&
+        after.createdBy == before.createdBy &&
+        after.updatedAt is timestamp &&
+        after.updatedAt == request.time &&
+        after.updatedBy == request.auth.uid;
+    }
+
+    function isPublished(data) {
+      return 'status' in data && data.status == 'published';
+    }
+
+    function worldPublished(worldId) {
+      return exists(/databases/$(database)/documents/content_worlds/$(worldId)) &&
+        get(/databases/$(database)/documents/content_worlds/$(worldId)).data.status == 'published';
+    }
+
+    function worldAllowsChildMutation(worldId) {
+      return exists(/databases/$(database)/documents/content_worlds/$(worldId)) &&
+        !('_deleteLock' in
+          get(/databases/$(database)/documents/content_worlds/$(worldId)).data) &&
+        !('_adminWorldOperation' in
+          get(/databases/$(database)/documents/content_worlds/$(worldId)).data);
+    }
+
+    function rankPublished(worldId, rankId) {
+      return exists(/databases/$(database)/documents/content_worlds/$(worldId)/ranks/$(rankId)) &&
+        get(/databases/$(database)/documents/content_worlds/$(worldId)/ranks/$(rankId)).data.status == 'published';
+    }
+
+    function rankAllowsChildMutation(worldId, rankId) {
+      return worldAllowsChildMutation(worldId) &&
+        exists(/databases/$(database)/documents/content_worlds/$(worldId)/ranks/$(rankId)) &&
+        !('_adminRankOperation' in
+          get(/databases/$(database)/documents/content_worlds/$(worldId)/ranks/$(rankId)).data) &&
+        !('_adminCopyOperation' in
+          get(/databases/$(database)/documents/content_worlds/$(worldId)/ranks/$(rankId)).data);
+    }
+
+    function gatePublished(worldId, rankId, gateId) {
+      return exists(/databases/$(database)/documents/content_worlds/$(worldId)/ranks/$(rankId)/gates/$(gateId)) &&
+        get(/databases/$(database)/documents/content_worlds/$(worldId)/ranks/$(rankId)/gates/$(gateId)).data.status == 'published';
+    }
+
+    function rankInitiallyAvailable(worldId, rankId) {
+      return rankPublished(worldId, rankId) &&
+        'unlockConfig' in
+          get(/databases/$(database)/documents/content_worlds/$(worldId)/ranks/$(rankId)).data &&
+        get(/databases/$(database)/documents/content_worlds/$(worldId)/ranks/$(rankId))
+          .data.unlockConfig.initialStatus == 'available';
+    }
+
+    function rankCreateUpdatesWorldCount(worldId) {
+      return 'rankCount' in get(/databases/$(database)/documents/content_worlds/$(worldId)).data &&
+        'rankCount' in getAfter(/databases/$(database)/documents/content_worlds/$(worldId)).data &&
+        getAfter(/databases/$(database)/documents/content_worlds/$(worldId)).data.rankCount ==
+          get(/databases/$(database)/documents/content_worlds/$(worldId)).data.rankCount + 1 &&
+        getAfter(/databases/$(database)/documents/content_worlds/$(worldId)).data.gateCount ==
+          get(/databases/$(database)/documents/content_worlds/$(worldId)).data.gateCount &&
+        getAfter(/databases/$(database)/documents/content_worlds/$(worldId)).data.wordCount ==
+          get(/databases/$(database)/documents/content_worlds/$(worldId)).data.wordCount &&
+        getAfter(/databases/$(database)/documents/content_worlds/$(worldId)).data.version ==
+          get(/databases/$(database)/documents/content_worlds/$(worldId)).data.version;
+    }
+
+    function worldCounterOnlyIncrement(before, after) {
+      return after.diff(before).affectedKeys().hasOnly([
+          'rankCount', 'gateCount', 'wordCount', 'updatedAt', 'updatedBy'
+        ]) &&
+        after.version == before.version &&
+        (
+          (after.rankCount == before.rankCount + 1 &&
+            after.gateCount == before.gateCount &&
+            after.wordCount == before.wordCount) ||
+          (after.rankCount == before.rankCount &&
+            after.gateCount == before.gateCount + 1 &&
+            after.wordCount == before.wordCount) ||
+          (after.rankCount == before.rankCount &&
+            after.gateCount == before.gateCount &&
+            after.wordCount == before.wordCount + 1)
+        );
+    }
+
+    function rankCounterOnlyIncrement(before, after) {
+      return after.diff(before).affectedKeys().hasOnly([
+          'gateCount', 'wordCount', 'updatedAt', 'updatedBy'
+        ]) &&
+        after.version == before.version &&
+        (
+          (after.gateCount == before.gateCount + 1 &&
+            after.wordCount == before.wordCount) ||
+          (after.gateCount == before.gateCount &&
+            after.wordCount == before.wordCount + 1)
+        );
+    }
+
+    function gateCreateUpdatesAncestorCounts(worldId, rankId) {
+      return
+        getAfter(/databases/$(database)/documents/content_worlds/$(worldId)/ranks/$(rankId)).data.gateCount ==
+          get(/databases/$(database)/documents/content_worlds/$(worldId)/ranks/$(rankId)).data.gateCount + 1 &&
+        getAfter(/databases/$(database)/documents/content_worlds/$(worldId)/ranks/$(rankId)).data.wordCount ==
+          get(/databases/$(database)/documents/content_worlds/$(worldId)/ranks/$(rankId)).data.wordCount &&
+        getAfter(/databases/$(database)/documents/content_worlds/$(worldId)/ranks/$(rankId)).data.version ==
+          get(/databases/$(database)/documents/content_worlds/$(worldId)/ranks/$(rankId)).data.version &&
+        getAfter(/databases/$(database)/documents/content_worlds/$(worldId)).data.rankCount ==
+          get(/databases/$(database)/documents/content_worlds/$(worldId)).data.rankCount &&
+        getAfter(/databases/$(database)/documents/content_worlds/$(worldId)).data.gateCount ==
+          get(/databases/$(database)/documents/content_worlds/$(worldId)).data.gateCount + 1 &&
+        getAfter(/databases/$(database)/documents/content_worlds/$(worldId)).data.wordCount ==
+          get(/databases/$(database)/documents/content_worlds/$(worldId)).data.wordCount &&
+        getAfter(/databases/$(database)/documents/content_worlds/$(worldId)).data.version ==
+          get(/databases/$(database)/documents/content_worlds/$(worldId)).data.version;
+    }
+
+    function gateCounterOnlyIncrement(before, after) {
+      return after.diff(before).affectedKeys().hasOnly([
+          'wordCount', 'updatedAt', 'updatedBy'
+        ]) &&
+        after.version == before.version &&
+        after.wordCount == before.wordCount + 1;
+    }
+
+    function validWorld(data, worldId) {
+      return data.keys().hasOnly([
+          'worldId', 'slug', 'title', 'subtitle', 'description', 'icon', 'cover',
+          'theme', 'category', 'primaryInterest', 'interestTags',
+          'difficulty', 'languageFrom', 'languageTo',
+          'status', 'version', 'schemaVersion', 'rankCount', 'gateCount',
+          'wordCount', 'order', 'isFeatured', 'createdAt', 'updatedAt',
+          'createdBy', 'updatedBy'
+        ]) &&
+        data.keys().hasAll([
+          'worldId', 'title', 'status', 'schemaVersion', 'order',
+          'createdAt', 'updatedAt', 'createdBy', 'updatedBy'
+        ]) &&
+        data.worldId == worldId &&
+        nonEmptyString(data.title, 160) &&
+        optionalString(data, 'slug', 120) &&
+        (!isPublished(data) || nonEmptyString(data.slug, 120)) &&
+        optionalString(data, 'subtitle', 240) &&
+        optionalString(data, 'description', 4000) &&
+        optionalString(data, 'icon', 500) &&
+        optionalString(data, 'cover', 2048) &&
+        (!('theme' in data) || data.theme is string || data.theme is map) &&
+        optionalString(data, 'category', 100) &&
+        validOptionalWorldInterest(data) &&
+        validOptionalWorldInterestTags(data) &&
+        optionalString(data, 'difficulty', 80) &&
+        optionalString(data, 'languageFrom', 40) &&
+        optionalString(data, 'languageTo', 40) &&
+        validContentStatus(data.status) &&
+        optionalNonNegativeInt(data, 'version') &&
+        data.schemaVersion == 1 &&
+        optionalNonNegativeInt(data, 'rankCount') &&
+        optionalNonNegativeInt(data, 'gateCount') &&
+        optionalNonNegativeInt(data, 'wordCount') &&
+        data.order is int && data.order >= 0 &&
+        optionalBool(data, 'isFeatured') &&
+        data.createdBy is string && data.updatedBy is string;
+    }
+
+    function validRank(data, worldId, rankId) {
+      return data.keys().hasOnly([
+          'worldId', 'rankId', 'title', 'subtitle', 'description', 'order',
+          'difficulty', 'cefrLevel', 'status', 'gateCount', 'wordCount', 'unlockConfig',
+          'version', 'schemaVersion', 'createdAt', 'updatedAt', 'createdBy', 'updatedBy'
+        ]) &&
+        data.keys().hasAll([
+          'worldId', 'rankId', 'title', 'order', 'status',
+          'gateCount', 'wordCount', 'version', 'schemaVersion',
+          'createdAt', 'updatedAt', 'createdBy', 'updatedBy'
+        ]) &&
+        data.worldId == worldId &&
+        data.rankId == rankId &&
+        nonEmptyString(data.title, 160) &&
+        optionalString(data, 'subtitle', 240) &&
+        optionalString(data, 'description', 4000) &&
+        data.order is int && data.order >= 0 &&
+        optionalString(data, 'difficulty', 80) &&
+        validContentStatus(data.status) &&
+        optionalNonNegativeInt(data, 'gateCount') &&
+        optionalNonNegativeInt(data, 'wordCount') &&
+        data.version is int && data.version >= 1 &&
+        validOptionalCefrLevel(data) &&
+        validUnlockConfig(data) &&
+        data.schemaVersion == 1 &&
+        data.createdBy is string && data.updatedBy is string;
+    }
+
+    function validRankCefrUpdate(before, after) {
+      let previousLevel = before.get('cefrLevel', 'unclassified');
+      let nextLevel = after.get('cefrLevel', 'unclassified');
+      return previousLevel == nextLevel || previousLevel == 'unclassified';
+    }
+
+    function validGate(data, worldId, rankId, gateId) {
+      return data.keys().hasOnly([
+          'worldId', 'rankId', 'gateId', 'title', 'subtitle', 'description',
+          'order', 'difficulty', 'status', 'version', 'wordCount',
+          'entryAssessmentPassRatio', 'unlockConfig',
+          'schemaVersion', 'createdAt', 'updatedAt', 'createdBy', 'updatedBy'
+        ]) &&
+        data.keys().hasAll([
+          'worldId', 'rankId', 'gateId', 'title', 'order', 'status',
+          'version', 'wordCount', 'schemaVersion',
+          'createdAt', 'updatedAt', 'createdBy', 'updatedBy'
+        ]) &&
+        data.worldId == worldId &&
+        data.rankId == rankId &&
+        data.gateId == gateId &&
+        nonEmptyString(data.title, 160) &&
+        optionalString(data, 'subtitle', 240) &&
+        optionalString(data, 'description', 4000) &&
+        data.order is int && data.order >= 0 &&
+        optionalString(data, 'difficulty', 80) &&
+        validContentStatus(data.status) &&
+        data.version is int && data.version >= 1 &&
+        data.wordCount is int && data.wordCount >= 0 &&
+        validEntryAssessmentPassRatio(data) &&
+        validUnlockConfig(data) &&
+        data.schemaVersion == 1 &&
+        data.createdBy is string && data.updatedBy is string;
+    }
+
+    function validWordLexicalDetails(data) {
+      return optionalString(data, 'definition', 4000) &&
+        optionalString(data, 'definition_ar', 4000) &&
+        optionalString(data, 'example', 4000) &&
+        optionalString(data, 'exampleTranslation', 4000) &&
+        optionalString(data, 'partOfSpeech', 120) &&
+        optionalString(data, 'level', 80) &&
+        optionalList(data, 'tags', 50) &&
+        optionalList(data, 'synonyms', 50) &&
+        optionalString(data, 'pronunciation', 500) &&
+        optionalString(data, 'notes', 4000);
+    }
+
+    function validPreparedWordDetails(data) {
+      return validWordLexicalDetails(data) &&
+        optionalString(data, 'category', 120) &&
+        optionalString(data, 'audioUrl', 2048) &&
+        optionalString(data, 'imageUrl', 2048);
+    }
+
+    function validContentWord(data, worldId, rankId, gateId, contentWordId) {
+      return data.keys().hasAll([
+          'normalizationVersion', 'worldId', 'rankId', 'gateId',
+          'contentWordId', 'word', 'normalizedWord', 'wordKey', 'translation',
+          'order', 'status', 'version', 'schemaVersion',
+          'createdAt', 'updatedAt', 'createdBy', 'updatedBy'
+        ]) &&
+        data.normalizationVersion == 1 &&
+        data.worldId == worldId &&
+        data.rankId == rankId &&
+        data.gateId == gateId &&
+        data.contentWordId == contentWordId &&
+        nonEmptyString(data.word, 240) &&
+        nonEmptyString(data.normalizedWord, 240) &&
+        nonEmptyString(data.wordKey, 240) &&
+        nonEmptyString(data.translation, 1000) &&
+        validPreparedWordDetails(data) &&
+        data.order is int && data.order >= 0 &&
+        validContentStatus(data.status) &&
+        data.version is int && data.version >= 1 &&
+        data.schemaVersion == 1 &&
+        data.createdBy is string && data.updatedBy is string;
+    }
+
+    function validStagingStatus(status) {
+      return status == 'pending' || status == 'distributing' || status == 'distributed';
+    }
+
+    function validDistributionTarget(data) {
+      return !('distributionTarget' in data) || (
+        data.distributionTarget is map &&
+        data.distributionTarget.keys().hasOnly(['worldId', 'rankId', 'gateId']) &&
+        data.distributionTarget.keys().hasAll(['worldId', 'rankId', 'gateId']) &&
+        nonEmptyString(data.distributionTarget.worldId, 128) &&
+        nonEmptyString(data.distributionTarget.rankId, 128) &&
+        nonEmptyString(data.distributionTarget.gateId, 128)
+      );
+    }
+
+    function validStagingWord(data, stagingWordId) {
+      return data.keys().hasOnly([
+          'stagingWordId', 'importBatchId', 'sourceFileName', 'sourceOrder',
+          'schemaVersion', 'normalizationVersion', 'word', 'normalizedWord',
+          'wordKey', 'translation', 'definition', 'definition_ar', 'example',
+          'exampleTranslation', 'category', 'partOfSpeech', 'level', 'tags',
+          'synonyms', 'pronunciation', 'audioUrl', 'imageUrl', 'notes', 'order',
+          'stagingStatus', 'distributionTarget', 'distributionOperationId',
+          'distributedContentWordId', 'distributedAt', 'importedAt',
+          'createdAt', 'updatedAt', 'createdBy', 'updatedBy'
+        ]) &&
+        data.keys().hasAll([
+          'stagingWordId', 'importBatchId', 'sourceFileName', 'sourceOrder',
+          'schemaVersion', 'normalizationVersion', 'word', 'normalizedWord',
+          'wordKey', 'translation', 'order', 'stagingStatus', 'importedAt',
+          'createdAt', 'updatedAt', 'createdBy', 'updatedBy'
+        ]) &&
+        data.stagingWordId == stagingWordId &&
+        stagingWordId.matches('staging_[a-f0-9]{64}') &&
+        nonEmptyString(data.importBatchId, 128) &&
+        nonEmptyString(data.sourceFileName, 240) &&
+        data.sourceOrder is int && data.sourceOrder >= 0 && data.sourceOrder <= 1000000 &&
+        data.schemaVersion == 1 &&
+        data.normalizationVersion == 1 &&
+        nonEmptyString(data.word, 240) &&
+        nonEmptyString(data.normalizedWord, 240) &&
+        nonEmptyString(data.wordKey, 240) &&
+        nonEmptyString(data.translation, 1000) &&
+        validPreparedWordDetails(data) &&
+        data.order is int && data.order >= 0 &&
+        validStagingStatus(data.stagingStatus) &&
+        validDistributionTarget(data) &&
+        optionalString(data, 'distributionOperationId', 128) &&
+        optionalString(data, 'distributedContentWordId', 128) &&
+        optionalTime(data, 'distributedAt') &&
+        data.importedAt is timestamp &&
+        data.createdBy is string && data.updatedBy is string;
+    }
+
+    function validStagingCreate(data, stagingWordId) {
+      return validStagingWord(data, stagingWordId) &&
+        data.stagingStatus == 'pending' &&
+        !('distributionTarget' in data) &&
+        !('distributionOperationId' in data) &&
+        !('distributedContentWordId' in data) &&
+        !('distributedAt' in data) &&
+        data.importedAt == request.time &&
+        validCreateAudit(data);
+    }
+
+    function validStagingUpdate(before, after, stagingWordId) {
+      return validStagingWord(after, stagingWordId) &&
+        after.diff(before).affectedKeys().hasOnly([
+          'stagingStatus', 'distributionTarget', 'distributionOperationId',
+          'distributedContentWordId', 'distributedAt', 'updatedAt', 'updatedBy'
+        ]) &&
+        after.stagingWordId == before.stagingWordId &&
+        after.importBatchId == before.importBatchId &&
+        after.sourceFileName == before.sourceFileName &&
+        after.sourceOrder == before.sourceOrder &&
+        after.normalizedWord == before.normalizedWord &&
+        after.wordKey == before.wordKey &&
+        validUpdateAudit(before, after);
+    }
+
+    function validLegacyWord(data, uid) {
+      return data.keys().hasOnly([
+          'text', 'word', 'normalizedWord', 'wordKey', 'translation',
+          'definition', 'definition_ar', 'meaning', 'example',
+          'exampleTranslation', 'partOfSpeech', 'category', 'level',
+          'tags', 'synonyms', 'pronunciation', 'notes', 'starred',
+          'forgetCount', 'userId', 'xpValue', 'mastery_status',
+          'mastery_streak', 'last_recalled_at', 'first_recalled_at',
+          'last_recall_day', 'last_recall_session_id', 'last_quizzed_at',
+          'quiz_seen_count', 'mastered_once', 'firstMasteredAt',
+          'hasEarnedMasteryXP', 'earnedTransitions', 'remasteryAwardCount',
+          'xpEconomyVersion', 'hiddenFromDictionary',
+          'hiddenFromDictionaryAt', 'personalDictionaryState',
+          'order', 'createdAt'
+        ]) &&
+        data.keys().hasAll(['meaning', 'category', 'userId']) &&
+        data.userId == uid &&
+        (('text' in data && nonEmptyString(data.text, 500)) ||
+          ('word' in data && nonEmptyString(data.word, 500))) &&
+        data.meaning is string && data.meaning.size() <= 2000 &&
+        data.category is string && data.category.size() <= 120 &&
+        optionalString(data, 'normalizedWord', 240) &&
+        optionalString(data, 'wordKey', 240) &&
+        optionalString(data, 'translation', 1000) &&
+        validWordLexicalDetails(data) &&
+        optionalBool(data, 'starred') &&
+        validLegacySrsFields(data) &&
+        optionalBool(data, 'hiddenFromDictionary') &&
+        optionalTime(data, 'hiddenFromDictionaryAt') &&
+        (!data.get('hiddenFromDictionary', false) ||
+          data.get('hiddenFromDictionaryAt', null) is timestamp) &&
+        (!('personalDictionaryState' in data) ||
+          validPersonalDictionaryState(data.personalDictionaryState)) &&
+        optionalNonNegativeInt(data, 'order') &&
+        optionalTime(data, 'createdAt');
+    }
+
+    function validLegacySrsFields(data) {
+      return optionalNonNegativeInt(data, 'forgetCount') &&
+        data.get('forgetCount', 0) <= 100000 &&
+        optionalNumber(data, 'xpValue') &&
+        (!('mastery_status' in data) || validSrsStatus(data.mastery_status)) &&
+        (!('mastery_streak' in data) ||
+          (data.mastery_streak is int && data.mastery_streak >= 0 &&
+            data.mastery_streak <= 3)) &&
+        optionalTime(data, 'last_recalled_at') &&
+        optionalTime(data, 'first_recalled_at') &&
+        optionalString(data, 'last_recall_day', 20) &&
+        optionalString(data, 'last_recall_session_id', 180) &&
+        optionalTime(data, 'last_quizzed_at') &&
+        optionalNonNegativeInt(data, 'quiz_seen_count') &&
+        optionalBool(data, 'mastered_once') &&
+        optionalTime(data, 'firstMasteredAt') &&
+        optionalBool(data, 'hasEarnedMasteryXP') &&
+        optionalList(data, 'earnedTransitions', 8) &&
+        optionalNonNegativeInt(data, 'remasteryAwardCount') &&
+        optionalNonNegativeInt(data, 'xpEconomyVersion');
+    }
+
+    function validLegacyWordUpdate(before, after, uid) {
+      let visibilityChanged = after.diff(before).affectedKeys().hasAny([
+        'hiddenFromDictionary', 'hiddenFromDictionaryAt'
+      ]);
+      let srsChanged = after.diff(before).affectedKeys().hasAny([
+        'forgetCount', 'xpValue', 'mastery_status', 'mastery_streak',
+        'last_recalled_at', 'first_recalled_at', 'last_recall_day',
+        'last_recall_session_id', 'last_quizzed_at', 'quiz_seen_count',
+        'mastered_once', 'firstMasteredAt', 'hasEarnedMasteryXP',
+        'earnedTransitions', 'remasteryAwardCount', 'xpEconomyVersion'
+      ]);
+      let membershipChanged = after.diff(before).affectedKeys().hasAny([
+        'personalDictionaryState'
+      ]);
+      let validMembershipOnly = membershipChanged &&
+        after.diff(before).affectedKeys().hasOnly(['personalDictionaryState']) &&
+        validPersonalDictionaryState(after.personalDictionaryState);
+      let validVisibilityOnly = visibilityChanged &&
+          after.diff(before).affectedKeys().hasOnly([
+            'hiddenFromDictionary', 'hiddenFromDictionaryAt',
+            'personalDictionaryState'
+          ]) &&
+          (!membershipChanged || validPersonalDictionaryState(after.personalDictionaryState)) &&
+          (
+            (
+              after.hiddenFromDictionary == true &&
+              after.hiddenFromDictionaryAt == request.time
+            ) ||
+            (
+              after.hiddenFromDictionary == false &&
+              after.hiddenFromDictionaryAt == null
+            )
+          );
+      let validSrsOnly = srsChanged &&
+        after.diff(before).affectedKeys().hasOnly([
+          'forgetCount', 'xpValue', 'mastery_status', 'mastery_streak',
+          'last_recalled_at', 'first_recalled_at', 'last_recall_day',
+          'last_recall_session_id', 'last_quizzed_at', 'quiz_seen_count',
+          'mastered_once', 'firstMasteredAt', 'hasEarnedMasteryXP',
+          'earnedTransitions', 'remasteryAwardCount', 'xpEconomyVersion'
+        ]) &&
+        validLegacySrsFields(after);
+      return validMembershipOnly ||
+        validVisibilityOnly ||
+        validSrsOnly ||
+        (
+          !visibilityChanged && !srsChanged &&
+          validLegacyWord(after, uid) &&
+          (!membershipChanged || validPersonalDictionaryState(after.personalDictionaryState))
+        );
+    }
+
+    function legacyWordDeleteLeavesNoSources(data, uid) {
+      let wordKey = data.get('wordKey', '');
+      let canonicalPath = /databases/$(database)/documents/users/$(uid)/contentWords/$(wordKey);
+      return wordKey == '' ||
+        !exists(canonicalPath) ||
+        (
+          existsAfter(canonicalPath) &&
+          getAfter(canonicalPath).data.sourceCount == 0
+        );
+    }
+
+    function validCustomWorld(data, uid) {
+      return data.keys().hasOnly([
+          'name', 'description', 'emoji', 'userId', 'createdAt', 'updatedAt'
+        ]) && data.keys().size() == 6 &&
+        data.userId == uid &&
+        nonEmptyString(data.name, 40) &&
+        data.description is string && data.description.size() <= 140 &&
+        nonEmptyString(data.emoji, 16) &&
+        validTimeValue(data.createdAt) && validTimeValue(data.updatedAt);
+    }
+
+    function profileFieldNames() {
+      return [
+          'userXP', 'xpEconomyVersion', 'dailyStreak', 'maxStreak',
+          'lastActivityDate', 'activityMap', 'quizExposureHistory', 'theme',
+          'oasisMode', 'themeIntroSeen',
+          'displayName', 'addedGameWords', 'dailyLootState', 'titlesState',
+          'activeTitleId', 'dailyQuestDate', 'dailyQuestState',
+          'streakFreezes', 'freezeSaves', 'gameDictAdds', 'perfectQuizzes',
+          'extraChests', 'updatedAt'
+        ];
+    }
+
+    function validProfileValues(data) {
+      return data.keys().hasAll(['userXP', 'xpEconomyVersion']) &&
+        data.userXP is number && data.userXP >= 0 &&
+        data.xpEconomyVersion is int && data.xpEconomyVersion >= 0 &&
+        optionalNonNegativeInt(data, 'dailyStreak') &&
+        optionalNonNegativeInt(data, 'maxStreak') &&
+        optionalString(data, 'lastActivityDate', 40) &&
+        optionalMap(data, 'activityMap', 5000) &&
+        optionalList(data, 'quizExposureHistory', 3) &&
+        optionalString(data, 'theme', 80) &&
+        optionalString(data, 'oasisMode', 20) &&
+        (!('oasisMode' in data) || data.oasisMode == 'light' || data.oasisMode == 'dark') &&
+        optionalList(data, 'themeIntroSeen', 12) &&
+        optionalString(data, 'displayName', 120) &&
+        optionalList(data, 'addedGameWords', 5000) &&
+        optionalMap(data, 'dailyLootState', 100) &&
+        optionalMap(data, 'titlesState', 100) &&
+        optionalString(data, 'activeTitleId', 120) &&
+        optionalString(data, 'dailyQuestDate', 40) &&
+        optionalMap(data, 'dailyQuestState', 100) &&
+        optionalNonNegativeInt(data, 'streakFreezes') &&
+        optionalNonNegativeInt(data, 'freezeSaves') &&
+        optionalNonNegativeInt(data, 'gameDictAdds') &&
+        optionalNonNegativeInt(data, 'perfectQuizzes') &&
+        optionalList(data, 'extraChests', 500) &&
+         optionalTime(data, 'updatedAt');
+    }
+
+    function validProfileCreate(data) {
+      return data.keys().hasOnly(profileFieldNames()) && validProfileValues(data);
+    }
+
+    function validProfileUpdate(before, after) {
+      // A legacy field may remain untouched on an existing document, but a
+      // client cannot add, delete, or mutate it. All current fields retain the
+      // same strict value validation used for new profiles.
+      return after.diff(before).affectedKeys().hasOnly(profileFieldNames()) &&
+        validProfileValues(after);
+    }
+
+    function validEntryExperienceInterestIds(ids) {
+      return ids is list && ids.size() <= 6 &&
+        ids.toSet().size() == ids.size() &&
+        ids.toSet().hasOnly([
+          'games', 'movies', 'study', 'general', 'technology', 'travel'
+        ].toSet());
+    }
+
+    function legacyEntryNeedsFirstActionProof(data) {
+      return (data.status == 'completed' || data.status == 'skipped') &&
+        !('actionStatus' in data);
+    }
+
+    function verifiedEntryCompletion(data) {
+      return data.status == 'completed' &&
+        'actionStatus' in data && data.actionStatus == 'completed';
+    }
+
+    function validEntryExperience(data, versionId) {
+      return versionId == 'v1' &&
+        data.keys().hasOnly([
+          'contractVersion', 'experienceVersion', 'status', 'audience',
+          'classification', 'currentStep', 'interestsStatus', 'interestIds',
+          'themeStatus', 'themeId', 'oasisMode', 'themeExplicit', 'actionStatus', 'source',
+          'startedAt', 'updatedAt', 'completedAt', 'skippedAt'
+        ]) && data.keys().size() == 18 &&
+        data.contractVersion == 1 && data.experienceVersion == 1 &&
+        (data.status == 'in-progress' || data.status == 'completed' || data.status == 'skipped') &&
+        (data.audience == 'new' || data.audience == 'returning' || data.audience == 'returning-guest') &&
+        (
+          data.classification == 'brand-new' ||
+          data.classification == 'returning-with-progress' ||
+          data.classification == 'returning-light' ||
+          data.classification == 'returning-guest-with-local-data' ||
+          data.classification == 'existing-account-without-meaningful-progress'
+        ) &&
+        (data.currentStep == 'interests' || data.currentStep == 'theme' || data.currentStep == 'action') &&
+        (data.interestsStatus == 'pending' || data.interestsStatus == 'selected' || data.interestsStatus == 'skipped') &&
+        validEntryExperienceInterestIds(data.interestIds) &&
+        (data.interestsStatus != 'selected' || data.interestIds.size() > 0) &&
+        (data.interestsStatus == 'selected' || data.interestIds.size() == 0) &&
+        (data.themeStatus == 'pending' || data.themeStatus == 'selected' || data.themeStatus == 'preserved') &&
+        (
+          data.themeId == '' || data.themeId == 'lootlingua' || data.themeId == 'ocean' ||
+          data.themeId == 'golden' || data.themeId == 'scroll' || data.themeId == 'glass'
+        ) &&
+        (data.oasisMode == 'light' || data.oasisMode == 'dark') &&
+        data.themeExplicit is bool &&
+        (data.actionStatus == 'pending' || data.actionStatus == 'ready' || data.actionStatus == 'completed') &&
+        (data.source == 'app-entry' || data.source == 'guest-migration' || data.source == 'settings') &&
+        data.startedAt is timestamp && data.updatedAt == request.time &&
+        (data.completedAt == null || data.completedAt is timestamp) &&
+        (data.skippedAt == null || data.skippedAt is timestamp) &&
+        (data.status != 'completed' || (
+          data.currentStep == 'action' && data.actionStatus == 'completed' &&
+          data.completedAt is timestamp && data.skippedAt == null
+        )) &&
+        (data.status != 'skipped' || (data.currentStep == 'action' && data.skippedAt is timestamp && data.completedAt == null)) &&
+        (data.status == 'completed' || data.completedAt == null) &&
+        (data.status == 'skipped' || data.skippedAt == null);
+    }
+
+    function validEntryExperienceUpdate(before, after, versionId) {
+      return validEntryExperience(after, versionId) &&
+        after.contractVersion == before.contractVersion &&
+        after.experienceVersion == before.experienceVersion &&
+        (
+          legacyEntryNeedsFirstActionProof(before) ||
+          after.audience == before.audience
+        ) &&
+        (
+          legacyEntryNeedsFirstActionProof(before) ||
+          after.classification == before.classification
+        ) &&
+        after.startedAt == before.startedAt &&
+        (
+          (before.status == 'in-progress' && after.status != 'skipped') ||
+          (verifiedEntryCompletion(before) && after.status == 'completed') ||
+          (legacyEntryNeedsFirstActionProof(before) &&
+            (after.status == 'in-progress' || after.status == 'completed'))
+        ) &&
+        (
+          !('actionStatus' in before) || before.actionStatus != 'completed' ||
+          after.actionStatus == 'completed'
+        ) &&
+        (
+          legacyEntryNeedsFirstActionProof(before) ||
+          before.completedAt == null || after.completedAt == before.completedAt
+        ) &&
+        (
+          legacyEntryNeedsFirstActionProof(before) ||
+          before.skippedAt == null || after.skippedAt == before.skippedAt
+        );
+    }
+
+    function validEntryExperienceV2(data, versionId) {
+      return versionId == 'v2' &&
+        data.keys().hasOnly([
+          'contractVersion', 'experienceVersion', 'status', 'audience',
+          'classification', 'currentStep', 'interestsStatus', 'interestIds',
+          'themeStatus', 'themeId', 'oasisMode', 'themeExplicit',
+          'journeyStatus', 'selectedWorldId', 'gamerStatus', 'source',
+          'startedAt', 'updatedAt', 'completedAt', 'skippedAt'
+        ]) && data.keys().size() == 20 &&
+        data.contractVersion == 2 && data.experienceVersion == 2 &&
+        (data.status == 'in-progress' || data.status == 'completed') &&
+        (data.audience == 'new' || data.audience == 'returning' || data.audience == 'returning-guest') &&
+        (
+          data.classification == 'brand-new' ||
+          data.classification == 'returning-with-progress' ||
+          data.classification == 'returning-light' ||
+          data.classification == 'returning-guest-with-local-data' ||
+          data.classification == 'existing-account-without-meaningful-progress'
+        ) &&
+        (
+          data.currentStep == 'interests' || data.currentStep == 'theme' ||
+          data.currentStep == 'worlds' || data.currentStep == 'journey' ||
+          data.currentStep == 'context' || data.currentStep == 'destination' ||
+          data.currentStep == 'return'
+        ) &&
+        (data.interestsStatus == 'pending' || data.interestsStatus == 'selected' || data.interestsStatus == 'skipped') &&
+        validEntryExperienceInterestIds(data.interestIds) &&
+        (data.interestsStatus != 'selected' || data.interestIds.size() > 0) &&
+        (data.interestsStatus == 'selected' || data.interestIds.size() == 0) &&
+        (data.themeStatus == 'pending' || data.themeStatus == 'selected' || data.themeStatus == 'preserved') &&
+        (
+          data.themeId == '' || data.themeId == 'lootlingua' || data.themeId == 'ocean' ||
+          data.themeId == 'golden' || data.themeId == 'scroll' || data.themeId == 'glass'
+        ) &&
+        (data.oasisMode == 'light' || data.oasisMode == 'dark') &&
+        data.themeExplicit is bool &&
+        (
+          data.journeyStatus == 'pending' || data.journeyStatus == 'world-selected' ||
+          data.journeyStatus == 'structure-explored' || data.journeyStatus == 'return-reviewed'
+        ) &&
+        data.selectedWorldId is string && data.selectedWorldId.size() <= 128 &&
+        (
+          data.gamerStatus == 'not-applicable' || data.gamerStatus == 'offered' ||
+          data.gamerStatus == 'running' || data.gamerStatus == 'completed' ||
+          data.gamerStatus == 'unavailable' || data.gamerStatus == 'skipped'
+        ) &&
+        (data.source == 'app-entry' || data.source == 'guest-migration' || data.source == 'settings') &&
+        data.startedAt is timestamp && data.updatedAt == request.time &&
+        (data.completedAt == null || data.completedAt is timestamp) &&
+        data.skippedAt == null &&
+        (data.status != 'completed' || (
+          data.currentStep == 'destination' &&
+          (data.journeyStatus == 'structure-explored' || data.journeyStatus == 'return-reviewed') &&
+          data.completedAt is timestamp
+        )) &&
+        (data.status == 'completed' || data.completedAt == null);
+    }
+
+    function validEntryExperienceV2Update(before, after, versionId) {
+      return validEntryExperienceV2(after, versionId) &&
+        after.contractVersion == before.contractVersion &&
+        after.experienceVersion == before.experienceVersion &&
+        after.audience == before.audience &&
+        after.classification == before.classification &&
+        after.startedAt == before.startedAt &&
+        (
+          (before.status == 'in-progress' &&
+            (after.status == 'in-progress' || after.status == 'completed')) ||
+          (before.status == 'completed' && after.status == 'completed')
+        ) &&
+        (before.completedAt == null || after.completedAt == before.completedAt);
+    }
+
+    function validWordMasteryDocument(data) {
+      return data.keys().hasOnly(['entries', 'updatedAt']) &&
+        data.keys().hasAll(['entries']) &&
+        data.entries is map && data.entries.size() <= 5000 &&
+        optionalTime(data, 'updatedAt');
+    }
+
+    function validQuizSession(data) {
+      return data.keys().hasOnly([
+          'id', 'mode', 'source', 'createdAt', 'words', 'pool',
+          'questionCount', 'direction', 'quizIndex', 'currentStreak',
+          'currentQuizMistakes', 'timeAttackHp', 'quizSessionResults',
+          'hasStartedAnswering'
+        ]) &&
+        data.keys().hasAll(['id', 'mode', 'source', 'words']) &&
+        nonEmptyString(data.id, 500) &&
+        (data.mode == 'timeAttack' || data.mode == 'scramble') &&
+        data.source is string && data.source.size() <= 500 &&
+        data.words is list && data.words.size() > 0 && data.words.size() <= 2000 &&
+        optionalList(data, 'pool', 3000) &&
+        optionalNonNegativeInt(data, 'questionCount') &&
+        optionalMap(data, 'direction', 10) &&
+        optionalNonNegativeInt(data, 'quizIndex') &&
+        optionalNonNegativeInt(data, 'currentStreak') &&
+        optionalNonNegativeInt(data, 'currentQuizMistakes') &&
+        optionalNonNegativeInt(data, 'timeAttackHp') &&
+        optionalList(data, 'quizSessionResults', 5000) &&
+        optionalBool(data, 'hasStartedAnswering') &&
+        optionalTime(data, 'createdAt');
+    }
+
+    function validXpEvent(data, metaId) {
+      return data.keys().hasOnly(['amount', 'reason', 'xpEconomyVersion', 'createdAt']) &&
+        data.keys().size() == 4 &&
+        data.amount is int && data.amount > 0 && data.amount <= 50 &&
+        data.xpEconomyVersion is int && data.xpEconomyVersion >= 2 &&
+        data.createdAt is timestamp &&
+        ((data.reason == 'word_transition_new_learning' && data.amount == 2 &&
+            metaId.matches('xp_event_word_transition:[^:]{1,180}:new_learning')) ||
+          (data.reason == 'word_transition_learning_reviewing' && data.amount == 4 &&
+            metaId.matches('xp_event_word_transition:[^:]{1,180}:learning_reviewing')) ||
+          (data.reason == 'word_mastered_first' && data.amount == 8 &&
+            metaId.matches('xp_event_word_transition:[^:]{1,180}:reviewing_mastered')) ||
+          (data.reason == 'word_remastered' && data.amount == 3 &&
+            metaId.matches('xp_event_word_transition:[^:]{1,180}:remastered:1')) ||
+          (data.reason == 'daily_chest_unlock' &&
+            metaId.matches('xp_event_daily_chest_unlock:[0-9]{1,20}')));
+    }
+
+    function validContentLearningWord(data, contentWordId) {
+      return data.keys().hasOnly([
+          'canonicalId', 'normalizationVersion', 'normalizedWord',
+          'masteryKey', 'legacyWordId', 'word',
+          'wordKey', 'translation', 'definition', 'definition_ar',
+          'meaning', 'example', 'exampleTranslation', 'partOfSpeech',
+          'category', 'level', 'tags', 'synonyms', 'pronunciation',
+          'notes', 'difficulty',
+          'forgetCount', 'contentRefPath', 'primarySource', 'sourceCount',
+          'eligibleEvidenceCount', 'lastEligibleEvidenceAt',
+          'lastEvidenceEventId', 'evidenceVersion',
+          'evidenceTimezoneOffsetMinutes', 'lastEvidenceLocalDayKey',
+          'schemaVersion', 'createdAt', 'joinedAt', 'updatedAt'
+        ]) &&
+        data.keys().hasAll([
+          'canonicalId', 'normalizationVersion', 'normalizedWord',
+          'masteryKey', 'word',
+          'forgetCount', 'schemaVersion', 'createdAt', 'updatedAt'
+        ]) &&
+        data.canonicalId == contentWordId &&
+        data.normalizationVersion == 1 &&
+        nonEmptyString(data.normalizedWord, 240) &&
+        nonEmptyString(data.masteryKey, 240) &&
+        optionalString(data, 'legacyWordId', 500) &&
+        nonEmptyString(data.word, 240) &&
+        optionalString(data, 'wordKey', 240) &&
+        optionalString(data, 'translation', 1000) &&
+        validWordLexicalDetails(data) &&
+        optionalString(data, 'meaning', 1000) &&
+        optionalString(data, 'category', 120) &&
+        optionalString(data, 'difficulty', 80) &&
+        data.forgetCount is int && data.forgetCount >= 0 && data.forgetCount <= 100000 &&
+        optionalString(data, 'contentRefPath', 1000) &&
+        optionalMap(data, 'primarySource', 20) &&
+        optionalNonNegativeInt(data, 'sourceCount') &&
+        optionalNonNegativeInt(data, 'eligibleEvidenceCount') &&
+        data.get('eligibleEvidenceCount', 0) <= 3 &&
+        optionalTime(data, 'lastEligibleEvidenceAt') &&
+        optionalString(data, 'lastEvidenceEventId', 500) &&
+        (!('evidenceVersion' in data) ||
+          data.evidenceVersion == 1 || data.evidenceVersion == 2) &&
+        (!('evidenceTimezoneOffsetMinutes' in data) ||
+          (data.evidenceTimezoneOffsetMinutes is int &&
+            data.evidenceTimezoneOffsetMinutes >= -840 &&
+            data.evidenceTimezoneOffsetMinutes <= 840)) &&
+        (!('lastEvidenceLocalDayKey' in data) ||
+          data.lastEvidenceLocalDayKey is int) &&
+        data.schemaVersion == 1 &&
+        data.createdAt is timestamp && data.updatedAt is timestamp &&
+        optionalTime(data, 'joinedAt');
+    }
+
+    function validJourney(data, worldId) {
+      return data.keys().hasOnly([
+          'worldId', 'activeRankId', 'activeGateId', 'status',
+          'startedAt', 'updatedAt', 'journeyVersion', 'placementStatus',
+          'activePlacementAssessmentId', 'unlockedRankIds', 'unlockedGateIds',
+          'activeLevelPlacementAssessmentId', 'activeLevelPlacementCefrLevel',
+          'levelPlacementStatus', 'levelPlacementVersion',
+          'passedCefrLevels', 'partialCefrLevels',
+          'contentJourneyStatus', 'levelPlacementAssessmentIds',
+          'levelPlacementPassedRankIds', 'levelPlacementClearedGateIds',
+          'completedRankIds', 'rankCompletionVersions', 'worldCompletion'
+        ]) &&
+        data.keys().hasAll([
+          'worldId', 'activeRankId', 'activeGateId', 'status',
+          'startedAt', 'updatedAt', 'journeyVersion', 'placementStatus',
+          'unlockedRankIds', 'unlockedGateIds'
+        ]) &&
+        data.worldId == worldId &&
+        nonEmptyString(data.activeRankId, 128) &&
+        nonEmptyString(data.activeGateId, 128) &&
+        validJourneyStatus(data.status) &&
+        data.startedAt is timestamp &&
+        data.updatedAt is timestamp &&
+        data.journeyVersion == 1 &&
+        validPlacementStatus(data.placementStatus) &&
+        optionalString(data, 'activePlacementAssessmentId', 500) &&
+        optionalString(data, 'activeLevelPlacementAssessmentId', 500) &&
+        optionalString(data, 'activeLevelPlacementCefrLevel', 12) &&
+        (!('levelPlacementStatus' in data) ||
+          validLevelPlacementStatus(data.levelPlacementStatus)) &&
+        (!('levelPlacementVersion' in data) ||
+          data.levelPlacementVersion == 1 || data.levelPlacementVersion == 2) &&
+        (!('contentJourneyStatus' in data) ||
+          data.contentJourneyStatus == 'in-progress' ||
+          data.contentJourneyStatus == 'completed-current-content') &&
+        optionalMap(data, 'levelPlacementAssessmentIds', 6) &&
+        (!('levelPlacementPassedRankIds' in data) ||
+          (data.levelPlacementPassedRankIds is list &&
+            data.levelPlacementPassedRankIds.size() <= 500 &&
+            data.levelPlacementPassedRankIds.toSet().size() ==
+              data.levelPlacementPassedRankIds.size())) &&
+        (!('levelPlacementClearedGateIds' in data) ||
+          (data.levelPlacementClearedGateIds is list &&
+            data.levelPlacementClearedGateIds.size() <= 2000 &&
+            data.levelPlacementClearedGateIds.toSet().size() ==
+              data.levelPlacementClearedGateIds.size())) &&
+        (!('completedRankIds' in data) ||
+          (data.completedRankIds is list &&
+            data.completedRankIds.size() <= 500 &&
+            data.completedRankIds.toSet().size() == data.completedRankIds.size())) &&
+        (!('rankCompletionVersions' in data) ||
+          (data.rankCompletionVersions is map &&
+            data.rankCompletionVersions.size() <= 500)) &&
+        validWorldCompletion(data, worldId) &&
+        validPassedCefrLevels(data.get('passedCefrLevels', [])) &&
+        validPartialCefrLevels(data.get('partialCefrLevels', [])) &&
+        data.get('partialCefrLevels', []).toSet().intersection(
+          data.get('passedCefrLevels', []).toSet()
+        ).size() == 0 &&
+        (
+          data.get('activeLevelPlacementAssessmentId', '') == '' ||
+          (
+            validClassifiedCefrLevel(data.activeLevelPlacementCefrLevel) &&
+            (data.levelPlacementStatus == 'active' ||
+              data.levelPlacementStatus == 'submitting' ||
+              data.levelPlacementStatus == 'awaiting-decision' ||
+              data.levelPlacementStatus == 'paused')
+          )
+        ) &&
+        data.unlockedRankIds is list &&
+        data.unlockedRankIds.size() > 0 &&
+        data.unlockedRankIds.size() <= 500 &&
+        data.unlockedRankIds.toSet().size() == data.unlockedRankIds.size() &&
+        data.unlockedGateIds is list &&
+        data.unlockedGateIds.size() > 0 &&
+        data.unlockedGateIds.size() <= 2000 &&
+        data.unlockedGateIds.toSet().size() == data.unlockedGateIds.size() &&
+        data.activeRankId in data.unlockedRankIds &&
+        data.activeGateId in data.unlockedGateIds &&
+        worldPublished(worldId) &&
+        rankPublished(worldId, data.activeRankId) &&
+        gatePublished(worldId, data.activeRankId, data.activeGateId);
+    }
+
+    function activeJourneyPointerAfter(uid, worldId) {
+      return existsAfter(
+          /databases/$(database)/documents/users/$(uid)/meta/active_content_journey
+        ) &&
+        getAfter(
+          /databases/$(database)/documents/users/$(uid)/meta/active_content_journey
+        ).data.worldId == worldId;
+    }
+
+    function validJourneyCreate(data, uid, worldId) {
+      return validJourney(data, worldId) &&
+        data.status == 'active' &&
+        data.placementStatus == 'not-started' &&
+        (!('activePlacementAssessmentId' in data) ||
+          data.activePlacementAssessmentId == '') &&
+        data.startedAt == request.time &&
+        data.updatedAt == request.time &&
+        data.unlockedRankIds.size() == 1 &&
+        data.unlockedGateIds.size() == 1 &&
+        data.get('levelPlacementClearedGateIds', []).size() == 0 &&
+        data.get('completedRankIds', []).size() == 0 &&
+        data.get('rankCompletionVersions', {}).size() == 0 &&
+        data.unlockedRankIds[0] == data.activeRankId &&
+        data.unlockedGateIds[0] == data.activeGateId &&
+        rankInitiallyAvailable(worldId, data.activeRankId) &&
+        gatePublished(worldId, data.activeRankId, data.activeGateId) &&
+        activeJourneyPointerAfter(uid, worldId);
+    }
+
+    function validJourneyStatusUpdate(before, after, uid, worldId) {
+      return
+        after.diff(before).affectedKeys().hasOnly(['status', 'updatedAt']) &&
+        after.worldId == before.worldId &&
+        after.activeRankId == before.activeRankId &&
+        after.activeGateId == before.activeGateId &&
+        after.startedAt == before.startedAt &&
+        after.journeyVersion == before.journeyVersion &&
+        after.placementStatus == before.placementStatus &&
+        after.get('activePlacementAssessmentId', '') ==
+          before.get('activePlacementAssessmentId', '') &&
+        after.unlockedRankIds == before.unlockedRankIds &&
+        after.unlockedGateIds == before.unlockedGateIds &&
+        after.updatedAt == request.time &&
+        (after.status == 'paused' || activeJourneyPointerAfter(uid, worldId));
+    }
+
+    function validJourneyPlacementChoice(before, after) {
+      return
+        after.diff(before).affectedKeys().hasOnly([
+          'placementStatus', 'activePlacementAssessmentId', 'updatedAt'
+        ]) &&
+        before.placementStatus == 'not-started' &&
+        (after.placementStatus == 'active' || after.placementStatus == 'declined') &&
+        after.get('activePlacementAssessmentId', '') == '' &&
+        after.worldId == before.worldId &&
+        after.activeRankId == before.activeRankId &&
+        after.activeGateId == before.activeGateId &&
+        after.status == before.status &&
+        after.startedAt == before.startedAt &&
+        after.journeyVersion == before.journeyVersion &&
+        after.unlockedRankIds == before.unlockedRankIds &&
+        after.unlockedGateIds == before.unlockedGateIds &&
+        after.updatedAt == request.time;
+    }
+
+    function validJourneyPlacementAttach(before, after, uid, worldId) {
+      let session = getAfter(
+        /databases/$(database)/documents/users/$(uid)/contentProgress/$(worldId)/placementSessions/$(after.activePlacementAssessmentId)
+      ).data;
+      return
+        after.diff(before).affectedKeys().hasOnly([
+          'activePlacementAssessmentId', 'updatedAt'
+        ]) &&
+        before.placementStatus == 'active' &&
+        after.placementStatus == 'active' &&
+        before.get('activePlacementAssessmentId', '') == '' &&
+        nonEmptyString(after.activePlacementAssessmentId, 500) &&
+        after.activeRankId == before.activeRankId &&
+        after.activeGateId == before.activeGateId &&
+        after.status == before.status &&
+        after.startedAt == before.startedAt &&
+        after.journeyVersion == before.journeyVersion &&
+        after.unlockedRankIds == before.unlockedRankIds &&
+        after.unlockedGateIds == before.unlockedGateIds &&
+        after.updatedAt == request.time &&
+        existsAfter(
+          /databases/$(database)/documents/users/$(uid)/contentProgress/$(worldId)/placementSessions/$(after.activePlacementAssessmentId)
+        ) &&
+        session.status == 'active' &&
+        session.worldId == worldId &&
+        session.rankId == after.activeRankId &&
+        session.currentGateId == after.activeGateId;
+    }
+
+    function validJourneyPlacementAdvance(before, after, uid, worldId) {
+      let cleared = get(
+        /databases/$(database)/documents/users/$(uid)/contentProgress/$(worldId)/ranks/$(before.activeRankId)/gates/$(before.activeGateId)
+      ).data;
+      let session = get(
+        /databases/$(database)/documents/users/$(uid)/contentProgress/$(worldId)/placementSessions/$(before.activePlacementAssessmentId)
+      ).data;
+      return
+        after.diff(before).affectedKeys().hasOnly([
+          'activeRankId', 'activeGateId', 'unlockedRankIds',
+          'unlockedGateIds', 'activePlacementAssessmentId', 'updatedAt'
+        ]) &&
+        before.status == 'active' &&
+        after.status == 'active' &&
+        after.worldId == before.worldId &&
+        after.startedAt == before.startedAt &&
+        after.journeyVersion == before.journeyVersion &&
+        before.placementStatus == 'active' &&
+        after.placementStatus == 'active' &&
+        nonEmptyString(before.activePlacementAssessmentId, 500) &&
+        after.activePlacementAssessmentId == '' &&
+        after.activeGateId != before.activeGateId &&
+        after.unlockedRankIds.hasAll(before.unlockedRankIds) &&
+        after.unlockedRankIds.size() <= before.unlockedRankIds.size() + 1 &&
+        after.unlockedGateIds.hasAll(before.unlockedGateIds) &&
+        after.unlockedGateIds.size() == before.unlockedGateIds.size() + 1 &&
+        after.activeRankId in after.unlockedRankIds &&
+        after.activeGateId in after.unlockedGateIds &&
+        rankPublished(worldId, after.activeRankId) &&
+        gatePublished(worldId, after.activeRankId, after.activeGateId) &&
+        after.updatedAt == request.time &&
+        exists(
+          /databases/$(database)/documents/users/$(uid)/contentProgress/$(worldId)/ranks/$(before.activeRankId)/gates/$(before.activeGateId)
+        ) &&
+        cleared.status == 'cleared' &&
+        cleared.clearedBy == 'placement' &&
+        cleared.placementAssessmentId == before.activePlacementAssessmentId &&
+        cleared.nextRankId == after.activeRankId &&
+        cleared.nextGateId == after.activeGateId &&
+        exists(
+          /databases/$(database)/documents/users/$(uid)/contentProgress/$(worldId)/placementSessions/$(before.activePlacementAssessmentId)
+        ) &&
+        session.status == 'completed' &&
+        session.outcome == 'passed' &&
+        session.correctCount >= session.requiredCorrect &&
+        session.rankId == before.activeRankId &&
+        session.currentGateId == before.activeGateId &&
+        activeJourneyPointerAfter(uid, worldId);
+    }
+
+    function validJourneyPlacementFinish(before, after, uid, worldId) {
+      let session = get(
+        /databases/$(database)/documents/users/$(uid)/contentProgress/$(worldId)/placementSessions/$(before.activePlacementAssessmentId)
+      ).data;
+      return
+        after.diff(before).affectedKeys().hasOnly([
+          'placementStatus', 'activePlacementAssessmentId', 'updatedAt'
+        ]) &&
+        before.status == 'active' &&
+        after.status == 'active' &&
+        before.placementStatus == 'active' &&
+        after.placementStatus == 'completed' &&
+        nonEmptyString(before.activePlacementAssessmentId, 500) &&
+        after.activePlacementAssessmentId == '' &&
+        after.activeRankId == before.activeRankId &&
+        after.activeGateId == before.activeGateId &&
+        after.startedAt == before.startedAt &&
+        after.journeyVersion == before.journeyVersion &&
+        after.unlockedRankIds == before.unlockedRankIds &&
+        after.unlockedGateIds == before.unlockedGateIds &&
+        after.updatedAt == request.time &&
+        exists(
+          /databases/$(database)/documents/users/$(uid)/contentProgress/$(worldId)/placementSessions/$(before.activePlacementAssessmentId)
+        ) &&
+        session.status == 'completed' &&
+        session.worldId == worldId &&
+        session.rankId == before.activeRankId &&
+        session.currentGateId == before.activeGateId &&
+        activeJourneyPointerAfter(uid, worldId);
+    }
+
+    function validJourneyPlacementStopBetweenGates(before, after, uid, worldId) {
+      return
+        after.diff(before).affectedKeys().hasOnly([
+          'placementStatus', 'updatedAt'
+        ]) &&
+        before.status == 'active' &&
+        after.status == 'active' &&
+        before.placementStatus == 'active' &&
+        after.placementStatus == 'completed' &&
+        before.get('activePlacementAssessmentId', '') == '' &&
+        after.get('activePlacementAssessmentId', '') == '' &&
+        after.worldId == before.worldId &&
+        after.activeRankId == before.activeRankId &&
+        after.activeGateId == before.activeGateId &&
+        after.startedAt == before.startedAt &&
+        after.journeyVersion == before.journeyVersion &&
+        after.unlockedRankIds == before.unlockedRankIds &&
+        after.unlockedGateIds == before.unlockedGateIds &&
+        after.updatedAt == request.time &&
+        activeJourneyPointerAfter(uid, worldId);
+    }
+
+    function validJourneyPlacementReset(before, after, uid, worldId) {
+      let session = getAfter(
+        /databases/$(database)/documents/users/$(uid)/contentProgress/$(worldId)/placementSessions/$(before.activePlacementAssessmentId)
+      ).data;
+      return
+        after.diff(before).affectedKeys().hasOnly([
+          'activeRankId', 'activeGateId', 'placementStatus',
+          'activePlacementAssessmentId', 'unlockedRankIds',
+          'unlockedGateIds', 'updatedAt'
+        ]) &&
+        before.status == 'active' &&
+        after.status == 'active' &&
+        before.placementStatus == 'active' &&
+        after.placementStatus == 'declined' &&
+        nonEmptyString(before.activePlacementAssessmentId, 500) &&
+        after.activePlacementAssessmentId == '' &&
+        after.activeRankId in before.unlockedRankIds &&
+        after.activeGateId in before.unlockedGateIds &&
+        after.unlockedRankIds == [after.activeRankId] &&
+        after.unlockedGateIds == [after.activeGateId] &&
+        after.startedAt == before.startedAt &&
+        after.journeyVersion == before.journeyVersion &&
+        after.updatedAt == request.time &&
+        rankInitiallyAvailable(worldId, after.activeRankId) &&
+        gatePublished(worldId, after.activeRankId, after.activeGateId) &&
+        existsAfter(
+          /databases/$(database)/documents/users/$(uid)/contentProgress/$(worldId)/placementSessions/$(before.activePlacementAssessmentId)
+        ) &&
+        session.status == 'abandoned' &&
+        activeJourneyPointerAfter(uid, worldId);
+    }
+
+    function validJourneyLevelPlacementStart(before, after, uid, worldId) {
+      let assessmentId = after.activeLevelPlacementAssessmentId;
+      let session = getAfter(
+        /databases/$(database)/documents/users/$(uid)/contentProgress/$(worldId)/levelPlacementSessions/$(assessmentId)
+      ).data;
+      return after.diff(before).affectedKeys().hasOnly([
+          'placementStatus', 'activeLevelPlacementAssessmentId',
+          'activeLevelPlacementCefrLevel', 'levelPlacementStatus',
+          'levelPlacementVersion', 'passedCefrLevels', 'updatedAt'
+        ]) &&
+        before.status == 'active' &&
+        after.status == 'active' &&
+        before.get('activeLevelPlacementAssessmentId', '') == '' &&
+        nonEmptyString(assessmentId, 500) &&
+        validClassifiedCefrLevel(after.activeLevelPlacementCefrLevel) &&
+        after.levelPlacementStatus == 'active' &&
+        (after.levelPlacementVersion == 1 || after.levelPlacementVersion == 2) &&
+        after.placementStatus == (
+          before.placementStatus == 'not-started' ? 'declined' : before.placementStatus
+        ) &&
+        before.placementStatus != 'active' &&
+        after.activeRankId == before.activeRankId &&
+        after.activeGateId == before.activeGateId &&
+        after.unlockedRankIds == before.unlockedRankIds &&
+        after.unlockedGateIds == before.unlockedGateIds &&
+        after.worldId == worldId &&
+        after.startedAt == before.startedAt &&
+        after.journeyVersion == before.journeyVersion &&
+        after.journeyVersion == 1 &&
+        worldPublished(worldId) &&
+        rankPublished(worldId, after.activeRankId) &&
+        gatePublished(worldId, after.activeRankId, after.activeGateId) &&
+        after.get('passedCefrLevels', []) == before.get('passedCefrLevels', []) &&
+        after.get('partialCefrLevels', []) == before.get('partialCefrLevels', []) &&
+        after.updatedAt == request.time &&
+        (
+          journeyCanStartCefrLevel(before, after.activeLevelPlacementCefrLevel) ||
+          (
+            session.get('assessmentMode', '') == 'new-ranks' &&
+            after.activeLevelPlacementCefrLevel in before.get('passedCefrLevels', [])
+          )
+        ) &&
+        existsAfter(
+          /databases/$(database)/documents/users/$(uid)/contentProgress/$(worldId)/levelPlacementSessions/$(assessmentId)
+        ) &&
+        session.status == 'active' &&
+        session.assessmentId == assessmentId &&
+        session.worldId == worldId &&
+        session.cefrLevel == after.activeLevelPlacementCefrLevel &&
+        activeJourneyPointerAfter(uid, worldId);
+    }
+
+    function validJourneyLevelPlacementDecision(before, after, uid, worldId, decisionKind) {
+      let assessmentId = before.activeLevelPlacementAssessmentId;
+      let session = getAfter(
+        /databases/$(database)/documents/users/$(uid)/contentProgress/$(worldId)/levelPlacementSessions/$(assessmentId)
+      ).data;
+      return (
+        (
+          decisionKind == 'result' &&
+          after.diff(before).affectedKeys().hasOnly([
+            'activeRankId', 'activeGateId', 'unlockedRankIds', 'unlockedGateIds',
+            'passedCefrLevels', 'partialCefrLevels', 'levelPlacementStatus',
+            'contentJourneyStatus', 'levelPlacementAssessmentIds',
+            'levelPlacementPassedRankIds', 'updatedAt'
+          ]) &&
+          after.activeLevelPlacementAssessmentId == assessmentId &&
+          after.activeLevelPlacementCefrLevel == before.activeLevelPlacementCefrLevel &&
+          after.levelPlacementStatus == 'awaiting-decision' &&
+          session.status == 'awaiting-decision' &&
+          (
+            session.placementVersion == 1 ||
+            (
+              after.get('levelPlacementAssessmentIds', {})[session.cefrLevel] == assessmentId &&
+              after.get('levelPlacementPassedRankIds', []).hasAll(
+                before.get('levelPlacementPassedRankIds', [])
+              ) &&
+              after.get('levelPlacementPassedRankIds', []).hasAll(session.passedRankIds) &&
+              after.get('contentJourneyStatus', 'in-progress') ==
+                (session.completedCurrentContent
+                  ? 'completed-current-content'
+                  : 'in-progress')
+            )
+          )
+        ) ||
+        (
+          decisionKind == 'outcome' &&
+          after.diff(before).affectedKeys().hasOnly([
+            'activeRankId', 'activeGateId', 'unlockedRankIds', 'unlockedGateIds',
+            'passedCefrLevels', 'partialCefrLevels', 'levelPlacementStatus',
+            'contentJourneyStatus', 'levelPlacementAssessmentIds',
+            'levelPlacementPassedRankIds', 'activeLevelPlacementAssessmentId',
+            'activeLevelPlacementCefrLevel', 'levelPlacementClearedGateIds',
+            'worldCompletion', 'updatedAt'
+          ]) &&
+          after.activeLevelPlacementAssessmentId == '' &&
+          after.activeLevelPlacementCefrLevel == '' &&
+          after.levelPlacementStatus == 'completed' &&
+          session.status == 'completed' &&
+          session.completedAt == request.time &&
+          session.assessedAt == request.time &&
+          after.get('levelPlacementAssessmentIds', {})[session.cefrLevel] == assessmentId &&
+          after.get('levelPlacementPassedRankIds', []).toSet() ==
+            before.get('levelPlacementPassedRankIds', []).toSet().union(
+              session.passedRankIds.toSet()
+            ) &&
+          after.get('levelPlacementClearedGateIds', []) is list &&
+          after.get('levelPlacementClearedGateIds', []).size() <= 2000 &&
+          after.get('levelPlacementClearedGateIds', []).toSet().size() ==
+            after.get('levelPlacementClearedGateIds', []).size() &&
+          after.get('levelPlacementClearedGateIds', []).toSet() ==
+            before.get('levelPlacementClearedGateIds', []).toSet().union(
+              session.resultClearedGateIds.toSet()
+            ) &&
+          after.get('contentJourneyStatus', 'in-progress') ==
+            (session.completedCurrentContent ? 'completed-current-content' : 'in-progress') &&
+          (session.completedCurrentContent
+            ? (worldCompletionUnchanged(before, after) ||
+              validWorldCompletionAppend(before, after, worldId, 'level-placement'))
+            : worldCompletionUnchanged(before, after))
+        )
+        ) &&
+        before.status == 'active' && after.status == 'active' &&
+        nonEmptyString(assessmentId, 500) &&
+        after.updatedAt == request.time &&
+        existsAfter(
+          /databases/$(database)/documents/users/$(uid)/contentProgress/$(worldId)/levelPlacementSessions/$(assessmentId)
+        ) &&
+        session.resultApplied == true &&
+        session.worldId == worldId &&
+        session.cefrLevel == before.activeLevelPlacementCefrLevel &&
+        session.resultUnlockedRankIds is list &&
+        session.resultUnlockedGateIds is list &&
+        after.unlockedRankIds.hasAll(before.unlockedRankIds) &&
+        after.unlockedRankIds.hasAll(session.resultUnlockedRankIds) &&
+        after.unlockedRankIds.size() <=
+          before.unlockedRankIds.size() + session.resultUnlockedRankIds.size() &&
+        after.unlockedGateIds.hasAll(before.unlockedGateIds) &&
+        after.unlockedGateIds.hasAll(session.resultUnlockedGateIds) &&
+        after.unlockedGateIds.size() <=
+          before.unlockedGateIds.size() + session.resultUnlockedGateIds.size() &&
+        after.activeRankId in after.unlockedRankIds &&
+        after.activeGateId in after.unlockedGateIds &&
+        rankPublished(worldId, after.activeRankId) &&
+        gatePublished(worldId, after.activeRankId, after.activeGateId) &&
+        (
+          (session.resultStartRankId == '' &&
+            after.activeRankId == before.activeRankId &&
+            after.activeGateId == before.activeGateId) ||
+          (
+            nonEmptyString(session.resultStartRankId, 128) &&
+            nonEmptyString(session.resultStartGateId, 128) &&
+            after.activeRankId == session.resultStartRankId &&
+            after.activeGateId == session.resultStartGateId
+          )
+        ) &&
+        (
+          (
+            session.passedLevel == true &&
+            after.passedCefrLevels.hasAll(before.get('passedCefrLevels', [])) &&
+            session.cefrLevel in after.passedCefrLevels &&
+            after.passedCefrLevels.size() >= before.get('passedCefrLevels', []).size() &&
+            after.passedCefrLevels.size() <=
+              before.get('passedCefrLevels', []).size() + 1
+          ) ||
+          (
+            session.passedLevel == false &&
+            after.passedCefrLevels == before.get('passedCefrLevels', [])
+          )
+        ) &&
+        after.partialCefrLevels.toSet().difference(
+          before.get('partialCefrLevels', []).toSet()
+        ).hasOnly([session.cefrLevel].toSet()) &&
+        before.get('partialCefrLevels', []).toSet().difference(
+          after.partialCefrLevels.toSet()
+        ).hasOnly([session.cefrLevel].toSet()) &&
+        activeJourneyPointerAfter(uid, worldId);
+    }
+
+    function validJourneyLevelPlacementFinish(before, after, uid, worldId) {
+      let assessmentId = before.activeLevelPlacementAssessmentId;
+      let session = getAfter(
+        /databases/$(database)/documents/users/$(uid)/contentProgress/$(worldId)/levelPlacementSessions/$(assessmentId)
+      ).data;
+      return after.diff(before).affectedKeys().hasOnly([
+          'activeLevelPlacementAssessmentId', 'activeLevelPlacementCefrLevel',
+          'levelPlacementStatus', 'updatedAt'
+        ]) &&
+        nonEmptyString(assessmentId, 500) &&
+        after.updatedAt == request.time &&
+        existsAfter(
+          /databases/$(database)/documents/users/$(uid)/contentProgress/$(worldId)/levelPlacementSessions/$(assessmentId)
+        ) &&
+        (
+          (
+            before.levelPlacementStatus == 'paused' &&
+            after.levelPlacementStatus == 'active' &&
+            session.status == 'active' &&
+            after.activeLevelPlacementAssessmentId == assessmentId &&
+            after.activeLevelPlacementCefrLevel == before.activeLevelPlacementCefrLevel
+          ) ||
+          (
+            after.levelPlacementStatus == 'paused' &&
+            session.status == 'paused' &&
+            after.activeLevelPlacementAssessmentId == assessmentId &&
+            after.activeLevelPlacementCefrLevel == before.activeLevelPlacementCefrLevel
+          ) ||
+          (
+            after.levelPlacementStatus == 'completed' &&
+            session.status == 'completed' &&
+            after.activeLevelPlacementAssessmentId == '' &&
+            after.activeLevelPlacementCefrLevel == ''
+          ) ||
+          (
+            after.levelPlacementStatus == 'abandoned' &&
+            session.status == 'abandoned' &&
+            after.activeLevelPlacementAssessmentId == '' &&
+            after.activeLevelPlacementCefrLevel == ''
+          )
+        ) &&
+        activeJourneyPointerAfter(uid, worldId);
+    }
+
+    function validJourneyNewRankReconcile(before, after, uid, worldId) {
+      return before.get('activeLevelPlacementAssessmentId', '') == '' &&
+        after.get('activeLevelPlacementAssessmentId', '') == '' &&
+        after.diff(before).affectedKeys().hasOnly([
+          'activeRankId', 'activeGateId', 'unlockedRankIds',
+          'unlockedGateIds', 'contentJourneyStatus', 'updatedAt'
+        ]) &&
+        after.status == before.status &&
+        after.placementStatus == before.placementStatus &&
+        after.unlockedRankIds.hasAll(before.unlockedRankIds) &&
+        after.unlockedRankIds.size() <= before.unlockedRankIds.size() + 1 &&
+        after.unlockedGateIds.hasAll(before.unlockedGateIds) &&
+        after.unlockedGateIds.size() <= before.unlockedGateIds.size() + 1 &&
+        after.contentJourneyStatus == 'in-progress' &&
+        after.updatedAt == request.time &&
+        rankPublished(worldId, after.activeRankId) &&
+        gatePublished(worldId, after.activeRankId, after.activeGateId) &&
+        (
+          (
+            before.get('contentJourneyStatus', 'in-progress') ==
+              'completed-current-content' &&
+            activeJourneyPointerAfter(uid, worldId)
+          ) ||
+          (
+            before.get('contentJourneyStatus', 'in-progress') == 'in-progress' &&
+            after.activeRankId == before.activeRankId &&
+            after.activeGateId == before.activeGateId
+          )
+        );
+    }
+
+    function validWorldCompletion(data, worldId) {
+      return !('worldCompletion' in data) || (
+        data.worldCompletion is map &&
+        data.worldCompletion.keys().hasOnly([
+          'version', 'status', 'worldId', 'completionId',
+          'requiredRankIds', 'rankVersions', 'completedBy', 'completedAt'
+        ]) &&
+        data.worldCompletion.keys().hasAll([
+          'version', 'status', 'worldId', 'completionId',
+          'requiredRankIds', 'rankVersions', 'completedBy', 'completedAt'
+        ]) &&
+        data.worldCompletion.version == 1 &&
+        data.worldCompletion.status == 'completed' &&
+        data.worldCompletion.worldId == worldId &&
+        nonEmptyString(data.worldCompletion.completionId, 500) &&
+        data.worldCompletion.requiredRankIds is list &&
+        data.worldCompletion.requiredRankIds.size() > 0 &&
+        data.worldCompletion.requiredRankIds.size() <= 500 &&
+        data.worldCompletion.requiredRankIds.toSet().size() ==
+          data.worldCompletion.requiredRankIds.size() &&
+        data.worldCompletion.rankVersions is map &&
+        data.worldCompletion.rankVersions.size() ==
+          data.worldCompletion.requiredRankIds.size() &&
+        data.worldCompletion.rankVersions.keys().toSet() ==
+          data.worldCompletion.requiredRankIds.toSet() &&
+        (data.worldCompletion.completedBy == 'gate-clear' ||
+          data.worldCompletion.completedBy == 'level-placement') &&
+        data.worldCompletion.completedAt is timestamp
+      );
+    }
+
+    function worldCompletionUnchanged(before, after) {
+      return after.get('worldCompletion', null) == before.get('worldCompletion', null);
+    }
+
+    function validWorldCompletionAppend(before, after, worldId, completedBy) {
+      let achievement = after.worldCompletion;
+      let coveredRanks = after.get('completedRankIds', []).toSet().union(
+        after.get('levelPlacementPassedRankIds', []).toSet()
+      );
+      return (
+          'worldCompletion' in before && worldCompletionUnchanged(before, after)
+        ) || (
+          !('worldCompletion' in before) &&
+          validWorldCompletion(after, worldId) &&
+          achievement.completedBy == completedBy &&
+          achievement.completedAt == request.time &&
+          coveredRanks.hasAll(achievement.requiredRankIds.toSet()) &&
+          after.get('contentJourneyStatus', 'in-progress') ==
+            'completed-current-content'
+        );
+    }
+
+    function rankCompletionLedgerUnchanged(before, after) {
+      return after.get('completedRankIds', []) == before.get('completedRankIds', []) &&
+        after.get('rankCompletionVersions', {}) == before.get('rankCompletionVersions', {});
+    }
+
+    function validRankCompletionAppend(before, after, worldId, rankId) {
+      let beforeIds = before.get('completedRankIds', []);
+      let afterIds = after.get('completedRankIds', []);
+      let beforeVersions = before.get('rankCompletionVersions', {});
+      let afterVersions = after.get('rankCompletionVersions', {});
+      let publishedRank = get(
+        /databases/$(database)/documents/content_worlds/$(worldId)/ranks/$(rankId)
+      ).data;
+      return (
+          rankId in beforeIds && rankCompletionLedgerUnchanged(before, after)
+        ) || (
+          !(rankId in beforeIds) &&
+          afterIds.toSet() == beforeIds.toSet().union([rankId].toSet()) &&
+          afterIds.size() == beforeIds.size() + 1 &&
+          afterVersions.diff(beforeVersions).affectedKeys().hasOnly([rankId]) &&
+          afterVersions[rankId] == publishedRank.version
+        );
+    }
+
+    function validJourneyGateClearAdvance(before, after, uid, worldId) {
+      let progress = getAfter(
+        /databases/$(database)/documents/users/$(uid)/contentProgress/$(worldId)/ranks/$(before.activeRankId)/gates/$(before.activeGateId)
+      ).data;
+      let attempt = getAfter(
+        /databases/$(database)/documents/users/$(uid)/contentProgress/$(worldId)/gateClearAttempts/$(progress.lastClearAttemptId)
+      ).data;
+      return before.status == 'active' && after.status == 'active' &&
+        after.diff(before).affectedKeys().hasOnly([
+          'activeRankId', 'activeGateId', 'unlockedRankIds',
+          'unlockedGateIds', 'completedRankIds',
+          'rankCompletionVersions', 'updatedAt'
+        ]) &&
+        progress.status == 'cleared' && progress.clearedBy == 'gate-clear' &&
+        progress.nextRankId == after.activeRankId &&
+        progress.nextGateId == after.activeGateId &&
+        nonEmptyString(progress.lastClearAttemptId, 500) &&
+        attempt.status == 'passed' && attempt.result == 'passed' &&
+        attempt.worldId == worldId &&
+        attempt.rankId == before.activeRankId &&
+        attempt.gateId == before.activeGateId &&
+        after.activeGateId != before.activeGateId &&
+        after.unlockedRankIds.hasAll(before.unlockedRankIds) &&
+        after.unlockedRankIds.size() <= before.unlockedRankIds.size() + 1 &&
+        after.unlockedGateIds.hasAll(before.unlockedGateIds) &&
+        after.unlockedGateIds.size() == before.unlockedGateIds.size() + 1 &&
+        after.activeRankId in after.unlockedRankIds &&
+        after.activeGateId in after.unlockedGateIds &&
+        rankPublished(worldId, after.activeRankId) &&
+        gatePublished(worldId, after.activeRankId, after.activeGateId) &&
+        after.updatedAt == request.time &&
+        (after.activeRankId == before.activeRankId
+          ? rankCompletionLedgerUnchanged(before, after)
+          : validRankCompletionAppend(
+              before,
+              after,
+              worldId,
+              before.activeRankId
+            )) &&
+        activeJourneyPointerAfter(uid, worldId);
+    }
+
+    function validJourneyGateClearCompleteContent(before, after, uid, worldId) {
+      let progress = getAfter(
+        /databases/$(database)/documents/users/$(uid)/contentProgress/$(worldId)/ranks/$(before.activeRankId)/gates/$(before.activeGateId)
+      ).data;
+      let attempt = getAfter(
+        /databases/$(database)/documents/users/$(uid)/contentProgress/$(worldId)/gateClearAttempts/$(progress.lastClearAttemptId)
+      ).data;
+      return before.status == 'active' && after.status == 'active' &&
+        after.diff(before).affectedKeys().hasOnly([
+          'completedRankIds', 'rankCompletionVersions',
+          'contentJourneyStatus', 'worldCompletion', 'updatedAt'
+        ]) &&
+        after.activeRankId == before.activeRankId &&
+        after.activeGateId == before.activeGateId &&
+        after.unlockedRankIds == before.unlockedRankIds &&
+        after.unlockedGateIds == before.unlockedGateIds &&
+        after.contentJourneyStatus == 'completed-current-content' &&
+        progress.status == 'cleared' && progress.clearedBy == 'gate-clear' &&
+        progress.nextRankId == '' && progress.nextGateId == '' &&
+        nonEmptyString(progress.lastClearAttemptId, 500) &&
+        attempt.status == 'passed' && attempt.result == 'passed' &&
+        attempt.worldId == worldId &&
+        attempt.rankId == before.activeRankId &&
+        attempt.gateId == before.activeGateId &&
+        after.updatedAt == request.time &&
+        validRankCompletionAppend(before, after, worldId, before.activeRankId) &&
+        (worldCompletionUnchanged(before, after) ||
+          validWorldCompletionAppend(before, after, worldId, 'gate-clear')) &&
+        activeJourneyPointerAfter(uid, worldId);
+    }
+
+    function validJourneyUpdate(before, after, uid, worldId) {
+      return (before.get('activeLevelPlacementAssessmentId', '') != '' ||
+          after.get('activeLevelPlacementAssessmentId', '') != '')
+        ? (
+          before.get('activeLevelPlacementAssessmentId', '') == ''
+            ? validJourneyLevelPlacementStart(before, after, uid, worldId)
+            : (
+              validJourney(after, worldId) &&
+              (
+                after.get('levelPlacementStatus', '') == 'awaiting-decision' &&
+                  before.get('levelPlacementStatus', '') != 'awaiting-decision'
+                  ? validJourneyLevelPlacementDecision(
+                    before,
+                    after,
+                    uid,
+                    worldId,
+                    'result'
+                  )
+                  : validJourneyLevelPlacementFinish(before, after, uid, worldId)
+              )
+            )
+        )
+        : (
+        (
+          before.placementStatus == 'active' &&
+          nonEmptyString(before.get('activePlacementAssessmentId', ''), 500) &&
+          after.placementStatus == 'active' &&
+          after.activeGateId != before.activeGateId &&
+          validJourneyPlacementAdvance(before, after, uid, worldId)
+        ) ||
+        (
+          before.placementStatus == 'active' &&
+          nonEmptyString(before.get('activePlacementAssessmentId', ''), 500) &&
+          after.placementStatus == 'completed' &&
+          validJourneyPlacementFinish(before, after, uid, worldId)
+        ) ||
+        (
+          before.placementStatus == 'active' &&
+          before.get('activePlacementAssessmentId', '') == '' &&
+          after.placementStatus == 'completed' &&
+          validJourneyPlacementStopBetweenGates(before, after, uid, worldId)
+        ) ||
+        (
+          after.diff(before).affectedKeys().hasOnly([
+            'activeRankId', 'activeGateId', 'unlockedRankIds',
+            'unlockedGateIds', 'completedRankIds',
+            'rankCompletionVersions', 'updatedAt'
+          ]) &&
+          after.activeGateId != before.activeGateId &&
+          validJourneyGateClearAdvance(before, after, uid, worldId)
+        ) ||
+        (
+          after.get('contentJourneyStatus', 'in-progress') ==
+            'completed-current-content' &&
+          before.get('contentJourneyStatus', 'in-progress') !=
+            'completed-current-content' &&
+          validJourneyGateClearCompleteContent(before, after, uid, worldId)
+        ) ||
+        (
+          validJourney(after, worldId) &&
+          (
+          validJourneyStatusUpdate(before, after, uid, worldId) ||
+          validJourneyPlacementChoice(before, after) ||
+          validJourneyPlacementAttach(before, after, uid, worldId) ||
+          validJourneyPlacementReset(before, after, uid, worldId) ||
+          validJourneyNewRankReconcile(before, after, uid, worldId)
+          )
+        ));
+    }
+
+    function validActiveJourneyPointer(data, uid) {
+      return data.keys().hasOnly(['worldId', 'journeyVersion', 'updatedAt']) &&
+        data.keys().size() == 3 &&
+        nonEmptyString(data.worldId, 128) &&
+        data.journeyVersion == 1 &&
+        data.updatedAt == request.time &&
+        existsAfter(
+          /databases/$(database)/documents/users/$(uid)/contentProgress/$(data.worldId)
+        ) &&
+        getAfter(
+          /databases/$(database)/documents/users/$(uid)/contentProgress/$(data.worldId)
+        ).data.status == 'active';
+    }
+
+    function validActiveJourneyPointerUpdate(before, after, uid) {
+      return validActiveJourneyPointer(after, uid) &&
+        (
+          before.worldId == after.worldId ||
+          (
+            existsAfter(
+              /databases/$(database)/documents/users/$(uid)/contentProgress/$(before.worldId)
+            ) &&
+            getAfter(
+              /databases/$(database)/documents/users/$(uid)/contentProgress/$(before.worldId)
+            ).data.status == 'paused'
+          )
+        );
+    }
+
+    function validPlacementAnswer(
+      answer,
+      expectedContentWordId,
+      expectedWordKey,
+      expectsMetadata
+    ) {
+      return answer is map &&
+        answer.keys().hasOnly([
+          'contentWordId', 'wordKey', 'selectedContentWordId', 'correct', 'seenAt'
+        ]) &&
+        answer.keys().hasAll([
+          'contentWordId', 'selectedContentWordId', 'correct'
+        ]) &&
+        answer.contentWordId == expectedContentWordId &&
+        nonEmptyString(answer.contentWordId, 128) &&
+        nonEmptyString(answer.selectedContentWordId, 128) &&
+        answer.correct is bool &&
+        answer.correct ==
+          (answer.selectedContentWordId == answer.contentWordId) &&
+        (
+          !expectsMetadata ||
+          (
+            answer.keys().hasAll(['wordKey', 'seenAt']) &&
+            answer.wordKey == expectedWordKey &&
+            nonEmptyString(answer.wordKey, 240) &&
+            validTimeValue(answer.seenAt)
+          )
+        );
+    }
+
+    function validPlacementSession(data, worldId, assessmentId) {
+      return data.keys().hasOnly([
+          'assessmentId', 'worldId', 'rankId', 'currentGateId',
+          'currentQuestionIndex', 'orderedContentWordIds', 'orderedWordKeys', 'answers',
+          'correctCount', 'totalQuestions', 'passThreshold',
+          'requiredCorrect', 'status', 'source', 'suppressRewards',
+          'answersComplete', 'wordsLinked', 'gateProgressSaved',
+          'placementCompleted', 'nextGateUnlocked', 'completionStep',
+          'placementVersion', 'startedAt', 'updatedAt', 'outcome',
+          'score', 'rankCompletedByPlacement', 'completedAt', 'abandonedAt'
+        ]) &&
+        data.keys().hasAll([
+          'assessmentId', 'worldId', 'rankId', 'currentGateId',
+          'currentQuestionIndex', 'orderedContentWordIds', 'answers',
+          'correctCount', 'totalQuestions', 'passThreshold',
+          'requiredCorrect', 'status', 'source', 'suppressRewards',
+          'placementVersion', 'startedAt', 'updatedAt'
+        ]) &&
+        data.assessmentId == assessmentId &&
+        data.worldId == worldId &&
+        nonEmptyString(data.rankId, 128) &&
+        nonEmptyString(data.currentGateId, 128) &&
+        data.currentQuestionIndex is int &&
+        data.currentQuestionIndex >= 0 &&
+        data.orderedContentWordIds is list &&
+        data.orderedContentWordIds.size() > 0 &&
+        data.orderedContentWordIds.size() <= 2000 &&
+        (!('orderedWordKeys' in data) || (
+          data.orderedWordKeys is list &&
+          data.orderedWordKeys.size() == data.orderedContentWordIds.size()
+        )) &&
+        data.answers is list &&
+        data.answers.size() == data.currentQuestionIndex &&
+        data.correctCount is int &&
+        data.correctCount >= 0 &&
+        data.correctCount <= data.answers.size() &&
+        data.totalQuestions is int &&
+        data.totalQuestions == data.orderedContentWordIds.size() &&
+        data.passThreshold is number &&
+        data.passThreshold > 0 &&
+        data.passThreshold <= 1 &&
+        data.requiredCorrect is int &&
+        data.requiredCorrect >= 1 &&
+        data.requiredCorrect <= data.totalQuestions &&
+        data.requiredCorrect >= data.totalQuestions * data.passThreshold &&
+        data.requiredCorrect - 1 < data.totalQuestions * data.passThreshold &&
+        validPlacementSessionStatus(data.status) &&
+        data.source == 'placement' &&
+        data.suppressRewards == true &&
+        optionalBool(data, 'answersComplete') &&
+        optionalBool(data, 'wordsLinked') &&
+        optionalBool(data, 'gateProgressSaved') &&
+        optionalBool(data, 'placementCompleted') &&
+        optionalBool(data, 'nextGateUnlocked') &&
+        optionalString(data, 'completionStep', 24) &&
+        data.get('wordsLinked', true) == true &&
+        data.placementVersion == 1 &&
+        data.startedAt is timestamp &&
+        data.updatedAt is timestamp &&
+        optionalString(data, 'outcome', 12) &&
+        optionalNumber(data, 'score') &&
+        optionalBool(data, 'rankCompletedByPlacement') &&
+        optionalTime(data, 'completedAt') &&
+        optionalTime(data, 'abandonedAt') &&
+        (
+          (
+            data.status == 'active' &&
+            data.currentQuestionIndex < data.totalQuestions &&
+            data.get('answersComplete', false) == false &&
+            data.get('gateProgressSaved', false) == false &&
+            data.get('placementCompleted', false) == false &&
+            data.get('nextGateUnlocked', false) == false &&
+            data.get('completionStep', 'answering') == 'answering' &&
+            !('outcome' in data) &&
+            !('completedAt' in data) &&
+            !('abandonedAt' in data)
+          ) ||
+          (
+            data.status == 'submitting' &&
+            data.currentQuestionIndex == data.totalQuestions &&
+            data.answersComplete == true &&
+            data.gateProgressSaved == false &&
+            data.placementCompleted == false &&
+            data.nextGateUnlocked == false &&
+            data.completionStep == 'answers-saved' &&
+            !('outcome' in data) &&
+            !('completedAt' in data) &&
+            !('abandonedAt' in data)
+          ) ||
+          (
+            data.status == 'completed' &&
+            data.currentQuestionIndex == data.totalQuestions &&
+            data.answersComplete == true &&
+            data.gateProgressSaved == true &&
+            data.placementCompleted == true &&
+            data.completionStep == 'result-saved' &&
+            (data.outcome == 'passed' || data.outcome == 'failed') &&
+            data.score * data.totalQuestions == data.correctCount &&
+            data.rankCompletedByPlacement is bool &&
+            data.completedAt is timestamp &&
+            !('abandonedAt' in data) &&
+            (
+              (data.outcome == 'passed' &&
+                data.correctCount >= data.requiredCorrect) ||
+              (data.outcome == 'failed' &&
+                data.correctCount < data.requiredCorrect)
+            )
+          ) ||
+          (
+            data.status == 'abandoned' &&
+            data.get('gateProgressSaved', false) == false &&
+            data.get('placementCompleted', false) == false &&
+            data.get('nextGateUnlocked', false) == false &&
+            data.completionStep == 'abandoned' &&
+            data.abandonedAt is timestamp &&
+            !('outcome' in data) &&
+            !('completedAt' in data)
+          )
+        ) &&
+        worldPublished(worldId) &&
+        rankPublished(worldId, data.rankId) &&
+        gatePublished(worldId, data.rankId, data.currentGateId);
+    }
+
+    function placementSessionIsCurrent(uid, worldId, data, assessmentId) {
+      let journey = getAfter(
+        /databases/$(database)/documents/users/$(uid)/contentProgress/$(worldId)
+      ).data;
+      return existsAfter(
+          /databases/$(database)/documents/users/$(uid)/contentProgress/$(worldId)
+        ) &&
+        journey.status == 'active' &&
+        journey.placementStatus == 'active' &&
+        journey.activePlacementAssessmentId == assessmentId &&
+        journey.activeRankId == data.rankId &&
+        journey.activeGateId == data.currentGateId;
+    }
+
+    function validPlacementSessionCreate(data, uid, worldId, assessmentId) {
+      return validPlacementSession(data, worldId, assessmentId) &&
+        data.keys().hasAll([
+          'orderedWordKeys', 'answersComplete', 'wordsLinked', 'gateProgressSaved',
+          'placementCompleted', 'nextGateUnlocked', 'completionStep'
+        ]) &&
+        data.status == 'active' &&
+        data.currentQuestionIndex == 0 &&
+        data.answers.size() == 0 &&
+        data.correctCount == 0 &&
+        data.startedAt == request.time &&
+        data.updatedAt == request.time &&
+        placementSessionIsCurrent(uid, worldId, data, assessmentId);
+    }
+
+    function validPlacementAnswerAppend(before, after) {
+      let answer = after.answers[before.answers.size()];
+      return before.status == 'active' &&
+        after.answers.size() == before.answers.size() + 1 &&
+        after.currentQuestionIndex == before.currentQuestionIndex + 1 &&
+        validPlacementAnswer(
+          answer,
+          before.orderedContentWordIds[before.currentQuestionIndex],
+          'orderedWordKeys' in before
+            ? before.orderedWordKeys[before.currentQuestionIndex]
+            : '',
+          'orderedWordKeys' in before
+        ) &&
+        after.correctCount ==
+          before.correctCount + (answer.correct ? 1 : 0);
+    }
+
+    function placementCompletionMatchesProgress(uid, worldId, data, assessmentId) {
+      let progress = get(
+        /databases/$(database)/documents/users/$(uid)/contentProgress/$(worldId)/ranks/$(data.rankId)/gates/$(data.currentGateId)
+      ).data;
+      return exists(
+          /databases/$(database)/documents/users/$(uid)/contentProgress/$(worldId)/ranks/$(data.rankId)/gates/$(data.currentGateId)
+        ) &&
+        progress.placementAssessmentId == assessmentId &&
+        progress.placementCorrect == data.correctCount &&
+        progress.placementTotal == data.totalQuestions &&
+        progress.placementScore == data.score &&
+        (
+          (data.outcome == 'passed' &&
+            progress.status == 'cleared' &&
+            progress.clearedBy == 'placement') ||
+          (data.outcome == 'failed' &&
+            progress.status == 'learning' &&
+            !('clearedBy' in progress))
+        );
+    }
+
+    function validPlacementSessionCompletion(before, after, uid, worldId, assessmentId) {
+      return after.status == 'completed' &&
+          after.diff(before).affectedKeys().hasOnly([
+            'status', 'outcome', 'score', 'rankCompletedByPlacement',
+            'gateProgressSaved', 'placementCompleted', 'nextGateUnlocked',
+            'completionStep', 'completedAt', 'updatedAt'
+          ]) &&
+          after.currentQuestionIndex == after.totalQuestions &&
+          after.gateProgressSaved == true &&
+          after.placementCompleted == true &&
+          after.nextGateUnlocked is bool &&
+          after.completionStep == 'result-saved' &&
+          (after.outcome == 'passed' || after.outcome == 'failed') &&
+          after.score * after.totalQuestions == after.correctCount &&
+          after.rankCompletedByPlacement is bool &&
+          after.completedAt == request.time &&
+          after.updatedAt == request.time &&
+          (
+            (after.outcome == 'passed' &&
+              after.correctCount >= after.requiredCorrect) ||
+            (after.outcome == 'failed' &&
+              after.correctCount < after.requiredCorrect)
+          ) &&
+          placementCompletionMatchesProgress(uid, worldId, after, assessmentId);
+    }
+
+    function validActivePlacementSessionUpdate(
+      before,
+      after,
+      uid,
+      worldId,
+      assessmentId
+    ) {
+      return before.status == 'active' &&
+        after.updatedAt == request.time &&
+        (
+        (
+          after.diff(before).affectedKeys().hasOnly([
+            'currentQuestionIndex', 'answers', 'correctCount', 'status',
+            'answersComplete', 'completionStep', 'updatedAt'
+          ]) &&
+          validPlacementAnswerAppend(before, after) &&
+          (
+            (
+              after.status == 'active' &&
+              after.currentQuestionIndex < after.totalQuestions &&
+              after.answersComplete == false &&
+              after.completionStep == 'answering'
+            ) ||
+            (
+              after.status == 'submitting' &&
+              after.currentQuestionIndex == after.totalQuestions &&
+              after.answersComplete == true &&
+              after.completionStep == 'answers-saved'
+            )
+          ) &&
+          placementSessionIsCurrent(uid, worldId, after, assessmentId)
+        ) ||
+        (
+          after.status == 'abandoned' &&
+          after.diff(before).affectedKeys().hasOnly([
+            'status', 'completionStep', 'abandonedAt', 'updatedAt'
+          ]) &&
+          after.completionStep == 'abandoned' &&
+          after.abandonedAt == request.time &&
+          getAfter(
+            /databases/$(database)/documents/users/$(uid)/contentProgress/$(worldId)
+          ).data.placementStatus == 'declined'
+        )
+        );
+    }
+
+    function levelPlacementPrefixItemMatches(data, index) {
+      return data.passedPrefixLength <= index ||
+        (
+          data.passedRankIds.size() > index &&
+          data.orderedRankIds.size() > index &&
+          data.passedRankIds[index] == data.orderedRankIds[index]
+        );
+    }
+
+    function validLevelPlacementPrefix(data) {
+      return data.passedPrefixLength is int &&
+        data.passedPrefixLength >= 0 &&
+        data.passedPrefixLength <= 8 &&
+        data.passedRankIds is list &&
+        data.passedRankIds.size() == data.passedPrefixLength &&
+        data.passedRankIds.toSet().size() == data.passedRankIds.size() &&
+        levelPlacementPrefixItemMatches(data, 0) &&
+        levelPlacementPrefixItemMatches(data, 1) &&
+        levelPlacementPrefixItemMatches(data, 2) &&
+        levelPlacementPrefixItemMatches(data, 3) &&
+        levelPlacementPrefixItemMatches(data, 4) &&
+        levelPlacementPrefixItemMatches(data, 5) &&
+        levelPlacementPrefixItemMatches(data, 6) &&
+        levelPlacementPrefixItemMatches(data, 7) &&
+        (
+          (
+            (data.status == 'active' || data.status == 'submitting') &&
+            data.passedPrefixLength == 0 &&
+            data.passedRankIds == [] &&
+            data.recommendedStartRankId == '' &&
+            data.recommendedStartGateId == ''
+          ) ||
+          (
+            data.passedPrefixLength == data.orderedRankIds.size() &&
+            data.passedLevel == true &&
+            data.recommendedStartRankId == '' &&
+            data.recommendedStartGateId == ''
+          ) ||
+          (
+            data.passedPrefixLength < data.orderedRankIds.size() &&
+            data.passedLevel == false &&
+            data.recommendedStartRankId ==
+              data.orderedRankIds[data.passedPrefixLength] &&
+            nonEmptyString(data.recommendedStartGateId, 128)
+          )
+        );
+    }
+
+    function validLevelPlacementAnswer(answer, expectedQuestionId) {
+      return answer is map &&
+        answer.keys().hasOnly([
+          'questionId', 'rankId', 'gateId', 'contentWordId', 'wordKey',
+          'selectedQuestionId', 'correct'
+        ]) &&
+        answer.keys().hasAll([
+          'questionId', 'rankId', 'gateId', 'contentWordId', 'wordKey',
+          'selectedQuestionId', 'correct'
+        ]) &&
+        answer.questionId == expectedQuestionId &&
+        nonEmptyString(answer.rankId, 128) &&
+        nonEmptyString(answer.gateId, 128) &&
+        nonEmptyString(answer.contentWordId, 128) &&
+        nonEmptyString(answer.wordKey, 240) &&
+        nonEmptyString(answer.selectedQuestionId, 500) &&
+        answer.correct is bool &&
+        answer.correct == (answer.selectedQuestionId == answer.questionId);
+    }
+
+    function validLevelPlacementSession(data, worldId, assessmentId) {
+      return data.keys().hasOnly([
+          'assessmentId', 'worldId', 'cefrLevel', 'status', 'assessmentSeed',
+          'orderedQuestionIds', 'selectedContentWordIds', 'selectedWords',
+          'answers', 'currentQuestionIndex', 'correctCount', 'placementVersion',
+          'perRankStats', 'ambiguousRankIds', 'recommendedStartRankId',
+          'recommendedStartGateId', 'passedRankIds', 'passedPrefixLength',
+          'passedLevel', 'orderedRankIds', 'rankTitles', 'rankFirstGateIds',
+          'rankCoverage', 'adaptiveReserveIdsByRank', 'adaptiveRound',
+          'adaptiveRankIds', 'saveWordChoice', 'saveWordPendingIds',
+          'saveWordSavedIds', 'saveWordFailures', 'saveWordSummary',
+          'source', 'suppressRewards', 'startedAt', 'updatedAt',
+          'answersCompletedAt', 'resultApplied', 'nextCefrLevel',
+          'resultStartRankId', 'resultStartGateId',
+          'resultUnlockedRankIds', 'resultUnlockedGateIds',
+          'resultClearedGateIds', 'completedCurrentContent', 'assessedAt',
+          'assessmentMode', 'previousAssessmentId', 'testedRankIds',
+          'assessedRankIds', 'assessedRankVersions', 'publishedRankSetHash',
+          'rankVersions', 'wordsSaveCompletedAt', 'pausedAt', 'resumedAt',
+          'completedAt', 'abandonedAt'
+        ]) &&
+        data.keys().hasAll([
+          'assessmentId', 'worldId', 'cefrLevel', 'status', 'assessmentSeed',
+          'orderedQuestionIds', 'selectedContentWordIds', 'selectedWords',
+          'answers', 'currentQuestionIndex', 'correctCount', 'placementVersion',
+          'perRankStats', 'ambiguousRankIds', 'recommendedStartRankId',
+          'recommendedStartGateId', 'passedRankIds', 'passedPrefixLength',
+          'passedLevel', 'orderedRankIds', 'rankTitles', 'rankFirstGateIds',
+          'rankCoverage', 'adaptiveReserveIdsByRank', 'adaptiveRound',
+          'adaptiveRankIds', 'saveWordChoice', 'saveWordPendingIds',
+          'saveWordSavedIds', 'saveWordFailures', 'saveWordSummary',
+          'source', 'suppressRewards', 'startedAt', 'updatedAt'
+        ]) &&
+        data.assessmentId == assessmentId &&
+        data.worldId == worldId &&
+        validClassifiedCefrLevel(data.cefrLevel) &&
+        validLevelPlacementStatus(data.status) &&
+        nonEmptyString(data.assessmentSeed, 1000) &&
+        data.orderedQuestionIds is list &&
+        data.orderedQuestionIds.size() > 0 &&
+        data.orderedQuestionIds.size() <= 24 &&
+        data.orderedQuestionIds.toSet().size() == data.orderedQuestionIds.size() &&
+        data.selectedContentWordIds is list &&
+        data.selectedContentWordIds.size() > 0 &&
+        data.selectedContentWordIds.size() <= 100 &&
+        data.selectedContentWordIds.toSet().size() == data.selectedContentWordIds.size() &&
+        data.selectedWords is list &&
+        data.selectedWords.size() == data.selectedContentWordIds.size() &&
+        data.answers is list &&
+        data.answers.size() == data.currentQuestionIndex &&
+        data.currentQuestionIndex is int &&
+        data.currentQuestionIndex >= 0 &&
+        data.currentQuestionIndex <= data.orderedQuestionIds.size() &&
+        data.correctCount is int &&
+        data.correctCount >= 0 &&
+        data.correctCount <= data.answers.size() &&
+        (data.placementVersion == 1 || data.placementVersion == 2) &&
+        (
+          data.placementVersion == 1 ||
+          (
+            (data.assessmentMode == 'full-level' || data.assessmentMode == 'new-ranks') &&
+            data.previousAssessmentId is string &&
+            data.previousAssessmentId.size() <= 500 &&
+            data.testedRankIds is list &&
+            data.testedRankIds == data.orderedRankIds &&
+            data.assessedRankIds is list &&
+            data.assessedRankIds.toSet().hasAll(data.testedRankIds.toSet()) &&
+            data.assessedRankIds.size() <= 500 &&
+            data.assessedRankVersions is map &&
+            nonEmptyString(data.publishedRankSetHash, 100) &&
+            data.rankVersions is map
+          )
+        ) &&
+        data.perRankStats is map &&
+        data.ambiguousRankIds is list &&
+        data.recommendedStartRankId is string &&
+        data.recommendedStartGateId is string &&
+        data.passedLevel is bool &&
+        data.orderedRankIds is list &&
+        data.orderedRankIds.size() > 0 && data.orderedRankIds.size() <= 100 &&
+        data.orderedRankIds.toSet().size() == data.orderedRankIds.size() &&
+        data.rankTitles is map &&
+        data.rankFirstGateIds is map &&
+        data.rankCoverage is map &&
+        data.adaptiveReserveIdsByRank is map &&
+        data.adaptiveRound is int && data.adaptiveRound >= 0 &&
+          data.adaptiveRound <= 1 &&
+        data.adaptiveRankIds is list &&
+        validLevelPlacementSaveChoice(data.saveWordChoice) &&
+        data.saveWordPendingIds is list &&
+        data.saveWordSavedIds is list &&
+        data.saveWordFailures is list &&
+        data.saveWordSummary is map &&
+        data.source == 'level-placement' &&
+        data.suppressRewards == true &&
+        data.startedAt is timestamp &&
+        data.updatedAt is timestamp &&
+        worldPublished(worldId);
+    }
+
+    function levelPlacementSessionIsCurrent(uid, worldId, data, assessmentId) {
+      let journey = getAfter(
+        /databases/$(database)/documents/users/$(uid)/contentProgress/$(worldId)
+      ).data;
+      return existsAfter(
+          /databases/$(database)/documents/users/$(uid)/contentProgress/$(worldId)
+        ) &&
+        journey.status == 'active' &&
+        journey.activeLevelPlacementAssessmentId == assessmentId &&
+        journey.activeLevelPlacementCefrLevel == data.cefrLevel &&
+        (
+          journeyCanStartCefrLevel(journey, data.cefrLevel) ||
+          (
+            data.get('assessmentMode', '') == 'new-ranks' &&
+            data.cefrLevel in journey.get('passedCefrLevels', [])
+          )
+        );
+    }
+
+    function validLevelPlacementSessionCreate(data, uid, worldId, assessmentId) {
+      return validLevelPlacementSession(data, worldId, assessmentId) &&
+        data.status == 'active' &&
+        data.currentQuestionIndex == 0 &&
+        data.answers.size() == 0 &&
+        data.correctCount == 0 &&
+        data.adaptiveRound == 0 &&
+        data.passedPrefixLength == 0 &&
+        data.passedRankIds == [] &&
+        data.passedLevel == false &&
+        data.recommendedStartRankId == '' &&
+        data.recommendedStartGateId == '' &&
+        data.saveWordChoice == 'undecided' &&
+        data.saveWordPendingIds == [] &&
+        data.saveWordSavedIds == [] &&
+        data.saveWordFailures == [] &&
+        data.startedAt == request.time &&
+        data.updatedAt == request.time &&
+        !('resultApplied' in data) &&
+        !('completedAt' in data) &&
+        !('abandonedAt' in data) &&
+        levelPlacementSessionIsCurrent(uid, worldId, data, assessmentId);
+    }
+
+    function validLevelPlacementAnswerUpdate(before, after, uid, worldId, assessmentId) {
+      let answer = after.answers[before.answers.size()];
+      return before.status == 'active' &&
+        after.diff(before).affectedKeys().hasOnly([
+          'status', 'orderedQuestionIds', 'answers', 'currentQuestionIndex',
+          'correctCount', 'perRankStats', 'ambiguousRankIds',
+          'recommendedStartRankId', 'recommendedStartGateId', 'passedRankIds',
+          'passedPrefixLength', 'passedLevel', 'adaptiveRound',
+          'adaptiveRankIds', 'answersCompletedAt', 'resultApplied', 'updatedAt'
+        ]) &&
+        after.answers.size() == before.answers.size() + 1 &&
+        after.currentQuestionIndex == before.currentQuestionIndex + 1 &&
+        validLevelPlacementAnswer(
+          answer,
+          before.orderedQuestionIds[before.currentQuestionIndex]
+        ) &&
+        after.correctCount == before.correctCount + (answer.correct ? 1 : 0) &&
+        (
+          after.orderedQuestionIds == before.orderedQuestionIds ||
+          (
+            before.currentQuestionIndex + 1 == before.orderedQuestionIds.size() &&
+            before.adaptiveRound == 0 &&
+            after.adaptiveRound == 1 &&
+            after.orderedQuestionIds.hasAll(before.orderedQuestionIds) &&
+            after.orderedQuestionIds.size() > before.orderedQuestionIds.size() &&
+            after.orderedQuestionIds.size() <= before.orderedQuestionIds.size() + 2
+          )
+        ) &&
+        (
+          (
+            after.status == 'active' &&
+            after.currentQuestionIndex < after.orderedQuestionIds.size() &&
+            !('answersCompletedAt' in after)
+          ) ||
+          (
+            after.status == 'awaiting-decision' &&
+            after.currentQuestionIndex == after.orderedQuestionIds.size() &&
+            after.answersCompletedAt == request.time &&
+            after.resultApplied == false
+          )
+        ) &&
+        after.updatedAt == request.time &&
+        (after.status == 'active' || validLevelPlacementPrefix(after)) &&
+        levelPlacementSessionIsCurrent(uid, worldId, after, assessmentId);
+    }
+
+    function validLevelPlacementDecisionApply(before, after, uid, worldId, assessmentId, decisionKind) {
+      let resumesCompletedResult = before.status == 'paused' &&
+        before.currentQuestionIndex == before.orderedQuestionIds.size() &&
+        before.answers.size() == before.orderedQuestionIds.size() &&
+        before.answersCompletedAt is timestamp;
+      let journey = getAfter(
+        /databases/$(database)/documents/users/$(uid)/contentProgress/$(worldId)
+      ).data;
+      return (
+        (
+          decisionKind == 'result' &&
+          after.status == 'awaiting-decision' &&
+          after.diff(before).affectedKeys().hasOnly([
+            'status', 'resumedAt', 'resultApplied', 'nextCefrLevel',
+            'resultStartRankId', 'resultStartGateId', 'resultUnlockedRankIds',
+            'resultUnlockedGateIds', 'resultClearedGateIds',
+            'completedCurrentContent', 'assessedAt', 'updatedAt'
+          ]) &&
+          (!resumesCompletedResult || after.resumedAt == request.time) &&
+          (
+            after.placementVersion == 1 ||
+            (
+              after.resultClearedGateIds is list &&
+              after.resultClearedGateIds.toSet().size() == after.resultClearedGateIds.size() &&
+              after.resultUnlockedGateIds.toSet().hasAll(after.resultClearedGateIds.toSet()) &&
+              after.completedCurrentContent is bool &&
+              after.assessedAt == request.time
+            )
+          ) &&
+          journey.levelPlacementStatus == 'awaiting-decision'
+        ) ||
+        (
+          decisionKind == 'outcome' &&
+          after.status == 'completed' &&
+          after.diff(before).affectedKeys().hasOnly([
+            'status', 'resultApplied', 'nextCefrLevel', 'resultStartRankId',
+            'resultStartGateId', 'resultUnlockedRankIds',
+            'resultUnlockedGateIds', 'resultClearedGateIds',
+            'completedCurrentContent', 'assessedAt', 'completedAt', 'updatedAt'
+          ]) &&
+          after.completedAt == request.time && after.assessedAt == request.time &&
+          after.resultClearedGateIds is list &&
+          after.resultClearedGateIds.toSet().size() == after.resultClearedGateIds.size() &&
+          after.resultUnlockedGateIds.toSet().hasAll(after.resultClearedGateIds.toSet()) &&
+          after.completedCurrentContent is bool &&
+          journey.levelPlacementStatus == 'completed' &&
+          journey.activeLevelPlacementAssessmentId == '' &&
+          journey.activeLevelPlacementCefrLevel == '' &&
+          journey.get('levelPlacementAssessmentIds', {})[after.cefrLevel] == assessmentId
+        )
+        ) &&
+        (before.status == 'awaiting-decision' || resumesCompletedResult) &&
+        before.get('resultApplied', false) == false &&
+        after.resultApplied == true &&
+        (after.nextCefrLevel == '' || validClassifiedCefrLevel(after.nextCefrLevel)) &&
+        after.resultUnlockedRankIds is list &&
+        after.resultUnlockedRankIds.toSet().size() == after.resultUnlockedRankIds.size() &&
+        after.resultUnlockedRankIds.hasAll(after.passedRankIds) &&
+        after.resultUnlockedRankIds.size() <= after.passedRankIds.size() + 1 &&
+        after.resultUnlockedGateIds is list &&
+        after.resultUnlockedGateIds.toSet().size() == after.resultUnlockedGateIds.size() &&
+        (after.resultStartRankId == '' || after.resultStartRankId in after.resultUnlockedRankIds) &&
+        (after.resultStartGateId == '' || after.resultStartGateId in after.resultUnlockedGateIds) &&
+        after.updatedAt == request.time;
+    }
+
+    function validLevelPlacementSaveUpdate(before, after) {
+      return (before.status == 'awaiting-decision' || before.status == 'paused' ||
+          before.status == 'completed') &&
+        after.status == before.status &&
+        after.diff(before).affectedKeys().hasOnly([
+          'saveWordChoice', 'saveWordPendingIds', 'saveWordSavedIds',
+          'saveWordFailures', 'saveWordSummary', 'wordsSaveCompletedAt', 'updatedAt'
+        ]) &&
+        validLevelPlacementSaveChoice(after.saveWordChoice) &&
+        after.saveWordChoice != 'undecided' &&
+        (before.saveWordChoice == 'undecided' ||
+          after.saveWordChoice == before.saveWordChoice) &&
+        after.orderedQuestionIds.toSet().hasAll(after.saveWordPendingIds.toSet()) &&
+        after.orderedQuestionIds.toSet().hasAll(after.saveWordSavedIds.toSet()) &&
+        after.saveWordPendingIds.toSet().intersection(
+          after.saveWordSavedIds.toSet()
+        ).size() == 0 &&
+        after.updatedAt == request.time;
+    }
+
+    function validLevelPlacementClose(before, after, uid, worldId) {
+      return after.diff(before).affectedKeys().hasOnly([
+          'status', 'pausedAt', 'resumedAt', 'completedAt', 'abandonedAt', 'updatedAt'
+        ]) &&
+        after.updatedAt == request.time &&
+        (
+          (
+            (before.status == 'active' || before.status == 'submitting' ||
+              before.status == 'awaiting-decision' || before.status == 'paused') &&
+            after.status == 'paused' && after.pausedAt == request.time
+          ) ||
+          (
+            before.status == 'paused' && after.status == 'active' &&
+            after.resumedAt == request.time
+          ) ||
+          (
+            (before.status == 'awaiting-decision' || before.status == 'paused') &&
+            after.status == 'completed' && after.completedAt == request.time
+          ) ||
+          (
+            (before.status == 'active' || before.status == 'awaiting-decision' ||
+              before.status == 'paused') &&
+            after.status == 'abandoned' && after.abandonedAt == request.time
+          )
+        ) &&
+        getAfter(
+          /databases/$(database)/documents/users/$(uid)/contentProgress/$(worldId)
+        ).data.levelPlacementStatus == after.status;
+    }
+
+    function validQuizEvidenceSession(data, sessionId) {
+      return data.keys().hasOnly([
+          'sessionId', 'status', 'mode', 'sourceType', 'privateWorldId',
+          'wordKeys', 'correctWordKeys', 'totalCount', 'correctCount',
+          'evidenceVersion', 'completedAt'
+        ]) && data.keys().size() == 11 &&
+        data.sessionId == sessionId &&
+        nonEmptyString(data.sessionId, 220) &&
+        data.status == 'completed' &&
+        (data.mode == 'timeAttack' || data.mode == 'scramble') &&
+        (data.sourceType == 'personal' || data.sourceType == 'private-world') &&
+        data.privateWorldId is string && data.privateWorldId.size() <= 500 &&
+        (data.sourceType != 'private-world' || nonEmptyString(data.privateWorldId, 500)) &&
+        data.wordKeys is list && data.wordKeys.size() > 0 && data.wordKeys.size() <= 2000 &&
+        data.wordKeys.toSet().size() == data.wordKeys.size() &&
+        data.correctWordKeys is list && data.correctWordKeys.size() <= data.wordKeys.size() &&
+        data.correctWordKeys.toSet().size() == data.correctWordKeys.size() &&
+        data.wordKeys.hasAll(data.correctWordKeys) &&
+        data.totalCount == data.wordKeys.size() &&
+        data.correctCount == data.correctWordKeys.size() &&
+        (data.evidenceVersion == 1 || data.evidenceVersion == 2) &&
+        data.completedAt == request.time;
+    }
+
+    function legacyEvidenceIntervalSatisfied(canonical) {
+      let count = canonical.get('eligibleEvidenceCount', 0);
+      let lastAt = canonical.get('lastEligibleEvidenceAt', null);
+      return count == 0 ||
+        (count == 1 && lastAt is timestamp &&
+          lastAt <= request.time - duration.value(24, 'h')) ||
+        (count == 2 && lastAt is timestamp &&
+          lastAt <= request.time - duration.value(72, 'h'));
+    }
+
+    function v2EvidenceIntervalSatisfied(canonical, data) {
+      let count = canonical.get('eligibleEvidenceCount', 0);
+      let lastAt = canonical.get('lastEligibleEvidenceAt', null);
+      return count == 0 ||
+        (count == 1 && lastAt is timestamp &&
+          lastAt <= request.time - duration.value(2, 'h')) ||
+        (count == 2 && lastAt is timestamp &&
+          lastAt <= request.time - duration.value(30, 'm') &&
+          (
+            canonical.get('evidenceVersion', 1) == 1 ||
+            data.localDayKey > canonical.get('lastEvidenceLocalDayKey', data.localDayKey)
+          ));
+    }
+
+    function validEvidenceEvent(data, uid, wordKey, eventId) {
+      let canonical = get(
+        /databases/$(database)/documents/users/$(uid)/contentWords/$(wordKey)
+      ).data;
+      let session = get(
+        /databases/$(database)/documents/users/$(uid)/quizEvidenceSessions/$(data.sessionId)
+      ).data;
+      let legacy = get(
+        /databases/$(database)/documents/users/$(uid)/words/$(canonical.legacyWordId)
+      ).data;
+      return data.keys().hasOnly([
+          'eventId', 'sessionId', 'wordKey', 'sourceType', 'privateWorldId',
+          'membershipWordId', 'mode', 'correct', 'completed', 'sequence',
+          'evidenceVersion', 'timezoneOffsetMinutes', 'localDayKey', 'occurredAt'
+        ]) &&
+        data.keys().hasAll([
+          'eventId', 'sessionId', 'wordKey', 'sourceType', 'privateWorldId',
+          'membershipWordId', 'mode', 'correct', 'completed', 'sequence',
+          'evidenceVersion', 'occurredAt'
+        ]) &&
+        data.eventId == eventId &&
+        data.wordKey == wordKey &&
+        data.correct == true && data.completed == true &&
+        (data.evidenceVersion == 1 || data.evidenceVersion == 2) &&
+        data.occurredAt == request.time &&
+        data.sequence == canonical.get('eligibleEvidenceCount', 0) + 1 &&
+        data.sequence <= 3 &&
+        (
+          (
+            data.evidenceVersion == 1 &&
+            data.eventId == 'e1~' + uid + '~' + data.sessionId + '~' + wordKey &&
+            !('timezoneOffsetMinutes' in data) && !('localDayKey' in data) &&
+            legacyEvidenceIntervalSatisfied(canonical)
+          ) ||
+          (
+            data.evidenceVersion == 2 &&
+            data.eventId == 'e2~' + uid + '~' + data.sessionId + '~' + wordKey &&
+            data.timezoneOffsetMinutes is int &&
+            data.timezoneOffsetMinutes >= -840 && data.timezoneOffsetMinutes <= 840 &&
+            data.localDayKey is int &&
+            (
+              !('evidenceTimezoneOffsetMinutes' in canonical) ||
+              data.timezoneOffsetMinutes == canonical.evidenceTimezoneOffsetMinutes
+            ) &&
+            v2EvidenceIntervalSatisfied(canonical, data)
+          )
+        ) &&
+        session.status == 'completed' &&
+        session.evidenceVersion == data.evidenceVersion &&
+        session.sourceType == data.sourceType &&
+        session.mode == data.mode &&
+        wordKey in session.correctWordKeys &&
+        (
+          (
+            data.sourceType == 'personal' &&
+            legacy.get('personalDictionaryState', 'active') == 'active'
+          ) ||
+          (
+            data.sourceType == 'private-world' &&
+            session.privateWorldId == data.privateWorldId &&
+            nonEmptyString(data.membershipWordId, 500) &&
+            existsAfter(
+              /databases/$(database)/documents/users/$(uid)/customWorlds/$(data.privateWorldId)/words/$(data.membershipWordId)
+            ) &&
+            getAfter(
+              /databases/$(database)/documents/users/$(uid)/customWorlds/$(data.privateWorldId)/words/$(data.membershipWordId)
+            ).data.wordKey == wordKey
+          )
+        );
+    }
+
+    function validEvidenceSummaryUpdate(before, after, uid, wordKey) {
+      let event = getAfter(
+        /databases/$(database)/documents/users/$(uid)/contentWords/$(wordKey)/evidence/$(after.lastEvidenceEventId)
+      ).data;
+      return after.diff(before).affectedKeys().hasOnly([
+          'eligibleEvidenceCount', 'lastEligibleEvidenceAt',
+          'lastEvidenceEventId', 'evidenceVersion',
+          'evidenceTimezoneOffsetMinutes', 'lastEvidenceLocalDayKey', 'updatedAt'
+        ]) &&
+        after.eligibleEvidenceCount == before.get('eligibleEvidenceCount', 0) + 1 &&
+        after.eligibleEvidenceCount <= 3 &&
+        after.lastEligibleEvidenceAt == request.time &&
+        nonEmptyString(after.lastEvidenceEventId, 500) &&
+        (after.evidenceVersion == 1 || after.evidenceVersion == 2) &&
+        (
+          (
+            after.evidenceVersion == 1 &&
+            after.get('evidenceTimezoneOffsetMinutes', null) ==
+              before.get('evidenceTimezoneOffsetMinutes', null) &&
+            after.get('lastEvidenceLocalDayKey', null) ==
+              before.get('lastEvidenceLocalDayKey', null)
+          ) ||
+          (
+            after.evidenceVersion == 2 &&
+            after.evidenceTimezoneOffsetMinutes == event.timezoneOffsetMinutes &&
+            after.lastEvidenceLocalDayKey == event.localDayKey &&
+            (
+              !('evidenceTimezoneOffsetMinutes' in before) ||
+              after.evidenceTimezoneOffsetMinutes == before.evidenceTimezoneOffsetMinutes
+            )
+          )
+        ) &&
+        after.updatedAt == request.time &&
+        event.wordKey == wordKey &&
+        event.eventId == after.lastEvidenceEventId &&
+        event.sequence == after.eligibleEvidenceCount &&
+        event.occurredAt == request.time;
+    }
+
+    function journeyAllowsGate(uid, worldId, rankId, gateId) {
+      return existsAfter(
+          /databases/$(database)/documents/users/$(uid)/contentProgress/$(worldId)
+        ) &&
+        getAfter(
+          /databases/$(database)/documents/users/$(uid)/contentProgress/$(worldId)
+        ).data.status == 'active' &&
+        existsAfter(
+          /databases/$(database)/documents/users/$(uid)/meta/active_content_journey
+        ) &&
+        getAfter(
+          /databases/$(database)/documents/users/$(uid)/meta/active_content_journey
+        ).data.worldId == worldId &&
+        rankId in getAfter(
+          /databases/$(database)/documents/users/$(uid)/contentProgress/$(worldId)
+        ).data.unlockedRankIds &&
+        gateId in getAfter(
+          /databases/$(database)/documents/users/$(uid)/contentProgress/$(worldId)
+        ).data.unlockedGateIds &&
+        !(gateId in getAfter(
+          /databases/$(database)/documents/users/$(uid)/contentProgress/$(worldId)
+        ).data.get('levelPlacementClearedGateIds', []));
+    }
+
+    function validLoadedGateSnapshot(data) {
+      return data.loadedAt is timestamp &&
+        data.wordCountAtLoad is int &&
+        data.wordCountAtLoad >= 0 && data.wordCountAtLoad <= 2000 &&
+        data.contentVersion is int && data.contentVersion >= 1 &&
+        data.snapshotVersion is int && data.snapshotVersion >= 1 &&
+        data.loadedContentWordIds is list && data.loadedContentWordIds.size() <= 2000 &&
+        data.loadedWordKeys is list && data.loadedWordKeys.size() <= 2000 &&
+        data.nextRankId is string && data.nextRankId.size() <= 128 &&
+        data.nextGateId is string && data.nextGateId.size() <= 128 &&
+        data.loadStrategy == 'deterministic-source-docs-v1' &&
+        nonEmptyString(data.operationId, 180);
+    }
+
+    function validPlacementGateScore(data) {
+      return nonEmptyString(data.placementAssessmentId, 500) &&
+        data.placementScore is number &&
+        data.placementCorrect is int && data.placementTotal is int &&
+        data.placementTotal > 0 && data.placementCorrect >= 0 &&
+        data.placementCorrect <= data.placementTotal &&
+        data.placementScore * data.placementTotal == data.placementCorrect;
+    }
+
+    function validLevelPlacementGateScore(data) {
+      return nonEmptyString(data.levelPlacementAssessmentId, 500) &&
+        data.levelPlacementScore is number &&
+        data.levelPlacementScore >= 0 && data.levelPlacementScore <= 1;
+    }
+
+    function validGateProgress(data, worldId, rankId, gateId) {
+      return data.keys().hasOnly([
+          'worldId', 'rankId', 'gateId', 'status', 'journeyVersion',
+          'lastActivityAt', 'readyEvidenceCount', 'clearAttempts',
+          'loadedAt', 'wordCountAtLoad', 'contentVersion', 'snapshotVersion',
+          'loadedContentWordIds', 'loadedWordKeys', 'nextRankId', 'nextGateId',
+          'loadStrategy', 'operationId', 'masteryComplete',
+          'readyWordCount', 'requiredWordCount', 'needsEvidenceWordCount',
+          'availableForReviewNowCount', 'waitingLaterTodayCount',
+          'waitingNextDayCount', 'readinessNextAt',
+          'readinessTimezoneOffsetMinutes',
+          'readinessVersion', 'readyAt', 'activeClearAttemptId',
+          'lastClearAttemptId', 'lastClearResult', 'clearScore',
+          'clearCorrect', 'clearTotal',
+          'clearedAt', 'clearedBy', 'placementScore',
+          'placementCorrect', 'placementTotal', 'placementAssessmentId',
+          'levelPlacementAssessmentId', 'levelPlacementScore',
+          'placementClearedWithoutLoad'
+        ]) &&
+        data.keys().hasAll([
+          'worldId', 'rankId', 'gateId', 'status', 'journeyVersion',
+          'lastActivityAt', 'readyEvidenceCount', 'clearAttempts'
+        ]) &&
+        data.worldId == worldId &&
+        data.rankId == rankId &&
+        data.gateId == gateId &&
+        validJourneyGateStatus(data.status) &&
+        data.journeyVersion == 1 &&
+        data.lastActivityAt == request.time &&
+        data.readyEvidenceCount is int && data.readyEvidenceCount >= 0 &&
+        data.clearAttempts is int && data.clearAttempts >= 0 &&
+        optionalNonNegativeInt(data, 'readyWordCount') &&
+        optionalNonNegativeInt(data, 'requiredWordCount') &&
+        optionalNonNegativeInt(data, 'needsEvidenceWordCount') &&
+        optionalNonNegativeInt(data, 'availableForReviewNowCount') &&
+        optionalNonNegativeInt(data, 'waitingLaterTodayCount') &&
+        optionalNonNegativeInt(data, 'waitingNextDayCount') &&
+        optionalTime(data, 'readinessNextAt') &&
+        (!('readinessTimezoneOffsetMinutes' in data) ||
+          (data.readinessTimezoneOffsetMinutes is int &&
+            data.readinessTimezoneOffsetMinutes >= -840 &&
+            data.readinessTimezoneOffsetMinutes <= 840)) &&
+        (!('readinessVersion' in data) ||
+          data.readinessVersion == 1 || data.readinessVersion == 2) &&
+        optionalTime(data, 'readyAt') &&
+        optionalString(data, 'activeClearAttemptId', 500) &&
+        optionalString(data, 'lastClearAttemptId', 500) &&
+        (!('lastClearResult' in data) ||
+          data.lastClearResult == 'passed' || data.lastClearResult == 'failed') &&
+        optionalNumber(data, 'clearScore') &&
+        optionalNonNegativeInt(data, 'clearCorrect') &&
+        optionalNonNegativeInt(data, 'clearTotal') &&
+        optionalBool(data, 'masteryComplete') &&
+        (
+          (
+            data.status == 'available' &&
+            !('loadedAt' in data) &&
+            !('wordCountAtLoad' in data) &&
+            !('loadedContentWordIds' in data) &&
+            !('loadedWordKeys' in data) &&
+            !('nextRankId' in data) &&
+            !('nextGateId' in data) &&
+            !('clearedAt' in data) &&
+            !('clearedBy' in data) &&
+            !('placementAssessmentId' in data)
+          ) ||
+          (
+            data.status == 'cleared' &&
+            data.clearedBy == 'level-placement' &&
+            data.clearedAt is timestamp &&
+            validLevelPlacementGateScore(data) &&
+            data.placementClearedWithoutLoad == true &&
+            !('loadedAt' in data) && !('wordCountAtLoad' in data) &&
+            !('loadedContentWordIds' in data) && !('loadedWordKeys' in data)
+          ) ||
+          (
+            (data.status == 'learning' || data.status == 'ready' || data.status == 'cleared') &&
+            data.keys().hasAll([
+              'loadedAt', 'wordCountAtLoad', 'contentVersion', 'snapshotVersion',
+              'loadedContentWordIds', 'loadedWordKeys', 'nextRankId',
+              'nextGateId', 'loadStrategy', 'operationId'
+            ]) &&
+            validLoadedGateSnapshot(data) &&
+            data.readyEvidenceCount <= data.wordCountAtLoad &&
+            (!('readyWordCount' in data) ||
+              data.readyWordCount == data.readyEvidenceCount) &&
+            (!('requiredWordCount' in data) ||
+              data.requiredWordCount == data.wordCountAtLoad) &&
+            (!('needsEvidenceWordCount' in data) ||
+              data.needsEvidenceWordCount ==
+                data.get('requiredWordCount', data.wordCountAtLoad) -
+                data.get('readyWordCount', data.readyEvidenceCount)) &&
+            (
+              (
+                data.status == 'learning' &&
+                !('clearedAt' in data) &&
+                !('clearedBy' in data) &&
+                (
+                  !('placementAssessmentId' in data) ||
+                  validPlacementGateScore(data)
+                )
+              ) ||
+              (
+                data.status == 'ready' &&
+                data.readyEvidenceCount == data.wordCountAtLoad &&
+                data.wordCountAtLoad > 0 &&
+                data.readyAt is timestamp &&
+                !('clearedAt' in data) &&
+                !('clearedBy' in data)
+              ) ||
+              (
+                data.status == 'cleared' &&
+                (
+                  (
+                    !('clearedBy' in data) &&
+                    !('placementAssessmentId' in data)
+                  ) ||
+                  (
+                    data.clearedBy == 'placement' &&
+                    data.clearedAt is timestamp &&
+                    validPlacementGateScore(data)
+                  ) ||
+                  (
+                    data.clearedBy == 'level-placement' &&
+                    data.clearedAt is timestamp &&
+                    validLevelPlacementGateScore(data) &&
+                    data.placementClearedWithoutLoad == false
+                  )
+                )
+              )
+            )
+          )
+        ) &&
+        worldPublished(worldId) &&
+        rankPublished(worldId, rankId) &&
+        gatePublished(worldId, rankId, gateId);
+    }
+
+    function validAvailableGateProgress(data, worldId, rankId, gateId) {
+      return data.keys().hasOnly([
+          'worldId', 'rankId', 'gateId', 'status', 'journeyVersion',
+          'lastActivityAt', 'readyEvidenceCount', 'clearAttempts'
+        ]) && data.keys().size() == 8 &&
+        data.worldId == worldId && data.rankId == rankId && data.gateId == gateId &&
+        data.status == 'available' && data.journeyVersion == 1 &&
+        data.lastActivityAt == request.time &&
+        data.readyEvidenceCount == 0 && data.clearAttempts == 0 &&
+        worldPublished(worldId) && rankPublished(worldId, rankId) &&
+        gatePublished(worldId, rankId, gateId);
+    }
+
+    function validLevelPlacementClearedResult(data, uid, worldId, rankId, gateId) {
+      let session = getAfter(
+        /databases/$(database)/documents/users/$(uid)/contentProgress/$(worldId)/levelPlacementSessions/$(data.levelPlacementAssessmentId)
+      ).data;
+      return data.status == 'cleared' && data.clearedBy == 'level-placement' &&
+        data.clearedAt == request.time &&
+        data.worldId == worldId && data.rankId == rankId && data.gateId == gateId &&
+        data.journeyVersion == 1 && data.lastActivityAt == request.time &&
+        data.readyEvidenceCount is int && data.readyEvidenceCount >= 0 &&
+        data.clearAttempts is int && data.clearAttempts >= 0 &&
+        validLevelPlacementGateScore(data) &&
+        data.placementClearedWithoutLoad is bool &&
+        worldPublished(worldId) && rankPublished(worldId, rankId) &&
+        gatePublished(worldId, rankId, gateId) &&
+        (session.status == 'awaiting-decision' || session.status == 'completed') &&
+        session.resultApplied == true &&
+        rankId in session.passedRankIds && gateId in session.resultClearedGateIds &&
+        session.worldId == worldId;
+    }
+
+    function validLevelPlacementClearedProgress(data, uid, worldId, rankId, gateId) {
+      return data.keys().hasOnly([
+          'worldId', 'rankId', 'gateId', 'status', 'journeyVersion',
+          'lastActivityAt', 'readyEvidenceCount', 'clearAttempts',
+          'clearedAt', 'clearedBy', 'levelPlacementAssessmentId',
+          'levelPlacementScore', 'placementClearedWithoutLoad'
+        ]) && data.keys().size() == 13 &&
+        data.placementClearedWithoutLoad == true &&
+        validLevelPlacementClearedResult(data, uid, worldId, rankId, gateId);
+    }
+
+    function validLevelPlacementClearedUpdate(before, after, uid, worldId, rankId, gateId) {
+      return after.status == 'cleared' && after.clearedBy == 'level-placement' &&
+        (before.status == 'available' || before.status == 'learning' ||
+          before.status == 'ready' || before.status == 'cleared') &&
+        after.diff(before).affectedKeys().hasOnly([
+          'status', 'clearedAt', 'clearedBy', 'levelPlacementAssessmentId',
+          'levelPlacementScore', 'placementClearedWithoutLoad', 'lastActivityAt'
+        ]) &&
+        validLevelPlacementClearedResult(after, uid, worldId, rankId, gateId);
+    }
+
+    function validOptionalLevelPlacementGateLoad(before, after, worldId, rankId, gateId) {
+      return before.status == 'cleared' && before.clearedBy == 'level-placement' &&
+        before.get('placementClearedWithoutLoad', false) == true &&
+        !('loadedAt' in before) && after.status == 'cleared' &&
+        after.clearedBy == before.clearedBy &&
+        after.levelPlacementAssessmentId == before.levelPlacementAssessmentId &&
+        after.levelPlacementScore == before.levelPlacementScore &&
+        after.placementClearedWithoutLoad == false &&
+        after.diff(before).affectedKeys().hasOnly([
+          'lastActivityAt', 'loadedAt', 'wordCountAtLoad', 'contentVersion',
+          'snapshotVersion', 'loadedContentWordIds', 'loadedWordKeys',
+          'nextRankId', 'nextGateId', 'loadStrategy', 'operationId',
+          'readyEvidenceCount', 'readyWordCount', 'requiredWordCount',
+          'needsEvidenceWordCount', 'availableForReviewNowCount',
+          'waitingLaterTodayCount', 'waitingNextDayCount', 'readinessNextAt',
+          'readinessTimezoneOffsetMinutes', 'readinessVersion',
+          'placementClearedWithoutLoad'
+        ]) &&
+        validGateProgress(after, worldId, rankId, gateId);
+    }
+
+    function validPlacementGateResultUpdate(before, after, uid, worldId, rankId, gateId) {
+      let session = get(
+        /databases/$(database)/documents/users/$(uid)/contentProgress/$(worldId)/placementSessions/$(after.placementAssessmentId)
+      ).data;
+      return before.status == 'learning' &&
+        after.diff(before).affectedKeys().hasOnly([
+          'status', 'clearedAt', 'clearedBy', 'placementScore',
+          'placementCorrect', 'placementTotal', 'placementAssessmentId',
+          'lastActivityAt'
+        ]) &&
+        after.worldId == before.worldId &&
+        after.rankId == before.rankId &&
+        after.gateId == before.gateId &&
+        after.lastActivityAt == request.time &&
+        validPlacementGateScore(after) &&
+        session.status == 'submitting' &&
+        session.currentQuestionIndex == session.totalQuestions &&
+        session.answersComplete == true &&
+        session.rankId == rankId &&
+        session.currentGateId == gateId &&
+        after.placementCorrect == session.correctCount &&
+        after.placementTotal == session.totalQuestions &&
+        after.placementScore * session.totalQuestions ==
+          session.correctCount &&
+        placementSessionIsCurrent(
+          uid,
+          worldId,
+          session,
+          after.placementAssessmentId
+        ) &&
+        (
+          (
+            session.correctCount >= session.requiredCorrect &&
+            after.status == 'cleared' &&
+            after.get('clearedBy', '') == 'placement' &&
+            after.clearedAt == request.time
+          ) ||
+          (
+            session.correctCount < session.requiredCorrect &&
+            after.status == 'learning' &&
+            !('clearedAt' in after) &&
+            !('clearedBy' in after)
+          )
+        );
+    }
+
+    function validLearningGateProgressUpdate(before, after, worldId, rankId, gateId) {
+      return (before.status == 'available' || before.status == 'learning') &&
+        after.status == 'learning' &&
+        after.diff(before).affectedKeys().hasOnly([
+          'status', 'lastActivityAt',
+          'loadedAt', 'wordCountAtLoad', 'contentVersion', 'snapshotVersion',
+          'loadedContentWordIds', 'loadedWordKeys', 'nextRankId', 'nextGateId',
+          'loadStrategy', 'operationId', 'readyWordCount',
+          'requiredWordCount', 'needsEvidenceWordCount', 'readinessVersion',
+          'readyEvidenceCount', 'availableForReviewNowCount',
+          'waitingLaterTodayCount', 'waitingNextDayCount', 'readinessNextAt',
+          'readinessTimezoneOffsetMinutes'
+        ]) &&
+        after.worldId == worldId &&
+        after.rankId == rankId &&
+        after.gateId == gateId &&
+        after.journeyVersion == 1 &&
+        after.lastActivityAt == request.time &&
+        after.get('readyEvidenceCount', 0) == after.get('readyWordCount', 0) &&
+        after.clearAttempts == before.clearAttempts &&
+        validLoadedGateSnapshot(after) &&
+        after.get('readyWordCount', 0) >= 0 &&
+        after.get('readyWordCount', 0) <= after.loadedWordKeys.size() &&
+        after.get('requiredWordCount', after.loadedWordKeys.size()) ==
+          after.loadedWordKeys.size() &&
+        after.get(
+          'needsEvidenceWordCount',
+          after.loadedWordKeys.size() - after.get('readyWordCount', 0)
+        ) == after.get('requiredWordCount', after.loadedWordKeys.size()) -
+          after.get('readyWordCount', 0) &&
+        (after.get('readinessVersion', 1) == 1 ||
+          after.get('readinessVersion', 1) == 2) &&
+        after.get(
+          'availableForReviewNowCount',
+          after.get(
+            'needsEvidenceWordCount',
+            after.loadedWordKeys.size() - after.get('readyWordCount', 0)
+          )
+        ) +
+          after.get('waitingLaterTodayCount', 0) +
+          after.get('waitingNextDayCount', 0) + after.get('readyWordCount', 0) ==
+            after.get('requiredWordCount', after.loadedWordKeys.size()) &&
+        optionalBool(after, 'masteryComplete') &&
+        after.get('masteryComplete', false) == before.get('masteryComplete', false) &&
+        !('clearedAt' in after) &&
+        !('clearedBy' in after);
+    }
+
+    function validGateReadinessUpdate(before, after, uid, worldId, rankId, gateId) {
+      return (before.status == 'learning' || before.status == 'ready') &&
+        (after.status == 'learning' || after.status == 'ready') &&
+        journeyAllowsGate(uid, worldId, rankId, gateId) &&
+        after.diff(before).affectedKeys().hasOnly([
+          'status', 'readyEvidenceCount', 'readyWordCount',
+          'requiredWordCount', 'needsEvidenceWordCount',
+          'availableForReviewNowCount', 'waitingLaterTodayCount',
+          'waitingNextDayCount', 'readinessNextAt',
+          'readinessTimezoneOffsetMinutes',
+          'readinessVersion', 'readyAt', 'lastActivityAt'
+        ]) &&
+        after.worldId == before.worldId &&
+        after.rankId == before.rankId &&
+        after.gateId == before.gateId &&
+        after.loadedWordKeys == before.loadedWordKeys &&
+        after.requiredWordCount == before.loadedWordKeys.size() &&
+        after.readyEvidenceCount == after.readyWordCount &&
+        after.readyWordCount >= before.get('readyWordCount', 0) &&
+        after.readyWordCount >= 0 &&
+        after.readyWordCount <= after.requiredWordCount &&
+        after.needsEvidenceWordCount == after.requiredWordCount - after.readyWordCount &&
+        (after.readinessVersion == 1 || after.readinessVersion == 2) &&
+        after.get('availableForReviewNowCount', 0) +
+          after.get('waitingLaterTodayCount', 0) +
+          after.get('waitingNextDayCount', 0) + after.readyWordCount ==
+            after.requiredWordCount &&
+        after.lastActivityAt == request.time &&
+        (
+          (
+            after.status == 'learning' &&
+            after.readyWordCount < after.requiredWordCount
+          ) ||
+          (
+            after.status == 'ready' &&
+            after.requiredWordCount > 0 &&
+            after.readyWordCount == after.requiredWordCount &&
+            after.readyAt == request.time
+          ) ||
+          (
+            before.status == 'ready' && after.status == 'ready' &&
+            after.readyAt == before.readyAt
+          )
+        );
+    }
+
+    function validGateClearAnswer(answer, expectedContentWordId, questionOrder) {
+      return answer is map &&
+        answer.keys().hasOnly([
+          'contentWordId', 'selectedContentWordId', 'correct'
+        ]) &&
+        answer.keys().hasAll([
+          'contentWordId', 'selectedContentWordId', 'correct'
+        ]) &&
+        answer.contentWordId == expectedContentWordId &&
+        nonEmptyString(answer.contentWordId, 128) &&
+        nonEmptyString(answer.selectedContentWordId, 128) &&
+        answer.selectedContentWordId in questionOrder &&
+        answer.correct == (answer.selectedContentWordId == answer.contentWordId);
+    }
+
+    function validGateClearAttemptCreate(data, uid, worldId, attemptId) {
+      let progress = getAfter(
+        /databases/$(database)/documents/users/$(uid)/contentProgress/$(worldId)/ranks/$(data.rankId)/gates/$(data.gateId)
+      ).data;
+      let journey = getAfter(
+        /databases/$(database)/documents/users/$(uid)/contentProgress/$(worldId)
+      ).data;
+      return data.keys().hasOnly([
+          'attemptId', 'worldId', 'rankId', 'gateId', 'questionOrder',
+          'answers', 'currentQuestionIndex', 'correctCount', 'totalCount',
+          'passRatio', 'requiredCorrect', 'status', 'gateClearVersion',
+          'startedAt', 'updatedAt'
+        ]) && data.keys().size() == 15 &&
+        data.attemptId == attemptId && data.worldId == worldId &&
+        nonEmptyString(data.rankId, 128) && nonEmptyString(data.gateId, 128) &&
+        data.questionOrder is list && data.questionOrder.size() > 0 &&
+        data.questionOrder.size() <= 2000 &&
+        data.questionOrder.toSet().size() == data.questionOrder.size() &&
+        data.answers is list && data.answers.size() == 0 &&
+        data.currentQuestionIndex == 0 && data.correctCount == 0 &&
+        data.totalCount == data.questionOrder.size() &&
+        data.passRatio is number && data.passRatio > 0 && data.passRatio <= 1 &&
+        data.requiredCorrect is int &&
+        data.requiredCorrect >= data.totalCount * data.passRatio &&
+        data.requiredCorrect - 1 < data.totalCount * data.passRatio &&
+        data.status == 'active' && data.gateClearVersion == 1 &&
+        data.startedAt == request.time && data.updatedAt == request.time &&
+        progress.status == 'ready' &&
+        progress.activeClearAttemptId == attemptId &&
+        journey.status == 'active' &&
+        journey.activeRankId == data.rankId &&
+        journey.activeGateId == data.gateId;
+    }
+
+    function validGateClearAnswerUpdate(before, after) {
+      let answer = after.answers[before.answers.size()];
+      return before.status == 'active' &&
+        after.diff(before).affectedKeys().hasOnly([
+          'answers', 'currentQuestionIndex', 'correctCount', 'status', 'updatedAt'
+        ]) &&
+        after.answers.size() == before.answers.size() + 1 &&
+        after.currentQuestionIndex == before.currentQuestionIndex + 1 &&
+        after.currentQuestionIndex == after.answers.size() &&
+        after.currentQuestionIndex <= after.totalCount &&
+        validGateClearAnswer(
+          answer,
+          before.questionOrder[before.currentQuestionIndex],
+          before.questionOrder
+        ) &&
+        after.correctCount == before.correctCount + (answer.correct ? 1 : 0) &&
+        after.updatedAt == request.time &&
+        (
+          (after.currentQuestionIndex < after.totalCount && after.status == 'active') ||
+          (after.currentQuestionIndex == after.totalCount && after.status == 'submitting')
+        );
+    }
+
+    function validGateClearAttemptFinish(before, after) {
+      return before.status == 'submitting' &&
+        after.diff(before).affectedKeys().hasOnly([
+          'status', 'result', 'score', 'completedAt', 'updatedAt'
+        ]) &&
+        before.currentQuestionIndex == before.totalCount &&
+        before.answers.size() == before.totalCount &&
+        after.score == after.correctCount / after.totalCount &&
+        after.completedAt == request.time && after.updatedAt == request.time &&
+        (
+          (
+            before.correctCount >= before.requiredCorrect &&
+            after.status == 'passed' && after.result == 'passed'
+          ) ||
+          (
+            before.correctCount < before.requiredCorrect &&
+            after.status == 'failed' && after.result == 'failed'
+          )
+        );
+    }
+
+    function validGateClearAttemptAbandon(before, after) {
+      return before.status == 'active' &&
+        after.diff(before).affectedKeys().hasOnly([
+          'status', 'abandonedAt', 'updatedAt'
+        ]) &&
+        after.status == 'abandoned' &&
+        after.abandonedAt == request.time && after.updatedAt == request.time;
+    }
+
+    function validGateClearStartProgressUpdate(before, after, uid, worldId, rankId, gateId) {
+      let attempt = getAfter(
+        /databases/$(database)/documents/users/$(uid)/contentProgress/$(worldId)/gateClearAttempts/$(after.activeClearAttemptId)
+      ).data;
+      return before.status == 'ready' && after.status == 'ready' &&
+        before.get('activeClearAttemptId', '') == '' &&
+        after.diff(before).affectedKeys().hasOnly([
+          'activeClearAttemptId', 'clearAttempts', 'lastActivityAt'
+        ]) &&
+        nonEmptyString(after.activeClearAttemptId, 500) &&
+        after.clearAttempts == before.clearAttempts + 1 &&
+        after.lastActivityAt == request.time &&
+        attempt.status == 'active' && attempt.worldId == worldId &&
+        attempt.rankId == rankId && attempt.gateId == gateId;
+    }
+
+    function validGateClearProgressResult(before, after, uid, worldId, rankId, gateId) {
+      let attempt = getAfter(
+        /databases/$(database)/documents/users/$(uid)/contentProgress/$(worldId)/gateClearAttempts/$(before.activeClearAttemptId)
+      ).data;
+      let journey = getAfter(
+        /databases/$(database)/documents/users/$(uid)/contentProgress/$(worldId)
+      ).data;
+      return before.status == 'ready' &&
+        nonEmptyString(before.activeClearAttemptId, 500) &&
+        after.diff(before).affectedKeys().hasOnly([
+          'status', 'activeClearAttemptId', 'lastClearAttemptId',
+          'lastClearResult', 'clearScore', 'clearCorrect', 'clearTotal',
+          'clearedBy', 'clearedAt', 'lastActivityAt'
+        ]) &&
+        after.activeClearAttemptId == '' &&
+        after.lastClearAttemptId == before.activeClearAttemptId &&
+        after.lastActivityAt == request.time &&
+        attempt.worldId == worldId && attempt.rankId == rankId && attempt.gateId == gateId &&
+        (
+          (
+            attempt.status == 'failed' &&
+            after.status == 'ready' && after.lastClearResult == 'failed' &&
+            !('clearedBy' in after) && !('clearedAt' in after)
+          ) ||
+          (
+            attempt.status == 'passed' &&
+            after.status == 'cleared' && after.lastClearResult == 'passed' &&
+            after.clearScore == attempt.score &&
+            after.clearCorrect == attempt.correctCount &&
+            after.clearTotal == attempt.totalCount &&
+            after.clearedBy == 'gate-clear' && after.clearedAt == request.time &&
+            (
+              (after.nextGateId == '' && journey.activeGateId == gateId &&
+                journey.get('contentJourneyStatus', 'in-progress') ==
+                  'completed-current-content') ||
+              (after.nextGateId != '' && journey.activeGateId == after.nextGateId &&
+                journey.activeRankId == after.nextRankId)
+            )
+          )
+        );
+    }
+
+    function validGateClearAbandonProgress(before, after, uid, worldId) {
+      let attempt = getAfter(
+        /databases/$(database)/documents/users/$(uid)/contentProgress/$(worldId)/gateClearAttempts/$(before.activeClearAttemptId)
+      ).data;
+      return before.status == 'ready' && after.status == 'ready' &&
+        after.diff(before).affectedKeys().hasOnly([
+          'activeClearAttemptId', 'lastActivityAt'
+        ]) &&
+        after.activeClearAttemptId == '' && after.lastActivityAt == request.time &&
+        attempt.status == 'abandoned';
+    }
+
+    function validPlacementGateReset(before, after, uid, worldId, rankId, gateId) {
+      let journey = getAfter(
+        /databases/$(database)/documents/users/$(uid)/contentProgress/$(worldId)
+      ).data;
+      let activeAssessmentId = get(
+        /databases/$(database)/documents/users/$(uid)/contentProgress/$(worldId)
+      ).data.activePlacementAssessmentId;
+      let session = getAfter(
+        /databases/$(database)/documents/users/$(uid)/contentProgress/$(worldId)/placementSessions/$(activeAssessmentId)
+      ).data;
+      return before.status == 'cleared' &&
+        before.clearedBy == 'placement' &&
+        after.diff(before).affectedKeys().hasOnly([
+          'status', 'lastActivityAt', 'clearedAt', 'clearedBy',
+          'placementScore', 'placementCorrect', 'placementTotal',
+          'placementAssessmentId'
+        ]) &&
+        after.status == 'learning' &&
+        after.lastActivityAt == request.time &&
+        after.worldId == before.worldId &&
+        after.rankId == before.rankId &&
+        after.gateId == before.gateId &&
+        !('clearedAt' in after) &&
+        !('clearedBy' in after) &&
+        !('placementScore' in after) &&
+        !('placementCorrect' in after) &&
+        !('placementTotal' in after) &&
+        !('placementAssessmentId' in after) &&
+        journey.placementStatus == 'declined' &&
+        journey.activeRankId == rankId &&
+        journey.activeGateId == gateId &&
+        session.status == 'abandoned';
+    }
+
+    function validJourneyContentWordSource(data, uid, canonicalId, sourceId) {
+      let journey = getAfter(
+        /databases/$(database)/documents/users/$(uid)/contentProgress/$(data.worldId)
+      ).data;
+      let activePointer = getAfter(
+        /databases/$(database)/documents/users/$(uid)/meta/active_content_journey
+      ).data;
+      let world = get(
+        /databases/$(database)/documents/content_worlds/$(data.worldId)
+      ).data;
+      let rank = get(
+        /databases/$(database)/documents/content_worlds/$(data.worldId)/ranks/$(data.rankId)
+      ).data;
+      let gate = get(
+        /databases/$(database)/documents/content_worlds/$(data.worldId)/ranks/$(data.rankId)/gates/$(data.gateId)
+      ).data;
+      let publishedWord = get(
+        /databases/$(database)/documents/content_worlds/$(data.worldId)/ranks/$(data.rankId)/gates/$(data.gateId)/words/$(data.contentWordId)
+      ).data;
+      let canonicalWord = getAfter(
+        /databases/$(database)/documents/users/$(uid)/contentWords/$(canonicalId)
+      ).data;
+      let levelSession = getAfter(
+        /databases/$(database)/documents/users/$(uid)/contentProgress/$(data.worldId)/levelPlacementSessions/$(data.get('assessmentId', 'missing'))
+      ).data;
+      return data.keys().hasOnly([
+          'worldId', 'rankId', 'gateId', 'contentWordId',
+          'addedFrom', 'operationId', 'linkedAt',
+          'placementAssessmentId', 'placementSeenAt',
+          'type', 'assessmentId', 'cefrLevel', 'placementResult'
+        ]) &&
+        data.keys().hasAll([
+          'worldId', 'rankId', 'gateId', 'contentWordId',
+          'addedFrom', 'operationId', 'linkedAt'
+        ]) &&
+        nonEmptyString(data.worldId, 128) &&
+        nonEmptyString(data.rankId, 128) &&
+        nonEmptyString(data.gateId, 128) &&
+        nonEmptyString(data.contentWordId, 128) &&
+        nonEmptyString(data.operationId, 180) &&
+        data.linkedAt == request.time &&
+        journey.status == 'active' &&
+        activePointer.worldId == data.worldId &&
+        world.status == 'published' &&
+        rank.status == 'published' &&
+        gate.status == 'published' &&
+        publishedWord.status == 'published' &&
+        publishedWord.wordKey == canonicalId &&
+        publishedWord.normalizedWord == canonicalWord.normalizedWord &&
+        (
+          (
+            sourceId ==
+              'published_' + data.worldId + '~' + data.rankId + '~' +
+              data.gateId + '~' + data.contentWordId &&
+            data.addedFrom == 'published-gate' &&
+            !('type' in data) &&
+            !('assessmentId' in data) &&
+            !('cefrLevel' in data) &&
+            !('placementResult' in data) &&
+            data.rankId in journey.unlockedRankIds &&
+            data.gateId in journey.unlockedGateIds &&
+            (
+              (
+                !('placementAssessmentId' in data) &&
+                !('placementSeenAt' in data)
+              ) ||
+              (
+                nonEmptyString(data.placementAssessmentId, 500) &&
+                data.placementSeenAt == request.time
+              )
+            )
+          ) ||
+          (
+            sourceId ==
+              'level_placement_' + data.assessmentId + '~' + data.contentWordId &&
+            data.addedFrom == 'level-placement' &&
+            data.type == 'level-placement' &&
+            nonEmptyString(data.assessmentId, 500) &&
+            validClassifiedCefrLevel(data.cefrLevel) &&
+            (data.placementResult == 'correct' ||
+              data.placementResult == 'incorrect') &&
+            !('placementAssessmentId' in data) &&
+            !('placementSeenAt' in data) &&
+            existsAfter(
+              /databases/$(database)/documents/users/$(uid)/contentProgress/$(data.worldId)/levelPlacementSessions/$(data.assessmentId)
+            ) &&
+            levelSession.assessmentId == data.assessmentId &&
+            levelSession.worldId == data.worldId &&
+            levelSession.cefrLevel == data.cefrLevel &&
+            data.contentWordId in levelSession.selectedContentWordIds &&
+            (levelSession.status == 'awaiting-decision' ||
+              levelSession.status == 'paused' ||
+              levelSession.status == 'completed')
+          )
+        );
+    }
+
+    function validPersonalContentWordSource(data, uid, canonicalId, sourceId) {
+      let canonicalWord = getAfter(
+        /databases/$(database)/documents/users/$(uid)/contentWords/$(canonicalId)
+      ).data;
+      return data.keys().hasOnly([
+          'addedFrom', 'operationId', 'linkedAt', 'customWorldId', 'importId'
+        ]) &&
+        data.keys().hasAll(['addedFrom', 'operationId', 'linkedAt']) &&
+        nonEmptyString(data.operationId, 180) &&
+        data.linkedAt == request.time &&
+        canonicalWord.canonicalId == canonicalId &&
+        canonicalWord.wordKey == canonicalId &&
+        (
+          (
+            data.addedFrom == 'manual' &&
+            sourceId == 'manual' &&
+            !('customWorldId' in data) && !('importId' in data)
+          ) ||
+          (
+            data.addedFrom == 'dictionary-search' &&
+            sourceId == 'dictionary_search' &&
+            !('customWorldId' in data) && !('importId' in data)
+          ) ||
+          (
+            data.addedFrom == 'private-world' &&
+            nonEmptyString(data.customWorldId, 500) &&
+            sourceId == 'private_world_' + data.customWorldId &&
+            !('importId' in data)
+          ) ||
+          (
+            data.addedFrom == 'import' &&
+            nonEmptyString(data.importId, 500) &&
+            sourceId == 'import_' + data.importId &&
+            !('customWorldId' in data)
+          )
+        );
+    }
+
+    function validContentWordSource(data, uid, canonicalId, sourceId) {
+      return (
+          (
+            data.get('addedFrom', '') == 'manual' ||
+            data.get('addedFrom', '') == 'dictionary-search' ||
+            data.get('addedFrom', '') == 'private-world' ||
+            data.get('addedFrom', '') == 'import'
+          ) &&
+          validPersonalContentWordSource(data, uid, canonicalId, sourceId)
+        ) ||
+        (
+          (
+            data.get('addedFrom', '') == 'published-gate' ||
+            data.get('addedFrom', '') == 'level-placement'
+          ) &&
+          validJourneyContentWordSource(data, uid, canonicalId, sourceId)
+        );
+    }
+
+    function validContentLearningWordCreate(data, uid, contentWordId) {
+      return validContentLearningWord(data, contentWordId) &&
+        nonEmptyString(data.legacyWordId, 500) &&
+        data.forgetCount == 0 &&
+        data.sourceCount == 1 &&
+        data.createdAt == request.time &&
+        data.joinedAt == request.time &&
+        data.updatedAt == request.time &&
+        data.primarySource is map &&
+        data.primarySource.keys().hasOnly([
+          'worldId', 'rankId', 'gateId', 'contentWordId',
+          'customWorldId', 'importId', 'sourceId', 'addedFrom'
+        ]) &&
+        data.primarySource.keys().hasAll(['sourceId', 'addedFrom']) &&
+        nonEmptyString(data.primarySource.sourceId, 1500) &&
+        (
+          (
+            (data.primarySource.addedFrom == 'published-gate' ||
+              data.primarySource.addedFrom == 'level-placement') &&
+            nonEmptyString(data.primarySource.worldId, 128) &&
+            nonEmptyString(data.primarySource.rankId, 128) &&
+            nonEmptyString(data.primarySource.gateId, 128) &&
+            nonEmptyString(data.primarySource.contentWordId, 128)
+          ) ||
+          (
+            (data.primarySource.addedFrom == 'manual' ||
+              data.primarySource.addedFrom == 'dictionary-search') &&
+            !('worldId' in data.primarySource) &&
+            !('customWorldId' in data.primarySource) &&
+            !('importId' in data.primarySource)
+          ) ||
+          (
+            data.primarySource.addedFrom == 'private-world' &&
+            nonEmptyString(data.primarySource.customWorldId, 500)
+          ) ||
+          (
+            data.primarySource.addedFrom == 'import' &&
+            nonEmptyString(data.primarySource.importId, 500)
+          )
+        ) &&
+        existsAfter(
+          /databases/$(database)/documents/users/$(uid)/contentWords/$(contentWordId)/sources/$(data.primarySource.sourceId)
+        );
+    }
+
+    function validAiCacheEntry(entry, expectedType) {
+      return entry is map &&
+        entry.keys().hasOnly(['type', 'meanings', 'createdAt']) &&
+        entry.keys().hasAll(['type', 'meanings', 'createdAt']) &&
+        entry.type == expectedType &&
+        entry.meanings is list &&
+        entry.meanings.size() > 0 && entry.meanings.size() <= 30 &&
+        entry.createdAt is timestamp;
+    }
+
+    function validAiCache(data) {
+      return data.keys().hasOnly([
+          'word', 'caches', 'type', 'meanings', 'meaning', 'createdAt'
+        ]) &&
+        data.keys().hasAll(['word']) &&
+        nonEmptyString(data.word, 500) &&
+        (!('caches' in data) || (
+          data.caches is map &&
+          data.caches.size() > 0 &&
+          data.caches.keys().hasOnly(['normal', 'gamer']) &&
+          (!('normal' in data.caches) || validAiCacheEntry(data.caches.normal, 'normal')) &&
+          (!('gamer' in data.caches) || validAiCacheEntry(data.caches.gamer, 'gamer'))
+        )) &&
+        (!('type' in data) || data.type == 'normal' || data.type == 'gamer') &&
+        optionalList(data, 'meanings', 30) &&
+        (!('meaning' in data) || data.meaning is string ||
+          data.meaning is list || data.meaning is map) &&
+        optionalTime(data, 'createdAt') &&
+        ('caches' in data || 'type' in data);
+    }
+
+    function preservesExistingCacheEntries(before, after) {
+      return (!('caches' in before) || !('normal' in before.caches) ||
+          ('normal' in after.caches && after.caches.normal == before.caches.normal)) &&
+        (!('caches' in before) || !('gamer' in before.caches) ||
+          ('gamer' in after.caches && after.caches.gamer == before.caches.gamer));
+    }
+
+    function newCacheEntriesUseServerTime(before, after) {
+      return (!('normal' in after.caches) ||
+          (('caches' in before && 'normal' in before.caches) ||
+            after.caches.normal.createdAt == request.time)) &&
+        (!('gamer' in after.caches) ||
+          (('caches' in before && 'gamer' in before.caches) ||
+            after.caches.gamer.createdAt == request.time));
+    }
+
+    function newCacheDocumentUsesServerTime(data) {
+      return (!('normal' in data.caches) ||
+          data.caches.normal.createdAt == request.time) &&
+        (!('gamer' in data.caches) ||
+          data.caches.gamer.createdAt == request.time);
+    }
+
+    function validSuggestion(data) {
+      return data.keys().hasOnly([
+          'word', 'ar', 'game', 'timestamp', 'userId', 'userEmail'
+        ]) && data.keys().size() == 6 &&
+        data.userId == request.auth.uid &&
+        nonEmptyString(data.word, 500) &&
+        nonEmptyString(data.ar, 2000) &&
+        data.game is string && data.game.size() <= 200 &&
+        data.userEmail is string && data.userEmail.size() <= 320 &&
+        ((!('email' in request.auth.token) && data.userEmail == '') ||
+          ('email' in request.auth.token && data.userEmail == request.auth.token.email)) &&
+        data.timestamp is timestamp && data.timestamp == request.time;
+    }
+
+    // Prepared content: public clients can only read fully published ancestry.
+    match /content_worlds/{worldId} {
+      allow read: if isAdmin() || isPublished(resource.data);
+      allow create: if isAdmin() && validWorld(request.resource.data, worldId) &&
+        validCreateAudit(request.resource.data);
+      allow update: if isAdmin() &&
+        !('_deleteLock' in resource.data) &&
+        !('_adminWorldOperation' in resource.data) &&
+        validWorld(request.resource.data, worldId) &&
+        (
+          (request.resource.data.version == resource.data.version + 1 &&
+            request.resource.data.rankCount == resource.data.rankCount &&
+            request.resource.data.gateCount == resource.data.gateCount &&
+            request.resource.data.wordCount == resource.data.wordCount) ||
+          worldCounterOnlyIncrement(resource.data, request.resource.data)
+        ) &&
+        validUpdateAudit(resource.data, request.resource.data);
+      // Recursive prepared-content deletion is backend-only so descendants
+      // cannot be orphaned by a browser deleteDoc call.
+      allow delete: if false;
+
+      match /ranks/{rankId} {
+        allow read: if isAdmin() ||
+          (isPublished(resource.data) && worldPublished(worldId));
+        allow create: if isAdmin() &&
+          worldAllowsChildMutation(worldId) &&
+          validRank(request.resource.data, worldId, rankId) &&
+          request.resource.data.version == 1 &&
+          request.resource.data.gateCount == 0 &&
+          request.resource.data.wordCount == 0 &&
+          rankCreateUpdatesWorldCount(worldId) &&
+          validCreateAudit(request.resource.data);
+        allow update: if isAdmin() &&
+          worldAllowsChildMutation(worldId) &&
+          !('_adminRankOperation' in resource.data) &&
+          !('_adminCopyOperation' in resource.data) &&
+          validRank(request.resource.data, worldId, rankId) &&
+          validRankCefrUpdate(resource.data, request.resource.data) &&
+          (
+            (request.resource.data.version == resource.data.version + 1 &&
+              request.resource.data.gateCount == resource.data.gateCount &&
+              request.resource.data.wordCount == resource.data.wordCount) ||
+            rankCounterOnlyIncrement(resource.data, request.resource.data)
+          ) &&
+          validUpdateAudit(resource.data, request.resource.data);
+        allow delete: if false;
+
+        match /gates/{gateId} {
+          allow read: if isAdmin() ||
+            (isPublished(resource.data) && worldPublished(worldId) &&
+              rankPublished(worldId, rankId));
+          allow create: if isAdmin() &&
+            rankAllowsChildMutation(worldId, rankId) &&
+            validGate(request.resource.data, worldId, rankId, gateId) &&
+            request.resource.data.version == 1 &&
+            request.resource.data.wordCount == 0 &&
+            gateCreateUpdatesAncestorCounts(worldId, rankId) &&
+            validCreateAudit(request.resource.data);
+          allow update: if isAdmin() &&
+            rankAllowsChildMutation(worldId, rankId) &&
+            !('_adminGateOperation' in resource.data) &&
+            !('_adminGateCopyOperation' in resource.data) &&
+            validGate(request.resource.data, worldId, rankId, gateId) &&
+            (
+              (request.resource.data.version == resource.data.version + 1 &&
+                request.resource.data.wordCount == resource.data.wordCount) ||
+              gateCounterOnlyIncrement(resource.data, request.resource.data)
+            ) &&
+            validUpdateAudit(resource.data, request.resource.data);
+          allow delete: if false;
+
+          match /words/{contentWordId} {
+            allow read: if isAdmin() ||
+              (isPublished(resource.data) && worldPublished(worldId) &&
+                rankPublished(worldId, rankId) &&
+                gatePublished(worldId, rankId, gateId));
+            allow create: if isAdmin() &&
+              request.resource.data.version == 1 &&
+              validContentWord(request.resource.data, worldId, rankId, gateId, contentWordId) &&
+              validCreateAudit(request.resource.data);
+            allow update: if isAdmin() &&
+              validContentWord(request.resource.data, worldId, rankId, gateId, contentWordId) &&
+              request.resource.data.worldId == resource.data.worldId &&
+              request.resource.data.rankId == resource.data.rankId &&
+              request.resource.data.gateId == resource.data.gateId &&
+              request.resource.data.contentWordId == resource.data.contentWordId &&
+              request.resource.data.version == resource.data.version + 1 &&
+              validUpdateAudit(resource.data, request.resource.data);
+            allow delete: if isAdmin();
+          }
+        }
+      }
+    }
+
+    match /content_word_import_staging/{stagingWordId} {
+      allow read: if isAdmin();
+      allow create: if isAdmin() &&
+        validStagingCreate(request.resource.data, stagingWordId);
+      allow update: if isAdmin() &&
+        validStagingUpdate(resource.data, request.resource.data, stagingWordId);
+      allow delete: if isAdmin();
+    }
+
+    // Existing user paths remain explicit. There is intentionally no recursive
+    // owner rule under /users/{uid}; Journey writes use narrow validators below.
+    match /users/{uid} {
+      allow get: if isOwner(uid);
+      allow list, create, update, delete: if false;
+
+      match /words/{wordId} {
+        allow read: if isOwner(uid);
+        allow create: if isOwner(uid) && validLegacyWord(request.resource.data, uid);
+        allow update: if isOwner(uid) &&
+          validLegacyWordUpdate(resource.data, request.resource.data, uid);
+        allow delete: if isOwner(uid) &&
+          legacyWordDeleteLeavesNoSources(resource.data, uid);
+      }
+
+      match /customWorlds/{worldId} {
+        allow read: if isOwner(uid);
+        allow create: if isOwner(uid) && validCustomWorld(request.resource.data, uid);
+        // The legacy reader serializes Firestore timestamps to ISO strings before
+        // saving an edit, so createdAt cannot be type-immutable without breaking it.
+        allow update: if isOwner(uid) && validCustomWorld(request.resource.data, uid);
+        allow delete: if isOwner(uid);
+
+        match /words/{wordId} {
+          allow read: if isOwner(uid);
+          allow create, update: if isOwner(uid) && validLegacyWord(request.resource.data, uid);
+          allow delete: if isOwner(uid);
+        }
+      }
+
+      match /meta/profile {
+        allow read: if isOwner(uid);
+        allow create: if isOwner(uid) && validProfileCreate(request.resource.data);
+        allow update: if isOwner(uid) &&
+          validProfileUpdate(resource.data, request.resource.data);
+        allow delete: if false;
+      }
+
+      match /entryExperiences/{versionId} {
+        allow read: if isOwner(uid);
+        allow create: if isOwner(uid) &&
+          request.resource.data.status != 'skipped' &&
+          (
+            validEntryExperience(request.resource.data, versionId) ||
+            validEntryExperienceV2(request.resource.data, versionId)
+          );
+        allow update: if isOwner(uid) &&
+          (
+            validEntryExperienceUpdate(resource.data, request.resource.data, versionId) ||
+            validEntryExperienceV2Update(resource.data, request.resource.data, versionId)
+          );
+        allow delete: if false;
+      }
+
+      match /meta/word_mastery {
+        allow read: if isOwner(uid);
+        allow create, update: if isOwner(uid) && validWordMasteryDocument(request.resource.data);
+        allow delete: if false;
+      }
+
+      match /meta/active_quiz_session {
+        allow read: if isOwner(uid);
+        allow create, update: if isOwner(uid) && validQuizSession(request.resource.data);
+        allow delete: if isOwner(uid);
+      }
+
+      match /meta/active_content_journey {
+        allow read: if isOwner(uid);
+        allow create: if isOwner(uid) &&
+          validActiveJourneyPointer(request.resource.data, uid);
+        allow update: if isOwner(uid) &&
+          validActiveJourneyPointerUpdate(resource.data, request.resource.data, uid);
+        allow delete: if false;
+      }
+
+      match /meta/{metaId} {
+        allow read: if isOwner(uid) && metaId.matches('xp_event_.*');
+        allow create: if isOwner(uid) && metaId.matches('xp_event_.*') &&
+          validXpEvent(request.resource.data, metaId);
+        allow update, delete: if false;
+      }
+
+      match /testSettings/clock {
+        allow read: if isOwner(uid) && canUseTestClock();
+        allow create, update: if isOwner(uid) && canUseTestClock() &&
+          validTestClock(request.resource.data, uid);
+        allow delete: if false;
+      }
+
+      match /contentProgress/{worldId} {
+        allow read: if isOwner(uid);
+        allow create: if isOwner(uid) &&
+          validJourneyCreate(request.resource.data, uid, worldId);
+        allow update: if isOwner(uid) && (
+          (
+            resource.data.get('activeLevelPlacementAssessmentId', '') != '' &&
+            request.resource.data.get('activeLevelPlacementAssessmentId', '') == '' &&
+            request.resource.data.get('levelPlacementStatus', '') == 'completed' &&
+            request.resource.data.get('levelPlacementAssessmentIds', {}) !=
+              resource.data.get('levelPlacementAssessmentIds', {}) &&
+            validJourneyLevelPlacementDecision(
+              resource.data, request.resource.data, uid, worldId, 'outcome'
+            )
+          ) ||
+          (
+            resource.data.get('activeLevelPlacementAssessmentId', '') != '' &&
+            request.resource.data.get('levelPlacementStatus', '') == 'awaiting-decision' &&
+            resource.data.get('levelPlacementStatus', '') != 'awaiting-decision' &&
+            validJourneyLevelPlacementDecision(
+              resource.data, request.resource.data, uid, worldId, 'result'
+            )
+          ) ||
+          (
+            !(
+              resource.data.get('activeLevelPlacementAssessmentId', '') != '' &&
+              request.resource.data.get('levelPlacementStatus', '') == 'awaiting-decision' &&
+              resource.data.get('levelPlacementStatus', '') != 'awaiting-decision'
+            ) &&
+            !(
+              resource.data.get('activeLevelPlacementAssessmentId', '') != '' &&
+              request.resource.data.get('activeLevelPlacementAssessmentId', '') == '' &&
+              request.resource.data.get('levelPlacementStatus', '') == 'completed' &&
+              request.resource.data.get('levelPlacementAssessmentIds', {}) !=
+                resource.data.get('levelPlacementAssessmentIds', {})
+            ) &&
+            validJourneyUpdate(resource.data, request.resource.data, uid, worldId)
+          )
+        );
+        allow delete: if false;
+
+        match /placementSessions/{assessmentId} {
+          allow read: if isOwner(uid);
+          allow create: if isOwner(uid) &&
+            validPlacementSessionCreate(
+              request.resource.data,
+              uid,
+              worldId,
+              assessmentId
+            );
+          allow update: if isOwner(uid) && (
+            (
+              resource.data.status == 'submitting' &&
+              validPlacementSessionCompletion(
+                resource.data, request.resource.data, uid, worldId, assessmentId
+              )
+            ) ||
+            (
+              resource.data.status == 'active' &&
+              validActivePlacementSessionUpdate(
+                resource.data, request.resource.data, uid, worldId, assessmentId
+              )
+            )
+          );
+          allow delete: if false;
+        }
+
+        match /levelPlacementSessions/{assessmentId} {
+          allow read: if isOwner(uid);
+          allow create: if isOwner(uid) &&
+            validLevelPlacementSessionCreate(
+              request.resource.data,
+              uid,
+              worldId,
+              assessmentId
+            );
+          allow update: if isOwner(uid) && (
+            (
+              resource.data.get('resultApplied', false) == false &&
+              request.resource.data.get('resultApplied', false) == true &&
+              request.resource.data.status == 'completed' &&
+              validLevelPlacementDecisionApply(
+                resource.data, request.resource.data, uid, worldId,
+                assessmentId, 'outcome'
+              )
+            ) ||
+            (
+              resource.data.get('resultApplied', false) == false &&
+              request.resource.data.get('resultApplied', false) == true &&
+              request.resource.data.status != 'completed' &&
+              validLevelPlacementDecisionApply(
+                resource.data, request.resource.data, uid, worldId,
+                assessmentId, 'result'
+              )
+            ) ||
+            (
+              !(
+                resource.data.get('resultApplied', false) == false &&
+                request.resource.data.get('resultApplied', false) == true
+              ) &&
+              (request.resource.data.currentQuestionIndex ==
+                  resource.data.currentQuestionIndex + 1
+                ? validLevelPlacementAnswerUpdate(
+                  resource.data, request.resource.data, uid, worldId, assessmentId
+                )
+                : (request.resource.data.status != resource.data.status
+                  ? validLevelPlacementClose(
+                    resource.data, request.resource.data, uid, worldId
+                  )
+                  : validLevelPlacementSaveUpdate(resource.data, request.resource.data)
+                )
+              )
+            )
+          );
+          allow delete: if false;
+        }
+
+        match /gateClearAttempts/{attemptId} {
+          allow read: if isOwner(uid);
+          allow create: if isOwner(uid) &&
+            validGateClearAttemptCreate(request.resource.data, uid, worldId, attemptId);
+          allow update: if isOwner(uid) &&
+            (
+              validGateClearAnswerUpdate(resource.data, request.resource.data) ||
+              validGateClearAttemptFinish(resource.data, request.resource.data) ||
+              validGateClearAttemptAbandon(resource.data, request.resource.data)
+            );
+          allow delete: if false;
+        }
+
+        match /ranks/{rankId} {
+          allow read: if isOwner(uid);
+          allow write: if false;
+
+          match /gates/{gateId} {
+            allow read: if isOwner(uid);
+            allow create: if isOwner(uid) && (
+              (
+                request.resource.data.status == 'available' &&
+                journeyAllowsGate(uid, worldId, rankId, gateId) &&
+                validAvailableGateProgress(
+                  request.resource.data, worldId, rankId, gateId
+                )
+              ) ||
+              (
+                request.resource.data.status == 'cleared' &&
+                request.resource.data.get('clearedBy', '') == 'level-placement' &&
+                validLevelPlacementClearedProgress(
+                  request.resource.data, uid, worldId, rankId, gateId
+                )
+              ) ||
+              (
+                request.resource.data.status != 'available' &&
+                request.resource.data.get('masteryComplete', false) == false &&
+                !(request.resource.data.status == 'cleared' &&
+                  request.resource.data.get('clearedBy', '') == 'level-placement') &&
+                journeyAllowsGate(uid, worldId, rankId, gateId) &&
+                request.resource.data.status != 'cleared' &&
+                validGateProgress(request.resource.data, worldId, rankId, gateId)
+              )
+            );
+            // masteryComplete is a frozen legacy field. Crown is derived from SRS.
+            allow update: if isOwner(uid) &&
+              request.resource.data.get('masteryComplete', false) ==
+                resource.data.get('masteryComplete', false) &&
+              (
+                (
+                  request.resource.data.status == 'cleared' &&
+                  request.resource.data.get('clearedBy', '') == 'level-placement' &&
+                  validLevelPlacementClearedUpdate(
+                    resource.data, request.resource.data, uid, worldId, rankId, gateId
+                  )
+                ) ||
+                (
+                  'placementAssessmentId' in request.resource.data &&
+                  validPlacementGateResultUpdate(
+                    resource.data, request.resource.data, uid, worldId, rankId, gateId
+                  )
+                ) ||
+                (
+                  journeyAllowsGate(uid, worldId, rankId, gateId) &&
+                  (
+                    validLearningGateProgressUpdate(
+                      resource.data, request.resource.data, worldId, rankId, gateId
+                    ) ||
+                    validGateReadinessUpdate(
+                      resource.data, request.resource.data, uid, worldId, rankId, gateId
+                    ) ||
+                    validGateClearStartProgressUpdate(
+                      resource.data, request.resource.data, uid, worldId, rankId, gateId
+                    ) ||
+                    validGateClearProgressResult(
+                      resource.data, request.resource.data, uid, worldId, rankId, gateId
+                    ) ||
+                    validGateClearAbandonProgress(
+                      resource.data, request.resource.data, uid, worldId
+                    ) ||
+                    validOptionalLevelPlacementGateLoad(
+                      resource.data, request.resource.data, worldId, rankId, gateId
+                    ) ||
+                    validPlacementGateReset(
+                      resource.data, request.resource.data, uid, worldId, rankId, gateId
+                    )
+                  )
+                )
+              );
+            allow delete: if false;
+          }
+        }
+      }
+
+      match /quizEvidenceSessions/{sessionId} {
+        allow read: if isOwner(uid);
+        allow create: if isOwner(uid) &&
+          validQuizEvidenceSession(request.resource.data, sessionId);
+        allow update, delete: if false;
+      }
+
+      match /contentOperations/{operationId} {
+        allow read: if isOwner(uid);
+        allow write: if false;
+      }
+
+      match /contentWords/{contentWordId} {
+        allow read: if isOwner(uid);
+        allow create: if isOwner(uid) &&
+          validContentLearningWordCreate(request.resource.data, uid, contentWordId);
+        allow delete: if false;
+        allow update: if isOwner(uid) &&
+          exists(/databases/$(database)/documents/users/$(uid)/contentWords/$(contentWordId)) &&
+          (
+            (
+              request.resource.data.diff(resource.data).affectedKeys().hasAny([
+                'eligibleEvidenceCount', 'lastEligibleEvidenceAt',
+                'lastEvidenceEventId', 'evidenceVersion',
+                'evidenceTimezoneOffsetMinutes', 'lastEvidenceLocalDayKey'
+              ]) &&
+              validEvidenceSummaryUpdate(
+                resource.data,
+                request.resource.data,
+                uid,
+                contentWordId
+              )
+            ) ||
+            (
+              (
+                (
+                  request.resource.data.diff(resource.data).affectedKeys()
+                    .hasOnly(['forgetCount', 'updatedAt']) &&
+                  (request.resource.data.forgetCount == resource.data.forgetCount ||
+                    request.resource.data.forgetCount == resource.data.forgetCount + 1 ||
+                    (resource.data.forgetCount > 0 &&
+                      request.resource.data.forgetCount == resource.data.forgetCount - 1))
+                ) ||
+                (
+                  request.resource.data.diff(resource.data).affectedKeys()
+                    .hasOnly(['sourceCount', 'updatedAt']) &&
+                  (
+                    request.resource.data.sourceCount == resource.data.sourceCount + 1 ||
+                    request.resource.data.sourceCount == resource.data.sourceCount - 1 ||
+                    (
+                      request.resource.data.sourceCount == 0 &&
+                      resource.data.sourceCount > 0
+                    )
+                  )
+                )
+              ) &&
+              validContentLearningWord(request.resource.data, contentWordId) &&
+              request.resource.data.updatedAt == request.time
+            )
+          );
+
+        match /sources/{sourceId} {
+          allow read: if isOwner(uid);
+          allow create: if isOwner(uid) &&
+            existsAfter(
+              /databases/$(database)/documents/users/$(uid)/contentWords/$(contentWordId)
+            ) &&
+            validContentWordSource(request.resource.data, uid, contentWordId, sourceId);
+          allow update: if false;
+          allow delete: if isOwner(uid) &&
+            (resource.data.addedFrom == 'manual' ||
+              resource.data.addedFrom == 'dictionary-search' ||
+              resource.data.addedFrom == 'private-world' ||
+              resource.data.addedFrom == 'import');
+        }
+
+
+        match /evidence/{eventId} {
+          allow read: if isOwner(uid);
+          allow create: if isOwner(uid) &&
+            validEvidenceEvent(request.resource.data, uid, contentWordId, eventId);
+          allow update, delete: if false;
+        }
+      }
+    }
+
+    // Shared AI cache: public reads are retained; authenticated users may fill
+    // validated cache entries. Only admins may remove poisoned/obsolete entries.
+    match /ai_global_cache/{cacheId} {
+      allow read: if true;
+      allow create: if signedIn() &&
+        validAiCache(request.resource.data) &&
+        'caches' in request.resource.data &&
+        newCacheDocumentUsesServerTime(request.resource.data);
+      allow update: if isAdmin() || (
+        signedIn() &&
+        validAiCache(request.resource.data) &&
+        'caches' in request.resource.data &&
+        request.resource.data.word == resource.data.word &&
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['caches']) &&
+        preservesExistingCacheEntries(resource.data, request.resource.data) &&
+        newCacheEntriesUseServerTime(resource.data, request.resource.data)
+      );
+      allow delete: if isAdmin();
+    }
+
+    match /suggestions/{suggestionId} {
+      allow create: if signedIn() && validSuggestion(request.resource.data);
+      allow read, delete: if isAdmin();
+      allow update: if false;
+    }
+
+    match /admin_audit_logs/{logId} {
+      allow read: if isAdmin();
+      allow write: if false;
+    }
+
+    // Admin authority comes only from Firebase custom claims.
+    match /admins/{adminId} {
+      allow read, write: if false;
+    }
+
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

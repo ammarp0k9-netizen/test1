@@ -1,0 +1,11 @@
+{
+  "firestore": {
+    "rules": "rules-candidates/firestore.production-plus-entry-v2.rules",
+    "indexes": "firestore.indexes.json"
+  },
+  "emulators": {
+    "firestore": {
+      "port": 8080
+    }
+  }
+}

@@ -27,7 +27,21 @@ import {
 } from 'firebase/firestore';
 
 const projectId = 'demo-lootlingua';
-const rules = readFileSync(new URL('../firestore.rules', import.meta.url), 'utf8');
+const rulesFile = process.env.FIRESTORE_RULES_FILE || new URL('../firestore.rules', import.meta.url);
+const rules = readFileSync(rulesFile, 'utf8');
+const rulesProfile = process.env.FIRESTORE_RULES_PROFILE || 'local';
+const productionEntryV2CandidateProfile = rulesProfile === 'production-entry-v2-candidate';
+assert.ok(
+  rulesProfile === 'local' || productionEntryV2CandidateProfile,
+  `Unsupported Firestore Rules profile: ${rulesProfile}`
+);
+if (productionEntryV2CandidateProfile) {
+  assert.match(rules, /function\s+validEntryExperienceV2\s*\(/);
+  assert.match(rules, /function\s+validEntryExperienceV2Update\s*\(/);
+  assert.doesNotMatch(rules, /match\s+\/notifications\/\{notificationId\}/);
+}
+console.log(`# Firestore Rules source: ${process.env.FIRESTORE_RULES_FILE || 'firestore.rules'}`);
+console.log(`# Firestore Rules profile: ${rulesProfile}`);
 const environment = await initializeTestEnvironment({
   projectId,
   firestore: { rules }
@@ -5850,9 +5864,21 @@ try {
     }));
   });
 
-  await test('notification lifecycle is owner-bound, read-monotonic, terminal, and non-deletable', async () => {
+  await test(productionEntryV2CandidateProfile
+    ? 'production-based Entry v2 candidate preserves the unreleased notifications deny contract'
+    : 'notification lifecycle is owner-bound, read-monotonic, terminal, and non-deletable', async () => {
     const notificationId = 'nt3_rules_contract';
     const path = `users/user-a/notifications/${notificationId}`;
+    if (productionEntryV2CandidateProfile) {
+      await assertFails(setDoc(doc(userA, path), { id: notificationId }));
+      await environment.withSecurityRulesDisabled(async (context) => {
+        await setDoc(doc(context.firestore(), path), { id: notificationId });
+      });
+      await assertFails(getDoc(doc(userA, path)));
+      await assertFails(updateDoc(doc(userA, path), { status: 'dismissed' }));
+      await assertFails(deleteDoc(doc(userA, path)));
+      return;
+    }
     await assertSucceeds(setDoc(doc(userA, path), {
       id: notificationId,
       schemaVersion: 3,
