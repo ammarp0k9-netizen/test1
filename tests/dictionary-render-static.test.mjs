@@ -3,11 +3,12 @@ import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 import vm from 'node:vm';
 
-const [dictionarySource, renderSource, cloudSource, entryControllerSource] = await Promise.all([
+const [dictionarySource, renderSource, cloudSource, entryControllerSource, personalDataSource] = await Promise.all([
   readFile(new URL('../js/dictionary.js', import.meta.url), 'utf8'),
   readFile(new URL('../js/dictionary-render.js', import.meta.url), 'utf8'),
   readFile(new URL('../js/cloud.js', import.meta.url), 'utf8'),
   readFile(new URL('../js/entry-experience-controller.js', import.meta.url), 'utf8'),
+  readFile(new URL('../js/personal-dictionary-data.js', import.meta.url), 'utf8'),
 ]);
 
 test('personal words retain every published educational field from the cloud snapshot', () => {
@@ -65,6 +66,100 @@ test('personal dictionary snapshot mapper completes without listener-only state'
   assert.equal(page.endCursor.id, 'word-a');
   assert.equal(page.fromCache, false);
   assert.equal(page.hasPendingWrites, false);
+  assert.equal(page.listen, false);
+
+  const listenerPage = new vm.Script(`${mapperSource}; mapPersonalPageSnapshot(snapshot, request, true);`)
+    .runInContext(context);
+  assert.equal(listenerPage.listen, true);
+});
+
+test('personal dictionary keeps one current-page listener and prefetches nearby pages once', async () => {
+  const root = {};
+  vm.runInContext(personalDataSource, vm.createContext({
+    window: root,
+    globalThis: root,
+    console,
+    Date,
+    Map,
+    Set,
+    Promise,
+    String,
+    Number,
+    Array,
+    Object,
+    Math,
+  }));
+
+  let openedListeners = 0;
+  let cachedPageListeners = 0;
+  let oneShotReads = 0;
+  let unsubscribedListeners = 0;
+  const makePage = (pageIndex, hasNext) => ({
+    items: [{ id: `word-${pageIndex}`, word: `word ${pageIndex}` }],
+    beforeCursor: pageIndex ? { value: pageIndex - 1, id: `word-${pageIndex - 1}` } : null,
+    startCursor: { value: pageIndex, id: `word-${pageIndex}` },
+    endCursor: { value: pageIndex, id: `word-${pageIndex}` },
+    hasPrevious: pageIndex > 0,
+    hasNext,
+  });
+  const adapter = {
+    openPageListener: async () => {
+      openedListeners += 1;
+      return {
+        initial: makePage(0, true),
+        unsubscribe: () => { unsubscribedListeners += 1; },
+      };
+    },
+    listenPage: (_request, onUpdate) => {
+      cachedPageListeners += 1;
+      onUpdate(makePage(1, false));
+      return () => { unsubscribedListeners += 1; };
+    },
+    fetchPage: async () => {
+      oneShotReads += 1;
+      return makePage(1, false);
+    },
+    getCounts: async () => ({ totalCount: 2, filteredCount: null }),
+  };
+  const repository = root.LootLinguaPersonalDictionaryData.createRepository({ pageSize: 1 });
+  repository.configure({ ownerType: 'account', ownerId: 'account-1', adapter });
+
+  await repository.loadInitial();
+  assert.equal(openedListeners, 1);
+  assert.equal(repository.getSnapshot().listenerCount, 1);
+  assert.equal(repository.getSnapshot().currentPage.items[0].id, 'word-0');
+
+  await repository.prefetchNext();
+  assert.equal(oneShotReads, 1);
+  assert.equal(openedListeners, 1);
+  assert.equal(cachedPageListeners, 0);
+  assert.equal(repository.getSnapshot().listenerCount, 1);
+
+  await repository.loadNext();
+  assert.equal(cachedPageListeners, 1);
+  assert.equal(unsubscribedListeners, 1);
+  assert.equal(repository.getSnapshot().listenerCount, 1);
+
+  repository.destroy();
+  assert.equal(unsubscribedListeners, 2);
+  assert.equal(repository.getSnapshot().listenerCount, 0);
+
+  const nextRepository = root.LootLinguaPersonalDictionaryData.createRepository({ pageSize: 1 });
+  nextRepository.configure({ ownerType: 'account', ownerId: 'account-2', adapter });
+  await nextRepository.loadInitial();
+  assert.equal(openedListeners, 2);
+  assert.equal(nextRepository.getSnapshot().listenerCount, 1);
+  nextRepository.destroy();
+  assert.equal(unsubscribedListeners, 3);
+});
+
+test('account dictionary startup always releases the loading gate after its initial page settles', () => {
+  const start = cloudSource.indexOf('async function loadWordsFromCloud');
+  const end = cloudSource.indexOf('function mapWordDoc', start);
+  const block = cloudSource.slice(start, end);
+  assert.match(block, /await openPersonalDictionaryQuery\(currentPersonalDictionaryQuery\(\)\)/);
+  assert.match(block, /finally\s*{\s*finishPersonalDictionaryInitialLoad\(\)/);
+  assert.match(block, /wordsUnsubscribe = \(\) =>[\s\S]*personalDictionaryRepository\?\.destroy\?\.\(\)/);
 });
 
 test('part of speech and category render as separate labels', () => {

@@ -306,7 +306,7 @@
     return query(personalWordsRef(uid), ...constraints);
   }
 
-  function mapPersonalPageSnapshot(snapshot, request) {
+  function mapPersonalPageSnapshot(snapshot, request, listen = false) {
     const pageSize = Math.max(1, Number(request?.pageSize) || PERSONAL_WORD_PAGE_SIZE);
     const direction = request?.direction === 'backward' ? 'backward' : 'forward';
     const sort = String(request?.query?.sort || 'newest');
@@ -330,6 +330,7 @@
       endCursor: pageDocs.length ? personalCursorFromDoc(pageDocs[pageDocs.length - 1], sort) : null,
       fromCache: snapshot.metadata?.fromCache === true,
       hasPendingWrites: snapshot.metadata?.hasPendingWrites === true,
+      listen: listen === true,
     };
   }
 
@@ -351,7 +352,7 @@
           let resolved = false;
           const unsubscribe = onSnapshot(buildPersonalPageQuery(request), (snapshot) => {
             if (auth.currentUser?.uid !== ownerId) return;
-            const page = mapPersonalPageSnapshot(snapshot, request);
+            const page = mapPersonalPageSnapshot(snapshot, request, true);
             if (!resolved) {
               resolved = true;
               resolve({ initial: page, unsubscribe });
@@ -369,7 +370,7 @@
       listenPage(request, onUpdate, onError) {
         return onSnapshot(buildPersonalPageQuery(request), (snapshot) => {
           if (auth.currentUser?.uid !== ownerId) return;
-          onUpdate(mapPersonalPageSnapshot(snapshot, request));
+          onUpdate(mapPersonalPageSnapshot(snapshot, request, true));
         }, onError);
       },
       async getCounts({ query: requestedQuery }) {
