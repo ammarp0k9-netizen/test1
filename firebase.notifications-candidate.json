@@ -1,0 +1,10 @@
+{
+  "firestore": {
+    "rules": "rules-candidates/firestore.production-plus-entry-matching-notifications.rules"
+  },
+  "emulators": {
+    "firestore": {
+      "port": 8080
+    }
+  }
+}

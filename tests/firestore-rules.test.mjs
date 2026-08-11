@@ -31,14 +31,24 @@ const rulesFile = process.env.FIRESTORE_RULES_FILE || new URL('../firestore.rule
 const rules = readFileSync(rulesFile, 'utf8');
 const rulesProfile = process.env.FIRESTORE_RULES_PROFILE || 'local';
 const productionEntryV2CandidateProfile = rulesProfile === 'production-entry-v2-candidate';
+const productionNotificationsCandidateProfile = rulesProfile === 'production-notifications-candidate';
+const productionNotificationsLiveProfile = rulesProfile === 'production-notifications-live';
 assert.ok(
-  rulesProfile === 'local' || productionEntryV2CandidateProfile,
+  rulesProfile === 'local' || productionEntryV2CandidateProfile ||
+    productionNotificationsCandidateProfile || productionNotificationsLiveProfile,
   `Unsupported Firestore Rules profile: ${rulesProfile}`
 );
-if (productionEntryV2CandidateProfile) {
+if (productionEntryV2CandidateProfile || productionNotificationsCandidateProfile || productionNotificationsLiveProfile) {
   assert.match(rules, /function\s+validEntryExperienceV2\s*\(/);
   assert.match(rules, /function\s+validEntryExperienceV2Update\s*\(/);
+  assert.match(rules, /\(data\.mode == 'matching' && data\.evidenceVersion == 2\)/);
+}
+if (productionEntryV2CandidateProfile) {
   assert.doesNotMatch(rules, /match\s+\/notifications\/\{notificationId\}/);
+}
+if (productionNotificationsCandidateProfile || productionNotificationsLiveProfile) {
+  assert.match(rules, /function\s+validNotificationUpdate\s*\(/);
+  assert.match(rules, /match\s+\/notifications\/\{notificationId\}/);
 }
 console.log(`# Firestore Rules source: ${process.env.FIRESTORE_RULES_FILE || 'firestore.rules'}`);
 console.log(`# Firestore Rules profile: ${rulesProfile}`);
@@ -5923,7 +5933,7 @@ try {
 
   await test(productionEntryV2CandidateProfile
     ? 'production-based Entry v2 candidate preserves the unreleased notifications deny contract'
-    : 'notification lifecycle is owner-bound, read-monotonic, terminal, and non-deletable', async () => {
+    : 'Matching completion notification BatchGet/write is owner-bound, shape-safe, and terminal-monotonic', async () => {
     const notificationId = 'nt3_rules_contract';
     const path = `users/user-a/notifications/${notificationId}`;
     if (productionEntryV2CandidateProfile) {
@@ -5936,8 +5946,8 @@ try {
       await assertFails(deleteDoc(doc(userA, path)));
       return;
     }
-    await assertSucceeds(setDoc(doc(userA, path), {
-      id: notificationId,
+    const notificationPayload = (id, overrides = {}) => ({
+      id,
       schemaVersion: 3,
       ownerId: 'user-a',
       kind: 'smart',
@@ -5951,17 +5961,68 @@ try {
       updatedAt: serverTimestamp(),
       showCount: 1,
       readAt: null,
+      ...overrides,
+    });
+    const matchingWordKeys = Array.from({ length: 10 }, (_, index) => `notification-matching-${index + 1}`);
+    await assertSucceeds(setDoc(doc(userA, 'users/user-a/quizEvidenceSessions/notification-matching-v2'), {
+      sessionId: 'notification-matching-v2',
+      status: 'completed',
+      mode: 'matching',
+      sourceType: 'personal',
+      privateWorldId: '',
+      wordKeys: matchingWordKeys,
+      correctWordKeys: matchingWordKeys,
+      totalCount: 10,
+      correctCount: 10,
+      evidenceVersion: 2,
+      completedAt: serverTimestamp(),
     }));
-    await assertSucceeds(getDoc(doc(userA, path)));
+    const notificationRef = doc(userA, path);
+    await assertSucceeds(setDoc(notificationRef, notificationPayload(notificationId)));
+    await assertSucceeds(getDoc(notificationRef));
     await assertFails(getDoc(doc(userB, path)));
+    await assertFails(setDoc(
+      doc(userB, 'users/user-a/notifications/nt3_cross_account'),
+      notificationPayload('nt3_cross_account')
+    ));
+    await assertSucceeds(runTransaction(userA, async (transaction) => {
+      const snapshot = await transaction.get(notificationRef);
+      assert.equal(snapshot.exists(), true);
+      transaction.update(notificationRef, {
+        showCount: 2,
+        updatedAt: serverTimestamp(),
+      });
+    }));
     await assertSucceeds(updateDoc(doc(userA, path), {
       readAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    }));
+    await assertFails(updateDoc(doc(userB, path), {
+      readAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    }));
+    await assertFails(updateDoc(doc(userA, path), {
+      arbitraryField: 'not-allowed',
       updatedAt: serverTimestamp(),
     }));
     await assertFails(updateDoc(doc(userA, path), {
       readAt: null,
       updatedAt: serverTimestamp(),
     }));
+    await assertFails(setDoc(
+      doc(userA, 'users/user-a/notifications/nt3_invalid_status'),
+      notificationPayload('nt3_invalid_status', { status: 'archived' })
+    ));
+    await assertFails(setDoc(
+      doc(userA, 'users/user-a/notifications/nt3_invalid_cta'),
+      notificationPayload('nt3_invalid_cta', {
+        cta: { id: 'review-due', label: 'Review', args: {}, arbitraryField: true },
+      })
+    ));
+    await assertFails(setDoc(
+      doc(userA, 'users/user-a/notifications/nt3_arbitrary_create'),
+      notificationPayload('nt3_arbitrary_create', { arbitraryField: true })
+    ));
     await assertSucceeds(updateDoc(doc(userA, path), {
       status: 'dismissed',
       dismissedAt: serverTimestamp(),
@@ -5970,6 +6031,11 @@ try {
     }));
     await assertFails(updateDoc(doc(userA, path), {
       status: 'active',
+      updatedAt: serverTimestamp(),
+    }));
+    await assertFails(updateDoc(doc(userA, path), {
+      status: 'resolved',
+      resolvedAt: serverTimestamp(),
       updatedAt: serverTimestamp(),
     }));
     await assertFails(deleteDoc(doc(userA, path)));

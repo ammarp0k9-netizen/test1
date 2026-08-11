@@ -3,12 +3,13 @@ import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 import vm from 'node:vm';
 
-const [storageSource, srsSource, quizSource, runtimeSource, scriptSource] = await Promise.all([
+const [storageSource, srsSource, quizSource, runtimeSource, scriptSource, notificationStoreSource] = await Promise.all([
   readFile(new URL('../js/storage.js', import.meta.url), 'utf8'),
   readFile(new URL('../js/srs.js', import.meta.url), 'utf8'),
   readFile(new URL('../js/quiz.js', import.meta.url), 'utf8'),
   readFile(new URL('../js/quiz-runtime.js', import.meta.url), 'utf8'),
   readFile(new URL('../js/script.js', import.meta.url), 'utf8'),
+  readFile(new URL('../js/notification-store.js', import.meta.url), 'utf8'),
 ]);
 
 function between(source, start, end) {
@@ -21,6 +22,15 @@ function between(source, start, end) {
 
 function clone(value) {
   return JSON.parse(JSON.stringify(value));
+}
+
+function memoryStorage() {
+  const values = new Map();
+  return {
+    getItem: (key) => values.has(String(key)) ? values.get(String(key)) : null,
+    setItem: (key, value) => values.set(String(key), String(value)),
+    removeItem: (key) => values.delete(String(key)),
+  };
 }
 
 function makeMasteryState(index = 1) {
@@ -282,6 +292,7 @@ function createCommitHarness(mode = 'matching', correctness = Array(10).fill(tru
     Set,
     Number,
     Math,
+    console,
   });
   const commitSource = between(runtimeSource, 'async function commitVerifiedQuizResults', 'function markRemember');
   new vm.Script(`${commitSource}\nthis.commitVerifiedQuizResults = commitVerifiedQuizResults;`).runInContext(context);
@@ -311,10 +322,27 @@ test('Matching errors retain the verified correct count and do not become correc
   assert.equal(result.xp, 16);
 });
 
-function createFinishHarness({ fail = false, pending = false } = {}) {
+test('notification feedback failure after a Matching commit does not hide or repeat learning success', async () => {
+  const harness = createCommitHarness('matching');
+  harness.context.pushNotification = () => {
+    const error = new Error('Missing or insufficient permissions.');
+    error.code = 'permission-denied';
+    throw error;
+  };
+  const result = await harness.context.commitVerifiedQuizResults();
+  assert.equal(result.correctCount, 10);
+  assert.equal(result.total, 10);
+  assert.equal(result.xp, 20);
+  assert.equal(harness.stats.rewardBatches, 1);
+  assert.equal(harness.stats.learningBatches, 1);
+  assert.equal(harness.stats.projections, 1);
+});
+
+function createFinishHarness({ fail = false, pending = false, notificationPermissionDenied = false } = {}) {
   const statuses = [];
   const scheduled = [];
   let commits = 0;
+  const learningStats = { xpTransitions: 0, evidenceWrites: 0, notificationAttempts: 0 };
   const trace = { stage() { return this; }, count() { return this; }, warn() { return this; }, end() { return this; } };
   const elements = new Map([
     ['quizView', { setAttribute() {}, removeAttribute() {} }],
@@ -340,7 +368,20 @@ function createFinishHarness({ fail = false, pending = false } = {}) {
         };
       },
     },
-    dispatchEvent() {},
+    dispatchEvent(event) {
+      if (event?.type !== 'lootlingua:trusted-quiz-completed') return true;
+      window.LootLinguaNotificationStore?.upsert({
+        kind: 'smart',
+        notificationType: 'reminder.quiz.inactive',
+        occurrenceKey: 'quiz:matching-regression',
+        status: 'active',
+        visualType: 'info',
+        message: 'Quiz reminder',
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+      });
+      return true;
+    },
   };
   const context = vm.createContext({
     window,
@@ -358,6 +399,8 @@ function createFinishHarness({ fail = false, pending = false } = {}) {
     isVerifiedQuizMode() { return true; },
     async commitVerifiedQuizResults(_trace, onStage) {
       commits += 1;
+      learningStats.xpTransitions += 1;
+      learningStats.evidenceWrites += 1;
       onStage('applying-rewards');
       onStage('committing-learning');
       if (pending) return new Promise(() => {});
@@ -396,11 +439,31 @@ function createFinishHarness({ fail = false, pending = false } = {}) {
     Number,
     Map,
     Date,
+    JSON,
+    Set,
+    String,
+    console,
+    localStorage: memoryStorage(),
   });
+  if (notificationPermissionDenied) {
+    vm.runInContext(notificationStoreSource, context);
+    window.LootLinguaNotificationStore.switchOwner('uid-a');
+    window.LootLinguaNotificationStore.registerCloudAdapter({
+      async writeRecords() {
+        learningStats.notificationAttempts += 1;
+        if (learningStats.notificationAttempts === 1) {
+          const error = new Error('Firestore BatchGetDocuments: Missing or insufficient permissions.');
+          error.code = 'permission-denied';
+          throw error;
+        }
+        return true;
+      },
+    });
+  }
   const finishSource = between(runtimeSource, 'const QUIZ_FINISH_TRANSITIONS', 'function markForgot');
   new vm.Script(`${finishSource}\nthis.finishQuizRun = finishQuizRun; this.getFinishState = () => quizFinishState;`)
     .runInContext(context);
-  return { context, statuses, scheduled, get commits() { return commits; } };
+  return { context, window, statuses, scheduled, learningStats, get commits() { return commits; } };
 }
 
 test('account Matching finish is single-flight and leaves loading on the completed result state', async () => {
@@ -414,6 +477,29 @@ test('account Matching finish is single-flight and leaves loading on the complet
   assert.equal(harness.context.getFinishState(), 'completed');
   assert.ok(harness.statuses.includes('completed'));
   assert.equal(harness.scheduled.filter((timer) => !timer.cleared).length, 1);
+});
+
+test('account Matching 10/10 completes when notification BatchGet/write is permission-denied and retries without duplicate learning', async () => {
+  const harness = createFinishHarness({ notificationPermissionDenied: true });
+  const result = await harness.context.finishQuizRun();
+  await Promise.resolve();
+  await Promise.resolve();
+  await Promise.resolve();
+  assert.equal(result.correctCount, 10);
+  assert.equal(result.total, 10);
+  assert.equal(harness.context.getFinishState(), 'completed');
+  assert.equal(harness.commits, 1);
+  assert.equal(harness.learningStats.xpTransitions, 1);
+  assert.equal(harness.learningStats.evidenceWrites, 1);
+  assert.equal(harness.learningStats.notificationAttempts, 1);
+  assert.equal(harness.window.LootLinguaNotificationStore.deferredCloudWriteCount(), 1);
+
+  assert.equal(await harness.window.LootLinguaNotificationStore.retryDeferredCloudWrites(), true);
+  assert.equal(harness.learningStats.notificationAttempts, 2);
+  assert.equal(harness.window.LootLinguaNotificationStore.deferredCloudWriteCount(), 0);
+  assert.equal(harness.commits, 1);
+  assert.equal(harness.learningStats.xpTransitions, 1);
+  assert.equal(harness.learningStats.evidenceWrites, 1);
 });
 
 test('a failed account commit exits loading into a retryable state', async () => {

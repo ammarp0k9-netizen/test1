@@ -131,7 +131,11 @@ async function commitVerifiedQuizResults(trace, onStage) {
       const first = advancedWords[0];
       const statusLabel = first.nextStatus === 'Mastered' ? 'متقنة' : first.nextStatus === 'Reviewing' ? 'قريبة من الإتقان' : 'قيد التعلم';
       const extra = advancedWords.length > 1 ? ` و${advancedWords.length - 1} كلمة أخرى` : '';
-      pushNotification(`زاد مؤشر الإتقان: ${first.word} أصبحت ${statusLabel}${extra}. +${xp} XP`, 'success');
+      try {
+        pushNotification(`زاد مؤشر الإتقان: ${first.word} أصبحت ${statusLabel}${extra}. +${xp} XP`, 'success');
+      } catch (error) {
+        console.warn('[QuizFinish] Notification side effect deferred after learning commit.', error?.message || error);
+      }
     }
   }
   if (masteredCount > 0) recordChestMasteredWords(masteredIds);
@@ -175,6 +179,20 @@ const QUIZ_FINISH_COMMIT_TIMEOUT_MS = 30000;
 let quizFinishState = 'answering';
 let quizFinishPromise = null;
 let quizFinishUi = null;
+
+function dispatchTrustedQuizCompletedSafely(detail) {
+  // Notification evaluation is downstream of the durable learning commit. Run
+  // it detached so notification persistence can never retry that commit.
+  Promise.resolve().then(() => {
+    try {
+      window.dispatchEvent(new CustomEvent('lootlingua:trusted-quiz-completed', { detail }));
+    } catch (error) {
+      console.warn('[QuizFinish] Notification evaluation deferred after learning commit.', error?.message || error);
+    }
+  }).catch((error) => {
+    console.warn('[QuizFinish] Notification evaluation scheduling failed safely.', error?.message || error);
+  });
+}
 
 function setQuizFinishState(nextState, options = {}) {
   const allowed = QUIZ_FINISH_TRANSITIONS[quizFinishState] || [];
@@ -273,14 +291,12 @@ function finishQuizRun() {
   if (fullyCompleted && commit.total > 0) {
     incrementDailyCountBy(commit.total);
     checkAndUpdateStreak({ learningEvent: true });
-    window.dispatchEvent(new CustomEvent('lootlingua:trusted-quiz-completed', {
-      detail: {
-        sessionId: String(activeQuizSession?.id || ''),
-        completedAt: Date.now(),
-        correctCount: Number(commit.correctCount) || 0,
-        total: Number(commit.total) || 0,
-      },
-    }));
+    dispatchTrustedQuizCompletedSafely({
+      sessionId: String(activeQuizSession?.id || ''),
+      completedAt: Date.now(),
+      correctCount: Number(commit.correctCount) || 0,
+      total: Number(commit.total) || 0,
+    });
   }
   if (fullyCompleted && accuracy >= 0.9) recordHighAccuracyVerifiedQuiz(activeQuizSession.id);
   if (currentQuizMistakes === 0 && currentQuizWords.length > 0 && verified) {

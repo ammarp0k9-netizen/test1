@@ -6,7 +6,8 @@
     signInWithEmailAndPassword, createUserWithEmailAndPassword, sendPasswordResetEmail
   } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js";
   import {
-    getFirestore, collection, addDoc, query,
+    getFirestore, collection, addDoc, query, where, limit, limitToLast,
+    startAfter, endBefore, documentId, getCountFromServer,
     orderBy, deleteDoc, doc, updateDoc, onSnapshot, serverTimestamp,
     getDoc, setDoc, getDocs, runTransaction, writeBatch
   } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
@@ -29,6 +30,8 @@
   window.db = db;
   window.auth = auth;
   let wordsUnsubscribe = null;
+  let personalDictionaryRepository = null;
+  let personalDictionaryRepositoryUnsubscribe = null;
   let customWorldsUnsubscribe = null;
   let customWorldWordsUnsubscribe = null;
   let wordMasteryUnsubscribe = null;
@@ -261,42 +264,292 @@
     }
   };
 
-  function loadWordsFromCloud(user) {
-    const listenerUid = user.uid;
-    const q = query(collection(db, "users", user.uid, "words"), orderBy("createdAt", "desc"));
-    wordsUnsubscribe = onSnapshot(q, (snapshot) => {
-      if (auth.currentUser?.uid !== listenerUid) return;
-      if (window.__suppressCloudWordsSnapshot) return;
-      const cloudWords = snapshot.docs.map(mapWordDoc);
+  const PERSONAL_WORD_PAGE_SIZE = 50;
+  const PERSONAL_WORD_CACHE_PAGES = 3;
 
-      if (typeof window.applyCloudWordsFromSnapshot === "function") {
-        window.applyCloudWordsFromSnapshot(cloudWords);
-      } else {
-        window.words = cloudWords;
-        if (typeof window.writeWordsToStorage === "function") {
-          window.writeWordsToStorage(cloudWords, "normal", listenerUid);
+  function personalWordsRef(uid) {
+    return collection(db, 'users', String(uid), 'words');
+  }
+
+  function personalSortDefinition(sort) {
+    if (sort === 'oldest') return { field: 'createdAt', direction: 'asc' };
+    if (sort === 'alpha') return { field: 'normalizedWord', direction: 'asc' };
+    if (sort === 'auto') return { field: 'order', direction: 'asc' };
+    return { field: 'createdAt', direction: 'desc' };
+  }
+
+  function personalCursorFromDoc(snapshot, sort) {
+    if (!snapshot) return null;
+    const definition = personalSortDefinition(sort);
+    return {
+      value: snapshot.data()?.[definition.field] ?? null,
+      id: snapshot.id,
+    };
+  }
+
+  function buildPersonalPageQuery(request, listen = false) {
+    const uid = String(request?.owner?.id || '');
+    const sort = String(request?.query?.sort || 'newest');
+    const filter = String(request?.query?.filter || 'all');
+    const direction = request?.direction === 'backward' ? 'backward' : 'forward';
+    const definition = personalSortDefinition(sort);
+    const constraints = [];
+    if (filter === 'starred') constraints.push(where('starred', '==', true));
+    constraints.push(orderBy(definition.field, definition.direction));
+    constraints.push(orderBy(documentId(), definition.direction));
+    if (request?.cursor) {
+      const values = [request.cursor.value, request.cursor.id];
+      constraints.push(direction === 'backward' ? endBefore(...values) : startAfter(...values));
+    }
+    const requestedSize = Math.max(1, Number(request?.pageSize) || PERSONAL_WORD_PAGE_SIZE);
+    constraints.push(direction === 'backward' ? limitToLast(requestedSize + 1) : limit(requestedSize + 1));
+    return query(personalWordsRef(uid), ...constraints);
+  }
+
+  function mapPersonalPageSnapshot(snapshot, request) {
+    const pageSize = Math.max(1, Number(request?.pageSize) || PERSONAL_WORD_PAGE_SIZE);
+    const direction = request?.direction === 'backward' ? 'backward' : 'forward';
+    const sort = String(request?.query?.sort || 'newest');
+    const hasPrevious = direction === 'backward'
+      ? snapshot.docs.length > pageSize
+      : Boolean(request?.cursor);
+    const hasNext = direction === 'backward' ? true : snapshot.docs.length > pageSize;
+    const pageDocs = direction === 'backward' && hasPrevious
+      ? snapshot.docs.slice(1)
+      : snapshot.docs.slice(0, pageSize);
+    const items = pageDocs.map(mapWordDoc);
+    const beforeCursor = direction === 'backward'
+      ? (hasPrevious ? personalCursorFromDoc(snapshot.docs[0], sort) : null)
+      : (request?.cursor || null);
+    return {
+      items,
+      hasPrevious,
+      hasNext,
+      beforeCursor,
+      startCursor: pageDocs.length ? personalCursorFromDoc(pageDocs[0], sort) : null,
+      endCursor: pageDocs.length ? personalCursorFromDoc(pageDocs[pageDocs.length - 1], sort) : null,
+      fromCache: snapshot.metadata?.fromCache === true,
+      hasPendingWrites: snapshot.metadata?.hasPendingWrites === true,
+      listen,
+    };
+  }
+
+  function createPersonalDictionaryFirestoreAdapter(uid) {
+    const ownerId = String(uid || '');
+    return Object.freeze({
+      async fetchPage(request) {
+        if (request?.owner?.id !== ownerId || auth.currentUser?.uid !== ownerId) {
+          throw Object.assign(new Error('personal-dictionary/stale-owner'), { code: 'personal-dictionary/stale-owner' });
         }
-        if (typeof window.saveAndRender === "function") window.saveAndRender();
-      }
-      
-      // Notify Smart Loading Overlay that user data is loaded
-      if (window.SmartLoadingOverlay && window.SmartLoadingOverlay.onUserDataLoaded) {
-        window.SmartLoadingOverlay.onUserDataLoaded();
-      }
-      
-      if (typeof window.markInitialFeatureLoadPartDone === "function") window.markInitialFeatureLoadPartDone("words");
-      else if (typeof window.finishInitialFeatureLoad === "function") window.finishInitialFeatureLoad();
-    }, (error) => {
-      console.warn("loadWordsFromCloud:", error.code || error.message, error);
-      if (error.code === "permission-denied" && typeof showToast === "function") {
-        showToast("قواعد Firebase لا تسمح بقراءة كلماتك حالياً. راجع Firestore Rules.");
-      }
-      // Even on error, dismiss the loading overlay
-      if (window.SmartLoadingOverlay && window.SmartLoadingOverlay.onUserDataLoaded) {
-        window.SmartLoadingOverlay.onUserDataLoaded();
-      }
-      if (typeof window.markInitialFeatureLoadPartDone === "function") window.markInitialFeatureLoadPartDone("words");
+        const snapshot = await getDocs(buildPersonalPageQuery(request));
+        return mapPersonalPageSnapshot(snapshot, request);
+      },
+      openPageListener(request, onUpdate) {
+        if (request?.owner?.id !== ownerId || auth.currentUser?.uid !== ownerId) {
+          return Promise.reject(Object.assign(new Error('personal-dictionary/stale-owner'), { code: 'personal-dictionary/stale-owner' }));
+        }
+        return new Promise((resolve, reject) => {
+          let resolved = false;
+          const unsubscribe = onSnapshot(buildPersonalPageQuery(request, true), (snapshot) => {
+            if (auth.currentUser?.uid !== ownerId) return;
+            const page = mapPersonalPageSnapshot(snapshot, request);
+            if (!resolved) {
+              resolved = true;
+              resolve({ initial: page, unsubscribe });
+            } else {
+              onUpdate(page);
+            }
+          }, (error) => {
+            if (!resolved) {
+              resolved = true;
+              reject(error);
+            }
+          });
+        });
+      },
+      listenPage(request, onUpdate, onError) {
+        return onSnapshot(buildPersonalPageQuery(request, true), (snapshot) => {
+          if (auth.currentUser?.uid !== ownerId) return;
+          onUpdate(mapPersonalPageSnapshot(snapshot, request));
+        }, onError);
+      },
+      async getCounts({ query: requestedQuery }) {
+        const source = personalWordsRef(ownerId);
+        const totalSnapshot = await getCountFromServer(source);
+        let filteredCount = null;
+        if (requestedQuery?.filter === 'starred') {
+          const filteredSnapshot = await getCountFromServer(query(source, where('starred', '==', true)));
+          filteredCount = Number(filteredSnapshot.data().count) || 0;
+        }
+        return { totalCount: Number(totalSnapshot.data().count) || 0, filteredCount };
+      },
+      async auditField(field) {
+        const source = personalWordsRef(ownerId);
+        const [totalSnapshot, coveredSnapshot] = await Promise.all([
+          getCountFromServer(source),
+          getCountFromServer(query(source, orderBy(String(field), 'asc'))),
+        ]);
+        const total = Number(totalSnapshot.data().count) || 0;
+        const covered = Number(coveredSnapshot.data().count) || 0;
+        return { field: String(field), total, covered, complete: total === covered };
+      },
+      async scanAll(settings = {}) {
+        let cursor = null;
+        let pageIndex = 0;
+        const scanQuery = {
+          source: 'personal',
+          sort: String(settings?.query?.sort || 'newest'),
+          filter: String(settings?.query?.filter || 'all'),
+        };
+        do {
+          if (auth.currentUser?.uid !== ownerId || settings.generation !== settings.generation) break;
+          const request = {
+            owner: { type: 'account', id: ownerId },
+            query: scanQuery,
+            pageSize: Math.max(1, Number(settings.pageSize) || PERSONAL_WORD_PAGE_SIZE),
+            pageIndex,
+            direction: 'forward',
+            cursor,
+          };
+          const snapshot = await getDocs(buildPersonalPageQuery(request));
+          const page = mapPersonalPageSnapshot(snapshot, request);
+          settings.onPage?.(page.items, { pageIndex, hasNext: page.hasNext });
+          cursor = page.endCursor;
+          pageIndex += 1;
+          if (!page.hasNext || !cursor) break;
+        } while (true);
+        return { complete: true, pageCount: pageIndex };
+      },
+      async getByIds({ ids }) {
+        const snapshots = await Promise.all((Array.isArray(ids) ? ids : []).map((id) =>
+          getDoc(doc(db, 'users', ownerId, 'words', String(id)))
+        ));
+        return snapshots.filter((snapshot) => snapshot.exists()).map(mapWordDoc);
+      },
+      async getByWordKey({ wordOrKey }) {
+        const identity = wordLifecycleApi().normalizeIdentity(wordOrKey);
+        const wordKey = String(identity.wordKey || wordOrKey || '');
+        if (!wordKey) return null;
+        const canonical = await getDoc(doc(db, 'users', ownerId, 'contentWords', wordKey));
+        const legacyWordId = String(canonical.data()?.legacyWordId || deterministicUserWordId(wordKey));
+        const legacy = await getDoc(doc(db, 'users', ownerId, 'words', legacyWordId));
+        return legacy.exists() ? mapWordDoc(legacy) : null;
+      },
     });
+  }
+
+  function finishPersonalDictionaryInitialLoad() {
+    if (window.SmartLoadingOverlay?.onUserDataLoaded) {
+      window.SmartLoadingOverlay.onUserDataLoaded();
+    }
+    if (typeof window.markInitialFeatureLoadPartDone === 'function') {
+      window.markInitialFeatureLoadPartDone('words');
+    } else if (typeof window.finishInitialFeatureLoad === 'function') {
+      window.finishInitialFeatureLoad();
+    }
+  }
+
+  function currentPersonalDictionaryQuery() {
+    const requested = window.getPersonalDictionaryQuery?.() || {};
+    return {
+      source: 'personal',
+      sort: String(requested.sort || 'auto'),
+      filter: String(requested.filter || 'all'),
+    };
+  }
+
+  function syncRepositoryWords(snapshot, detail) {
+    if (!personalDictionaryRepository || snapshot.owner.id !== auth.currentUser?.uid) return;
+    if (window.isPersonalDictionaryDataView?.() !== false) {
+      window.words = personalDictionaryRepository.getLoadedItems();
+    }
+    window.__lootlinguaDictionaryCounts = {
+      totalCount: snapshot.totalCount,
+      loadedCount: snapshot.loadedCount,
+      visibleCount: snapshot.visibleCount,
+      filteredCount: snapshot.filteredCount,
+    };
+    window.handlePersonalDictionaryDataChange?.(snapshot, detail);
+  }
+
+  async function openPersonalDictionaryQuery(nextQuery, options = {}) {
+    const user = auth.currentUser;
+    if (!user || !personalDictionaryRepository) return null;
+    const requested = { ...currentPersonalDictionaryQuery(), ...(nextQuery || {}) };
+    const coverageField = requested.sort === 'auto'
+      ? 'order'
+      : (requested.sort === 'alpha' ? 'normalizedWord' : '');
+    if (coverageField) {
+      const coverage = await personalDictionaryRepositoryAdapter.auditField(coverageField);
+      window.__lootlinguaDictionaryCoverage = {
+        ...(window.__lootlinguaDictionaryCoverage || {}),
+        [coverageField]: coverage,
+      };
+      if (!coverage.complete) {
+        personalDictionaryRepository.pause();
+        const fallbackWords = await personalDictionaryRepository.resolveAll(`sort:${requested.sort}`, {
+          sort: 'newest',
+          force: options.force === true,
+        });
+        window.__personalDictionaryFallbackWords = fallbackWords;
+        window.words = typeof window.sortDictionaryWords === 'function'
+          ? window.sortDictionaryWords(fallbackWords)
+          : fallbackWords;
+        window.handlePersonalDictionaryFallback?.(requested, fallbackWords);
+        return { fallback: true, words: fallbackWords, coverage };
+      }
+    }
+    window.__personalDictionaryFallbackWords = null;
+    personalDictionaryRepository.configure({
+      ownerType: 'account',
+      ownerId: user.uid,
+      adapter: personalDictionaryRepositoryAdapter,
+      query: requested,
+    });
+    return personalDictionaryRepository.loadInitial(requested);
+  }
+
+  let personalDictionaryRepositoryAdapter = null;
+
+  async function loadWordsFromCloud(user) {
+    const dataApi = window.LootLinguaPersonalDictionaryData;
+    if (!dataApi?.createRepository) {
+      finishPersonalDictionaryInitialLoad();
+      throw new Error('personal-dictionary/data-runtime-unavailable');
+    }
+    personalDictionaryRepository?.destroy?.();
+    personalDictionaryRepositoryUnsubscribe?.();
+    personalDictionaryRepositoryAdapter = createPersonalDictionaryFirestoreAdapter(user.uid);
+    personalDictionaryRepository = dataApi.createRepository({
+      pageSize: PERSONAL_WORD_PAGE_SIZE,
+      maxCachedPages: PERSONAL_WORD_CACHE_PAGES,
+    });
+    window.personalDictionaryRepository = personalDictionaryRepository;
+    personalDictionaryRepository.configure({
+      ownerType: 'account',
+      ownerId: user.uid,
+      adapter: personalDictionaryRepositoryAdapter,
+      query: currentPersonalDictionaryQuery(),
+    });
+    personalDictionaryRepositoryUnsubscribe = personalDictionaryRepository.subscribe(syncRepositoryWords);
+    wordsUnsubscribe = () => {
+      personalDictionaryRepositoryUnsubscribe?.();
+      personalDictionaryRepositoryUnsubscribe = null;
+      personalDictionaryRepository?.destroy?.();
+      personalDictionaryRepository = null;
+      personalDictionaryRepositoryAdapter = null;
+      window.personalDictionaryRepository = null;
+    };
+    try {
+      await openPersonalDictionaryQuery(currentPersonalDictionaryQuery());
+    } catch (error) {
+      console.warn('loadPersonalDictionaryPage:', error.code || error.message, error);
+      if (error.code === 'permission-denied' && typeof showToast === 'function') {
+        showToast('قواعد Firebase لا تسمح بقراءة كلماتك حالياً. راجع Firestore Rules.');
+      }
+    } finally {
+      finishPersonalDictionaryInitialLoad();
+    }
   }
 
   function mapWordDoc(d) {

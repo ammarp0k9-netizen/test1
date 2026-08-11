@@ -12,6 +12,8 @@
   let owner = 'guest';
   let records = [];
   let cloudAdapter = null;
+  const deferredCloudWrites = new Map();
+  let cloudRetryTimer = null;
 
   function cleanText(value) {
     return String(value ?? '').replace(/\s+/g, ' ').trim();
@@ -275,6 +277,77 @@
     return record ? { ...record } : null;
   }
 
+  function deferredCloudKey(ownerId, recordId) {
+    return `${cleanText(ownerId)}\u0000${cleanText(recordId)}`;
+  }
+
+  function clearDeferredCloudRecords(values, ownerId) {
+    (Array.isArray(values) ? values : []).forEach((record) => {
+      const key = deferredCloudKey(ownerId, record?.id);
+      const deferred = deferredCloudWrites.get(key);
+      if (!deferred || timeValue(deferred.updatedAt) <= timeValue(record?.updatedAt)) {
+        deferredCloudWrites.delete(key);
+      }
+    });
+  }
+
+  function deferCloudRecords(values, ownerId) {
+    (Array.isArray(values) ? values : []).forEach((record) => {
+      const current = owner === ownerId ? records.find((item) => item.id === record?.id) : null;
+      const deferredRecord = normalizeRecord(current || record, ownerId);
+      const key = deferredCloudKey(ownerId, deferredRecord.id);
+      deferredCloudWrites.set(
+        key,
+        mergePair(deferredCloudWrites.get(key), deferredRecord, ownerId)
+      );
+    });
+  }
+
+  function scheduleCloudRetry() {
+    if (cloudRetryTimer || typeof root.setTimeout !== 'function') return;
+    cloudRetryTimer = root.setTimeout(() => {
+      cloudRetryTimer = null;
+      retryDeferredCloudWrites();
+    }, 15000);
+  }
+
+  async function retryDeferredCloudWrites() {
+    if (!cloudAdapter?.writeRecords || owner === 'guest') return false;
+    const ownerId = owner;
+    const pending = [...deferredCloudWrites.entries()]
+      .filter(([key]) => key.startsWith(`${ownerId}\u0000`))
+      .map(([, record]) => record);
+    if (!pending.length) return true;
+    try {
+      const saved = await cloudAdapter.writeRecords(pending);
+      if (saved === false) throw new Error('Notification cloud adapter did not accept the deferred write.');
+      clearDeferredCloudRecords(pending, ownerId);
+      return true;
+    } catch (error) {
+      console.warn('[NotificationStore] Deferred cloud write retry failed.', error?.message || error);
+      scheduleCloudRetry();
+      return false;
+    }
+  }
+
+  function syncCloudRecords(values, label) {
+    if (!cloudAdapter?.writeRecords || owner === 'guest') return;
+    const ownerId = owner;
+    const outgoing = (Array.isArray(values) ? values : [])
+      .map((record) => normalizeRecord(record, ownerId));
+    Promise.resolve()
+      .then(() => cloudAdapter.writeRecords(outgoing))
+      .then((saved) => {
+        if (saved === false) throw new Error('Notification cloud adapter did not accept the write.');
+        clearDeferredCloudRecords(outgoing, ownerId);
+      })
+      .catch((error) => {
+        deferCloudRecords(outgoing, ownerId);
+        console.warn(`[NotificationStore] ${label} deferred.`, error?.message || error);
+        scheduleCloudRetry();
+      });
+  }
+
   function applyRecords(incoming, reason, options = {}) {
     const scopedIncoming = (Array.isArray(incoming) ? incoming : [incoming])
       .filter(Boolean)
@@ -286,8 +359,7 @@
     persist();
     emit(reason);
     if (options.sync !== false && cloudAdapter?.writeRecords && owner !== 'guest') {
-      Promise.resolve(cloudAdapter.writeRecords(scopedIncoming.map((item) => normalizeRecord(item, owner))))
-        .catch((error) => console.warn('[NotificationStore] Cloud write deferred.', error?.message || error));
+      syncCloudRecords(scopedIncoming, 'Cloud write');
     }
     return getAll();
   }
@@ -319,8 +391,7 @@
     persist();
     emit(reason);
     if (cloudAdapter?.writeRecords && owner !== 'guest') {
-      Promise.resolve(cloudAdapter.writeRecords(changed))
-        .catch((error) => console.warn('[NotificationStore] Cloud mutation deferred.', error?.message || error));
+      syncCloudRecords(changed, 'Cloud mutation');
     }
     return getAll();
   }
@@ -370,6 +441,7 @@
 
   function registerCloudAdapter(adapter) {
     cloudAdapter = adapter && typeof adapter === 'object' ? adapter : null;
+    if (cloudAdapter) retryDeferredCloudWrites();
     return cloudAdapter;
   }
 
@@ -399,6 +471,9 @@
   function purgeOwner(ownerId) {
     const target = cleanText(ownerId) || 'guest';
     try { localStorage.removeItem(storageKey(target)); } catch (_) {}
+    [...deferredCloudWrites.keys()]
+      .filter((key) => key.startsWith(`${target}\u0000`))
+      .forEach((key) => deferredCloudWrites.delete(key));
     if (owner === target) {
       records = [];
       emit('purge-owner');
@@ -427,6 +502,8 @@
     resolve,
     subscribe,
     registerCloudAdapter,
+    retryDeferredCloudWrites,
+    deferredCloudWriteCount: () => deferredCloudWrites.size,
     migrateGuestToOwner,
     purgeOwner,
   });
