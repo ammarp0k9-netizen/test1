@@ -30,6 +30,43 @@ test('personal words retain every published educational field from the cloud sna
   }
 });
 
+test('personal dictionary snapshot mapper completes without listener-only state', () => {
+  const sortStart = cloudSource.indexOf('function personalSortDefinition');
+  const mapperEnd = cloudSource.indexOf('function createPersonalDictionaryFirestoreAdapter', sortStart);
+  assert.notEqual(sortStart, -1);
+  assert.notEqual(mapperEnd, -1);
+  const mapperSource = cloudSource.slice(sortStart, mapperEnd);
+  const context = vm.createContext({
+    PERSONAL_WORD_PAGE_SIZE: 50,
+    mapWordDoc: (snapshot) => ({ id: snapshot.id, ...snapshot.data() }),
+    snapshot: {
+      docs: [
+        { id: 'word-a', data: () => ({ word: 'alpha', createdAt: 20 }) },
+        { id: 'word-b', data: () => ({ word: 'beta', createdAt: 10 }) },
+      ],
+      metadata: { fromCache: false, hasPendingWrites: false },
+    },
+    request: {
+      owner: { type: 'account', id: 'account-1' },
+      query: { sort: 'newest', filter: 'all' },
+      direction: 'forward',
+      pageSize: 1,
+      cursor: null,
+    },
+  });
+  const page = new vm.Script(`${mapperSource}; mapPersonalPageSnapshot(snapshot, request);`)
+    .runInContext(context);
+
+  assert.equal(page.items.length, 1);
+  assert.equal(page.items[0].id, 'word-a');
+  assert.equal(page.hasPrevious, false);
+  assert.equal(page.hasNext, true);
+  assert.equal(page.startCursor.id, 'word-a');
+  assert.equal(page.endCursor.id, 'word-a');
+  assert.equal(page.fromCache, false);
+  assert.equal(page.hasPendingWrites, false);
+});
+
 test('part of speech and category render as separate labels', () => {
   assert.match(renderSource, /w\.category[\s\S]*class="cat-tag/);
   assert.match(renderSource, /w\.partOfSpeech[\s\S]*class="pos-tag/);

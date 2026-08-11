@@ -287,7 +287,7 @@
     };
   }
 
-  function buildPersonalPageQuery(request, listen = false) {
+  function buildPersonalPageQuery(request) {
     const uid = String(request?.owner?.id || '');
     const sort = String(request?.query?.sort || 'newest');
     const filter = String(request?.query?.filter || 'all');
@@ -330,7 +330,6 @@
       endCursor: pageDocs.length ? personalCursorFromDoc(pageDocs[pageDocs.length - 1], sort) : null,
       fromCache: snapshot.metadata?.fromCache === true,
       hasPendingWrites: snapshot.metadata?.hasPendingWrites === true,
-      listen,
     };
   }
 
@@ -350,7 +349,7 @@
         }
         return new Promise((resolve, reject) => {
           let resolved = false;
-          const unsubscribe = onSnapshot(buildPersonalPageQuery(request, true), (snapshot) => {
+          const unsubscribe = onSnapshot(buildPersonalPageQuery(request), (snapshot) => {
             if (auth.currentUser?.uid !== ownerId) return;
             const page = mapPersonalPageSnapshot(snapshot, request);
             if (!resolved) {
@@ -368,7 +367,7 @@
         });
       },
       listenPage(request, onUpdate, onError) {
-        return onSnapshot(buildPersonalPageQuery(request, true), (snapshot) => {
+        return onSnapshot(buildPersonalPageQuery(request), (snapshot) => {
           if (auth.currentUser?.uid !== ownerId) return;
           onUpdate(mapPersonalPageSnapshot(snapshot, request));
         }, onError);
