@@ -2,7 +2,8 @@
   import { initializeApp }    from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
   import {
     getAuth, signInWithPopup, signInWithRedirect, signOut,
-    GoogleAuthProvider, onAuthStateChanged, getRedirectResult
+    GoogleAuthProvider, onAuthStateChanged, getRedirectResult,
+    signInWithEmailAndPassword, createUserWithEmailAndPassword, sendPasswordResetEmail
   } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js";
   import {
     getFirestore, collection, addDoc, query,
@@ -10,6 +11,7 @@
     getDoc, setDoc, getDocs, runTransaction, writeBatch
   } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
   import { publicLandingPath, runLogoutSequence } from './logout-flow.js?v=20260811-1';
+  import { mountAppAuth } from './app-auth-ui.js?v=20260811-2';
 
   const firebaseConfig = {
     apiKey:            "AIzaSyDQB5N4wxJw69-tb8suI2T2SfEfCpwFA2c",
@@ -165,7 +167,7 @@
     }
   });
 
-  window.login = async function() {
+  async function performGoogleLogin() {
     const provider = new GoogleAuthProvider();
     provider.setCustomParameters({ prompt: 'select_account' });
     setLoginLoading(true, isIOSDevice() ? 'جاري توجيهك لتسجيل الدخول...' : 'جاري فتح تسجيل الدخول...');
@@ -173,15 +175,24 @@
       if (isIOSDevice()) {
         sessionStorage.setItem(LOGIN_REDIRECT_PENDING_KEY, '1');
         await signInWithRedirect(auth, provider);
-        return true;
+        return { redirecting: true };
       }
-      await signInWithPopup(auth, provider);
+      const result = await signInWithPopup(auth, provider);
       setLoginLoading(false);
+      return result;
+    } catch (e) {
+      sessionStorage.removeItem(LOGIN_REDIRECT_PENDING_KEY);
+      setLoginLoading(false);
+      throw e;
+    }
+  }
+
+  window.login = async function() {
+    try {
+      await performGoogleLogin();
       return true;
     } catch (e) {
       console.error(e.code, e.message);
-      sessionStorage.removeItem(LOGIN_REDIRECT_PENDING_KEY);
-      setLoginLoading(false);
       const message = e.code === 'auth/popup-blocked'
         ? 'منع المتصفح نافذة تسجيل الدخول. اسمح بالنوافذ المنبثقة ثم حاول مرة أخرى.'
         : (e.code === 'auth/popup-closed-by-user' || e.code === 'auth/cancelled-popup-request')
@@ -191,6 +202,22 @@
       return false;
     }
   };
+
+  mountAppAuth({
+    gateway: Object.freeze({
+      observeAuth: (callback) => onAuthStateChanged(auth, callback),
+      currentUser: () => auth.currentUser,
+      hasPendingRedirect: () => false,
+      clearPendingRedirect: () => sessionStorage.removeItem(LOGIN_REDIRECT_PENDING_KEY),
+      finishRedirect: async () => null,
+      signInWithGoogle: performGoogleLogin,
+      signIn: (email, password) => signInWithEmailAndPassword(auth, email, password),
+      createAccount: (email, password) => createUserWithEmailAndPassword(auth, email, password),
+      sendPasswordReset: (email) => sendPasswordResetEmail(auth, email),
+    }),
+  }).catch((error) => {
+    console.error('app-auth-ui:', error?.message || error);
+  });
 
   window.confirmLogout = async function() {
     let authStateHandler = null;

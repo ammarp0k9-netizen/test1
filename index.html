@@ -86,7 +86,7 @@
     content="#090c0f"
   >
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
-  <link rel="stylesheet" href="style.css?v=20260811-1">
+  <link rel="stylesheet" href="style.css?v=20260811-2">
   <link rel="stylesheet" href="entry-experience.css?v=20260809-1">
 </head>
 <body class="legend-dock-visible">
@@ -762,7 +762,7 @@
       </section>
       <section class="profile-section profile-account-section">
         <h3><i class="fa-solid fa-user-gear"></i> إعدادات الحساب</h3>
-        <button id="loginBtn" class="auth-btn profile-auth-btn" onclick="login()"><i class="fa-brands fa-google" aria-hidden="true"></i> تسجيل دخول بـ Google</button>
+        <button id="loginBtn" class="auth-btn profile-auth-btn" onclick="openAppAuth('login')"><i class="fa-solid fa-right-to-bracket" aria-hidden="true"></i> تسجيل الدخول</button>
         <button id="logoutBtn" class="auth-btn profile-auth-btn" onclick="showModal('logoutModal')"><i class="fa-solid fa-right-from-bracket" aria-hidden="true"></i> تسجيل الخروج</button>
         <button id="adminEntryBtn" type="button" class="auth-btn profile-auth-btn admin-profile-entry" hidden disabled aria-hidden="true" tabindex="-1" style="display:none">
           <i class="fa-solid fa-shield-halved" aria-hidden="true"></i> إدارة المحتوى الجاهز
@@ -809,6 +809,27 @@
   <div class="entry-experience-backdrop" aria-hidden="true"></div>
   <section id="entryExperiencePanel" class="entry-experience-panel" role="dialog" aria-modal="true" aria-labelledby="entryExperienceTitle"></section>
   <p id="entryExperienceStatus" class="entry-experience-status" role="status" aria-live="polite"></p>
+</div>
+
+<!-- Auth UI shared with the public Landing; hydration remains owned by cloud.js. -->
+<div id="appAuthDialogShell" class="app-auth-dialog-shell" data-auth-dialog hidden>
+  <button class="app-auth-backdrop" type="button" data-auth-close tabindex="-1" aria-label="إغلاق نافذة تسجيل الدخول"></button>
+  <section class="app-auth-dialog" role="dialog" aria-modal="true" aria-labelledby="appAuthTitle" aria-describedby="appAuthIntro">
+    <button class="app-auth-close" type="button" data-auth-close aria-label="إغلاق"><span aria-hidden="true">×</span></button>
+    <div class="app-auth-brand" aria-hidden="true"><span><img src="Lootlingua_LOGO_2.png" alt=""></span></div>
+    <div class="app-auth-heading"><p data-auth-eyebrow>العودة إلى رحلتك</p><h2 id="appAuthTitle" data-auth-title tabindex="-1">أهلًا بعودتك</h2><p id="appAuthIntro" data-auth-intro>سجّل دخولك، وسنكمل من المكان المحفوظ في حسابك.</p></div>
+    <button class="app-google-button" type="button" data-auth-google><svg viewBox="0 0 24 24" aria-hidden="true"><path fill="#4285f4" d="M21.6 12.2c0-.7-.1-1.4-.2-2H12v3.9h5.4a4.6 4.6 0 0 1-2 3v2.6h3.3c1.9-1.8 2.9-4.4 2.9-7.5Z"/><path fill="#34a853" d="M12 22c2.7 0 5-.9 6.7-2.3l-3.3-2.6c-.9.6-2.1 1-3.4 1a5.9 5.9 0 0 1-5.6-4.1H3v2.7A10 10 0 0 0 12 22Z"/><path fill="#fbbc05" d="M6.4 14a6 6 0 0 1 0-3.9V7.4H3A10 10 0 0 0 3 16.7Z"/><path fill="#ea4335" d="M12 6c1.5 0 2.9.5 3.9 1.5l2.9-2.8A9.7 9.7 0 0 0 3 7.4l3.4 2.7A5.9 5.9 0 0 1 12 6Z"/></svg><span data-google-label>المتابعة بحساب Google</span></button>
+    <div class="app-auth-separator" data-auth-provider-separator><span>أو بالبريد الإلكتروني</span></div>
+    <form class="app-auth-form" data-auth-form novalidate>
+      <label class="app-auth-field" for="appAuthEmail"><span>البريد الإلكتروني</span><input id="appAuthEmail" data-auth-input="email" name="email" type="email" inputmode="email" autocomplete="email" dir="ltr" required aria-describedby="appAuthEmailError"><small id="appAuthEmailError" data-field-error="email"></small></label>
+      <label class="app-auth-field" for="appAuthPassword" data-password-field><span>كلمة المرور</span><span class="app-password-input-row"><input id="appAuthPassword" data-auth-input="password" name="password" type="password" autocomplete="current-password" dir="ltr" required aria-describedby="appAuthPasswordError"><button type="button" data-password-toggle="password" aria-pressed="false">إظهار</button></span><small id="appAuthPasswordError" data-field-error="password"></small></label>
+      <label class="app-auth-field" for="appAuthConfirmation" data-confirmation-field hidden><span>تأكيد كلمة المرور</span><span class="app-password-input-row"><input id="appAuthConfirmation" data-auth-input="confirmation" name="confirmation" type="password" autocomplete="new-password" dir="ltr" aria-describedby="appAuthConfirmationError"><button type="button" data-password-toggle="confirmation" aria-pressed="false">إظهار</button></span><small id="appAuthConfirmationError" data-field-error="confirmation"></small></label>
+      <button class="app-forgot-password" type="button" data-auth-mode="reset">نسيت كلمة المرور؟</button>
+      <p class="app-auth-message" data-auth-message role="status" aria-live="polite"></p>
+      <button class="app-auth-submit" type="submit" data-auth-submit><span data-auth-submit-label>تسجيل الدخول</span></button>
+    </form>
+    <p class="app-auth-switch" data-auth-switch-wrap><span data-auth-switch-text>ما عندك حساب؟</span> <button type="button" data-auth-switch="signup">أنشئ حسابًا</button></p>
+  </section>
 </div>
 
 <!-- ══ MODAL: صائد الكلمات الذكي ══ -->
@@ -1075,8 +1096,8 @@
 
 <!-- ══ FIREBASE ══ -->
   <script src="js/entry-experience-contract.js?v=20260808-1"></script>
-<script src="js/entry-experience-controller.js?v=20260809-1"></script>
-<script type="module" src="js/cloud.js?v=20260811-1"></script>
+<script src="js/entry-experience-controller.js?v=20260811-2"></script>
+<script type="module" src="js/cloud.js?v=20260811-2"></script>
 <script type="module" src="js/entry-experience-cloud.js?v=20260808-1"></script>
 
 <!-- ══ STATS PANEL ══ -->

@@ -1,7 +1,8 @@
 {
-  "generatedAt": "2026-08-11T08:47:50.050Z",
+  "generatedAt": "2026-08-11T10:09:38.455Z",
   "browser": "chrome.exe",
   "firebaseMode": "deterministic-offline-fallback",
+  "missingAssets": [],
   "matrix": [
     {
       "id": "landing-desktop-1440",
@@ -29,6 +30,178 @@
         "emailAutocomplete": "email",
         "passwordAutocomplete": "current-password",
         "confirmationAutocomplete": "new-password",
+        "productPreviewCount": 4,
+        "productPreviewImages": [],
+        "firebaseResources": [
+          "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js",
+          "https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js"
+        ]
+      }
+    },
+    {
+      "id": "landing-hero",
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "image": "reports/landing-auth-evidence/landing-hero.png",
+      "audit": {
+        "clientWidth": 1440,
+        "clientHeight": 900,
+        "scrollWidth": 1440,
+        "overflow": false,
+        "elementsInside": true,
+        "outside": [],
+        "authState": "guest",
+        "authProvider": "offline",
+        "dialogOpen": false,
+        "dialogLeft": 0,
+        "dialogRight": 0,
+        "reducedMotion": false,
+        "activeElement": "BODY",
+        "heroCta": "ابدأ رحلتك",
+        "authMessage": "",
+        "emailAutocomplete": "email",
+        "passwordAutocomplete": "current-password",
+        "confirmationAutocomplete": "new-password",
+        "productPreviewCount": 4,
+        "productPreviewImages": [],
+        "firebaseResources": [
+          "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js",
+          "https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js"
+        ]
+      }
+    },
+    {
+      "id": "landing-context",
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "image": "reports/landing-auth-evidence/landing-context.png",
+      "audit": {
+        "clientWidth": 1440,
+        "clientHeight": 900,
+        "scrollWidth": 1440,
+        "overflow": false,
+        "elementsInside": true,
+        "outside": [],
+        "authState": "guest",
+        "authProvider": "offline",
+        "dialogOpen": false,
+        "dialogLeft": 0,
+        "dialogRight": 0,
+        "reducedMotion": false,
+        "activeElement": "BODY",
+        "heroCta": "ابدأ رحلتك",
+        "authMessage": "",
+        "emailAutocomplete": "email",
+        "passwordAutocomplete": "current-password",
+        "confirmationAutocomplete": "new-password",
+        "productPreviewCount": 4,
+        "productPreviewImages": [],
+        "firebaseResources": [
+          "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js",
+          "https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js"
+        ]
+      }
+    },
+    {
+      "id": "landing-journey",
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "image": "reports/landing-auth-evidence/landing-journey.png",
+      "audit": {
+        "clientWidth": 1440,
+        "clientHeight": 900,
+        "scrollWidth": 1440,
+        "overflow": false,
+        "elementsInside": true,
+        "outside": [],
+        "authState": "guest",
+        "authProvider": "offline",
+        "dialogOpen": false,
+        "dialogLeft": 0,
+        "dialogRight": 0,
+        "reducedMotion": false,
+        "activeElement": "BODY",
+        "heroCta": "ابدأ رحلتك",
+        "authMessage": "",
+        "emailAutocomplete": "email",
+        "passwordAutocomplete": "current-password",
+        "confirmationAutocomplete": "new-password",
+        "productPreviewCount": 4,
+        "productPreviewImages": [],
+        "firebaseResources": [
+          "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js",
+          "https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js"
+        ]
+      }
+    },
+    {
+      "id": "landing-review",
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "image": "reports/landing-auth-evidence/landing-review.png",
+      "audit": {
+        "clientWidth": 1440,
+        "clientHeight": 900,
+        "scrollWidth": 1440,
+        "overflow": false,
+        "elementsInside": true,
+        "outside": [],
+        "authState": "guest",
+        "authProvider": "offline",
+        "dialogOpen": false,
+        "dialogLeft": 0,
+        "dialogRight": 0,
+        "reducedMotion": false,
+        "activeElement": "BODY",
+        "heroCta": "ابدأ رحلتك",
+        "authMessage": "",
+        "emailAutocomplete": "email",
+        "passwordAutocomplete": "current-password",
+        "confirmationAutocomplete": "new-password",
+        "productPreviewCount": 4,
+        "productPreviewImages": [],
+        "firebaseResources": [
+          "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js",
+          "https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js"
+        ]
+      }
+    },
+    {
+      "id": "landing-final-cta",
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "image": "reports/landing-auth-evidence/landing-final-cta.png",
+      "audit": {
+        "clientWidth": 1440,
+        "clientHeight": 900,
+        "scrollWidth": 1440,
+        "overflow": false,
+        "elementsInside": true,
+        "outside": [],
+        "authState": "guest",
+        "authProvider": "offline",
+        "dialogOpen": false,
+        "dialogLeft": 0,
+        "dialogRight": 0,
+        "reducedMotion": false,
+        "activeElement": "BODY",
+        "heroCta": "ابدأ رحلتك",
+        "authMessage": "",
+        "emailAutocomplete": "email",
+        "passwordAutocomplete": "current-password",
+        "confirmationAutocomplete": "new-password",
+        "productPreviewCount": 4,
+        "productPreviewImages": [],
         "firebaseResources": [
           "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js",
           "https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js"
@@ -61,6 +234,8 @@
         "emailAutocomplete": "email",
         "passwordAutocomplete": "current-password",
         "confirmationAutocomplete": "new-password",
+        "productPreviewCount": 4,
+        "productPreviewImages": [],
         "firebaseResources": [
           "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js",
           "https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js"
@@ -93,6 +268,8 @@
         "emailAutocomplete": "email",
         "passwordAutocomplete": "current-password",
         "confirmationAutocomplete": "new-password",
+        "productPreviewCount": 4,
+        "productPreviewImages": [],
         "firebaseResources": [
           "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js",
           "https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js"
@@ -125,6 +302,8 @@
         "emailAutocomplete": "email",
         "passwordAutocomplete": "current-password",
         "confirmationAutocomplete": "new-password",
+        "productPreviewCount": 4,
+        "productPreviewImages": [],
         "firebaseResources": [
           "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js",
           "https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js"
@@ -151,12 +330,14 @@
         "dialogLeft": 500,
         "dialogRight": 940,
         "reducedMotion": false,
-        "activeElement": "authEmail",
+        "activeElement": "landingAuthEmail",
         "heroCta": "ابدأ رحلتك",
         "authMessage": "",
         "emailAutocomplete": "email",
         "passwordAutocomplete": "current-password",
         "confirmationAutocomplete": "new-password",
+        "productPreviewCount": 4,
+        "productPreviewImages": [],
         "firebaseResources": [
           "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js",
           "https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js"
@@ -192,12 +373,14 @@
         "dialogLeft": 0,
         "dialogRight": 390,
         "reducedMotion": false,
-        "activeElement": "authEmail",
+        "activeElement": "landingAuthEmail",
         "heroCta": "ابدأ رحلتك",
         "authMessage": "",
         "emailAutocomplete": "email",
         "passwordAutocomplete": "current-password",
         "confirmationAutocomplete": "new-password",
+        "productPreviewCount": 4,
+        "productPreviewImages": [],
         "firebaseResources": [
           "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js",
           "https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js"
@@ -212,6 +395,53 @@
         "passwordRevealWorks": true,
         "closesAndClearsPasswords": true
       }
+    },
+    {
+      "id": "app-auth-dialog-desktop",
+      "viewport": {
+        "width": 1440,
+        "height": 1000
+      },
+      "image": "reports/landing-auth-evidence/app-auth-dialog-desktop.png",
+      "audit": {
+        "clientWidth": 1440,
+        "clientHeight": 1000,
+        "scrollWidth": 1440,
+        "overflow": false,
+        "elementsInside": true,
+        "outside": [],
+        "authState": "",
+        "authProvider": "",
+        "dialogOpen": true,
+        "dialogLeft": 500,
+        "dialogRight": 940,
+        "reducedMotion": false,
+        "activeElement": "appAuthEmail",
+        "heroCta": "",
+        "authMessage": "",
+        "emailAutocomplete": "email",
+        "passwordAutocomplete": "current-password",
+        "confirmationAutocomplete": "new-password",
+        "productPreviewCount": 0,
+        "productPreviewImages": [],
+        "firebaseResources": [
+          "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js",
+          "https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js",
+          "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js",
+          "https://www.gstatic.com/firebasejs/10.12.0/firebase-functions.js"
+        ]
+      },
+      "authInteractions": {
+        "signupState": {
+          "passwordAutocomplete": "new-password",
+          "confirmationAutocomplete": "new-password",
+          "confirmationVisible": true
+        },
+        "passwordRevealWorks": true,
+        "closesAndClearsPasswords": true
+      },
+      "deterministicAppAuth": true,
+      "ignoredAppRuntimeExceptions": []
     },
     {
       "id": "landing-reduced-motion",
@@ -239,6 +469,8 @@
         "emailAutocomplete": "email",
         "passwordAutocomplete": "current-password",
         "confirmationAutocomplete": "new-password",
+        "productPreviewCount": 4,
+        "productPreviewImages": [],
         "firebaseResources": [
           "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js",
           "https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js"

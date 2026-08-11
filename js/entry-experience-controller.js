@@ -1723,7 +1723,7 @@
         <p id="journeyAuthBody">سنحفظ بيانات الضيف أولًا، ثم نعيدك إلى العالم نفسه ونكمل طلبك مرة واحدة.</p>
         <p class="journey-auth-status" id="journeyAuthStatus" role="status" aria-live="polite"></p>
         <div class="journey-auth-actions">
-          <button type="button" class="entry-primary" data-journey-auth="login">المتابعة بحساب Google</button>
+          <button type="button" class="entry-primary" data-journey-auth="login">اختيار طريقة تسجيل الدخول</button>
           <button type="button" class="entry-secondary" data-journey-auth="guest">استكشف كضيف الآن</button>
         </div>
       </section>`;
@@ -1736,14 +1736,11 @@
       const button = event.currentTarget;
       const status = prompt.querySelector('#journeyAuthStatus');
       button.disabled = true;
-      if (status) status.textContent = 'جاري فتح تسجيل الدخول…';
+      if (status) status.textContent = 'جاري فتح خيارات تسجيل الدخول…';
       try {
-        if (typeof root.login !== 'function') throw new Error('auth-unavailable');
-        await root.login();
-        if (!root.auth?.currentUser) {
-          button.disabled = false;
-          if (status) status.textContent = 'لم يكتمل تسجيل الدخول. يمكنك المحاولة مرة أخرى أو المتابعة كضيف.';
-        }
+        if (typeof root.openAppAuth !== 'function') throw new Error('auth-unavailable');
+        closeJourneyAuthPrompt({ silent: true });
+        root.openAppAuth('login');
       } catch (_) {
         button.disabled = false;
         if (status) status.textContent = 'تعذّر تسجيل الدخول الآن. حاول مرة أخرى من دون فقدان خطوتك.';
@@ -1963,7 +1960,7 @@
     if (active) {
       runtime.inerted = [];
       Array.from(document.body.children).forEach((element) => {
-        if (['entryExperienceRoot', 'journeyAuthPrompt'].includes(element.id) || ['SCRIPT'].includes(element.tagName)) return;
+        if (['entryExperienceRoot', 'journeyAuthPrompt', 'appAuthDialogShell'].includes(element.id) || ['SCRIPT'].includes(element.tagName)) return;
         if (element.id === 'smartLoadingOverlay') return;
         runtime.inerted.push({
           element,

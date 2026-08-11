@@ -18,6 +18,7 @@ const offset = (process.pid + 193) % 400;
 const serverPort = 8850 + offset;
 const debugPort = 9850 + offset;
 const landingUrl = `http://127.0.0.1:${serverPort}/`;
+const appUrl = `http://127.0.0.1:${serverPort}/app`;
 const liveFirebase = process.env.LANDING_FIREBASE_MODE === 'live';
 const profileDir = fs.mkdtempSync(path.join(os.tmpdir(), 'lootlingua-landing-smoke-'));
 fs.mkdirSync(evidenceDir, { recursive: true });
@@ -61,6 +62,7 @@ let nextId = 1;
 const pending = new Map();
 const firebaseResponses = [];
 const runtimeExceptions = [];
+const missingAssets = [];
 function send(method, params = {}) {
   const id = nextId++;
   return new Promise((resolve, reject) => {
@@ -98,13 +100,19 @@ async function waitFor(expression, label, timeoutMs = 12000) {
   throw new Error(`Timed out waiting for ${label}`);
 }
 
-async function captureScreenshot(id) {
+async function captureScreenshot(id, selector = '') {
   await send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: 1, y: 1 });
   await delay(120);
+  const clip = selector ? await evaluate(`(() => {
+    const rect = document.querySelector(${JSON.stringify(selector)})?.getBoundingClientRect();
+    if (!rect) return null;
+    return { x: rect.left + scrollX, y: rect.top + scrollY, width: rect.width, height: rect.height, scale: 1 };
+  })()`) : null;
   const result = await send('Page.captureScreenshot', {
     format: 'png',
     fromSurface: true,
-    captureBeyondViewport: false,
+    captureBeyondViewport: Boolean(clip),
+    ...(clip ? { clip } : {}),
   });
   const imagePath = path.join(evidenceDir, `${id}.png`);
   fs.writeFileSync(imagePath, Buffer.from(result.data, 'base64'));
@@ -113,13 +121,13 @@ async function captureScreenshot(id) {
 
 const layoutAuditExpression = `(() => {
   const width = document.documentElement.clientWidth;
-  const visible = Array.from(document.querySelectorAll('header, main, footer, section, article, .auth-dialog'))
+  const visible = Array.from(document.querySelectorAll('header, main, footer, section, article, .auth-dialog, .app-auth-dialog'))
     .filter((node) => !node.closest('[hidden]') && getComputedStyle(node).display !== 'none');
   const outside = visible.filter((node) => {
     const rect = node.getBoundingClientRect();
     return rect.left < -1 || rect.right > width + 1;
   });
-  const dialog = document.querySelector('.auth-dialog');
+  const dialog = document.querySelector('.auth-dialog, .app-auth-dialog');
   const dialogShell = document.querySelector('[data-auth-dialog]');
   const dialogRect = dialog?.getBoundingClientRect();
   return {
@@ -138,9 +146,11 @@ const layoutAuditExpression = `(() => {
     activeElement: document.activeElement?.id || document.activeElement?.tagName || '',
     heroCta: document.querySelector('[data-journey-label]')?.textContent?.trim() || '',
     authMessage: document.querySelector('[data-auth-message]')?.textContent?.trim() || '',
-    emailAutocomplete: document.getElementById('authEmail')?.autocomplete || '',
-    passwordAutocomplete: document.getElementById('authPassword')?.autocomplete || '',
-    confirmationAutocomplete: document.getElementById('authConfirmation')?.autocomplete || '',
+    emailAutocomplete: document.querySelector('[data-auth-input="email"]')?.autocomplete || '',
+    passwordAutocomplete: document.querySelector('[data-auth-input="password"]')?.autocomplete || '',
+    confirmationAutocomplete: document.querySelector('[data-auth-input="confirmation"]')?.autocomplete || '',
+    productPreviewCount: document.querySelectorAll('.product-preview').length,
+    productPreviewImages: Array.from(document.querySelectorAll('.product-preview img')).map((node) => node.currentSrc || node.src),
     firebaseResources: performance.getEntriesByType('resource')
       .map((entry) => entry.name)
       .filter((name) => name.includes('firebase-')),
@@ -149,11 +159,17 @@ const layoutAuditExpression = `(() => {
 
 const scenarios = [
   { id: 'landing-desktop-1440', width: 1440, height: 1000 },
+  { id: 'landing-hero', width: 1440, height: 900, section: '#top' },
+  { id: 'landing-context', width: 1440, height: 900, section: '#context' },
+  { id: 'landing-journey', width: 1440, height: 900, section: '#journey' },
+  { id: 'landing-review', width: 1440, height: 900, section: '#review' },
+  { id: 'landing-final-cta', width: 1440, height: 900, section: '.final-cta' },
   { id: 'landing-tablet-834', width: 834, height: 1112 },
   { id: 'landing-mobile-390', width: 390, height: 844, mobile: true },
   { id: 'landing-mobile-320', width: 320, height: 568, mobile: true },
   { id: 'auth-dialog-desktop', width: 1440, height: 1000, auth: true },
   { id: 'auth-sheet-mobile', width: 390, height: 844, mobile: true, auth: true },
+  { id: 'app-auth-dialog-desktop', width: 1440, height: 1000, auth: true, app: true },
   { id: 'landing-reduced-motion', width: 390, height: 844, mobile: true, reducedMotion: true },
 ];
 
@@ -187,6 +203,9 @@ try {
       const response = message.params.response;
       if (response?.url?.includes('www.gstatic.com/firebasejs/')) {
         firebaseResponses.push({ url: response.url, status: response.status });
+      }
+      if (response?.status === 404 && response.url.startsWith(`http://127.0.0.1:${serverPort}/`)) {
+        missingAssets.push(response.url);
       }
     }
     if (message.method === 'Runtime.exceptionThrown') {
@@ -234,15 +253,51 @@ try {
         value: scenario.reducedMotion ? 'reduce' : 'no-preference',
       }],
     });
-    const url = new URL(landingUrl);
-    if (scenario.auth) url.searchParams.set('auth', 'login');
+    const url = new URL(scenario.app ? appUrl : landingUrl);
+    if (scenario.auth && !scenario.app) url.searchParams.set('auth', 'login');
     await send('Page.navigate', { url: url.href });
-    await waitFor(
-      `document.readyState === 'complete' && document.body?.dataset.authState === 'guest'`,
-      `${scenario.id} landing auth fallback`,
-    );
+    if (scenario.app) {
+      await waitFor(`document.readyState === 'complete' && document.getElementById('appAuthDialogShell')`, `${scenario.id} app shell`);
+      await delay(700);
+      await evaluate(`(async () => {
+        document.getElementById('smartLoadingOverlay')?.remove();
+        document.getElementById('toastHost')?.remove();
+        const entry = document.getElementById('entryExperienceRoot');
+        if (entry) { entry.hidden = true; entry.setAttribute('aria-hidden', 'true'); }
+        document.documentElement.classList.remove('entry-experience-active', 'journey-auth-active');
+        document.body.classList.remove('entry-experience-active', 'journey-auth-active');
+        const root = document.getElementById('appAuthDialogShell');
+        root.inert = false;
+        const module = await import('/js/app-auth-ui.js');
+        const unavailable = () => Promise.reject(Object.assign(new Error('offline'), { code: 'auth/network-request-failed' }));
+        const surface = await module.mountAppAuth({ gateway: {
+          observeAuth(callback) { queueMicrotask(() => callback(null)); return () => {}; },
+          currentUser: () => null,
+          hasPendingRedirect: () => false,
+          clearPendingRedirect() {},
+          finishRedirect: async () => null,
+          signInWithGoogle: unavailable,
+          signIn: unavailable,
+          createAccount: unavailable,
+          sendPasswordReset: unavailable,
+        }});
+        surface.open('login');
+        return true;
+      })()`);
+    } else {
+      await waitFor(
+        `document.readyState === 'complete' && document.body?.dataset.authState === 'guest'`,
+        `${scenario.id} landing auth fallback`,
+      );
+    }
     if (scenario.auth) {
       await waitFor(`document.querySelector('[data-auth-dialog]')?.hidden === false`, `${scenario.id} Auth surface`);
+    }
+    if (scenario.section) {
+      await evaluate(`(() => {
+        document.querySelectorAll('.reveal').forEach((node) => node.classList.add('is-visible'));
+        document.querySelector(${JSON.stringify(scenario.section)})?.scrollIntoView({ block: 'start' });
+      })()`);
     }
     await delay(350);
 
@@ -260,22 +315,25 @@ try {
       throw new Error(`${scenario.id}: reduced-motion preference was not applied`);
     }
     const scenarioExceptions = runtimeExceptions.slice(exceptionOffset);
-    if (scenarioExceptions.length) {
+    if (scenarioExceptions.length && !scenario.app) {
       throw new Error(`${scenario.id}: runtime exceptions ${JSON.stringify(scenarioExceptions)}`);
     }
     const liveSdkResponses = firebaseResponses.filter((response) =>
       response.url.endsWith('/firebase-app.js') || response.url.endsWith('/firebase-auth.js'));
     const expectedProvider = liveFirebase ? 'firebase' : 'offline';
-    if (audit.authProvider !== expectedProvider) {
+    if (!scenario.app && audit.authProvider !== expectedProvider) {
       throw new Error(`${scenario.id}: expected ${expectedProvider} Auth provider ${JSON.stringify(audit)}`);
     }
-    const image = await captureScreenshot(scenario.id);
+    if (!scenario.app && (audit.productPreviewCount !== 4 || audit.productPreviewImages.length)) {
+      throw new Error(`${scenario.id}: previews must be four image-free DOM compositions ${JSON.stringify(audit)}`);
+    }
+    const image = await captureScreenshot(scenario.id, scenario.section);
     let authInteractions = null;
     if (scenario.auth) {
       authInteractions = await evaluate(`(() => {
         const shell = document.querySelector('[data-auth-dialog]');
-        const password = document.getElementById('authPassword');
-        const confirmation = document.getElementById('authConfirmation');
+        const password = shell.querySelector('[data-auth-input="password"]');
+        const confirmation = shell.querySelector('[data-auth-input="confirmation"]');
         document.querySelector('[data-auth-switch="signup"]')?.click();
         const signupState = {
           passwordAutocomplete: password?.autocomplete || '',
@@ -284,7 +342,7 @@ try {
         };
         password.value = 'temporary-value';
         confirmation.value = 'temporary-value';
-        document.querySelector('[data-password-toggle="authPassword"]')?.click();
+        shell.querySelector('[data-password-toggle="password"]')?.click();
         const passwordRevealWorks = password.type === 'text';
         document.querySelector('[data-auth-close]')?.click();
         return {
@@ -310,13 +368,17 @@ try {
       audit,
       ...(liveFirebase ? { liveSdkResponses } : {}),
       ...(authInteractions ? { authInteractions } : {}),
+      ...(scenario.app ? { deterministicAppAuth: true, ignoredAppRuntimeExceptions: scenarioExceptions } : {}),
     });
   }
+
+  if (missingAssets.length) throw new Error(`Missing same-origin assets: ${JSON.stringify([...new Set(missingAssets)])}`);
 
   const summary = {
     generatedAt: new Date().toISOString(),
     browser: path.basename(browserPath),
     firebaseMode: liveFirebase ? 'live-sdk-guest-session' : 'deterministic-offline-fallback',
+    missingAssets: [],
     matrix,
   };
   const matrixName = liveFirebase ? 'live-matrix.json' : 'matrix.json';

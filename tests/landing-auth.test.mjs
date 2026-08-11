@@ -5,9 +5,9 @@ import {
   AUTH_MODES,
   SAFE_RESET_MESSAGE,
   authErrorMessage,
-  createLandingAuthController,
+  createAuthController,
   validateAuthFields,
-} from '../js/landing-auth-controller.js';
+} from '../js/auth-controller.js';
 
 function deferred() {
   let resolve;
@@ -36,10 +36,10 @@ function harness(overrides = {}) {
     sendPasswordReset: async () => undefined,
     ...overrides.gateway,
   };
-  const controller = createLandingAuthController({
+  const controller = createAuthController({
     gateway,
     onStateChange: (state) => states.push(state),
-    navigateToApp: () => navigation.push('/app'),
+    onAuthenticated: overrides.onAuthenticated || (() => navigation.push('/app')),
   });
   return { controller, gateway, states, navigation, emitAuth: (user) => authObserver(user) };
 }
@@ -76,7 +76,7 @@ test('signup validates confirmation locally before any Firebase request', async 
   assert.equal(states.at(-1).errors.confirmation, 'اكتب كلمة المرور نفسها في خانة التأكيد.');
 });
 
-test('email signup and login navigate only after Firebase returns a user', async () => {
+test('shared email signup and login complete only after Firebase returns a user', async () => {
   const signup = harness();
   await signup.controller.initialize();
   signup.controller.open(AUTH_MODES.SIGNUP);
@@ -146,4 +146,34 @@ test('natural field validation distinguishes email, password, and signup confirm
   assert.ok(invalid.errors.email);
   assert.ok(invalid.errors.password);
   assert.ok(invalid.errors.confirmation);
+});
+
+test('Landing and app adapters share login, signup, reset, and Google semantics', async () => {
+  for (const consumer of ['landing', 'app']) {
+    const completed = [];
+    const login = harness({ onAuthenticated: (_, source) => completed.push(`${consumer}:${source}`) });
+    await login.controller.initialize();
+    login.controller.open(AUTH_MODES.LOGIN);
+    assert.equal(await login.controller.submit({ email: 'user@example.com', password: 'secret7' }), true);
+    assert.deepEqual(completed, [`${consumer}:login`]);
+
+    const signupCompleted = [];
+    const signup = harness({ onAuthenticated: (_, source) => signupCompleted.push(`${consumer}:${source}`) });
+    await signup.controller.initialize();
+    signup.controller.open(AUTH_MODES.SIGNUP);
+    assert.equal(await signup.controller.submit({ email: 'new@example.com', password: 'secret7', confirmation: 'secret7' }), true);
+    assert.deepEqual(signupCompleted, [`${consumer}:signup`]);
+
+    const googleCompleted = [];
+    const google = harness({ onAuthenticated: (_, source) => googleCompleted.push(`${consumer}:${source}`) });
+    await google.controller.initialize();
+    assert.equal(await google.controller.signInWithGoogle(), true);
+    assert.deepEqual(googleCompleted, [`${consumer}:google`]);
+
+    const reset = harness();
+    await reset.controller.initialize();
+    reset.controller.open(AUTH_MODES.RESET);
+    assert.equal(await reset.controller.submit({ email: 'user@example.com' }), true);
+    assert.equal(reset.states.at(-1).message, SAFE_RESET_MESSAGE);
+  }
 });

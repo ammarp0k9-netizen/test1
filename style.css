@@ -12615,6 +12615,117 @@ html[data-theme="glass"] body.low-end-device :where(
   }
 }
 
+/* Shared account surface. Authentication state and hydration remain owned by cloud.js. */
+.app-auth-dialog-shell[hidden] { display: none !important; }
+.app-auth-dialog [hidden] { display: none !important; }
+.app-auth-dialog-shell {
+  position: fixed;
+  inset: 0;
+  z-index: 10500;
+  display: grid;
+  place-items: center;
+  padding: 20px;
+  isolation: isolate;
+}
+.app-auth-backdrop {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  border: 0;
+  background: rgba(2, 6, 23, .78);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+}
+.app-auth-dialog {
+  position: relative;
+  width: min(100%, 440px);
+  max-height: min(760px, calc(100dvh - 40px));
+  overflow: auto;
+  padding: 24px;
+  border: 1px solid #334155;
+  border-radius: 18px;
+  background: var(--card-bg);
+  color: var(--text-white);
+  box-shadow: 0 28px 80px rgba(0, 0, 0, .55);
+}
+.app-auth-close {
+  position: absolute;
+  inset-block-start: 13px;
+  inset-inline-end: 13px;
+  width: 36px;
+  height: 36px;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  background: var(--surface-bg);
+  color: var(--text-white);
+  font-size: 1.25rem;
+  cursor: pointer;
+}
+.app-auth-brand { display: flex; justify-content: center; margin-bottom: 8px; }
+.app-auth-brand > span { width: 58px; height: 58px; display: grid; place-items: center; overflow: hidden; border-radius: 13px; background: #03102d; }
+.app-auth-brand img { width: 100%; height: 100%; object-fit: cover; transform: scale(1.8); }
+.app-auth-heading { text-align: center; }
+.app-auth-heading > p:first-child { margin: 0 0 4px; color: #60a5fa; font-size: .78rem; font-weight: 800; }
+.app-auth-heading h2 { margin: 0; font-size: 1.7rem; }
+.app-auth-heading > p:last-child { margin: 6px auto 18px; color: var(--text-gray); font-size: .83rem; }
+.app-google-button {
+  width: 100%;
+  min-height: 46px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  border: 1px solid #334155;
+  border-radius: 11px;
+  background: var(--surface-bg);
+  color: var(--text-white);
+  font-weight: 800;
+  cursor: pointer;
+}
+.app-google-button svg { width: 20px; height: 20px; }
+.app-auth-separator { display: flex; align-items: center; gap: 10px; margin: 14px 0; color: var(--text-gray); font-size: .72rem; }
+.app-auth-separator::before, .app-auth-separator::after { content: ""; flex: 1; height: 1px; background: var(--border); }
+.app-auth-form { display: grid; gap: 11px; }
+.app-auth-field { display: grid; gap: 5px; color: #cbd5e1; font-size: .79rem; font-weight: 700; }
+.app-auth-field input {
+  width: 100%;
+  min-width: 0;
+  height: 44px;
+  padding: 0 11px;
+  border: 1px solid #334155;
+  border-radius: 10px;
+  background: var(--main-bg);
+  color: var(--text-white);
+}
+.app-auth-field input[aria-invalid="true"] { border-color: var(--danger); }
+.app-auth-field small { min-height: 1.15em; color: #fca5a5; font-size: .69rem; font-weight: 500; }
+.app-password-input-row { display: grid; grid-template-columns: minmax(0, 1fr) 68px; gap: 8px; direction: ltr; }
+.app-password-input-row button {
+  min-width: 68px;
+  height: 44px;
+  padding: 0 8px;
+  border: 1px solid #334155;
+  border-radius: 10px;
+  background: var(--surface-bg);
+  color: #cbd5e1;
+  font-size: .72rem;
+  font-weight: 800;
+  cursor: pointer;
+}
+.app-forgot-password { justify-self: start; padding: 2px 0; border: 0; background: transparent; color: #93c5fd; font-size: .74rem; cursor: pointer; }
+.app-auth-message { min-height: 1.35em; margin: -2px 0; color: #fca5a5; font-size: .75rem; text-align: center; }
+.app-auth-message[data-tone="success"] { color: #6ee7b7; }
+.app-auth-submit { width: 100%; min-height: 44px; border: 1px solid var(--accent); border-radius: 10px; background: var(--accent); color: white; font-weight: 800; cursor: pointer; }
+.app-auth-switch { margin: 14px 0 0; color: var(--text-gray); font-size: .78rem; text-align: center; }
+.app-auth-switch button { padding: 0; border: 0; background: transparent; color: #93c5fd; font-weight: 800; cursor: pointer; }
+.app-auth-dialog button:disabled, .app-auth-dialog input:disabled { opacity: .55; cursor: wait; }
+body.app-auth-dialog-open { overflow: hidden !important; overscroll-behavior: none; }
+
+@media (max-width: 600px) {
+  .app-auth-dialog-shell { align-items: end; padding: 0; }
+  .app-auth-dialog { width: 100%; max-height: min(88dvh, 740px); padding: 22px 18px max(22px, env(safe-area-inset-bottom)); border-radius: 19px 19px 0 0; }
+}
+
 /* ═════════════════════════════════════════════════════════════════
    LOOTLINGUA GLASS V2.7 — TRUE CHROMIUM BACKDROP REFRACTION
    The browser samples the real DOM behind the two fixed docks, then an

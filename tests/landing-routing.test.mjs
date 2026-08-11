@@ -12,6 +12,8 @@ const landing = read('landing.html');
 const landingCss = read('landing.css');
 const landingJs = read('js/landing.js');
 const landingAuthController = read('js/landing-auth-controller.js');
+const sharedAuthController = read('js/auth-controller.js');
+const sharedAuthSurface = read('js/auth-surface.js');
 const appCloud = read('js/cloud.js');
 const appShell = read('js/script.js');
 const appDocument = read('index.html');
@@ -82,7 +84,7 @@ test('landing is a standalone RTL page with accessible entry choices', () => {
   assert.match(landing, /autocomplete="email"/);
   assert.match(landing, /autocomplete="current-password"/);
   assert.match(landing, /autocomplete="new-password"/);
-  assert.doesNotMatch(landingJs + landingAuthController, /localStorage[^\n]*(?:password|credential)|(?:password|credential)[^\n]*localStorage/i);
+  assert.doesNotMatch(landingJs + landingAuthController + sharedAuthController + sharedAuthSurface, /localStorage[^\n]*(?:password|credential)|(?:password|credential)[^\n]*localStorage/i);
 });
 
 test('landing reuses the production Firebase project and navigates only internally', () => {
@@ -147,6 +149,8 @@ test('local static server serves landing, app, privacy, assets, and app fallback
     ['/landing.css', 'text/css', /\.hero-grid/],
     ['/js/landing.js', 'text/javascript', /initializeAuth/],
     ['/js/landing-auth-controller.js', 'text/javascript', /createLandingAuthController/],
+    ['/js/auth-controller.js', 'text/javascript', /createAuthController/],
+    ['/js/auth-surface.js', 'text/javascript', /createAuthSurface/],
   ];
 
   for (const [url, contentType, content] of cases) {
