@@ -1,0 +1,21 @@
+{
+  "generatedAt": "2026-08-11T11:40:08.516Z",
+  "browser": "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",
+  "screenshots": [
+    "reports/quiz-matching-evidence/matching-desktop.png",
+    "reports/quiz-matching-evidence/matching-mobile-correction.png"
+  ],
+  "assertions": {
+    "fixtureCount": true,
+    "minimumSevenCountVisible": true,
+    "minimumSevenStartBlocked": true,
+    "configuredStart": true,
+    "desktopAllPairsVisible": true,
+    "desktopNoHorizontalOverflow": true,
+    "firstAttemptEvidence": true,
+    "correctPairsLock": true,
+    "mobileCorrectionVisible": true,
+    "mobileNoHorizontalOverflow": true
+  },
+  "passed": true
+}

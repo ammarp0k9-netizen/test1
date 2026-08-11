@@ -7,7 +7,7 @@ function makeQuizSessionId() {
 }
 
 function isVerifiedQuizMode(mode) {
-  return mode === 'timeAttack' || mode === 'scramble';
+  return mode === 'timeAttack' || mode === 'scramble' || mode === 'matching';
 }
 
 const QUIZ_MODE_META = {
@@ -22,8 +22,18 @@ const QUIZ_MODE_META = {
   scramble: {
     title: 'الصندوق المشفر',
     desc: SCRAMBLE_DIRECTION_COPY['ar-to-en']
+  },
+  matching: {
+    title: 'مطابقة الكلمات',
+    desc: 'اربط كل كلمة بمعناها، ثم تحقق من جميع إجاباتك دفعة واحدة.'
   }
 };
+
+const quizCore = window.LootLinguaQuizCore;
+const quizSourceRequestCoordinator = quizCore.createSourceRequestCoordinator();
+const quizSourceLoadStates = new Map();
+let currentQuizSelectionPlan = null;
+let matchingQuizState = null;
 
 function getScrambleDirectionText(direction = scrambleDirection) {
   return SCRAMBLE_DIRECTION_COPY[direction] || SCRAMBLE_DIRECTION_COPY['ar-to-en'];
@@ -50,7 +60,7 @@ function openQuizSetup() {
 }
 
 function hideQuizPlayPanels() {
-  ['quizViewCard', 'quizTimeAttackView', 'quizScrambleView', 'quizSettingsPanel'].forEach(id => {
+  ['quizViewCard', 'quizTimeAttackView', 'quizScrambleView', 'quizMatchingView', 'quizSettingsPanel'].forEach(id => {
     const el = document.getElementById(id);
     if (el) el.style.display = 'none';
   });
@@ -83,6 +93,8 @@ function serializeActiveQuizSession() {
     currentQuizMistakes,
     timeAttackHp,
     quizSessionResults,
+    runtimeWords: currentQuizWords,
+    matchingState: matchingQuizState,
     hasStartedAnswering
   };
 }
@@ -218,6 +230,8 @@ function resetRuntimeQuizState() {
   currentQuizExposureMode = '';
   flashcardSessionOutcomes = new Map();
   quizSessionResults = [];
+  currentQuizSelectionPlan = null;
+  matchingQuizState = null;
   hasStartedAnswering = false;
   setQuizImmersive(false);
 }
@@ -228,10 +242,16 @@ function applyStoredQuizSession(session) {
     id: session.id || makeQuizSessionId(),
     mode: session.mode,
     source: session.source || 'personal',
+    sourceType: session.sourceType || quizCore.parseSourceScope(session.source || 'personal').sourceType,
+    sourceId: session.sourceId || quizCore.parseSourceScope(session.source || 'personal').sourceId,
     createdAt: session.createdAt || Date.now(),
     words: session.words,
     pool: Array.isArray(session.pool) && session.pool.length ? session.pool : session.words,
     questionCount: session.questionCount || session.words.length,
+    candidateCount: Number(session.candidateCount) || (Array.isArray(session.pool) ? session.pool.length : session.words.length),
+    selectedWordIds: Array.isArray(session.selectedWordIds) ? session.selectedWordIds : session.words.map(word => String(word.id)),
+    selectedWordKeys: Array.isArray(session.selectedWordKeys) ? session.selectedWordKeys : session.words.map(word => getWordMasteryKey(word)).filter(Boolean),
+    selectionPlanVersion: Number(session.selectionPlanVersion) || 1,
     direction: session.direction || {}
   };
   currentQuizExposureSessionId = activeQuizSession.id;
@@ -239,13 +259,16 @@ function applyStoredQuizSession(session) {
   flashcardSessionOutcomes = new Map();
   selectedQuizMode = activeQuizSession.mode;
   currentQuizSource = activeQuizSession.source;
-  currentQuizWords = activeQuizSession.words;
+  currentQuizWords = Array.isArray(session.runtimeWords) && session.runtimeWords.length
+    ? session.runtimeWords
+    : activeQuizSession.words;
   currentQuizPool = activeQuizSession.pool;
   quizIndex = Math.max(0, Math.min(Number(session.quizIndex) || 0, currentQuizWords.length));
   currentStreak = Number(session.currentStreak) || 0;
   currentQuizMistakes = Number(session.currentQuizMistakes) || 0;
   timeAttackHp = Number(session.timeAttackHp) || 3;
   quizSessionResults = Array.isArray(session.quizSessionResults) ? session.quizSessionResults : [];
+  matchingQuizState = session.matchingState || null;
   hasStartedAnswering = Boolean(session.hasStartedAnswering);
   if (activeQuizSession.direction?.timeAttack) timeAttackDirection = activeQuizSession.direction.timeAttack;
   if (activeQuizSession.direction?.scramble) scrambleDirection = activeQuizSession.direction.scramble;
@@ -266,6 +289,9 @@ window.resumeActiveQuizSession = function() {
   if (activeQuizSession.mode === 'timeAttack') {
     document.getElementById('quizTimeAttackView').style.display = 'block';
     renderTimeAttackQuestion();
+  } else if (activeQuizSession.mode === 'matching') {
+    document.getElementById('quizMatchingView').style.display = 'block';
+    renderMatchingBoard();
   } else {
     document.getElementById('quizScrambleView').style.display = 'block';
     updateScrambleCard();
@@ -325,6 +351,8 @@ function closeQuizSetup() {
 function openQuizModeSettings(mode) {
   syncQuizSourceOptions();
   selectedQuizMode = QUIZ_MODE_META[mode] ? mode : 'flashcards';
+  const ownerId = getQuizSourceOwnerId();
+  const token = quizSourceRequestCoordinator.begin(ownerId, currentQuizSource);
   const exitBtn = document.querySelector('#quizView .quiz-exit-btn');
   if (exitBtn) exitBtn.style.display = 'none';
   document.getElementById('quizViewSetup').style.display = 'none';
@@ -338,6 +366,7 @@ function openQuizModeSettings(mode) {
   document.getElementById('timeAttackDirectionGroup').style.display = selectedQuizMode === 'timeAttack' ? 'block' : 'none';
   document.getElementById('scrambleDirectionGroup').style.display = selectedQuizMode === 'scramble' ? 'block' : 'none';
   refreshQuizSettingsSummary();
+  ensureQuizSourceReady(currentQuizSource, { token, mode: selectedQuizMode, force: true });
 }
 
 function setQuizQuestionCount(count, btn) {
@@ -399,11 +428,14 @@ function syncQuizSourceOptions() {
 function setQuizSourceScope(scope, btn) {
   const requested = String(scope || 'personal');
   currentQuizSource = requested === 'starred' || requested.startsWith('custom:') ? requested : 'personal';
+  const ownerId = getQuizSourceOwnerId();
+  const token = quizSourceRequestCoordinator.begin(ownerId, currentQuizSource);
   document.querySelectorAll('[data-quiz-source]').forEach(el => {
     el.classList.toggle('active', el === btn || el.dataset.quizSource === currentQuizSource);
   });
   refreshQuizAvailableCount();
   refreshQuizSettingsSummary();
+  ensureQuizSourceReady(currentQuizSource, { token, mode: selectedQuizMode, force: true });
 }
 window.setQuizSourceScope = setQuizSourceScope;
 
@@ -411,10 +443,11 @@ function normalizeQuizWord(item, source, index) {
   if (!item) return null;
   const mastery = getWordMasteryState(item);
   const sourceId = source || 'personal';
+  const identity = window.LootLinguaWordLifecycle?.normalizeIdentity?.(item) || {};
   return {
     id: String(item.id || `${sourceId}-${item.text || item.word || index}`),
     word: item.word || item.text || '',
-    meaning: item.meaning || '',
+    meaning: item.meaning || item.translation || '',
     example: item.example || '',
     forgetCount: item.forgetCount || 0,
     starred: Boolean(item.starred),
@@ -431,39 +464,160 @@ function normalizeQuizWord(item, source, index) {
     mastered_once: mastery.mastered_once,
     personalDictionaryState: item.personalDictionaryState || 'active',
     hiddenFromDictionary: item.hiddenFromDictionary === true,
-    wordKey: item.wordKey || window.LootLinguaWordLifecycle?.wordKeyOf?.(item) || '',
+    wordKey: identity.wordKey || window.LootLinguaWordLifecycle?.wordKeyOf?.(item) || '',
+    storedWordKey: item.wordKey || '',
     customWorldId: sourceId.startsWith('custom:') ? sourceId.slice(7) : '',
     isGameQuizWord: false,
     quizSource: sourceId
   };
 }
 
-function getQuizSourceWords(scope = currentQuizSource) {
-  const uid = window.auth?.currentUser?.uid;
-  let source = [];
-  let sourceKey = 'personal';
-  if (scope === 'starred') {
-    source = readWordsFromStorage('normal', uid).filter(w => Boolean(w.starred));
-    sourceKey = 'personal';
-  } else if (String(scope).startsWith('custom:')) {
-    const worldId = String(scope).slice(7);
-    source = readCustomWorldWordsFromStorage(worldId, uid);
-    sourceKey = `custom:${worldId}`;
-  } else {
-    source = readWordsFromStorage('normal', uid);
-    sourceKey = 'personal';
-  }
-  const eligibility = sourceKey.startsWith('custom:')
-    ? (word) => window.LootLinguaWordLifecycle?.isEligibleForPrivateWorldQuiz(
-      word,
-      sourceKey.slice(7)
-    ) !== false
-    : (word) => window.LootLinguaWordLifecycle?.isEligibleForPersonalDictionaryQuiz(word) !== false;
-  return source
-    .filter(eligibility)
-    .map((w, i) => normalizeQuizWord(w, sourceKey, i))
-    .filter(w => w.word && w.meaning);
+function getQuizSourceOwnerId(uid) {
+  return String(uid || window.auth?.currentUser?.uid || 'guest');
 }
+
+function getQuizSourceLoadKey(ownerId, scope) {
+  return `${getQuizSourceOwnerId(ownerId)}::${quizCore.parseSourceScope(scope).scope}`;
+}
+
+function readQuizSourceRawWords(scope = currentQuizSource, ownerId = getQuizSourceOwnerId()) {
+  const source = quizCore.parseSourceScope(scope);
+  if (source.sourceType === 'private-world') {
+    return readCustomWorldWordsFromStorage(source.sourceId, ownerId);
+  }
+  return readWordsFromStorage('normal', ownerId);
+}
+
+function getQuizSourceResolutionStatus(scope, ownerId) {
+  const source = quizCore.parseSourceScope(scope);
+  if (source.sourceType !== 'private-world' || ownerId === 'guest') return 'ready';
+  return quizSourceLoadStates.get(getQuizSourceLoadKey(ownerId, source.scope))?.status || 'idle';
+}
+
+function resolveQuizSourceSnapshot(scope = currentQuizSource, options = {}) {
+  const ownerId = getQuizSourceOwnerId(options.ownerId);
+  const source = quizCore.parseSourceScope(scope);
+  const rawWords = Array.isArray(options.rawWords)
+    ? options.rawWords
+    : readQuizSourceRawWords(source.scope, ownerId);
+  return quizCore.resolveQuizCandidates({
+    scope: source.scope,
+    ownerId,
+    rawWords,
+    mode: options.mode || selectedQuizMode,
+    status: options.status || getQuizSourceResolutionStatus(source.scope, ownerId),
+    normalizeCandidate: (word, index, sourceScope) => normalizeQuizWord(word, sourceScope, index),
+    wordKeyOf: (word) => window.LootLinguaWordLifecycle?.normalizeIdentity?.(word)?.wordKey || getWordMasteryKey(word),
+    isEligible: (word, parsedSource) => parsedSource.sourceType === 'private-world'
+      ? window.LootLinguaWordLifecycle?.isEligibleForPrivateWorldQuiz(word, parsedSource.sourceId) !== false
+      : window.LootLinguaWordLifecycle?.isEligibleForPersonalDictionaryQuiz(word) !== false,
+  });
+}
+
+function getQuizSourceWords(scope = currentQuizSource, options = {}) {
+  return resolveQuizSourceSnapshot(scope, options).candidates;
+}
+
+async function ensureQuizSourceReady(scope = currentQuizSource, options = {}) {
+  const source = quizCore.parseSourceScope(scope);
+  const ownerId = getQuizSourceOwnerId(options.ownerId);
+  if (source.sourceType !== 'private-world' || ownerId === 'guest') {
+    return resolveQuizSourceSnapshot(source.scope, { ...options, ownerId, status: 'ready' });
+  }
+  const loadKey = getQuizSourceLoadKey(ownerId, source.scope);
+  const existing = quizSourceLoadStates.get(loadKey);
+  if (existing?.status === 'ready' && options.force !== true) {
+    return resolveQuizSourceSnapshot(source.scope, { ...options, ownerId, status: 'ready' });
+  }
+  if (existing?.status === 'loading' && existing.promise && quizSourceRequestCoordinator.isCurrent(existing.token)) {
+    return existing.promise;
+  }
+
+  const token = options.token && quizSourceRequestCoordinator.isCurrent(options.token)
+    ? options.token
+    : quizSourceRequestCoordinator.begin(ownerId, source.scope);
+  const promise = (async () => {
+    try {
+      if (typeof window.fetchCustomWorldWordsForQuiz !== 'function') {
+        throw new Error('Quiz source loader is not ready.');
+      }
+      const response = await window.fetchCustomWorldWordsForQuiz(source.sourceId, ownerId);
+      const currentOwnerId = getQuizSourceOwnerId();
+      if (!quizCore.isSourceResponseCurrent({
+        coordinator: quizSourceRequestCoordinator,
+        token,
+        response,
+        currentOwnerId,
+      })) {
+        return { stale: true, ownerId, scope: source.scope };
+      }
+      const cachedWords = readQuizSourceRawWords(source.scope, ownerId);
+      const responseWords = Array.isArray(response?.words) ? response.words : [];
+      const keepScopedCache = response?.fromCache === true && responseWords.length === 0 && cachedWords.length > 0;
+      if (!keepScopedCache) writeCustomWorldWordsToStorage(source.sourceId, responseWords, ownerId);
+      quizSourceLoadStates.set(loadKey, {
+        status: 'ready',
+        token,
+        loadedAt: Date.now(),
+        localFallback: keepScopedCache,
+      });
+      const snapshot = resolveQuizSourceSnapshot(source.scope, { ...options, ownerId, status: 'ready' });
+      refreshQuizAvailableCount();
+      refreshQuizSettingsSummary();
+      return snapshot;
+    } catch (error) {
+      if (quizSourceRequestCoordinator.isCurrent(token) && getQuizSourceOwnerId() === ownerId) {
+        const cachedSnapshot = resolveQuizSourceSnapshot(source.scope, { ...options, ownerId, status: 'ready' });
+        if (cachedSnapshot.candidateCount > 0) {
+          quizSourceLoadStates.set(loadKey, {
+            status: 'ready',
+            token,
+            loadedAt: Date.now(),
+            localFallback: true,
+            loadError: error,
+          });
+          refreshQuizAvailableCount();
+          refreshQuizSettingsSummary();
+          return cachedSnapshot;
+        }
+        quizSourceLoadStates.set(loadKey, { status: 'error', token, error });
+        refreshQuizAvailableCount();
+        refreshQuizSettingsSummary();
+      }
+      return { error, ownerId, scope: source.scope, stale: !quizSourceRequestCoordinator.isCurrent(token) };
+    }
+  })();
+  quizSourceLoadStates.set(loadKey, { status: 'loading', token, promise });
+  refreshQuizAvailableCount();
+  refreshQuizSettingsSummary();
+  return promise;
+}
+
+window.resolveQuizSourceSnapshot = resolveQuizSourceSnapshot;
+window.ensureQuizSourceReady = ensureQuizSourceReady;
+
+window.addEventListener('lootlingua:auth-state', () => {
+  quizSourceRequestCoordinator.invalidate();
+  quizSourceLoadStates.clear();
+  currentQuizSelectionPlan = null;
+  if (currentView === 'quiz') {
+    refreshQuizAvailableCount();
+    refreshQuizSettingsSummary();
+  }
+});
+
+window.addEventListener('lootlingua:quiz-source-data-changed', (event) => {
+  if (String(event?.detail?.ownerId || '') !== getQuizSourceOwnerId()) return;
+  if (currentView !== 'quiz') return;
+  refreshQuizAvailableCount();
+  refreshQuizSettingsSummary();
+});
+
+window.addEventListener('lootlingua:learning-data-changed', () => {
+  if (currentView !== 'quiz') return;
+  refreshQuizAvailableCount();
+  refreshQuizSettingsSummary();
+});
 
 function getQuizSourceParts(source = 'personal') {
   const src = String(source || 'personal');
@@ -509,17 +663,16 @@ function updateQuizWordInSource(wordId, updater, source = 'personal') {
   return updatedWord;
 }
 
-function warnIfTooFewQuizSourceWords(scope = currentQuizSource, count = getQuizSourceWords(scope).length) {
+function warnIfTooFewQuizSourceWords(scope = currentQuizSource, count = getQuizSourceWords(scope, { mode: selectedQuizMode }).length, mode = selectedQuizMode) {
   const source = getQuizSourceLabel(scope);
-  if (count <= 0) {
+  const eligibility = quizCore.getQuizStartEligibility(count, quizQuestionCount, { mode });
+  if (eligibility.reason === 'empty-source') {
     showToast(`ما عندك كلمات متاحة في ${source} حالياً. أضف كلمات أولاً.`, 'warning', 5600);
     return true;
   }
-  const requestedCount = quizQuestionCount === 'all'
-    ? count
-    : Math.max(1, Number.parseInt(quizQuestionCount, 10) || count);
-  if (count < requestedCount) {
-    showToast(`${source} فيه ${count} كلمات فقط، لذلك سيستخدم الاختبار الكلمات المتاحة كلها.`, 'info', 4800);
+  if (!eligibility.allowed) {
+    showToast(`${source} فيه ${count} كلمات مؤهلة. تحتاج ${eligibility.required} لبدء هذا الاختبار.`, 'warning', 5600);
+    return true;
   }
   return false;
 }
@@ -834,91 +987,46 @@ function validateQuizDeck(deck, requestedSize) {
 function buildBalancedQuizDeck(sourceWords, requestedCount, options = {}) {
   const available = Array.isArray(sourceWords) ? sourceWords : [];
   const limit = Math.max(0, Math.min(Math.floor(Number(requestedCount) || 0), available.length));
-  if (!limit) return [];
   const history = Array.isArray(options.history) ? options.history : readQuizExposureHistory();
-  const buckets = classifyWordsBySrsStatus(available, { ...options, history });
-  Object.keys(buckets).forEach(key => { buckets[key] = rankWordsWithinBucket(buckets[key], key); });
-  const allCandidates = Object.values(buckets).flat();
-  const backlog = getQuizBacklogState(buckets, limit);
-  const quotas = calculateQuizQuotas(limit, backlog);
-  const debug = { fallbacks: [] };
-  const selected = [];
-  const picked = new Set();
-  const deficits = {};
-  const primaryBuckets = ['reviewing', 'learning', 'new', 'masteredDue'];
-
-  primaryBuckets.forEach(bucketName => {
-    const wanted = quotas[bucketName] || 0;
-    let added = 0;
-    while (buckets[bucketName].length && added < wanted) {
-      const candidate = buckets[bucketName].shift();
-      if (picked.has(candidate.wordKey)) continue;
-      picked.add(candidate.wordKey);
-      candidate.selectionReason = `حصة ${bucketName}`;
-      selected.push(candidate);
-      added++;
-    }
-    deficits[bucketName] = Math.max(0, wanted - added);
+  currentQuizSelectionPlan = quizCore.buildQuizSelectionPlan(available, limit, {
+    now: options.now,
+    seed: options.seed,
+    history,
+    getWordKey: (word) => word.wordKey || getWordMasteryKey(word),
+    getState: (word) => getWordMasteryState(word),
+    getDueInfo: (word, state, now) => getQuizDueInfo(word, state, now),
   });
-
-  const take = fillQuotaFromFallbacks(selected, buckets, deficits, picked, debug);
-  const finalOrder = ['reviewing', 'learning', 'new', 'masteredDue', 'masteredNotDue'];
-  for (const bucketName of finalOrder) {
-    if (selected.length >= limit) break;
-    take(bucketName, limit - selected.length, bucketName === 'masteredNotDue' ? 'نقص كبير؛ Mastered احتياطية' : 'ملء المقاعد المتبقية');
-  }
-
-  const interleaved = interleaveQuizDeck(selected.slice(0, limit), options);
-  const deck = validateQuizDeck(interleaved.map(item => item.word), limit);
-  if (window.__lootlinguaQuizDebug === true) {
-    const availableCounts = allCandidates.reduce((counts, item) => {
-      counts[item.bucketType] = (counts[item.bucketType] || 0) + 1;
-      return counts;
-    }, {});
-    const selectedKeys = new Set(selected.map(item => item.wordKey));
-    console.groupCollapsed(`[LootLingua Quiz] deck ${deck.length}/${limit}`);
-    console.log('requested', requestedCount);
-    console.log('available by bucket', availableCounts);
-    console.log('quotas', quotas);
-    console.log('backlog', backlog);
-    console.log('fallbacks', debug.fallbacks);
-    console.table(selected.map(item => ({
-      word: item.word.word,
-      source: item.word.quizSource,
-      status: item.status,
-      bucket: item.bucketType,
-      score: Math.round(item.score),
-      reason: item.reason,
-      selectedBy: item.selectionReason,
-      recentPenalty: item.recentPenalty,
-    })));
-    console.log('recently penalized', selected.filter(item => item.recentPenalty > 0).map(item => item.word.word));
-    console.log('not selected with recent penalty', allCandidates
-      .filter(item => item.recentPenalty > 0 && !selectedKeys.has(item.wordKey))
-      .map(item => item.word.word));
-    console.groupEnd();
-  }
-  return deck;
+  window.__lootlinguaQuizSelectionReport = currentQuizSelectionPlan;
+  return currentQuizSelectionPlan.deck;
 }
 
 function buildSmartQuizDeck(sourceWords, requestedCount, options = {}) {
   return buildBalancedQuizDeck(sourceWords, requestedCount, options);
 }
 
-function getConfiguredQuizWords() {
-  const sourceWords = getQuizSourceWords();
+function getConfiguredQuizWords(options = {}) {
+  const sourceWords = getQuizSourceWords(currentQuizSource, { mode: selectedQuizMode });
   const count = quizQuestionCount === 'all' ? sourceWords.length : parseInt(quizQuestionCount, 10);
   currentQuizPool = sourceWords;
-  return buildSmartQuizDeck(sourceWords, count);
+  return buildSmartQuizDeck(sourceWords, count, options);
 }
 
 function refreshQuizAvailableCount() {
   const quizCountEl = document.getElementById('quizAvailableCount');
   if (!quizCountEl) return;
-  const total = getQuizSourceWords('personal').length;
-  const starred = getQuizSourceWords('starred').length;
+  const total = getQuizSourceWords('personal', { mode: selectedQuizMode }).length;
+  const starred = getQuizSourceWords('starred', { mode: selectedQuizMode }).length;
+  const ownerId = getQuizSourceOwnerId();
   const worldParts = customWorlds
-    .map(world => `${world.emoji || '📘'} ${world.name || 'عالم'}: ${getQuizSourceWords(`custom:${world.id}`).length}`)
+    .map(world => {
+      const scope = `custom:${world.id}`;
+      const status = getQuizSourceResolutionStatus(scope, ownerId);
+      if (ownerId !== 'guest' && status !== 'ready') {
+        const stateText = status === 'error' ? 'تعذر التجهيز' : 'اختره لعرض العدد';
+        return `${world.emoji || '📘'} ${world.name || 'عالم'}: ${stateText}`;
+      }
+      return `${world.emoji || '📘'} ${world.name || 'عالم'}: ${getQuizSourceWords(scope, { mode: selectedQuizMode }).length}`;
+    })
     .join('، ');
   quizCountEl.textContent = (total > 0 || starred > 0 || worldParts)
     ? `القاموس الشخصي: ${total} كلمة، الكلمات الصعبة: ${starred}${worldParts ? '، ' + worldParts : ''}`
@@ -926,33 +1034,58 @@ function refreshQuizAvailableCount() {
 }
 
 function refreshQuizSettingsSummary() {
-  const total = getQuizSourceWords().length;
+  const ownerId = getQuizSourceOwnerId();
+  const status = getQuizSourceResolutionStatus(currentQuizSource, ownerId);
+  const total = getQuizSourceWords(currentQuizSource, { mode: selectedQuizMode }).length;
   const countText = quizQuestionCount === 'all' ? 'كل الكلمات' : `${quizQuestionCount} أسئلة`;
   const summary = document.getElementById('quizSettingsSummary');
   const sourceText = getQuizSourceLabel(currentQuizSource);
-  if (summary) summary.textContent = `${sourceText}: ${total} كلمة متاحة، الاختبار: ${countText}.`;
+  const startButton = document.getElementById('quizStartButton');
+  if (status === 'loading' || status === 'idle') {
+    if (summary) summary.textContent = `${sourceText}: جارٍ تجهيز الكلمات...`;
+    if (startButton) startButton.disabled = true;
+    return;
+  }
+  if (status === 'error') {
+    if (summary) summary.textContent = `${sourceText}: تعذر تجهيز الكلمات. اختر المصدر مرة أخرى للمحاولة.`;
+    if (startButton) startButton.disabled = true;
+    return;
+  }
+  const eligibility = quizCore.getQuizStartEligibility(total, quizQuestionCount, { mode: selectedQuizMode });
+  if (summary) {
+    summary.textContent = eligibility.allowed
+      ? `${sourceText}: ${total} كلمة مؤهلة، الاختبار: ${countText}.`
+      : `${sourceText}: ${total} كلمة مؤهلة؛ تحتاج ${eligibility.required} لبدء الاختبار.`;
+  }
+  if (startButton) startButton.disabled = !eligibility.allowed;
 }
 
 function startConfiguredQuiz() {
-  startActualQuiz(selectedQuizMode, { configured: true });
+  return startActualQuiz(selectedQuizMode, { configured: true });
 }
 
-function startActualQuiz(mode, options = {}) {
+async function startActualQuiz(mode, options = {}) {
   stopTimeAttackTimer();
   const explicitWords = Array.isArray(options.words) ? options.words.filter(Boolean) : null;
   const sessionSource = String(options.source || currentQuizSource || 'personal');
+  const sessionId = options.sessionId || makeQuizSessionId();
+  if (!explicitWords) {
+    const ready = await ensureQuizSourceReady(currentQuizSource, { mode });
+    if (ready?.stale || ready?.error || currentQuizSource !== sessionSource) return false;
+  }
+  const resolvedSourceWords = explicitWords || getQuizSourceWords(currentQuizSource, { mode });
   let words = explicitWords || (options.configured
-    ? getConfiguredQuizWords()
-    : getQuizSourceWords(currentQuizSource));
-  if (!options.configured || explicitWords) currentQuizPool = words;
+    ? getConfiguredQuizWords({ seed: sessionId })
+    : resolvedSourceWords);
+  if (!options.configured || explicitWords) currentQuizPool = resolvedSourceWords;
   const verifiedMode = isVerifiedQuizMode(mode);
-  const starredCount = getQuizSourceWords('starred').length;
+  const starredCount = getQuizSourceWords('starred', { mode }).length;
 
   if (!options.skipAvailabilityCheck &&
-      (options.configured || mode === 'flashcards' || mode === 'timeAttack' || mode === 'scramble') &&
-      warnIfTooFewQuizSourceWords(currentQuizSource, getQuizSourceWords(currentQuizSource).length)) {
+      (options.configured || mode === 'flashcards' || mode === 'timeAttack' || mode === 'scramble' || mode === 'matching') &&
+      warnIfTooFewQuizSourceWords(currentQuizSource, resolvedSourceWords.length, mode)) {
     openQuizModeSettings(options.configured ? selectedQuizMode : mode);
-    return;
+    return false;
   }
 
   if (mode === 'recent') {
@@ -969,42 +1102,54 @@ function startActualQuiz(mode, options = {}) {
     } else words = words.slice(0, 10);
   } else if (mode === 'starred') {
     words = words.filter(w => w.starred);
-    if (warnIfTooFewStarredQuizWords(starredCount)) {
+    if (warnIfTooFewStarredQuizWords(starredCount) || warnIfTooFewQuizSourceWords('starred', words.length, 'flashcards')) {
       openQuizModeSettings('flashcards');
-      return;
+      return false;
     }
-  } else if (!options.configured && mode !== 'flashcards' && mode !== 'timeAttack' && mode !== 'scramble') {
+  } else if (!options.configured && mode !== 'flashcards' && mode !== 'timeAttack' && mode !== 'scramble' && mode !== 'matching') {
     words.sort(() => Math.random()-0.5);
   }
 
   if (options.configured && currentQuizSource === 'starred' && warnIfTooFewStarredQuizWords(starredCount)) {
     openQuizModeSettings(selectedQuizMode);
-    return;
+    return false;
   }
 
   if (!words.length) {
     showToast('ما في كلمات كافية لهذا الاختبار.');
     openQuizModeSettings(options.configured ? selectedQuizMode : 'flashcards');
-    return;
+    return false;
   }
 
-  currentQuizWords = words;
+  const selectedWords = words.map(word => ({ ...word }));
+  currentQuizWords = selectedWords.map(word => ({ ...word }));
   quizIndex = 0;
   currentStreak = 0;
   currentQuizMistakes = 0;
   quizSessionResults = [];
   hasStartedAnswering = false;
-  currentQuizExposureSessionId = makeQuizSessionId();
+  currentQuizExposureSessionId = sessionId;
   currentQuizExposureMode = verifiedMode ? 'verified' : 'flashcards';
   flashcardSessionOutcomes = new Map();
+  matchingQuizState = mode === 'matching'
+    ? quizCore.createMatchingState(selectedWords)
+    : null;
+  const sourceInfo = quizCore.parseSourceScope(sessionSource);
   activeQuizSession = verifiedMode ? {
     id: currentQuizExposureSessionId,
     mode,
     source: sessionSource,
+    sourceType: sourceInfo.sourceType,
+    sourceId: sourceInfo.sourceId,
     createdAt: Date.now(),
-    words,
+    words: selectedWords,
     pool: currentQuizPool,
-    questionCount: words.length,
+    questionCount: selectedWords.length,
+    candidateCount: resolvedSourceWords.length,
+    selectedWordIds: selectedWords.map(word => String(word.id)),
+    selectedWordKeys: selectedWords.map(word => word.wordKey || getWordMasteryKey(word)).filter(Boolean),
+    selectionPlanVersion: currentQuizSelectionPlan?.version || quizCore.SELECTION_PLAN_VERSION,
+    matchingState: matchingQuizState,
     direction: { timeAttack: timeAttackDirection, scramble: scrambleDirection }
   } : null;
   if (verifiedMode) {
@@ -1026,10 +1171,14 @@ function startActualQuiz(mode, options = {}) {
   } else if (mode === 'scramble') {
     document.getElementById('quizScrambleView').style.display = 'block';
     updateScrambleCard();
+  } else if (mode === 'matching') {
+    document.getElementById('quizMatchingView').style.display = 'block';
+    renderMatchingBoard();
   } else {
     document.getElementById('quizViewCard').style.display = 'block';
     updateCard();
   }
+  return true;
 }
 
 function gateGapReviewWords(wordKeys) {

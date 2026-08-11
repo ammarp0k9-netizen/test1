@@ -332,6 +332,9 @@ function writeWordsToStorage(words = window.words, type = 'normal', uid) {
   if (getStorageUserId(uid) === 'guest' && Array.isArray(words) && words.length > 0) {
     markGuestDataDirty();
   }
+  window.dispatchEvent?.(new CustomEvent('lootlingua:quiz-source-data-changed', {
+    detail: { ownerId: getStorageUserId(uid), scope: type === 'normal' ? 'personal' : type, source: 'local-write' },
+  }));
 }
 
 function getCustomWorldsStorageKey(uid) {
@@ -464,6 +467,13 @@ function writeCustomWorldWordsToStorage(worldId, words = window.words, uid) {
   if (getStorageUserId(uid) === 'guest' && Array.isArray(words) && words.length > 0) {
     markGuestDataDirty();
   }
+  window.dispatchEvent?.(new CustomEvent('lootlingua:quiz-source-data-changed', {
+    detail: {
+      ownerId: getStorageUserId(uid),
+      scope: `custom:${String(worldId)}`,
+      source: 'local-write',
+    },
+  }));
 }
 
 function removeCustomWorldWordsFromStorage(worldId, uid) {

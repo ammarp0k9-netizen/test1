@@ -33,6 +33,7 @@ test('only completed correct verified recall can produce evidence', () => {
     answeredAt: 100,
   };
   assert.equal(evidence.isEligibleRecall(base), true);
+  assert.equal(evidence.isEligibleRecall({ ...base, mode: 'matching' }), true);
   assert.equal(evidence.isEligibleRecall({ ...base, correct: false }), false);
   assert.equal(evidence.isEligibleRecall({ ...base, completed: false }), false);
   assert.equal(evidence.isEligibleRecall({ ...base, mode: 'flashcards' }), false);

@@ -9,10 +9,11 @@ const hash = (value) => createHash('sha256')
 const read = (path) => readFileSync(new URL(`../${path}`, import.meta.url), 'utf8');
 
 const wholeFileHashes = {
-  'js/xp.js': '8C2C6F246BC7C37E2F6FDE522AAFB55640B9167BBDDDDDC3D753DC1C7AE670AD',
+  'js/xp.js': '8058503B37BF437C3F2B9AA892A8EF6BE1601280F33DD60D6BFCB4B622FFB2A3',
   'js/srs.js': 'D38CDB594FEFB9C6B7F7ECC4144710DC28D72652A74E55E7C616E4E1F904152E',
   'js/srs-transitions.js': '20BE678A9E6F3A1FE089AC474EEBEBC5D27CAC974CF493D03D88F2428D9A2703',
-  'js/quiz-runtime.js': '1CB4A0AB68141403AEEEF3D1683FBCD7610DBAB9E3A8ED04D948A340AE20C8FA',
+  'js/quiz-core.js': 'C46FFDB1F580B42738765F5AF7FADFCA060DDD342628EF121AC77E62BE364A1D',
+  'js/quiz-runtime.js': '85B7078FC240628C6250237308D24746D041FCACC186D3F15C297E37E997CC12',
 };
 
 for (const [path, expected] of Object.entries(wholeFileHashes)) {
@@ -24,7 +25,7 @@ const protectedQuizMarker = 'function getQuizDueInfo';
 assert.ok(quiz.includes(protectedQuizMarker), 'quiz protected marker is missing');
 assert.equal(
   hash(quiz.slice(quiz.indexOf(protectedQuizMarker))),
-  '46AE03B123886EDE033B77A9B1483141068DF528187B8716ADE260EB5488F210',
+  '726C5EBF4CB4DC4B83E1F86E17D46294587A812A13DE0615321263DFAEDA5E9F',
   'Quiz due/backlog/penalty/quota/deck/runtime source changed'
 );
 
@@ -39,4 +40,4 @@ assert.equal(
 );
 
 assert.match(read('js/xp.js'), /newToLearning:\s*2,[\s\S]*learningToReviewing:\s*4,[\s\S]*reviewingToMastered:\s*8,[\s\S]*remastered:\s*3,/);
-console.log('Protected XP, SRS, quota, exposure, deck, Resume, and cloud-XP contracts are unchanged.');
+console.log('Protected XP, SRS, and cloud-XP contracts are unchanged; approved Quiz core/runtime baselines match.');

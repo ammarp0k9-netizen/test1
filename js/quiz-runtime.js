@@ -17,14 +17,18 @@ async function commitVerifiedQuizResults(trace, onStage) {
   const advancedWords = [];
   const transitionEntries = [];
 
-  const sessionSource = String(activeQuizSession.source || currentQuizSource || 'personal');
-  const sourceWords = sessionSource.startsWith('gate-gap:') &&
-      Array.isArray(activeQuizSession.words) && activeQuizSession.words.length
+  // Commit against the immutable candidate snapshot captured when this session
+  // started. Re-resolving here could apply an old answer to a newly selected
+  // source (or to another account after an auth switch).
+  const sourceWords = Array.isArray(activeQuizSession.words)
     ? activeQuizSession.words
-    : getQuizSourceWords(sessionSource);
+    : [];
+  const committedWordIds = new Set();
   for (const word of sourceWords) {
-    const result = byWord.get(String(word.id));
-    if (!result) continue;
+    const wordId = String(word.id);
+    const result = byWord.get(wordId);
+    if (!result || committedWordIds.has(wordId)) continue;
+    committedWordIds.add(wordId);
     if (result.correct) correctCount++;
     const update = computeSrsUpdate(word, result.correct, activeQuizSession.id, result.answeredAt || Date.now());
     transitionEntries.push({ word, result, update });
@@ -136,7 +140,7 @@ function setQuizFinishState(nextState, options = {}) {
   quizFinishState = nextState;
   const host = document.getElementById('quizView');
   if (!quizFinishUi && nextState !== 'answering') {
-    ['quizViewCard', 'quizTimeAttackView', 'quizScrambleView'].forEach((id) => {
+    ['quizViewCard', 'quizTimeAttackView', 'quizScrambleView', 'quizMatchingView'].forEach((id) => {
       const element = document.getElementById(id);
       if (element) element.style.display = 'none';
     });
@@ -244,6 +248,7 @@ function finishQuizRun() {
   currentQuizExposureMode = '';
   flashcardSessionOutcomes = new Map();
   quizSessionResults = [];
+  matchingQuizState = null;
   hasStartedAnswering = false;
   showToast(verified
     ? `تم حفظ الاختبار: ${Math.round(accuracy * 100)}% دقة${commit.xp ? `، +${commit.xp} XP` : ''}`
@@ -464,5 +469,166 @@ function submitScrambleAnswer() {
   saveActiveQuizSession();
   updateScrambleCard();
 }
+
+function getMatchingWordById(wordId) {
+  return (activeQuizSession?.words || currentQuizWords || [])
+    .find((word) => String(word.id) === String(wordId)) || null;
+}
+
+function matchingPairColor(index) {
+  const hues = [190, 272, 38, 328, 148, 218, 12, 92];
+  return `hsl(${hues[index % hues.length]} 78% 58%)`;
+}
+
+function matchingEncodedId(value) {
+  return sugAttr(value).replace(/'/g, '%27');
+}
+
+function renderMatchingBoard() {
+  if (!matchingQuizState) return;
+  const board = quizCore.currentMatchingBoard(matchingQuizState);
+  if (!board) return;
+  const totalBoards = matchingQuizState.boards.length;
+  const boardNumber = matchingQuizState.boardIndex + 1;
+  const wordsHost = document.getElementById('matchingWords');
+  const meaningsHost = document.getElementById('matchingMeanings');
+  const checkButton = document.getElementById('matchingCheckButton');
+  const feedback = document.getElementById('matchingFeedback');
+  const counter = document.getElementById('matchingCounter');
+  const progress = document.getElementById('matchingProgress');
+  if (!wordsHost || !meaningsHost || !checkButton) return;
+
+  if (counter) counter.textContent = `المجموعة ${boardNumber} / ${totalBoards}`;
+  if (progress) {
+    const completed = matchingQuizState.completedWordCount;
+    progress.style.width = `${Math.round((completed / Math.max(1, currentQuizWords.length)) * 100)}%`;
+  }
+  const pairIndexByWord = new Map(board.wordIds.map((wordId, index) => [wordId, index]));
+  const assignedWordByMeaning = new Map(Object.entries(board.selections).map(([wordId, meaningId]) => [meaningId, wordId]));
+  const firstWrongMeanings = new Set((board.incorrectWordIds || []).map((wordId) => board.firstAttemptSelections?.[wordId]).filter(Boolean));
+  const boardLocked = board.phase === 'complete' || board.phase === 'revealed';
+
+  wordsHost.innerHTML = board.wordIds.map((wordId, index) => {
+    const word = getMatchingWordById(wordId);
+    const paired = Boolean(board.selections[wordId]);
+    const selected = matchingQuizState.pendingWordId === wordId;
+    const correct = board.firstAttemptResults?.[wordId] === true;
+    const incorrect = board.phase === 'correction' && board.incorrectWordIds.includes(wordId);
+    const classes = [
+      'matching-option', 'matching-word-option', paired ? 'is-paired' : '', selected ? 'is-selected' : '',
+      correct ? 'is-correct is-locked' : '', incorrect ? 'is-incorrect' : '',
+      board.phase === 'revealed' && !correct ? 'is-revealed' : '',
+    ].filter(Boolean).join(' ');
+    const disabled = boardLocked || correct;
+    return `<button type="button" class="${classes}" style="--pair-color:${matchingPairColor(index)}" onclick="selectMatchingWord('${matchingEncodedId(wordId)}')" ${disabled ? 'disabled' : ''}>
+      <span class="matching-pair-badge">${paired || correct || board.phase === 'revealed' ? index + 1 : '•'}</span>
+      <span class="matching-option-label">${escapeHtml(word?.word || '')}</span>
+    </button>`;
+  }).join('');
+
+  meaningsHost.innerHTML = board.meaningOrder.map((meaningId) => {
+    const word = getMatchingWordById(meaningId);
+    const assignedWordId = assignedWordByMeaning.get(meaningId) || '';
+    const pairIndex = assignedWordId ? pairIndexByWord.get(assignedWordId) : -1;
+    const locked = assignedWordId && board.firstAttemptResults?.[assignedWordId] === true;
+    const incorrect = board.phase === 'correction' && firstWrongMeanings.has(meaningId);
+    const classes = [
+      'matching-option', 'matching-meaning-option', assignedWordId ? 'is-paired' : '',
+      locked ? 'is-correct is-locked' : '', incorrect ? 'is-incorrect' : '',
+      board.phase === 'revealed' && assignedWordId && !locked ? 'is-revealed' : '',
+    ].filter(Boolean).join(' ');
+    const color = pairIndex >= 0 ? matchingPairColor(pairIndex) : 'var(--accent)';
+    return `<button type="button" class="${classes}" style="--pair-color:${color}" onclick="selectMatchingMeaning('${matchingEncodedId(meaningId)}')" ${boardLocked || locked ? 'disabled' : ''}>
+      <span class="matching-pair-badge">${pairIndex >= 0 ? pairIndex + 1 : '•'}</span>
+      <span class="matching-option-label">${escapeHtml(word?.meaning || '')}</span>
+    </button>`;
+  }).join('');
+
+  const allPaired = board.wordIds.every((wordId) => Boolean(board.selections[wordId]));
+  checkButton.disabled = !allPaired && !boardLocked;
+  checkButton.textContent = boardLocked
+    ? (boardNumber < totalBoards ? 'المجموعة التالية' : 'إنهاء الاختبار')
+    : board.phase === 'correction'
+      ? 'تحقق من التصحيح'
+      : 'تحقق من إجاباتك';
+  if (feedback) {
+    if (board.phase === 'correction') {
+      feedback.textContent = 'لديك بعض الإجابات تحتاج مراجعة. صحح الأزواج المعلّمة؛ نتيجتك الأولى محفوظة.';
+    } else if (board.phase === 'revealed') {
+      feedback.textContent = 'راجع الأزواج الصحيحة قبل المتابعة. لم تتغير نتيجة المحاولة الأولى.';
+    } else if (board.phase === 'complete') {
+      feedback.textContent = board.incorrectWordIds.length
+        ? 'أكملت التصحيح. نتيجة المحاولة الأولى محفوظة.'
+        : 'ممتاز، جميع الأزواج صحيحة من المحاولة الأولى.';
+    } else if (matchingQuizState.pendingWordId) {
+      feedback.textContent = 'الآن اختر المعنى المقابل لهذه الكلمة.';
+    } else {
+      feedback.textContent = 'اختر كلمة، ثم اختر معناها المقابل.';
+    }
+  }
+}
+
+window.selectMatchingWord = function(encodedWordId) {
+  const board = quizCore.currentMatchingBoard(matchingQuizState);
+  const wordId = decodeSugAttr(encodedWordId);
+  if (!board || !wordId || board.firstAttemptResults?.[wordId] === true) return;
+  matchingQuizState.pendingWordId = wordId;
+  renderMatchingBoard();
+  saveActiveQuizSession();
+};
+
+window.selectMatchingMeaning = function(encodedMeaningId) {
+  const wordId = matchingQuizState?.pendingWordId;
+  const meaningId = decodeSugAttr(encodedMeaningId);
+  if (!wordId || !meaningId) {
+    showToast('اختر كلمة أولاً، ثم اختر معناها.', 'info', 2400);
+    return;
+  }
+  if (!quizCore.assignMatchingPair(matchingQuizState, wordId, meaningId)) return;
+  matchingQuizState.pendingWordId = '';
+  renderMatchingBoard();
+  saveActiveQuizSession();
+};
+
+function finishOrAdvanceMatchingBoard() {
+  const hasNext = quizCore.advanceMatchingBoard(matchingQuizState);
+  quizIndex = matchingQuizState.completedWordCount;
+  if (hasNext) {
+    saveActiveQuizSession();
+    renderMatchingBoard();
+    return;
+  }
+  quizIndex = currentQuizWords.length;
+  saveActiveQuizSession();
+  finishQuizRun();
+}
+
+window.submitMatchingAnswers = function() {
+  const board = quizCore.currentMatchingBoard(matchingQuizState);
+  if (!board) return;
+  if (board.phase === 'complete' || board.phase === 'revealed') {
+    finishOrAdvanceMatchingBoard();
+    return;
+  }
+  const result = quizCore.submitMatchingBoard(matchingQuizState, Date.now());
+  if (!result.accepted) {
+    showToast('اربط جميع الكلمات بمعانيها قبل التحقق.', 'warning', 3200);
+    return;
+  }
+  if (result.firstAttemptResults.length) {
+    hasStartedAnswering = true;
+    result.firstAttemptResults.forEach((answer) => {
+      const word = getMatchingWordById(answer.wordId);
+      quizSessionResults.push({
+        ...answer,
+        wordKey: word?.wordKey || getWordMasteryKey(word),
+      });
+      if (!answer.correct) currentQuizMistakes += 1;
+    });
+  }
+  activeQuizSession.matchingState = matchingQuizState;
+  saveActiveQuizSession();
+  renderMatchingBoard();
+};
 
 // ═══════════════════════════════════════════════════════

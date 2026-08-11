@@ -366,6 +366,11 @@
           <strong>الصندوق المشفر</strong>
           <span id="scrambleModeCoverDesc">رتب حروف الكلمة الإنجليزية اعتماداً على معناها العربي.</span>
         </button>
+        <button type="button" class="quiz-mode-card quiz-mode-matching" onclick="openQuizModeSettings('matching')">
+          <span class="quiz-mode-icon"><i class="fa-solid fa-link" aria-hidden="true"></i></span>
+          <strong>مطابقة الكلمات</strong>
+          <span>اربط كل كلمة بمعناها، ثم تحقق من المجموعة كاملة.</span>
+        </button>
       </div>
     </div>
 
@@ -412,7 +417,7 @@
         </div>
       </div>
       <p class="quiz-settings-summary" id="quizSettingsSummary">جاهز؟</p>
-      <button type="button" class="quiz-start-btn" onclick="startConfiguredQuiz()">
+      <button type="button" class="quiz-start-btn" id="quizStartButton" onclick="startConfiguredQuiz()">
         ابدأ الاختبار <i class="fa-solid fa-play" aria-hidden="true"></i>
       </button>
       </div>
@@ -474,6 +479,27 @@
         <input type="text" id="scrambleInput" placeholder="اكتب الكلمة هنا..." dir="ltr" autocomplete="off">
         <button type="button" class="quiz-start-btn" onclick="submitScrambleAnswer()">تأكيد</button>
       </div>
+    </div>
+    <!-- Quiz Matching -->
+    <div id="quizMatchingView" class="quiz-play-view quiz-matching-view" style="display:none;">
+      <button type="button" class="quiz-play-exit btn-icon-tip" data-tip="خروج" onclick="requestQuizExit()"><i class="fa-solid fa-arrow-right" aria-hidden="true"></i></button>
+      <div class="quiz-card-meta">
+        <span id="matchingCounter">المجموعة 1 / 1</span>
+        <span id="matchingScoreHint">اربط كل كلمة بمعناها</span>
+      </div>
+      <div class="quiz-card-bar"><div id="matchingProgress"></div></div>
+      <section class="matching-challenge" aria-labelledby="matchingTitle">
+        <div class="matching-heading">
+          <span class="quiz-mini-label">مطابقة الكلمات</span>
+          <h3 id="matchingTitle">اربط كل كلمة بمعناها</h3>
+          <p id="matchingFeedback" aria-live="polite">اختر كلمة، ثم اختر معناها المقابل.</p>
+        </div>
+        <div class="matching-board" id="matchingBoard">
+          <div class="matching-column" id="matchingWords" aria-label="الكلمات"></div>
+          <div class="matching-column matching-meanings" id="matchingMeanings" aria-label="المعاني"></div>
+        </div>
+        <button type="button" class="quiz-start-btn matching-check-btn" id="matchingCheckButton" onclick="submitMatchingAnswers()" disabled>تحقق من إجاباتك</button>
+      </section>
     </div>
     <div id="quizResumeModal" class="custom-modal quiz-resume-modal">
       <div class="modal-content">
@@ -1149,6 +1175,7 @@
     <script src="js/storage.js?v=20260801-1"></script>
   <script src="js/content-schema.js?v=20260722-1"></script>
 <script src="js/word-lifecycle.js?v=20260722-1"></script>
+<script src="js/quiz-core.js?v=20260811-1"></script>
 <script src="js/journey.js?v=20260729-5"></script>
 <script src="js/learning-evidence.js?v=20260729-1"></script>
 <script src="js/gate-clear.js?v=20260723-1"></script>
@@ -1164,10 +1191,10 @@
 <script src="js/admin.js?v=20260729-1"></script>
 <script src="js/dictionary-render.js?v=20260720-1"></script>
 <script src="js/srs.js?v=20260729-2"></script>
-<script src="js/quiz.js?v=20260729-2"></script>
+<script src="js/quiz.js?v=20260811-1"></script>
 <script src="js/srs-transitions.js"></script>
 <script src="js/srs-transition-batch.js?v=20260722-1"></script>
-<script src="js/quiz-runtime.js?v=20260729-1"></script>
+<script src="js/quiz-runtime.js?v=20260811-1"></script>
 <script src="js/notification-sources.js?v=20260811-1"></script>
 <script src="js/notification-runtime.js?v=20260811-1"></script>
 <script src="js/core-runtime.js"></script>

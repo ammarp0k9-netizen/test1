@@ -6844,6 +6844,9 @@ window.loadStarredView = function() {
   beginViewSwitch();
   saveCurrentViewScroll();
   closeSidebarIfOpen();
+  if (window.stopCustomWorldWordsCloudListener) window.stopCustomWorldWordsCloudListener();
+  activeCustomWorldId = null;
+  window.words = applyStoredWordOrder(readWordsFromStorage('normal', window.auth?.currentUser?.uid));
   currentView = 'starred';
   viewBackTarget = 'worlds';
 

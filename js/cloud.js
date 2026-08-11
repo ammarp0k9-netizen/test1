@@ -340,6 +340,9 @@
       hiddenFromDictionaryAt: data.hiddenFromDictionaryAt?.toDate
         ? data.hiddenFromDictionaryAt.toDate().toISOString()
         : (data.hiddenFromDictionaryAt || null),
+      personalDictionaryState: data.personalDictionaryState === 'moved-to-private-world'
+        ? 'moved-to-private-world'
+        : 'active',
       order:       Number.isFinite(data.order) ? data.order : null,
       createdAt:   data.createdAt?.toDate ? data.createdAt.toDate().toISOString() : (data.createdAt || null)
     };
@@ -1309,6 +1312,29 @@
       customWorldWordsUnsubscribe();
       customWorldWordsUnsubscribe = null;
     }
+  };
+
+  window.fetchCustomWorldWordsForQuiz = async function(worldId, expectedUid) {
+    const user = auth.currentUser;
+    const ownerId = String(expectedUid || user?.uid || '');
+    const sourceId = String(worldId || '');
+    if (!user || !ownerId || user.uid !== ownerId || !sourceId) {
+      const error = new Error('Quiz source owner or world is unavailable.');
+      error.code = 'quiz-source/owner-mismatch';
+      throw error;
+    }
+    const q = query(
+      collection(db, "users", ownerId, "customWorlds", sourceId, "words"),
+      orderBy("createdAt", "desc")
+    );
+    const snapshot = await getDocs(q);
+    return {
+      ownerId,
+      sourceId,
+      words: snapshot.docs.map(mapWordDoc),
+      fromCache: snapshot.metadata.fromCache,
+      hasPendingWrites: snapshot.metadata.hasPendingWrites,
+    };
   };
 
   window.saveCustomWorldToCloud = async function(world) {

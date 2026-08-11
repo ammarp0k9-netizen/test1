@@ -35,8 +35,12 @@ test('gap review starts a verified quiz from only the requested word keys', () =
   assert.match(block, /words: reviewWords/);
   assert.match(block, /gate-gap:/);
   assert.doesNotMatch(block, /activeGateId|unlockedGateIds|updateGateProgress/);
-  assert.match(runtime, /sessionSource\.startsWith\('gate-gap:'\)/);
   assert.match(runtime, /Array\.isArray\(activeQuizSession\.words\)/);
+  const commitBlock = runtime.slice(
+    runtime.indexOf('async function commitVerifiedQuizResults'),
+    runtime.indexOf('function markRemember')
+  );
+  assert.doesNotMatch(commitBlock, /getQuizSourceWords\(/);
 });
 
 test('refresh and multi-device updates are read-only in the Gate renderer', () => {
