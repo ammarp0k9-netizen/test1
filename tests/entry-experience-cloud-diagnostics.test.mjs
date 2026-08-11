@@ -40,7 +40,7 @@ function completedEntryState(overrides = {}) {
   };
 }
 
-function createHarness() {
+function createHarness(options = {}) {
   const auth = { currentUser: { uid: 'entry-cloud-user' } };
   const values = new Map();
   const diagnostics = [];
@@ -56,6 +56,7 @@ function createHarness() {
     data: () => values.get(reference.path),
   });
   const root = {
+    __LOOTLINGUA_ENTRY_CONTRACT_DIAGNOSTICS__: options.contractDiagnostics === true,
     __firebase: {
       Timestamp: { fromMillis: timestamp },
       doc,
@@ -82,6 +83,8 @@ function createHarness() {
   const testConsole = {
     ...console,
     error(...args) { logs.push(args); },
+    info(...args) { logs.push(args); },
+    warn(...args) { logs.push(args); },
   };
   new Function('window', 'globalThis', contractSource)(root, root);
   const executableCloudSource = [
@@ -94,6 +97,9 @@ function createHarness() {
     TestCustomEvent,
     testConsole
   );
+  if (options.existingDocument) {
+    values.set('users/entry-cloud-user/entryExperiences/v2', options.existingDocument);
+  }
   return {
     api: root.LootLinguaEntryExperienceCloud,
     auth,
@@ -191,4 +197,95 @@ test('auth readiness failures are diagnostic without exposing the account identi
       error.diagnostic?.firebaseCode === 'entry/auth-changed'
   );
   assert.equal(JSON.stringify(harness.logs).includes('entry-cloud-user'), false);
+});
+
+test('dev diagnostics compare the actual update shape with an existing document safely', async () => {
+  const existing = completedEntryState({
+    status: 'in-progress',
+    currentStep: 'return',
+    journeyStatus: 'pending',
+    completedAt: 0,
+  });
+  const harness = createHarness({
+    contractDiagnostics: true,
+    existingDocument: {
+      ...existing,
+      startedAt: timestamp(existing.startedAt),
+      updatedAt: timestamp(existing.updatedAt),
+      completedAt: null,
+      skippedAt: null,
+    },
+  });
+  const failure = new Error('backend detail must stay private');
+  failure.code = 'permission-denied';
+  harness.controls.writeError = failure;
+
+  await assert.rejects(
+    harness.save(completedEntryState(), {
+      operation: 'entry-completion', verify: true,
+    }),
+    (error) => {
+      const shape = error.diagnostic?.contractShape;
+      assert.equal(shape?.documentExists, true);
+      assert.equal(shape?.writeMode, 'update');
+      assert.equal(shape?.checks?.payloadHasOnlyAllowedFields, true);
+      assert.equal(shape?.checks?.payloadHasExactFieldCount, true);
+      assert.equal(shape?.checks?.currentVersion, true);
+      assert.equal(shape?.checks?.completionShape, true);
+      assert.equal(shape?.checks?.statusTransitionAllowed, true);
+      assert.deepEqual(shape?.checks?.immutableFieldsPreserved, {
+        contractVersion: true,
+        experienceVersion: true,
+        audience: true,
+        classification: true,
+        startedAt: true,
+        completedAt: true,
+      });
+      assert.deepEqual(shape?.attempted?.fields, [
+        'audience', 'classification', 'completedAt', 'contractVersion', 'currentStep',
+        'experienceVersion', 'gamerStatus', 'interestIds', 'interestsStatus',
+        'journeyStatus', 'oasisMode', 'selectedWorldId', 'skippedAt', 'source',
+        'startedAt', 'status', 'themeExplicit', 'themeId', 'themeStatus', 'updatedAt',
+      ]);
+      assert.equal(Object.hasOwn(shape?.attempted?.enumValues || {}, 'selectedWorldId'), false);
+      return true;
+    }
+  );
+  const serialized = JSON.stringify(harness.logs);
+  assert.equal(serialized.includes('entry-cloud-user'), false);
+  assert.equal(serialized.includes('backend detail must stay private'), false);
+});
+
+test('dev diagnostics expose a legacy structural mismatch without logging field values', async () => {
+  const harness = createHarness({
+    contractDiagnostics: true,
+    existingDocument: {
+      status: 'in-progress',
+      currentStep: 'return',
+      actionStatus: 'ready',
+      startedAt: timestamp(1000),
+      updatedAt: timestamp(2000),
+    },
+  });
+  const failure = new Error('denied');
+  failure.code = 'permission-denied';
+  harness.controls.writeError = failure;
+
+  await assert.rejects(
+    harness.save(completedEntryState(), {
+      operation: 'entry-completion', verify: true,
+    }),
+    (error) => {
+      const shape = error.diagnostic?.contractShape;
+      assert.equal(shape?.writeMode, 'update');
+      assert.deepEqual(shape?.existing?.fields, [
+        'actionStatus', 'currentStep', 'startedAt', 'status', 'updatedAt',
+      ]);
+      assert.equal(shape?.checks?.immutableFieldsPreserved?.contractVersion, false);
+      assert.equal(shape?.checks?.immutableFieldsPreserved?.experienceVersion, false);
+      assert.equal(shape?.existing?.enumValues?.status, 'in-progress');
+      assert.equal(Object.hasOwn(shape?.existing?.enumValues || {}, 'actionStatus'), false);
+      return true;
+    }
+  );
 });

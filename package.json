@@ -37,6 +37,7 @@
     "test:admin:browser": "node tools/admin-rank-browser-smoke.mjs",
     "test:admin:gate-browser": "node tools/admin-gate-browser-smoke.mjs",
     "test:rules": "firebase emulators:exec --only firestore --project demo-lootlingua \"node tests/firestore-rules.test.mjs\"",
+    "check:rules:production-parity": "node tools/check-production-firestore-rules-parity.cjs",
     "test:stage-a": "npm run test:contracts && npm run test:rules",
     "test:stage-b": "npm run test:contracts && npm run test:admin && npm --prefix functions run check && npm --prefix functions test && npm run test:rules",
     "test:stage-c1": "npm run test:contracts && npm run test:admin && npm run test:admin:browser && npm --prefix functions run check && npm --prefix functions test && npm run test:rules",

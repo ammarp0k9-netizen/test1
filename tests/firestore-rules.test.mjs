@@ -713,6 +713,10 @@ try {
       entryExperienceV2State()
     ));
     await assertFails(setDoc(
+      doc(anonymous, `users/${uid}/entryExperiences/v2`),
+      entryExperienceV2State()
+    ));
+    await assertFails(setDoc(
       doc(owner, `users/${uid}/entryExperiences/v1`),
       entryExperienceV2State()
     ));
@@ -759,7 +763,9 @@ try {
       completedAt: serverTimestamp(),
       updatedAt: serverTimestamp()
     }));
-    await assertSucceeds(updateDoc(reference, {
+    const completedEntrySnapshot = await getDoc(reference);
+    await assertSucceeds(setDoc(reference, {
+      ...completedEntrySnapshot.data(),
       source: 'settings',
       updatedAt: serverTimestamp()
     }));
@@ -809,6 +815,82 @@ try {
       journeyStatus: 'return-reviewed',
       selectedWorldId: '',
       startedAt: completedJourneyStartedAt,
+      completedAt: serverTimestamp()
+    })));
+
+    const newCompletedUid = 'entry-v2-new-completed';
+    const newCompletedDb = environment.authenticatedContext(newCompletedUid).firestore();
+    await assertSucceeds(setDoc(
+      doc(newCompletedDb, `users/${newCompletedUid}/entryExperiences/v2`),
+      entryExperienceV2State({
+        status: 'completed',
+        audience: 'returning',
+        classification: 'returning-with-progress',
+        currentStep: 'destination',
+        journeyStatus: 'return-reviewed',
+        completedAt: serverTimestamp()
+      })
+    ));
+  });
+
+  await test('Entry Experience v2 upgrades only a recognizable older shape into the strict current schema', async () => {
+    const uid = 'entry-v2-older-shape';
+    const owner = environment.authenticatedContext(uid).firestore();
+    const reference = doc(owner, `users/${uid}/entryExperiences/v2`);
+    const startedAt = Timestamp.fromMillis(1000);
+    await environment.withSecurityRulesDisabled(async (context) => {
+      await setDoc(doc(context.firestore(), `users/${uid}/entryExperiences/v2`), {
+        contractVersion: 2,
+        experienceVersion: 2,
+        status: 'in-progress',
+        audience: 'returning',
+        classification: 'returning-with-progress',
+        currentStep: 'return',
+        interestsStatus: 'selected',
+        interestIds: ['study'],
+        themeStatus: 'preserved',
+        themeId: 'lootlingua',
+        themeExplicit: false,
+        actionStatus: 'ready',
+        source: 'app-entry',
+        startedAt,
+        updatedAt: Timestamp.fromMillis(2000),
+        completedAt: null,
+        skippedAt: null
+      });
+    });
+    await assertSucceeds(setDoc(reference, entryExperienceV2State({
+      status: 'completed',
+      audience: 'returning',
+      classification: 'returning-with-progress',
+      currentStep: 'destination',
+      journeyStatus: 'return-reviewed',
+      startedAt,
+      completedAt: serverTimestamp()
+    })));
+
+    const malformedUid = 'entry-v2-malformed-version';
+    const malformedDb = environment.authenticatedContext(malformedUid).firestore();
+    const malformedReference = doc(
+      malformedDb,
+      `users/${malformedUid}/entryExperiences/v2`
+    );
+    await environment.withSecurityRulesDisabled(async (context) => {
+      await setDoc(doc(context.firestore(), `users/${malformedUid}/entryExperiences/v2`), {
+        status: 'in-progress',
+        audience: 'returning',
+        classification: 'returning-with-progress',
+        startedAt,
+        completedAt: null
+      });
+    });
+    await assertFails(setDoc(malformedReference, entryExperienceV2State({
+      status: 'completed',
+      audience: 'returning',
+      classification: 'returning-with-progress',
+      currentStep: 'destination',
+      journeyStatus: 'return-reviewed',
+      startedAt,
       completedAt: serverTimestamp()
     })));
   });
@@ -5811,7 +5893,7 @@ try {
   });
 
   if (testFilter) assert.ok(selected > 0, `No Rules test matched "${testFilter}"`);
-  assert.equal(passed, testFilter ? selected : 80);
+  assert.equal(passed, testFilter ? selected : 81);
   console.log(`# ${passed} Firestore Rules emulator tests passed`);
 } finally {
   await environment.cleanup();
