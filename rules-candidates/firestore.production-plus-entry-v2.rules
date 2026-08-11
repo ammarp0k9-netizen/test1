@@ -2513,7 +2513,8 @@ service cloud.firestore {
         data.sessionId == sessionId &&
         nonEmptyString(data.sessionId, 220) &&
         data.status == 'completed' &&
-        (data.mode == 'timeAttack' || data.mode == 'scramble') &&
+        (data.mode == 'timeAttack' || data.mode == 'scramble' ||
+          (data.mode == 'matching' && data.evidenceVersion == 2)) &&
         (data.sourceType == 'personal' || data.sourceType == 'private-world') &&
         data.privateWorldId is string && data.privateWorldId.size() <= 500 &&
         (data.sourceType != 'private-world' || nonEmptyString(data.privateWorldId, 500)) &&

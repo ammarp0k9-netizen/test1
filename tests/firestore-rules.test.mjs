@@ -4486,6 +4486,63 @@ try {
     await assertFails(getDoc(doc(userB, eventPath)));
   });
 
+  await test('quiz Evidence sessions accept Matching v2 without weakening trusted modes or shape checks', async () => {
+    const uid = 'quiz-evidence-matching-owner';
+    const owner = environment.authenticatedContext(uid).firestore();
+    const other = environment.authenticatedContext('quiz-evidence-matching-other').firestore();
+    const matchingWordKeys = Array.from({ length: 10 }, (_, index) => `matching-word-${index + 1}`);
+    const sessionPayload = (sessionId, overrides = {}) => ({
+      sessionId,
+      status: 'completed',
+      mode: 'matching',
+      sourceType: 'personal',
+      privateWorldId: '',
+      wordKeys: matchingWordKeys,
+      correctWordKeys: matchingWordKeys,
+      totalCount: matchingWordKeys.length,
+      correctCount: matchingWordKeys.length,
+      evidenceVersion: 2,
+      completedAt: serverTimestamp(),
+      ...overrides,
+    });
+    const createAsOwner = (sessionId, overrides = {}) => setDoc(
+      doc(owner, `users/${uid}/quizEvidenceSessions/${sessionId}`),
+      sessionPayload(sessionId, overrides)
+    );
+
+    await assertSucceeds(createAsOwner('matching-v2-valid'));
+    await assertSucceeds(createAsOwner('time-attack-v1-valid', {
+      mode: 'timeAttack',
+      evidenceVersion: 1,
+    }));
+    await assertSucceeds(createAsOwner('time-attack-v2-valid', { mode: 'timeAttack' }));
+    await assertSucceeds(createAsOwner('scramble-v1-valid', {
+      mode: 'scramble',
+      evidenceVersion: 1,
+    }));
+    await assertSucceeds(createAsOwner('scramble-v2-valid', { mode: 'scramble' }));
+
+    await assertFails(createAsOwner('matching-v1-invalid', { evidenceVersion: 1 }));
+    await assertFails(createAsOwner('unknown-mode-invalid', { mode: 'flashcards' }));
+    await assertFails(createAsOwner('field-injection-invalid', { forgedReward: 1000 }));
+    await assertFails(setDoc(
+      doc(other, `users/${uid}/quizEvidenceSessions/cross-account-invalid`),
+      sessionPayload('cross-account-invalid')
+    ));
+    await assertFails(createAsOwner('total-count-invalid', { totalCount: 9 }));
+    await assertFails(createAsOwner('correct-count-invalid', { correctCount: 9 }));
+    await assertFails(createAsOwner('duplicate-keys-invalid', {
+      wordKeys: ['matching-word-1', 'matching-word-1'],
+      correctWordKeys: ['matching-word-1'],
+      totalCount: 2,
+      correctCount: 1,
+    }));
+    await assertFails(createAsOwner('foreign-correct-key-invalid', {
+      correctWordKeys: ['not-in-word-keys'],
+      correctCount: 1,
+    }));
+  });
+
   await test('Evidence v2 enforces separate sessions, the short interval, and a later day', async () => {
     const uid = 'evidence-v2-user';
     const wordKey = 'evidence-v2-word';
@@ -5919,7 +5976,7 @@ try {
   });
 
   if (testFilter) assert.ok(selected > 0, `No Rules test matched "${testFilter}"`);
-  assert.equal(passed, testFilter ? selected : 81);
+  assert.equal(passed, testFilter ? selected : 82);
   console.log(`# ${passed} Firestore Rules emulator tests passed`);
 } finally {
   await environment.cleanup();
