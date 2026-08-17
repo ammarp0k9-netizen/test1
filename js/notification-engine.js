@@ -15,6 +15,7 @@
     CONTENT_UNLOCKED: 'progress.content.unlocked',
     WORDS_WEAK: 'reminder.words.weak',
     INACTIVITY: 'reminder.inactivity',
+    FEEDBACK_REQUEST: 'feedback.request',
   });
 
   const TABLE = Object.freeze({
@@ -29,6 +30,7 @@
     [TYPE.CONTENT_UNLOCKED]: { priority: 82, actionGroup: 'journey-unlock', delay: 0, maxShows: 2 },
     [TYPE.WORDS_WEAK]: { priority: 52, actionGroup: 'weak-words', delay: 3 * DAY, maxShows: 2 },
     [TYPE.INACTIVITY]: { priority: 44, actionGroup: 'return', delay: 7 * DAY, maxShows: 2 },
+    [TYPE.FEEDBACK_REQUEST]: { priority: 20, actionGroup: 'feedback', delay: 0, maxShows: 1 },
   });
 
   function numeric(value) {
@@ -91,6 +93,8 @@
         return { title: 'قوِّ كلماتك الصعبة', message: `لديك ${context.wordCount} كلمات صعبة أو مميزة لم تراجعها منذ مدة.`, cta: ['practice-weak-words', 'راجع الصعب'], visualType: 'warning' };
       case TYPE.INACTIVITY:
         return { title: 'ارجع بخطوة خفيفة', message: `مرّ ${context.days} أيام منذ آخر تعلّم فعلي. جلسة قصيرة تكفي للعودة.`, cta: ['resume-learning', 'ابدأ جلسة قصيرة'], visualType: 'info' };
+      case TYPE.FEEDBACK_REQUEST:
+        return { title: 'كيف كانت تجربتك؟', message: 'تقييم قصير يساعدنا نحسّن LootLingua.', cta: ['open-feedback', 'أرسل تقييمك'], visualType: 'info' };
       default:
         return { title: 'تذكير', message: '', cta: ['', ''], visualType: 'info' };
     }
@@ -113,6 +117,7 @@
       contentUnlocked: facts.contentUnlocked || {},
       weakWords: facts.weakWords || {},
       inactivity: facts.inactivity || {},
+      feedback: facts.feedback || {},
     };
   }
 
@@ -228,6 +233,15 @@
       });
     }
 
+    if (facts.feedback.eligible && clean(facts.feedback.episodeKey)) {
+      rules.push({
+        type: TYPE.FEEDBACK_REQUEST,
+        key: openKey(TYPE.FEEDBACK_REQUEST, occurrence(TYPE.FEEDBACK_REQUEST, facts.feedback.episodeKey)),
+        since: numeric(facts.feedback.eligibleSince) || now,
+        context: { trustedQuizCount: Math.max(0, Number(facts.feedback.trustedQuizCount) || 0) },
+      });
+    }
+
     return rules;
   }
 
@@ -241,11 +255,16 @@
     const hasGateReady = rules.find((rule) => rule.type === TYPE.GATE_READY);
     const hasUnlock = rules.find((rule) => rule.type === TYPE.CONTENT_UNLOCKED);
     const hasLongInactivity = rules.some((rule) => rule.type === TYPE.INACTIVITY);
+    const hasLearningPriority = rules.some((rule) => [
+      TYPE.STREAK_RISK, TYPE.REVIEW_DUE, TYPE.GATE_READY,
+      TYPE.CONTENT_UNLOCKED, TYPE.JOURNEY_INACTIVE,
+    ].includes(rule.type));
     return rules.filter((rule) => {
       if (reviewEligible && [TYPE.QUIZ_INACTIVE, TYPE.WORDS_WEAK].includes(rule.type)) return false;
       if (hasLongInactivity && rule.type === TYPE.CHEST_READY) return false;
       if (hasGateReady && [TYPE.GATE_PRACTICE, TYPE.JOURNEY_INACTIVE].includes(rule.type) && sameGate(rule, hasGateReady)) return false;
       if (hasUnlock && rule.type === TYPE.JOURNEY_INACTIVE && sameGate(rule, hasUnlock)) return false;
+      if (hasLearningPriority && rule.type === TYPE.FEEDBACK_REQUEST) return false;
       return true;
     }).filter((rule, index, values) => {
       if (rule.type !== TYPE.WORDS_NEW) return true;

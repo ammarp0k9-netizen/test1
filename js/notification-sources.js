@@ -114,8 +114,11 @@
       timestamp(item.state?.last_quizzed_at)
     ), 0);
     const createdAnchor = all.reduce((latest, item) => Math.max(latest, timestamp(item.word?.createdAt)), 0);
+    const verifiedCount = (Array.isArray(history) ? history : [])
+      .filter((entry) => entry?.mode === 'verified').length;
     return {
       localVerifiedAt,
+      verifiedCount,
       lastTrustedQuizAt: Math.max(localVerifiedAt, masteryQuizAt),
       learningAnchorAt: Math.max(createdAnchor, timestamp(newWords.batchCreatedAt)),
     };
@@ -227,6 +230,14 @@
     }
     const weakWords = weakFacts(review, now);
     const journey = await journeyFacts();
+    const quizView = document.getElementById('quizView');
+    const quizOpen = Boolean(quizView && quizView.offsetParent !== null && quizView.style.display !== 'none');
+    const feedbackSubmitted = localStorage.getItem(`lootlingua_feedback_submitted_v1_${ownerId}`) === '1';
+    const feedbackDismissedAt = timestamp(localStorage.getItem(`lootlingua_feedback_dismissed_at_v1_${ownerId}`));
+    const feedbackCooldownOver = !feedbackDismissedAt || now - feedbackDismissedAt >= 90 * DAY;
+    const feedbackEligible = !feedbackSubmitted && feedbackCooldownOver && !quizOpen &&
+      !root.__entryExperienceActive && words.length >= 10 && Number(quiz.verifiedCount) >= 1 &&
+      (ownerId === 'guest' || Boolean(journey.journey?.actionable));
     const profileLastActivity = String(localStorage.getItem('lastActivityDate') || '');
     const lastLearningAt = Math.max(
       quiz.lastTrustedQuizAt,
@@ -260,6 +271,16 @@
       quiz,
       weakWords,
       inactivity: { lastLearningAt },
+      feedback: {
+        eligible: feedbackEligible,
+        trustedQuizCount: Math.max(0, Number(quiz.verifiedCount) || 0),
+        eligibleSince: Math.max(quiz.localVerifiedAt, quiz.lastTrustedQuizAt),
+        // A dismissed request may be offered again only after its long cooldown.
+        // A submitted request never reaches this branch because feedbackEligible is false.
+        episodeKey: feedbackEligible
+          ? `meaningful-use-v1:${feedbackDismissedAt ? Math.floor((now - feedbackDismissedAt) / (90 * DAY)) : 0}`
+          : '',
+      },
       journey: journey.journey || {},
       gatePractice: journey.gatePractice || {},
       gateReady: journey.gateReady || {},

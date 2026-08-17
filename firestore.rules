@@ -3727,6 +3727,10 @@ service cloud.firestore {
       allow delete: if isAdmin();
     }
 
+    match /feedback/{feedbackId} {
+      allow read, write: if false;
+    }
+
     // Existing user paths remain explicit. There is intentionally no recursive
     // owner rule under /users/{uid}; Journey writes use narrow validators below.
     match /users/{uid} {

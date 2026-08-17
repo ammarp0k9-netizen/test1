@@ -212,6 +212,10 @@ h1 span { color: #60a5fa; }
 
 /* Flashcard contract from #quizViewCard. */
 .review-preview { padding: 14px; }
+.quiz-mode-preview { display: flex; flex-wrap: wrap; align-items: center; gap: 7px; margin-top: 16px; }
+.quiz-mode-preview strong { width: 100%; color: var(--text-white); font-size: .84rem; }
+.quiz-mode-preview span { padding: 5px 8px; border: 1px solid var(--border); border-radius: 999px; background: var(--card-bg); color: var(--text-gray); font-size: .72rem; font-weight: 800; }
+.quiz-mode-preview em { color: var(--accent); font-style: normal; }
 .review-preview .preview-label { margin: -14px -14px 14px; }
 #quizViewCard { display: grid; place-items: center; }
 .quiz-card-meta { width: 100%; max-width: 520px; display: flex; justify-content: space-between; margin-bottom: 9px; color: var(--text-gray); font-size: .72rem; }

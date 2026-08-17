@@ -20,6 +20,7 @@ const {
   createDuplicateContentWordHandler,
   createMoveContentWordHandler
 } = require('./content-word-admin');
+const { createSubmitFeedbackHandler } = require('./feedback');
 
 // Reuse the process-wide Admin app when this module is loaded more than once
 // by the Functions runtime or emulator.
@@ -58,6 +59,7 @@ const bulkUpdateContentWordsHandler = createBulkUpdateContentWordsHandler(wordHa
 const deleteContentWordHandler = createDeleteContentWordHandler(wordHandlerDependencies);
 const duplicateContentWordHandler = createDuplicateContentWordHandler(wordHandlerDependencies);
 const moveContentWordHandler = createMoveContentWordHandler(wordHandlerDependencies);
+const submitFeedbackHandler = createSubmitFeedbackHandler({ db, FieldValue, HttpsError, makeId: randomUUID });
 
 exports.deleteContentWorld = onCall({
   memory: '512MiB',
@@ -103,6 +105,11 @@ exports.bulkUpdateContentWords = onCall({
   memory: '512MiB',
   timeoutSeconds: 120
 }, bulkUpdateContentWordsHandler);
+
+exports.submitFeedback = onCall({
+  memory: '256MiB',
+  timeoutSeconds: 30
+}, submitFeedbackHandler);
 
 exports.deleteContentWord = onCall({
   memory: '512MiB',

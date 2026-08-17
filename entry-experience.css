@@ -480,6 +480,12 @@ body.journey-auth-active {
 .entry-selected-world-summary > div { display: grid; gap: 2px; }
 .entry-route-world small,
 .entry-selected-world-summary small { color: var(--entry-muted); font-size: .72rem; }
+.entry-preview-stage { display: grid; gap: 8px; }
+.entry-preview-stage-heading { display: flex; align-items: center; gap: 9px; padding-inline: 3px; }
+.entry-preview-stage-heading > span { display: grid; place-items: center; flex: 0 0 25px; width: 25px; height: 25px; border-radius: 50%; background: var(--accent-soft); color: var(--accent); font-size: .72rem; font-weight: 900; }
+.entry-preview-stage-heading > div { display: grid; gap: 1px; }
+.entry-preview-stage-heading small { color: var(--accent); font-size: .67rem; font-weight: 900; }
+.entry-preview-stage-heading strong { font-size: .9rem; line-height: 1.35; }
 
 .entry-route-ranks,
 .entry-route-gates { display: flex; gap: 9px; overflow-x: auto; padding: 3px; scrollbar-width: thin; }
@@ -496,6 +502,9 @@ body.journey-auth-active {
 }
 .entry-route-node:hover,
 .entry-route-node.activated { border-color: var(--accent); background: var(--accent-soft); transform: translateY(-1px); }
+.entry-route-node.selected { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, var(--card-bg)); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 12%, transparent); }
+.entry-route-node.selected .entry-route-selected-icon { opacity: 1; }
+.entry-route-selected-icon { opacity: 0; color: var(--accent); }
 .entry-route-rank { display: flex; align-items: center; justify-content: center; gap: 8px; color: var(--accent); font-weight: 850; }
 .entry-route-rank span { color: var(--text-white); }
 .entry-route-gate { display: grid; grid-template-columns: 30px 1fr; align-items: center; gap: 1px 8px; padding: 9px; text-align: start; }
@@ -505,6 +514,9 @@ body.journey-auth-active {
 .entry-route-loading { padding: 38px 10px; color: var(--entry-muted); text-align: center; }
 .entry-route-loading i { margin-inline-end: 7px; color: var(--accent); }
 .entry-route-retry { justify-self: center; }
+.entry-gate-preview { margin-top: 4px; }
+.entry-gate-preview-empty { border-style: dashed; }
+.entry-gate-preview.is-selected { border-color: color-mix(in srgb, var(--accent) 42%, var(--border)); }
 
 .entry-interaction-callout,
 .entry-context-note {

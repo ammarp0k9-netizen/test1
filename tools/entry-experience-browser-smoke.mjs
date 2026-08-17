@@ -488,6 +488,10 @@ function browserHarness() {
     setIdentity(scenario.loginUid, true);
     return true;
   };
+  // The production Journey prompt opens the app auth surface, which then calls
+  // the configured login provider. This focused controller harness supplies the
+  // same boundary without loading the full auth UI module.
+  window.openAppAuth = async () => window.login();
   window.__smokeSwitchAccount = (uid) => setIdentity(uid, true);
 
   window.addEventListener('DOMContentLoaded', () => {

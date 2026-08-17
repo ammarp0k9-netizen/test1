@@ -1,7 +1,7 @@
 {
-  "generatedAt": "2026-08-09T13:10:53.502Z",
+  "generatedAt": "2026-08-17T18:04:59.996Z",
   "browser": "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",
-  "appUrl": "http://127.0.0.1:9129/app",
+  "appUrl": "http://127.0.0.1:9015/app",
   "harness": "real Chrome DOM/input/reload with Firebase replaced by an in-page deterministic adapter",
   "passed": true,
   "caseCount": 18,

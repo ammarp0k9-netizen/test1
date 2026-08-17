@@ -9467,6 +9467,16 @@ html[dir="ltr"] .worlds-tabs[data-active-tab="custom"]::before {
   font-weight: 800;
 }
 
+.published-journey-current-marker {
+  width: fit-content;
+  padding: 3px 8px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
+  color: var(--accent);
+  font-size: 10px;
+  font-weight: 900;
+}
+
 .published-journey-node-action {
   display: inline-flex;
   align-items: center;
@@ -9534,30 +9544,30 @@ html[dir="ltr"] .worlds-tabs[data-active-tab="custom"]::before {
 
 /* Ready is an unfinished action: warm outline, flag, and a dominant CTA. */
 .published-journey-node.is-ready {
-  border: 2px solid color-mix(in srgb, #f59e0b 72%, var(--border));
-  background: color-mix(in srgb, #f59e0b 9%, var(--card-bg));
-  box-shadow: 0 8px 22px color-mix(in srgb, #f59e0b 13%, transparent);
+  border: 2px solid color-mix(in srgb, var(--star) 72%, var(--border));
+  background: color-mix(in srgb, var(--star) 9%, var(--card-bg));
+  box-shadow: 0 8px 22px color-mix(in srgb, var(--star) 13%, transparent);
 }
 
 .published-journey-node.is-ready .published-journey-node-marker {
-  border-color: #f59e0b;
-  background: color-mix(in srgb, #f59e0b 14%, var(--card-bg));
-  color: #f59e0b;
+  border-color: var(--star);
+  background: color-mix(in srgb, var(--star) 14%, var(--card-bg));
+  color: var(--star);
 }
 
 .published-journey-node.is-ready .published-journey-status {
-  color: #f59e0b;
+  color: var(--star);
 }
 
 .published-journey-node.is-ready .published-journey-node-action {
-  border-color: #f59e0b;
-  background: #f59e0b;
-  color: #241500;
-  box-shadow: 0 6px 16px color-mix(in srgb, #f59e0b 24%, transparent);
+  border-color: var(--star);
+  background: var(--star);
+  color: var(--main-bg);
+  box-shadow: 0 6px 16px color-mix(in srgb, var(--star) 24%, transparent);
 }
 
 .published-journey-node.is-ready .published-journey-node-progress-fill {
-  background: #f59e0b;
+  background: var(--star);
 }
 
 /* Cleared is finished: solid green marker and a quiet review action. */
@@ -9649,8 +9659,8 @@ html[dir="ltr"] .worlds-tabs[data-active-tab="custom"]::before {
 .published-gate-switcher-item > span { color: var(--text-gray); font-weight: 900; }
 .published-gate-switcher-item > i { color: var(--text-gray); }
 .published-gate-switcher-item.selected { border-color: var(--accent); background: var(--accent-soft); }
-.published-gate-switcher-item.is-ready { border-color: #f59e0b; }
-.published-gate-switcher-item.is-ready > i { color: #f59e0b; }
+.published-gate-switcher-item.is-ready { border-color: var(--star); }
+.published-gate-switcher-item.is-ready > i { color: var(--star); }
 .published-gate-switcher-item.is-cleared { border-color: color-mix(in srgb, var(--success) 52%, var(--border)); }
 .published-gate-switcher-item.is-cleared > i { color: var(--success); }
 .published-gate-switcher-item.is-mastered > i { color: var(--star); }
@@ -9686,11 +9696,11 @@ html[dir="ltr"] .worlds-tabs[data-active-tab="custom"]::before {
 .published-gate-journey-available .published-gate-state-icon { border-color: var(--accent); color: var(--accent); }
 .published-gate-journey-learning .published-gate-state-icon { border-color: var(--accent); background: var(--accent-soft); color: var(--accent); }
 .published-gate-journey-ready {
-  border: 2px solid color-mix(in srgb, #f59e0b 72%, var(--border));
-  background: color-mix(in srgb, #f59e0b 9%, var(--card-bg));
+  border: 2px solid color-mix(in srgb, var(--star) 72%, var(--border));
+  background: color-mix(in srgb, var(--star) 9%, var(--card-bg));
 }
-.published-gate-journey-ready .published-gate-state-icon { border-color: #f59e0b; background: color-mix(in srgb, #f59e0b 15%, var(--card-bg)); color: #f59e0b; }
-.published-gate-journey-ready .published-journey-cta:not(:disabled) { border-color: #f59e0b; background: #f59e0b; color: #241500; animation: none; }
+.published-gate-journey-ready .published-gate-state-icon { border-color: var(--star); background: color-mix(in srgb, var(--star) 15%, var(--card-bg)); color: var(--star); }
+.published-gate-journey-ready .published-journey-cta:not(:disabled) { border-color: var(--star); background: var(--star); color: var(--main-bg); animation: none; }
 .published-gate-journey-ready .published-journey-cta:not(:disabled)::after { content: none; }
 .published-gate-journey-cleared { border-color: color-mix(in srgb, var(--success) 52%, var(--border)); background: color-mix(in srgb, var(--success) 7%, var(--card-bg)); }
 .published-gate-journey-cleared .published-gate-state-icon { border-color: var(--success); background: var(--success); color: #07150d; }
@@ -9730,6 +9740,25 @@ html[dir="ltr"] .worlds-tabs[data-active-tab="custom"]::before {
   .published-journey-node-action { grid-column: 1 / -1; width: 100%; }
   .published-journey-node-heading { align-items: flex-start; flex-direction: column; gap: 4px; }
 }
+
+.feedback-dialog-shell { position: fixed; z-index: 11050; inset: 0; display: grid; place-items: center; padding: 16px; }
+.feedback-dialog-backdrop { position: absolute; inset: 0; border: 0; background: rgba(2, 6, 23, .72); backdrop-filter: blur(7px); }
+.feedback-dialog { position: relative; width: min(440px, 100%); padding: 24px; border: 1px solid color-mix(in srgb, var(--accent) 28%, var(--border)); border-radius: 20px; background: var(--card-bg); color: var(--text-white); box-shadow: 0 28px 76px rgba(0, 0, 0, .42); }
+.feedback-dialog h2 { margin: 4px 0 7px; font-size: 1.4rem; }
+.feedback-dialog > p { margin: 0; color: var(--text-gray); line-height: 1.65; }
+.feedback-eyebrow { color: var(--accent) !important; font-size: .78rem; font-weight: 900; }
+.feedback-dialog-close { position: absolute; inset-block-start: 10px; inset-inline-end: 11px; width: 34px; height: 34px; border: 1px solid var(--border); border-radius: 50%; background: transparent; color: var(--text-white); font-size: 1.35rem; cursor: pointer; }
+.feedback-dialog form { display: grid; gap: 13px; margin-top: 18px; }
+.feedback-dialog label { display: grid; gap: 6px; color: var(--text-gray); font-size: .82rem; font-weight: 800; }
+.feedback-dialog input, .feedback-dialog textarea { width: 100%; box-sizing: border-box; border: 1px solid var(--border); border-radius: 11px; padding: 10px; background: var(--surface-bg); color: var(--text-white); font: inherit; resize: vertical; }
+.feedback-rating { display: flex; gap: 5px; margin: 0; padding: 0; border: 0; }
+.feedback-rating button { width: 42px; height: 42px; border: 0; background: transparent; color: var(--text-gray); font-size: 1.8rem; cursor: pointer; }
+.feedback-rating button.selected { color: var(--star); }
+.feedback-rating button:focus-visible, .feedback-dialog-close:focus-visible { outline: 3px solid color-mix(in srgb, var(--accent) 45%, transparent); outline-offset: 2px; }
+.feedback-status { min-height: 1.4em; margin: 0; color: var(--text-gray); font-size: .84rem; }
+.feedback-submit { min-height: 46px; border: 0; border-radius: 11px; background: var(--accent); color: var(--main-bg); font: inherit; font-weight: 900; cursor: pointer; }
+.feedback-submit:disabled { opacity: .52; cursor: not-allowed; }
+@media (max-width: 390px) { .feedback-dialog { padding: 20px 16px; border-radius: 16px; } }
 
 .published-loading {
   display: grid;

@@ -138,6 +138,22 @@ async function initializeAuth() {
 }
 
 function bindPreviewInteractions() {
+  const reviewCopy = document.querySelector('#review .moment-copy');
+  if (reviewCopy && !reviewCopy.querySelector('.quiz-mode-preview')) {
+    const modes = document.createElement('div');
+    modes.className = 'quiz-mode-preview';
+    modes.setAttribute('aria-label', '\u0623\u0646\u0645\u0627\u0637 \u0627\u0644\u062a\u0639\u0644\u0651\u0645 \u0627\u0644\u0645\u062a\u0627\u062d\u0629');
+    const title = document.createElement('strong');
+    title.textContent = '\u0631\u0627\u062c\u0639 \u0648\u0627\u062e\u062a\u0628\u0631 \u0646\u0641\u0633\u0643 \u0628\u0623\u0643\u062b\u0631 \u0645\u0646 \u0637\u0631\u064a\u0642\u0629:';
+    modes.append(title);
+    [['\u0627\u062e\u062a\u064a\u0627\u0631 \u0633\u0631\u064a\u0639'], ['\u0631\u062a\u0651\u0628 \u0627\u0644\u062d\u0631\u0648\u0641'], ['\u0645\u0637\u0627\u0628\u0642\u0629 \u0627\u0644\u0643\u0644\u0645\u0627\u062a'], ['\u0628\u0637\u0627\u0642\u0627\u062a \u0627\u0644\u0630\u0627\u0643\u0631\u0629', '\u0645\u0631\u0627\u062c\u0639\u0629']].forEach(([label, note]) => {
+      const chip = document.createElement('span');
+      chip.textContent = label;
+      if (note) { const marker = document.createElement('em'); marker.textContent = note; chip.append(' ', marker); }
+      modes.append(chip);
+    });
+    reviewCopy.querySelector('.moment-note')?.before(modes);
+  }
   const contextToggle = document.querySelector('[data-context-toggle]');
   const contextResult = document.getElementById('previewGamerMeaning');
   contextToggle?.addEventListener('click', () => {

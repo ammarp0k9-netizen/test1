@@ -963,19 +963,13 @@ window.refreshGuestSearchLocks = function() {
 function showGuestTrialBlocked() {
   pushNotification('عذراً يا بطل! ميزة البحث مخصصة للأساطير المسجلين فقط. سجل الآن مجاناً!', 'warning');
   if (window.__lootlinguaEntryGamerGuideActive) return;
-  const modal = document.getElementById('profileModal');
-  if (typeof window.toggleProfileModal === 'function' && modal && !modal.classList.contains('open')) {
-    window.toggleProfileModal();
-  }
+  window.openAppAuth?.('login');
 }
 
 function showSearchLockRegisterHint() {
   pushNotification('عذراً يا بطل! ميزة البحث مخصصة للأساطير المسجلين فقط. سجل الآن مجاناً!', 'warning');
   if (window.__lootlinguaEntryGamerGuideActive) return;
-  const modal = document.getElementById('profileModal');
-  if (typeof window.toggleProfileModal === 'function' && modal && !modal.classList.contains('open')) {
-    window.toggleProfileModal();
-  }
+  window.openAppAuth?.('login');
 }
 
 function guardGuestAiSearch(type) {

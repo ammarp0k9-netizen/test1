@@ -4092,9 +4092,11 @@ function bindPublishedLockedNode(node, message) {
   });
 }
 
-function makePublishedRankJourneyNode(world, rank, state, rankProgress, onClick) {
+function makePublishedRankJourneyNode(world, rank, state, rankProgress, activeJourney, onClick) {
   const presentation = publishedJourneyPresentation(state);
-  const node = publishedElement('button', `published-journey-node published-rank-node is-${state}`);
+  const current = String(activeJourney?.worldId || '') === String(world?.worldId || '') &&
+    String(activeJourney?.activeRankId || '') === String(rank?.rankId || '');
+  const node = publishedElement('button', `published-journey-node published-rank-node is-${state}${current ? ' is-current' : ''}`);
   node.type = 'button';
   node.dataset.journeyState = state;
   const marker = publishedElement('span', 'published-journey-node-marker');
@@ -4106,6 +4108,7 @@ function makePublishedRankJourneyNode(world, rank, state, rankProgress, onClick)
     publishedElement('small', `published-journey-status is-${state}`, presentation.label)
   );
   copy.append(heading);
+  if (current) copy.append(publishedElement('small', 'published-journey-current-marker', '\u0623\u0646\u062a \u0647\u0646\u0627'));
   const summaryParts = [];
   if (Number.isFinite(Number(rank.gateCount))) summaryParts.push(`${Number(rank.gateCount)} بوابة`);
   if (Number.isFinite(Number(rank.wordCount))) summaryParts.push(`${Number(rank.wordCount)} كلمة`);
@@ -4162,6 +4165,7 @@ function makePublishedGateJourneyNode(world, rank, gate, state, progress, active
     publishedElement('small', `published-journey-status is-${state}`, presentation.label)
   );
   copy.append(heading);
+  if (current) copy.append(publishedElement('small', 'published-journey-current-marker', '\u0623\u0646\u062a \u0647\u0646\u0627'));
   if (gate.description || gate.subtitle) {
     copy.append(publishedElement('span', 'published-journey-node-description', gate.description || gate.subtitle));
   }
@@ -5162,6 +5166,7 @@ function makePublishedLevelSection(world, cefrLevel, ranks, journey, activeJourn
       rank,
       rankState,
       rankProgress,
+      activeJourney,
       () => window.openPublishedRank(world.worldId, rank.rankId)
     ));
   });

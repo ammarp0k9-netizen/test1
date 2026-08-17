@@ -139,6 +139,8 @@
       if (root.openPublishedGate && args.worldId && args.rankId && args.gateId) {
         await root.openPublishedGate(args.worldId, args.rankId, args.gateId);
       } else root.loadWorldsView?.();
+    } else if (action === 'open-feedback') {
+      root.LootLinguaFeedback?.open?.(record.id);
     } else handled = false;
     requestEvaluation(`cta:${action}`, 500);
     return handled;
@@ -148,7 +150,9 @@
   root.dismissNotification = function(notificationId, event) {
     event?.preventDefault?.();
     event?.stopPropagation?.();
+    const record = store.find(notificationId);
     store.dismiss([notificationId], Date.now(), 'user-dismissed');
+    if (record?.notificationType === engine.TYPE.FEEDBACK_REQUEST) root.LootLinguaFeedback?.markDismissed?.();
   };
 
   const events = [
