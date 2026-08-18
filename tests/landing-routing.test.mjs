@@ -121,6 +121,7 @@ test('public metadata consistently uses the canonical production origin', () => 
 
 test('Vercel routes root to landing and app paths to the existing app document', () => {
   assert.equal(rewriteDestination('/'), '/landing.html');
+  assert.equal(rewriteDestination('/landing'), '/landing.html');
   assert.equal(rewriteDestination('/app'), '/index.html');
   assert.equal(rewriteDestination('/app/:path*'), '/index.html');
   assert.equal(rewriteDestination('/privacy'), '/privacy.html');

@@ -31,6 +31,8 @@ http.createServer((request, response) => {
   const appRoute = pathname === '/app' || pathname === '/app/' || pathname.startsWith('/app/');
   const relativePath = pathname === '/'
     ? 'landing.html'
+    : pathname === '/landing' || pathname === '/landing/'
+      ? 'landing.html'
     : appRoute
       ? 'index.html'
       : pathname === '/privacy' || pathname === '/privacy/'

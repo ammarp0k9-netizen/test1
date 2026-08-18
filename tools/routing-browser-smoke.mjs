@@ -124,7 +124,7 @@ try {
 
   const results = [];
   results.push(await navigate(`${origin}/`, 'root'));
-  results.push(await navigate(`${origin}/landing.html`, 'landing-file'));
+  results.push(await navigate(`${origin}/landing`, 'landing'));
   results.push(await navigate(`${origin}/app`, 'app'));
   results.push(await navigate(`${origin}/app/dictionary`, 'dictionary-direct-new-tab'));
   await send('Page.reload', { ignoreCache: true });

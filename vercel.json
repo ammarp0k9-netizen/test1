@@ -4,11 +4,36 @@
       "source": "/privacy.html",
       "destination": "/privacy",
       "permanent": true
+    },
+    {
+      "source": "/landing.html",
+      "destination": "/landing",
+      "permanent": true
+    },
+    {
+      "source": "/landing.html/",
+      "destination": "/landing",
+      "permanent": true
+    },
+    {
+      "source": "/landing/",
+      "destination": "/landing",
+      "permanent": true
+    }
+  ],
+  "routes": [
+    {
+      "src": "^/$",
+      "dest": "/landing.html"
     }
   ],
   "rewrites": [
     {
       "source": "/",
+      "destination": "/landing.html"
+    },
+    {
+      "source": "/landing",
       "destination": "/landing.html"
     },
     {
