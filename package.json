@@ -4,6 +4,7 @@
   "scripts": {
     "test:landing": "node --test tests/landing-routing.test.mjs tests/landing-auth.test.mjs tests/shared-auth-ui.test.mjs tests/logout-flow.test.mjs",
     "test:landing:browser": "node tools/landing-browser-smoke.mjs",
+    "test:routing:browser": "node tools/routing-browser-smoke.mjs",
     "test:entry:contract": "node --test tests/entry-experience-contract.test.mjs",
     "test:entry:integration": "node --test tests/entry-experience-controller-behavior.test.mjs tests/entry-experience-cloud-diagnostics.test.mjs tests/entry-experience-integration-static.test.mjs tests/entry-readiness-orchestration-static.test.mjs tests/guest-entry-migration-static.test.mjs tests/legacy-entry-removal-static.test.mjs",
     "test:entry:browser": "node tools/entry-experience-browser-smoke.mjs",
