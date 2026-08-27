@@ -1309,6 +1309,7 @@ const publishedContentState = {
   gate: null,
   ranks: [],
   gates: [],
+  gatesByRank: new Map(),
   journey: null,
   activeJourney: null,
   activeJourneyDestination: null,
@@ -1479,6 +1480,7 @@ function clearPublishedJourneyViewState(options) {
   publishedContentState.activeJourneyDestination = null;
   publishedContentState.gateProgress = null;
   publishedContentState.gateProgressById = new Map();
+  publishedContentState.gatesByRank = new Map();
   publishedContentState.gateMasteryView = null;
   publishedContentState.newGateWords = [];
   publishedContentState.journeyAction = null;
@@ -1909,7 +1911,7 @@ function publishedJourneyErrorText(error) {
   const code = String(error?.code || '');
   const operation = String(error?.operation || '');
   if (operation === 'start-new-ranks-placement') {
-    return 'تعذر بدء اختبار الرتب الجديدة. لم يتم تغيير تقدمك.';
+    return 'تعذر بدء اختبار المحتوى الجديد. لم يتم تغيير تقدمك.';
   }
   if ([
     'journey-reconciliation',
@@ -1944,7 +1946,7 @@ function publishedJourneyErrorText(error) {
   }
   const messages = {
     'journey/sign-in-required': 'سجّل دخولك أولًا لبدء الرحلة.',
-    'journey/rank-locked': 'لا توجد رتبة متاحة لبدء الرحلة.',
+    'journey/rank-locked': 'لا توجد بوابة متاحة لبدء الرحلة.',
     'journey/gate-locked': 'البوابة الأولى مقفلة من إعدادات المحتوى.',
     'journey/not-active': 'فعّل هذه الرحلة أولًا ثم أعد المحاولة.',
     'placement/choice-required': 'اختر اختبار تحديد المستوى أو ابدأ من البداية.',
@@ -2413,7 +2415,7 @@ function renderPublishedLevelPlacementAssessment(bundle) {
   identity.append(
     publishedElement('small', '', bundle.world.title || 'العالم'),
     publishedElement('strong', '', `اختبار مستوى ${session.cefrLevel}`),
-    publishedElement('span', '', 'اختبار مختصر موزع على رتب المستوى')
+    publishedElement('span', '', 'اختبار مختصر عبر بوابات المستوى')
   );
   const exit = publishedElement('button', 'published-placement-exit');
   exit.type = 'button';
@@ -2546,11 +2548,11 @@ async function submitPublishedLevelPlacementAnswer(bundle, question, selectedId)
 function appendPublishedLevelPlacementStats(section, session) {
   if (!publishedContentState.levelPlacementReviewOpen) return;
   const list = publishedElement('div', 'published-level-result-list');
-  (session.orderedRankIds || []).forEach((rankId) => {
+  (session.orderedRankIds || []).forEach((rankId, index) => {
     const stat = session.perRankStats?.[rankId] || {};
     const row = publishedElement('div', 'published-level-result-row');
     row.append(
-      publishedElement('strong', '', session.rankTitles?.[rankId] || rankId),
+      publishedElement('strong', '', `جزء ${index + 1} من المستوى`),
       publishedElement('span', '', `${Number(stat.correct) || 0} / ${Number(stat.asked) || 0}`),
       publishedElement('small', '', {
         passed: 'متجاوزة',
@@ -2570,7 +2572,7 @@ function renderPublishedLevelPlacementResult(bundle) {
   setPublishedPlacementMode(false);
   const session = bundle.session;
   const passedLevel = Boolean(session.passedLevel);
-  const rankName = session.rankTitles?.[session.recommendedStartRankId] || 'الرتبة المقترحة';
+  const recommendedGateId = String(session.recommendedStartGateId || '');
   const section = publishedElement(
     'section',
     `published-placement-result published-level-placement-result ${passedLevel ? 'is-passed' : 'is-learning'}`
@@ -2589,7 +2591,7 @@ function renderPublishedLevelPlacementResult(bundle) {
       '',
       passedLevel
         ? 'تم حفظ نتيجة المستوى وفتح المستوى التالي دون بدء اختبار جديد تلقائيًا.'
-        : `أساسياتك جيدة. أفضل نقطة تبدأ منها هي رتبة «${rankName}».`
+        : `أساسياتك جيدة. أفضل نقطة تبدأ منها هي البوابة ${recommendedGateId ? 'المقترحة' : 'الأولى المتاحة'}.`
     ),
     publishedElement(
       'span',
@@ -3138,7 +3140,7 @@ function renderPublishedPlacementResumePrompt(bundle) {
     publishedElement(
       'p',
       '',
-      `${bundle.rank.title || 'الرتبة'} · ${bundle.gate.title || 'البوابة'} · السؤال ${Number(bundle.session.currentQuestionIndex) + 1} من ${bundle.session.totalQuestions}`
+      `${bundle.rank.cefrLevel || 'المستوى'} · ${bundle.gate.title || 'البوابة'} · السؤال ${Number(bundle.session.currentQuestionIndex) + 1} من ${bundle.session.totalQuestions}`
     )
   );
   const actions = publishedElement('div', 'published-placement-resume-actions');
@@ -3189,7 +3191,7 @@ function renderPublishedPlacementAssessment(bundle) {
   const identity = publishedElement('div', 'published-placement-identity');
   identity.append(
     publishedElement('small', '', bundle.world.title || 'العالم'),
-    publishedElement('strong', '', bundle.rank.title || 'الرتبة'),
+    publishedElement('strong', '', bundle.rank.cefrLevel || 'المستوى'),
     publishedElement('span', '', bundle.gate.title || 'البوابة')
   );
   const exit = publishedElement('button', 'published-placement-exit');
@@ -3392,7 +3394,6 @@ function renderPublishedPlacementDecision(result) {
   setPublishedPlacementMode(false);
   const session = result.session || {};
   const nextGateName = result.nextGate?.title || 'البوابة التالية';
-  const nextRankName = result.nextRank?.title || '';
   const section = publishedElement('section', 'published-placement-result is-passed');
   section.append(
     publishedIcon('fa-solid fa-circle-check'),
@@ -3400,9 +3401,7 @@ function renderPublishedPlacementDecision(result) {
     publishedElement(
       'p',
       '',
-      nextRankName
-        ? `نقطة التحديد التالية: ${nextRankName} · ${nextGateName}`
-        : `نقطة التحديد التالية: ${nextGateName}`
+      `نقطة التحديد التالية: ${nextGateName}`
     ),
     publishedElement(
       'span',
@@ -3815,11 +3814,16 @@ async function loadEntryWorldStructure(worldId, options) {
     api.getPublishedWorld(worldId),
     api.listPublishedRanks(worldId, settings),
   ]);
-  const rank = ranks.find((item) => item?.comingSoon !== true && item?.isComingSoon !== true) || ranks[0] || null;
-  const gates = rank
-    ? await api.listPublishedGates(worldId, rank.rankId, settings)
-    : [];
-  return { world, ranks, rank, gates };
+  const gatesByRank = new Map(await Promise.all(ranks.map(async (rank) => [
+    String(rank.rankId || ''),
+    await api.listPublishedGates(worldId, rank.rankId, settings),
+  ])));
+  const gates = ranks.flatMap((rank) => (gatesByRank.get(String(rank.rankId || '')) || []).map((gate) => ({
+    ...gate,
+    rankId: String(rank.rankId || ''),
+    cefrLevel: rank.cefrLevel || 'unclassified',
+  })));
+  return { world, ranks, gates };
 }
 
 async function loadEntryRankPreview(worldId, rankId, options) {
@@ -3996,8 +4000,8 @@ function makePublishedHierarchyCard(kind, item, onClick, options) {
   }
   if (item.difficulty) appendMetaChip(meta, item.difficulty, 'fa-solid fa-signal');
   if (item.category) appendMetaChip(meta, item.category, 'fa-solid fa-tag');
-  if (kind === 'world' && Number.isFinite(Number(item.rankCount))) {
-    appendMetaChip(meta, `${Number(item.rankCount)} رتبة`, 'fa-solid fa-ranking-star');
+  if (kind === 'world' && Number.isFinite(Number(item.gateCount))) {
+    appendMetaChip(meta, `${Number(item.gateCount)} بوابة`, 'fa-solid fa-dungeon');
   }
   if (kind === 'rank' && Number.isFinite(Number(item.gateCount))) {
     appendMetaChip(meta, `${Number(item.gateCount)} بوابة`, 'fa-solid fa-dungeon');
@@ -4206,14 +4210,14 @@ function makePublishedGateSwitcher(world, rank, gates, ranks, journey, activeJou
   const section = publishedElement('section', 'published-gate-switcher');
   const heading = publishedElement('div', 'published-gate-switcher-heading');
   heading.append(
-    publishedElement('small', '', 'بوابات هذه الرتبة'),
+    publishedElement('small', '', `بوابات مستوى ${rank.cefrLevel || ''}`.trim()),
     publishedElement('strong', '', 'انتقل بينها من هنا')
   );
   const rail = publishedElement('div', 'published-gate-switcher-rail');
   rail.setAttribute('role', 'tablist');
-  rail.setAttribute('aria-label', 'بوابات الرتبة');
+  rail.setAttribute('aria-label', `بوابات مستوى ${rank.cefrLevel || ''}`.trim());
   const select = publishedElement('select', 'published-gate-switcher-select');
-  select.setAttribute('aria-label', 'اختر بوابة من هذه الرتبة');
+  select.setAttribute('aria-label', `اختر بوابة من مستوى ${rank.cefrLevel || ''}`.trim());
   gates.forEach((gate, index) => {
     const progress = progressByGate?.get(String(gate.gateId)) || null;
     const state = publishedGateJourneyState(gate, rank, gates, ranks, journey, progress);
@@ -4286,18 +4290,18 @@ function makePublishedJourneyPanel(world, ranks, journey, activeJourney) {
       'span',
       '',
       worldMastered
-        ? 'أكملت جميع الرتب الحالية، وأتقنت كلمات بواباتها.'
+        ? 'أكملت جميع البوابات الحالية، وأتقنت كلماتها.'
         : (worldProgress?.hasNewContent
-          ? 'إنجازك التاريخي محفوظ، وهناك رتب منشورة جديدة يمكنك متابعتها دون فقدان الشارة.'
+          ? 'إنجازك التاريخي محفوظ، وهناك محتوى منشور جديد يمكنك متابعته دون فقدان الشارة.'
           : (completedCurrentContent
-            ? 'أنهيت جميع الرتب المنشورة حاليًا. الكلمات أو البوابات غير المتقنة تبقى للمراجعة ولا تمنع الإكمال.'
+            ? 'أنهيت جميع البوابات المنشورة حاليًا. الكلمات غير المتقنة تبقى للمراجعة ولا تمنع الإكمال.'
         : existing
         ? (active
           ? 'تابع من البوابة النشطة دون فقدان تقدمك.'
           : 'يمكنك جعل هذا العالم رحلتك النشطة مع بقاء تقدم العالم الآخر محفوظًا.')
         : (!window.auth?.currentUser
           ? 'سجّل دخولك لبدء الرحلة وحفظ تقدم البوابات.'
-          : 'تبدأ من أول رتبة وبوابة متاحتين، ثم تختار متى تحمّل الكلمات.')))
+          : 'تبدأ من أول بوابة متاحة، ثم تختار متى تحمّل الكلمات.')))
     )
   );
   panel.append(copy);
@@ -4314,7 +4318,7 @@ function makePublishedJourneyPanel(world, ranks, journey, activeJourney) {
         '',
         worldProgress?.hasNewContent
           ? 'محتوى جديد متاح'
-          : `${worldProgress?.completedRankCount || 0} / ${worldProgress?.requiredRankCount || 0} رتب مكتملة`
+          : 'اكتمل محتوى العالم الحالي'
       )
     );
     panel.append(achievement);
@@ -4357,7 +4361,7 @@ function makePublishedJourneyPanel(world, ranks, journey, activeJourney) {
     panel.append(publishedElement(
       'small',
       'published-journey-message',
-      'لا توجد رتبة متاحة لبدء الرحلة حاليًا.'
+      'لا توجد بوابة متاحة لبدء الرحلة حاليًا.'
     ));
   } else if (publishedContentState.journeyAction?.error || journeyError) {
     panel.append(
@@ -4466,7 +4470,7 @@ function renderPublishedGateClearAssessment(world, rank, gate, bundle) {
   const identity = publishedElement('div', 'published-placement-identity');
   identity.append(
     publishedElement('small', '', world.title || 'العالم'),
-    publishedElement('strong', '', rank.title || 'الرتبة'),
+    publishedElement('strong', '', rank.cefrLevel || 'المستوى'),
     publishedElement('span', '', gate.title || 'البوابة')
   );
   const exit = publishedButton(
@@ -4578,7 +4582,7 @@ function renderPublishedGateClearResult(world, rank, gate, bundle) {
       'strong',
       '',
       worldCompleted ? `اكتمل عالم ${world.title || ''}` :
-        (rankCompleted ? `اكتملت رتبة ${rank.title || ''}` :
+        (rankCompleted ? `اكتملت بوابات مستوى ${rank.cefrLevel || ''}` :
         (passed ? 'تم اجتياز البوابة' : 'تحتاج إلى مراجعة إضافية'))
     ),
     publishedElement(
@@ -4586,9 +4590,9 @@ function renderPublishedGateClearResult(world, rank, gate, bundle) {
       '',
       passed
         ? (completedCurrentContent
-          ? 'أكملت جميع الرتب المنشورة حاليًا. يمكنك متابعة المراجعات والكلمات المتبقية دون أن يتغير إنجازك.'
+          ? 'أكملت جميع البوابات المنشورة حاليًا. يمكنك متابعة المراجعات والكلمات المتبقية دون أن يتغير إنجازك.'
           : (rankCompleted
-            ? 'حُفظ إنجاز الرتبة، وأصبحت خطوتك التالية متاحة. الكلمات المتبقية للمراجعة لا تعيق تقدمك.'
+            ? 'حُفظ إنجازك، وأصبحت خطوتك التالية متاحة. الكلمات المتبقية للمراجعة لا تعيق تقدمك.'
             : 'فُتحت الخطوة التالية في رحلتك، ولن تبدأ تلقائيًا.'))
         : 'بقيت البوابة جاهزة، ويمكنك إعادة المحاولة لاحقًا دون فقدان أدلتك.'
     ),
@@ -5056,7 +5060,7 @@ function renderPublishedWorlds(items, activeJourney, accountDestination) {
     const introCopy = publishedElement('span', 'published-hub-copy');
     introCopy.append(
       publishedElement('strong', '', 'اختر عالمك التالي'),
-      publishedElement('span', '', 'محتوى مرتب على رتب وبوابات، جاهز للتصفح كلمة بكلمة.')
+      publishedElement('span', '', 'محتوى منظّم حسب المستوى والبوابات، جاهز للتصفح كلمة بكلمة.')
     );
     intro.append(
       introIcon,
@@ -5102,14 +5106,14 @@ function makePublishedLevelSection(world, cefrLevel, ranks, journey, activeJourn
   summary.append(publishedElement(
     'span',
     '',
-    `${ranks.length} رتب · ${gateCount} بوابة${wordCount ? ` · ${wordCount} كلمة` : ''}`
+    `${gateCount} بوابة${wordCount ? ` · ${wordCount} كلمة` : ''}`
   ));
   if (cefrLevel !== 'unclassified') {
     const labels = {
       locked: 'اختبار المستوى مقفل',
       available: `اختبار مستوى ${cefrLevel}`,
       'in-progress': 'متابعة اختبار المستوى',
-      'new-content': 'اختبار الرتب الجديدة',
+      'new-content': 'اختبار المحتوى الجديد',
       passed: 'تم اجتياز المستوى',
       'partially-passed': 'متابعة من نقطة البداية',
     };
@@ -5151,24 +5155,30 @@ function makePublishedLevelSection(world, cefrLevel, ranks, journey, activeJourn
       summary.append(publishedElement(
         'small',
         'published-level-new-count',
-        `${newRankCount} ${newRankCount === 1 ? 'رتبة جديدة' : 'رتب جديدة'}`
+        newRankCount ? 'محتوى جديد متاح' : ''
       ));
     }
   }
   header.append(copy, summary);
   section.append(header);
-  const grid = publishedElement('div', 'published-journey-rail published-rank-rail');
+  const grid = publishedElement('div', 'published-journey-rail published-gate-rail');
   ranks.forEach((rank) => {
-    const rankProgress = publishedRankProgressView(rank, [], journey, new Map(), ranks);
-    const rankState = publishedRankJourneyState(rank, journey, activeJourney, rankProgress);
-    grid.append(makePublishedRankJourneyNode(
-      world,
-      rank,
-      rankState,
-      rankProgress,
-      activeJourney,
-      () => window.openPublishedRank(world.worldId, rank.rankId)
-    ));
+    const rankId = String(rank.rankId || '');
+    const gates = publishedContentState.gatesByRank.get(rankId) || [];
+    const progressByGate = publishedContentState.journeyGraph?.progressByRank?.get(rankId) || new Map();
+    gates.forEach((gate) => {
+      const progress = progressByGate.get(String(gate.gateId)) || null;
+      const gateState = publishedGateJourneyState(gate, rank, gates, ranks, journey, progress);
+      grid.append(makePublishedGateJourneyNode(
+        world,
+        rank,
+        gate,
+        gateState,
+        progress,
+        activeJourney,
+        () => window.openPublishedGate(world.worldId, rankId, gate.gateId)
+      ));
+    });
   });
   section.append(grid);
   return section;
@@ -5197,7 +5207,7 @@ function renderPublishedRanks(world, ranks, journey, activeJourney) {
   });
   section.append(makePublishedJourneyPanel(world, ranks, journey, activeJourney));
   if (!ranks.length) {
-    section.append(renderPublishedEmpty('لا توجد رتب منشورة في هذا العالم.', 'fa-solid fa-ranking-star'));
+    section.append(renderPublishedEmpty('لا توجد مستويات أو بوابات منشورة في هذا العالم.', 'fa-solid fa-dungeon'));
   } else {
     const groups = window.LootLinguaContentSchema.groupRanksByCefrLevel(ranks);
     window.LootLinguaContentSchema.CEFR_LEVELS.forEach((level) => {
@@ -5568,7 +5578,7 @@ function renderPublishedGateWords(world, rank, gate, snapshot) {
   const section = publishedElement('section', 'published-route-view');
   appendPublishedHeader(section, {
     journey: true,
-    contextLabel: `${world.title || 'العالم'} · ${rank.title || 'الرتبة'}`,
+    contextLabel: `${world.title || 'العالم'} · ${rank.cefrLevel || 'المستوى'}`,
     title: gate.title || 'البوابة',
     description: gate.description || gate.subtitle || '',
     backLabel: 'العودة للبوابات',
@@ -5580,10 +5590,6 @@ function renderPublishedGateWords(world, rank, gate, snapshot) {
         iconClass: 'fa-solid fa-earth-americas',
       },
       { label: world.title || 'العالم', onClick: () => window.openPublishedWorld(world.worldId) },
-      {
-        label: rank.title || 'الرتبة',
-        onClick: () => window.openPublishedRank(world.worldId, rank.rankId)
-      },
       { label: gate.title || 'البوابة' },
     ],
   });
@@ -5790,6 +5796,7 @@ async function loadPublishedWorlds(options) {
   publishedContentState.wordPageRequest = null;
   publishedContentState.ranks = [];
   publishedContentState.gates = [];
+  publishedContentState.gatesByRank = new Map();
   clearPublishedJourneyViewState();
   publishedContentState.loading = true;
   renderPublishedLoading('جارٍ تحميل العوالم الجاهزة...');
@@ -5864,10 +5871,10 @@ async function loadPublishedRouteData(route, options) {
   publishedContentState.gates = [];
   clearPublishedJourneyViewState({ preserveJourney });
   publishedContentState.loading = true;
-  const level = key === 'world' ? 'ranks' : key === 'rank' ? 'gates' : 'words';
+  const level = key === 'world' ? 'gates' : key === 'rank' ? 'gates' : 'words';
   renderPublishedLoading(
     key === 'world'
-      ? 'جارٍ تحميل الرتب...'
+      ? 'جارٍ تحميل المستويات والبوابات...'
       : key === 'rank'
         ? 'جارٍ تحميل البوابات...'
         : 'جارٍ تحميل كلمات البوابة...'
@@ -5888,10 +5895,16 @@ async function loadPublishedRouteData(route, options) {
         readPublishedJourneyContext(params.worldId, journeyOptions),
       ]);
       if (generation !== publishedContentState.generation) return;
+      const gatesByRank = new Map(await Promise.all(ranks.map(async (rank) => [
+        String(rank.rankId || ''),
+        await api.listPublishedGates(params.worldId, rank.rankId, options),
+      ])));
+      if (generation !== publishedContentState.generation) return;
       const levelPlacementOverviews = journeyContext.levelPlacementOverviews ||
         await readPublishedLevelPlacementOverviews(params.worldId, ranks, options);
       if (generation !== publishedContentState.generation) return;
       publishedContentState.ranks = ranks;
+      publishedContentState.gatesByRank = gatesByRank;
       publishedContentState.levelPlacementOverviews = levelPlacementOverviews;
       publishedContentState.journeyGraph = journeyContext.graph || null;
       publishedContentState.journey = journeyContext.journey;
@@ -6029,6 +6042,17 @@ async function loadPublishedRouteData(route, options) {
 }
 
 window.loadPublishedContentRoute = function(route) {
+  // Rank URLs are retained only as backwards-compatible deep links.  The
+  // product surface no longer exposes Rank as a navigation destination.
+  if (route?.key === 'rank') {
+    const legacyWorldId = String(route?.params?.worldId || '');
+    const replacement = { key: 'world', params: { worldId: legacyWorldId } };
+    setPublishedContentRoute(replacement.key, replacement.params, {
+      replace: true,
+      source: 'legacy-rank-route',
+    });
+    route = replacement;
+  }
   animatePublishedRouteChange(route?.key || 'not-found');
   prepareWorldsShell();
   setPublishedTabState('published');
@@ -6050,12 +6074,10 @@ window.openPublishedWorld = function(worldId) {
 };
 
 window.openPublishedRank = function(worldId, rankId) {
-  const route = {
-    key: 'rank',
-    params: { worldId: String(worldId || ''), rankId: String(rankId || '') },
-  };
-  setPublishedContentRoute(route.key, route.params);
-  window.loadPublishedContentRoute(route);
+  // Kept as an internal/legacy entry point for existing callers and links.
+  // A user always returns to the World → Level → Gates surface.
+  void rankId;
+  window.openPublishedWorld(worldId);
 };
 
 window.openPublishedGate = function(worldId, rankId, gateId) {
@@ -6112,7 +6134,7 @@ window.addEventListener('lootlingua:journey-advanced', (event) => {
   const message = detail.journeyCompleted
     ? 'أحسنت! أكملت آخر بوابة في هذا العالم.'
     : detail.rankUnlocked
-      ? `فُتحت رتبة ${detail.nextRankTitle || 'جديدة'} وأول بوابة فيها.`
+      ? 'فُتحت البوابة التالية في رحلتك.'
       : `فُتحت بوابة ${detail.nextGateTitle || 'جديدة'}.`;
   if (typeof pushNotification === 'function') pushNotification(message, 'success');
   showToast(message, 'success', 6500);

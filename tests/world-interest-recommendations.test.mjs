@@ -168,7 +168,7 @@ test('renders badges without sorting, filtering, or mutating progress', () => {
   assert.doesNotMatch(recommendationSection, /localStorage|setDoc|updateDoc|Journey|progress/i);
 });
 
-test('Entry preview reads real published Worlds, ranks, and gates without creating Journey progress', async () => {
+test('Entry preview groups real published Gates under their Level without creating Journey progress', async () => {
   const calls = [];
   context.window.LootLinguaPublishedContent = {
     async listPublishedWorlds() {
@@ -185,7 +185,7 @@ test('Entry preview reads real published Worlds, ranks, and gates without creati
     },
     async listPublishedRanks(worldId) {
       calls.push(`ranks:${worldId}`);
-      return [{ rankId: 'rank-a1', title: 'A1' }];
+      return [{ rankId: 'rank-a1', title: 'A1', cefrLevel: 'A1' }];
     },
     async listPublishedGates(worldId, rankId) {
       calls.push(`gates:${worldId}:${rankId}`);
@@ -208,8 +208,9 @@ test('Entry preview reads real published Worlds, ranks, and gates without creati
 
   const structure = JSON.parse(JSON.stringify(await preview.loadWorldStructure('games')));
   assert.equal(structure.world.worldId, 'games');
-  assert.equal(structure.rank.rankId, 'rank-a1');
   assert.equal(structure.gates[0].gateId, 'gate-a1');
+  assert.equal(structure.gates[0].cefrLevel, 'A1');
+  assert.equal(structure.gates[0].rankId, 'rank-a1', 'Rank stays internal to the Gate reference.');
 
   const saved = JSON.parse(JSON.stringify(await preview.loadJourneyContext({
     worldId: 'games', activeRankId: 'rank-a1', activeGateId: 'gate-a1',

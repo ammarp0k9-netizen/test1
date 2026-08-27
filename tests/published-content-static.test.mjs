@@ -80,6 +80,36 @@ test('published UI is separate from the existing custom-world panel', () => {
   assert.doesNotMatch(apiSource, /innerHTML|localStorage|ui\.words|adminPager|stagingPager/);
 });
 
+test('Worlds presents Gates directly under CEFR Levels while retaining rankId only internally', () => {
+  const levelSection = sourceSection(
+    worldsSource,
+    'function makePublishedLevelSection',
+    'function renderPublishedRanks'
+  );
+  const routeSection = sourceSection(
+    worldsSource,
+    'window.loadPublishedContentRoute = function(route)',
+    'window.openPublishedWorldsRoot'
+  );
+  assert.match(levelSection, /published-gate-rail/);
+  assert.match(levelSection, /publishedContentState\.gatesByRank/);
+  assert.match(levelSection, /makePublishedGateJourneyNode/);
+  assert.doesNotMatch(levelSection, /makePublishedRankJourneyNode/);
+  assert.match(routeSection, /legacy-rank-route/);
+  assert.match(routeSection, /key: 'world'/);
+});
+
+test('world cards expose Gate counts rather than the internal Rank count', () => {
+  const card = sourceSection(
+    worldsSource,
+    'function makePublishedHierarchyCard',
+    'const PUBLISHED_JOURNEY_PRESENTATION'
+  );
+  assert.match(card, /kind === 'world' && Number\.isFinite\(Number\(item\.gateCount\)\)/);
+  assert.match(card, /بوابة/);
+  assert.doesNotMatch(card, /item\.rankCount/);
+});
+
 test('router recognizes every published-content route with dynamic project base path', () => {
   assert.match(routerSource, /location\.hostname\.endsWith\('\.github\.io'\)/);
   assert.match(routerSource, /segments\[1\] === 'app' \? `\/\$\{segments\[0\]\}\/app`/);

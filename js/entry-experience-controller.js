@@ -871,8 +871,8 @@
             <span class="entry-world-copy">
               ${recommended ? '<small><i class="fa-solid fa-wand-magic-sparkles" aria-hidden="true"></i> مقترح حسب اهتماماتك</small>' : '<small>عالم منشور</small>'}
               <strong>${escapeHtml(world.title || world.name || 'عالم تعلّم')}</strong>
-              <span>${escapeHtml(world.description || world.subtitle || 'رحلة منظمة عبر رتب وبوابات.')}</span>
-              <em>${Number(world.rankCount) || 0} رتبة · ${Number(world.gateCount) || 0} بوابة</em>
+              <span>${escapeHtml(world.description || world.subtitle || 'مجموعة كلمات حول موضوع أو اهتمام.')}</span>
+              <em>${Number(world.gateCount) || 0} بوابة</em>
             </span>
             <i class="fa-solid fa-circle-check entry-world-check" aria-hidden="true"></i>
           </button>`;
@@ -898,7 +898,7 @@
     bindPanelActions();
   }
 
-  function structureNodes(state) {
+  function legacyStructureNodes(state) {
     const model = state.model;
     const ranks = Array.isArray(model?.ranks) ? model.ranks.slice(0, 5) : [];
     const selectedRankId = String(state.selectedRankId || ranks[0]?.rankId || 'example');
@@ -944,6 +944,48 @@
       <div class="entry-preview-stage-heading"><span>2</span><div><small>البوابة</small><strong>${state.selectedGateId ? 'هذه هي البوابة المحددة الآن' : 'اختر بوابة لتظهر معاينتها'}</strong></div></div>
       <div class="entry-route-gates" role="listbox" aria-label="بوابات الرتبة">${gateNodes}</div>
     </div>`;
+  }
+
+  function structureNodes(state) {
+    const gates = Array.isArray(state.gates) && state.gates.length
+      ? state.gates.slice(0, 12)
+      : [1, 2, 3].map((index) => ({
+        gateId: `example-${index}`,
+        title: `بوابة ${index}`,
+        wordCount: 0,
+        cefrLevel: 'A1',
+        example: true,
+      }));
+    const levels = new Map();
+    gates.forEach((gate) => {
+      const level = String(gate?.cefrLevel || 'unclassified');
+      if (!levels.has(level)) levels.set(level, []);
+      levels.get(level).push(gate);
+    });
+    const order = ['A1', 'A2', 'B1', 'B2', 'C1', 'C2', 'unclassified'];
+    const orderedLevels = [...levels.keys()].sort((left, right) => order.indexOf(left) - order.indexOf(right));
+    if (state.gatesStatus === 'loading') {
+      return '<div class="entry-route-inline-state"><i class="fa-solid fa-circle-notch fa-spin" aria-hidden="true"></i><span>نجهّز بوابات المستويات…</span></div>';
+    }
+    if (state.gatesStatus === 'error') {
+      return '<div class="entry-route-inline-state is-error"><i class="fa-solid fa-triangle-exclamation" aria-hidden="true"></i><span>تعذر فتح بوابات هذا العالم الآن.</span></div>';
+    }
+    return orderedLevels.map((level) => {
+      const gatesInLevel = levels.get(level) || [];
+      return `<div class="entry-preview-stage">
+        <div class="entry-preview-stage-heading"><span>${escapeHtml(level)}</span><div><small>المستوى</small><strong>بوابات مستوى ${escapeHtml(level)}</strong></div></div>
+        <div class="entry-route-gates" role="listbox" aria-label="بوابات مستوى ${escapeHtml(level)}">
+          ${gatesInLevel.map((gate, index) => {
+            const selected = String(gate.gateId || '') === String(state.selectedGateId || '');
+            return `<button type="button" role="option" aria-selected="${selected}" class="entry-route-node entry-route-gate${selected ? ' selected' : ''}" data-entry-route-node="gate:${escapeHtml(gate.gateId)}" data-entry-preview-gate="${escapeHtml(gate.gateId)}">
+              <span>${index + 1}</span><strong>${escapeHtml(gate.title || `بوابة ${index + 1}`)}</strong>
+              <small>${gate.example ? 'مثال على خطوة تعلّم' : `${Number(gate.wordCount) || 0} كلمة`}</small>
+              <i class="fa-solid fa-circle-check entry-route-selected-icon" aria-hidden="true"></i>
+            </button>`;
+          }).join('')}
+        </div>
+      </div>`;
+    }).join('<div class="entry-route-line" aria-hidden="true"></div>');
   }
 
   function gatePreviewMarkup(state) {
@@ -995,12 +1037,12 @@
       <header class="entry-header"><div><span class="entry-eyebrow">معاينة تعليمية — لا تغيّر تقدمك</span><span class="entry-step-label">${stepIndicator('journey')}</span></div></header>
       <div class="entry-copy entry-copy-compact">
         <h1 id="entryExperienceTitle">${escapeHtml(world?.title || 'من العالم إلى بوابة تتقنها')}</h1>
-        <p>كل عالم طريق من رتب وبوابات. اختر رتبة، ثم افتح بوابة لترى جزءًا من محتواها.</p>
+        <p>كل عالم منظّم حسب مستوى لغتك، ثم بوابات تتعلم منها الكلمات خطوة بخطوة.</p>
       </div>
       <section class="entry-route-preview${explored ? ' explored' : ''}" aria-label="كيف تسير رحلة التعلم">
         <div class="entry-route-world"><span>${worldPreviewVisual(world)}</span><div><small>العالم</small><strong>${escapeHtml(world?.title || 'عالم التعلّم')}</strong></div></div>
-        ${loading ? '<div class="entry-route-loading"><i class="fa-solid fa-circle-notch fa-spin" aria-hidden="true"></i> نجهّز الرتب والبوابات المنشورة…</div>' : structureNodes(structure)}
-        ${failed ? '<button type="button" class="entry-secondary entry-route-retry" data-entry-action="retry-structure"><i class="fa-solid fa-rotate-right" aria-hidden="true"></i> أعد تحميل الرتب والبوابات</button>' : ''}
+        ${loading ? '<div class="entry-route-loading"><i class="fa-solid fa-circle-notch fa-spin" aria-hidden="true"></i> نجهّز المستويات والبوابات المنشورة…</div>' : structureNodes(structure)}
+        ${failed ? '<button type="button" class="entry-secondary entry-route-retry" data-entry-action="retry-structure"><i class="fa-solid fa-rotate-right" aria-hidden="true"></i> أعد تحميل المستويات والبوابات</button>' : ''}
       </section>
       ${loading ? '' : gatePreviewMarkup(structure)}
       <section class="entry-learning-explainer" aria-label="كيف يعمل التعلم في LootLingua">
@@ -1053,15 +1095,15 @@
     const reviewed = runtime.state.journeyStatus === 'return-reviewed';
     if (['idle', 'waiting'].includes(runtime.returnPreview.status)) queueMicrotask(() => ensureReturnPreview(false));
     const worldTitle = model?.world?.title || 'رحلتك الحالية';
-    const rankTitle = model?.rank?.title || journey.activeRankId || 'الرتبة الحالية';
+    const levelTitle = model?.rank?.cefrLevel || 'المستوى الحالي';
     const gateTitle = model?.gate?.title || journey.activeGateId || 'البوابة الحالية';
     panel.innerHTML = `
       <header class="entry-header entry-action-header"><span class="entry-eyebrow">تقدّمك الحقيقي محفوظ</span><span class="entry-step-label">عودة سريعة</span></header>
-      <div class="entry-copy entry-copy-compact"><h1 id="entryExperienceTitle">أعدناك إلى موضعك، لا إلى بداية جديدة</h1><p>التعلّم هنا منظّم في عالم، ثم رتبة، ثم بوابة. هذه البطاقة تعرض رحلتك الفعلية ولا تغيّرها.</p></div>
+      <div class="entry-copy entry-copy-compact"><h1 id="entryExperienceTitle">أعدناك إلى موضعك، لا إلى بداية جديدة</h1><p>التعلّم هنا منظّم في عالم، ثم مستوى، ثم بوابة. هذه البطاقة تعرض رحلتك الفعلية ولا تغيّرها.</p></div>
       <section class="entry-saved-route${reviewed ? ' reviewed' : ''}">
         <span><i class="fa-solid fa-earth-americas" aria-hidden="true"></i><small>العالم</small><strong>${escapeHtml(worldTitle)}</strong></span>
         <i class="fa-solid fa-angle-left" aria-hidden="true"></i>
-        <span><i class="fa-solid fa-ranking-star" aria-hidden="true"></i><small>الرتبة</small><strong>${escapeHtml(rankTitle)}</strong></span>
+        <span><i class="fa-solid fa-signal" aria-hidden="true"></i><small>المستوى</small><strong>${escapeHtml(levelTitle)}</strong></span>
         <i class="fa-solid fa-angle-left" aria-hidden="true"></i>
         <span><i class="fa-solid fa-dungeon" aria-hidden="true"></i><small>البوابة</small><strong>${escapeHtml(gateTitle)}</strong></span>
       </section>
@@ -1096,7 +1138,7 @@
         <h1 id="entryExperienceTitle">${escapeHtml(action.label)}</h1>
         <p>${escapeHtml(action.hint)}</p>
         ${selectedWorld ? `<div class="entry-selected-world-summary"><span>${worldPreviewVisual(selectedWorld)}</span><div><small>العالم الذي اخترته</small><strong>${escapeHtml(selectedWorld.title || selectedWorld.name || 'عالم التعلّم')}</strong></div></div>` : ''}
-        <div class="entry-journey-recap"><span><i class="fa-solid fa-earth-americas"></i> عالم</span><i class="fa-solid fa-angle-left"></i><span><i class="fa-solid fa-ranking-star"></i> رتب</span><i class="fa-solid fa-angle-left"></i><span><i class="fa-solid fa-dungeon"></i> بوابات</span><i class="fa-solid fa-angle-left"></i><span><i class="fa-solid fa-rotate"></i> تعلم ومراجعة</span></div>
+        <div class="entry-journey-recap"><span><i class="fa-solid fa-earth-americas"></i> عالم</span><i class="fa-solid fa-angle-left"></i><span><i class="fa-solid fa-signal"></i> مستويات</span><i class="fa-solid fa-angle-left"></i><span><i class="fa-solid fa-dungeon"></i> بوابات</span><i class="fa-solid fa-angle-left"></i><span><i class="fa-solid fa-rotate"></i> تعلم ومراجعة</span></div>
         <div class="entry-action-destinations">
           ${runtime.presentation?.classification === 'returning-with-progress' ? '' : '<button type="button" class="entry-secondary" data-entry-action="back"><i class="fa-solid fa-arrow-right" aria-hidden="true"></i> رجوع</button>'}
           <button type="button" class="entry-primary entry-action-primary" data-entry-cta="${action.id}">${escapeHtml(action.label)} <i class="fa-solid fa-arrow-left" aria-hidden="true"></i></button>
@@ -1312,7 +1354,7 @@
         if (!provider?.loadGatePreview) throw new Error('Gate preview is unavailable.');
         preview = await provider.loadGatePreview(
           structure.worldId,
-          structure.selectedRankId,
+          String(selectedGate?.rankId || structure.selectedRankId || ''),
           gateId
         );
       }
