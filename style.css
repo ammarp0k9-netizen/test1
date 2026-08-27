@@ -12821,6 +12821,68 @@ html[data-theme="glass"] body.low-end-device :where(
   }
 }
 
+/* Guided First Journey: a temporary focus layer, not a new progression system. */
+body.guided-first-journey-active .guided-first-journey-deemphasized {
+  opacity: .58;
+  filter: saturate(.72);
+}
+
+body.guided-first-journey-active .guided-first-journey-deemphasized:hover,
+body.guided-first-journey-active .guided-first-journey-deemphasized:focus-visible {
+  opacity: .92;
+  filter: none;
+}
+
+body.guided-first-journey-active .guided-first-journey-locked {
+  opacity: .46;
+}
+
+body.guided-first-journey-active .guided-first-journey-locked::after {
+  content: 'لاحقاً';
+  display: inline-flex;
+  align-items: center;
+  margin-inline-start: 7px;
+  padding: 2px 6px;
+  border: 1px solid color-mix(in srgb, var(--accent) 38%, transparent);
+  border-radius: 999px;
+  color: var(--accent);
+  font-size: .68rem;
+  font-weight: 800;
+}
+
+.guided-first-journey-note {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: fit-content;
+  max-width: 100%;
+  margin: 0 0 12px;
+  padding: 9px 12px;
+  border: 1px solid color-mix(in srgb, var(--accent) 45%, var(--border));
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--accent) 12%, var(--card-bg));
+  color: var(--text-white);
+  font-size: .86rem;
+  font-weight: 750;
+}
+
+.guided-first-journey-target {
+  position: relative;
+  z-index: 1;
+  outline: 3px solid color-mix(in srgb, var(--accent) 72%, transparent);
+  outline-offset: 4px;
+  box-shadow: 0 0 0 8px color-mix(in srgb, var(--accent) 13%, transparent);
+  animation: guidedFirstJourneyPulse 1.9s ease-in-out infinite;
+}
+
+@keyframes guidedFirstJourneyPulse {
+  50% { box-shadow: 0 0 0 12px color-mix(in srgb, var(--accent) 4%, transparent); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .guided-first-journey-target { animation: none; }
+}
+
 /* Shared account surface. Authentication state and hydration remain owned by cloud.js. */
 .app-auth-dialog-shell[hidden] { display: none !important; }
 .app-auth-dialog [hidden] { display: none !important; }

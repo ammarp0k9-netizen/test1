@@ -852,6 +852,7 @@ function openUnlockExplainModal(featureId) {
 }
 
 function handleLockedFeatureClick(featureId, fn, options = {}) {
+  if (window.LootLinguaGuidedFirstJourney?.shouldAllowSurface?.(featureId) === false) return false;
   if (!isFeatureUnlocked(featureId)) {
     openUnlockExplainModal(featureId);
     return false;
@@ -1395,6 +1396,7 @@ function openRouteOverlay(kind, key) {
 }
 
 function openRouteView(viewKey) {
+  if (window.LootLinguaGuidedFirstJourney?.shouldAllowSurface?.(viewKey) === false) return;
   if (viewKey === 'treasure') loadTreasureView();
   else if (viewKey === 'worlds') loadWorldsView();
   else if (viewKey === 'minecraft') loadGameDictionary('minecraft');

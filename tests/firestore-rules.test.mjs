@@ -588,7 +588,7 @@ async function seed() {
 
 let passed = 0;
 let selected = 0;
-const testFilter = String(process.argv[2] || '');
+const testFilter = String(process.env.FIRESTORE_RULES_TEST_FILTER || process.argv[2] || '');
 async function test(name, callback) {
   if (testFilter && !name.includes(testFilter)) return;
   selected += 1;
@@ -614,6 +614,45 @@ try {
     admin: true,
     testClock: true
   }).firestore();
+
+  await test('Guided First Journey is owner-bound, monotonic, and separate from learning progress', async () => {
+    const uid = 'guided-owner';
+    const owner = environment.authenticatedContext(uid).firestore();
+    const other = environment.authenticatedContext('guided-other').firestore();
+    const path = `users/${uid}/guidedFirstJourneys/v1`;
+    const reference = doc(owner, path);
+    const draft = {
+      version: 1,
+      audience: 'new',
+      phase: 'awaiting-first-gate',
+      worldId: 'world-alpha',
+      gateId: '',
+      startedAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+      completedAt: null,
+    };
+    await assertSucceeds(setDoc(reference, draft));
+    await assertSucceeds(getDoc(reference));
+    await assertFails(getDoc(doc(other, path)));
+    await assertSucceeds(updateDoc(reference, {
+      phase: 'awaiting-quiz-cta',
+      gateId: 'gate-1',
+      updatedAt: serverTimestamp(),
+    }));
+    await assertSucceeds(updateDoc(reference, {
+      phase: 'completed',
+      completedAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    }));
+    await assertFails(updateDoc(reference, {
+      phase: 'awaiting-quiz-cta',
+      completedAt: null,
+      updatedAt: serverTimestamp(),
+    }));
+    await assertFails(setDoc(doc(other, path), draft));
+    await assertFails(setDoc(doc(owner, `users/${uid}/guidedFirstJourneys/v2`), draft));
+    await assertFails(deleteDoc(reference));
+  });
 
   await test('Entry Experience v1 is owner-bound, version-bound, and non-deletable', async () => {
     const uid = 'entry-owner';
@@ -6094,7 +6133,7 @@ try {
   });
 
   if (testFilter) assert.ok(selected > 0, `No Rules test matched "${testFilter}"`);
-  assert.equal(passed, testFilter ? selected : 83);
+  assert.equal(passed, testFilter ? selected : 84);
   console.log(`# ${passed} Firestore Rules emulator tests passed`);
 } finally {
   await environment.cleanup();

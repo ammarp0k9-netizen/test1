@@ -8,6 +8,7 @@
     "test:entry:contract": "node --test tests/entry-experience-contract.test.mjs",
     "test:entry:integration": "node --test tests/entry-experience-controller-behavior.test.mjs tests/entry-experience-cloud-diagnostics.test.mjs tests/entry-experience-integration-static.test.mjs tests/entry-readiness-orchestration-static.test.mjs tests/guest-entry-migration-static.test.mjs tests/legacy-entry-removal-static.test.mjs",
     "test:entry:browser": "node tools/entry-experience-browser-smoke.mjs",
+    "test:guided-first-journey": "node --test tests/guided-first-journey.test.mjs",
     "test:entry:legacy-removal": "node --test tests/legacy-entry-removal-static.test.mjs",
     "test:contracts": "node --test tests/admin-access-static.test.mjs tests/content-schema.test.mjs tests/content-schema-gate.test.mjs tests/protected-contracts.test.mjs tests/word-list-data.test.mjs",
     "test:admin": "node --test tests/admin-access-static.test.mjs tests/admin-claim-state.test.mjs tests/admin-cloud-api-static.test.mjs tests/admin-cloud-rank-behavior.test.mjs tests/admin-cloud-gate-static.test.mjs tests/admin-cloud-gate-behavior.test.mjs tests/admin-cloud-word-static.test.mjs tests/admin-route-static.test.mjs tests/admin-ui-static.test.mjs tests/admin-gate-ui-static.test.mjs tests/admin-word-ui-static.test.mjs tests/admin-word-pagination-static.test.mjs tests/admin-word-import.test.mjs tests/admin-word-import-ui-static.test.mjs tests/admin-staging-static.test.mjs",

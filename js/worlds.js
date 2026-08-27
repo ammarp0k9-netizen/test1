@@ -1133,6 +1133,7 @@ initTreasureSwipeNavigation();
 window.loadGameDictionary = function(gameKey) {
   window.saveActiveAddFormDraft?.();
   cleanupQuizSessionIfActive();
+  if (window.LootLinguaGuidedFirstJourney?.shouldAllowSurface?.(gameKey) === false) return;
   if (!isFeatureUnlocked(gameKey)) {
     openUnlockExplainModal(gameKey);
     refreshFeatureUnlockUI();
@@ -3042,6 +3043,14 @@ async function runPublishedGateLoad(syncOnly) {
     } else {
       publishedContentState.journeyAction = null;
       clearPublishedJourneyError();
+      if (!syncOnly) {
+        // The behavioural milestone is the completed first gate load, never a
+        // click or a partially-linked result.
+        void window.LootLinguaGuidedFirstJourney?.gateWordsLoaded?.({
+          worldId: world.worldId,
+          gateId: gate.gateId,
+        });
+      }
     }
     rerenderPublishedRoute();
     if (!result.advancement?.advanced) {
@@ -4103,6 +4112,7 @@ function makePublishedRankJourneyNode(world, rank, state, rankProgress, activeJo
   const node = publishedElement('button', `published-journey-node published-rank-node is-${state}${current ? ' is-current' : ''}`);
   node.type = 'button';
   node.dataset.journeyState = state;
+  node.dataset.gateId = String(gate.gateId || '');
   const marker = publishedElement('span', 'published-journey-node-marker');
   marker.append(publishedIcon(presentation.icon));
   const copy = publishedElement('span', 'published-journey-node-copy');
@@ -4910,7 +4920,13 @@ function makePublishedGateJourneyPanel(world, rank, gate) {
     actions.append(publishedButton(
       'متابعة التعلم',
       'published-action-btn published-journey-btn published-journey-cta',
-      () => window.loadQuizView(),
+      () => {
+        void window.LootLinguaGuidedFirstJourney?.completeFromQuizCta?.({
+          worldId: world.worldId,
+          gateId: gate.gateId,
+        });
+        window.loadQuizView();
+      },
       'fa-solid fa-gamepad'
     ));
     if (publishedContentState.newGateWords.length) {
@@ -5219,6 +5235,7 @@ function renderPublishedRanks(world, ranks, journey, activeJourney) {
   }
   content.append(section);
   root.replaceChildren(content);
+  window.LootLinguaGuidedFirstJourney?.applyRoute?.({ type: 'world', worldId: world.worldId, root });
 }
 
 function renderPublishedGates(
@@ -5668,6 +5685,7 @@ function renderPublishedGateWords(world, rank, gate, snapshot) {
   const pagination = makePublishedPagination(snapshot, pageMeta);
   if (pagination) section.append(pagination);
   root.replaceChildren(section);
+  window.LootLinguaGuidedFirstJourney?.applyRoute?.({ type: 'gate', worldId: world.worldId, gateId: gate.gateId, root });
 }
 
 function createPublishedWordPager(worldId, rankId, gateId) {
@@ -5832,6 +5850,7 @@ window.showPublishedWorldsTab = function() {
 };
 
 window.showCustomWorldsTab = function() {
+  if (window.LootLinguaGuidedFirstJourney?.shouldAllowSurface?.('custom-worlds') === false) return;
   ++publishedContentState.generation;
   publishedContentState.wordPager?.invalidate();
   publishedContentState.wordPager = null;
@@ -6194,6 +6213,7 @@ function setEmojiPickerValue(emoji) {
 }
 
 window.openCustomWorldModal = function(options = {}) {
+  if (window.LootLinguaGuidedFirstJourney?.shouldAllowSurface?.('custom-worlds') === false) return;
   pendingCustomWorldModalMode = options.mode || 'create';
   pendingCustomWorldEditId = options.worldId || null;
   pendingWorldManageCreateAction = options.afterCreateAction || null;
@@ -6852,6 +6872,7 @@ window.confirmDeleteCustomWorld = async function(action) {
 window.loadTreasureView = function() {
   window.saveActiveAddFormDraft?.();
   cleanupQuizSessionIfActive();
+  if (window.LootLinguaGuidedFirstJourney?.shouldAllowSurface?.('treasure') === false) return;
   if (!isFeatureUnlocked('treasure')) {
     openUnlockExplainModal('treasure');
     refreshFeatureUnlockUI();
@@ -6913,6 +6934,7 @@ window.loadTreasureView = function() {
 window.loadStarredView = function() {
   window.saveActiveAddFormDraft?.();
   cleanupQuizSessionIfActive();
+  if (window.LootLinguaGuidedFirstJourney?.shouldAllowSurface?.('starred') === false) return;
   if (!isFeatureUnlocked('starred')) {
     openUnlockExplainModal('starred');
     refreshFeatureUnlockUI();
@@ -7022,6 +7044,7 @@ function renderStarredWords() {
 // ── Quiz Full-Page View ──
 window.loadQuizView = function(options = {}) {
   window.saveActiveAddFormDraft?.();
+  if (window.LootLinguaGuidedFirstJourney?.shouldAllowSurface?.('quiz', options) === false) return;
   if (!isFeatureUnlocked('quiz')) {
     openUnlockExplainModal('quiz');
     refreshFeatureUnlockUI();

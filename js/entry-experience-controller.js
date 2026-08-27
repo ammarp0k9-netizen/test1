@@ -2013,7 +2013,17 @@
 
     setBusy(true, 'جارٍ فتح وجهتك…');
     try {
+      const startsGuidedFirstJourney = id === 'open-selected-world' &&
+        root.LootLinguaGuidedFirstJourneyContract?.shouldStartForPresentation(runtime.presentation);
       const destination = await openEntryDestination(id, expected);
+      if (startsGuidedFirstJourney && destination?.type === 'world') {
+        // Kept separate from Entry v2: this is temporary in-product guidance,
+        // not a new Product Entry state or learning/progression mutation.
+        await root.LootLinguaGuidedFirstJourney?.beginFromEntry({
+          presentation: runtime.presentation,
+          worldId: destination.worldId,
+        });
+      }
       const completed = api().transitionState(runtime.state, { type: 'complete' }, Date.now());
       await commitTerminalState(completed, 'جارٍ حفظ اكتمال التجربة…', { applyAppearance: true });
       close();

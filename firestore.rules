@@ -3779,6 +3779,57 @@ service cloud.firestore {
         allow delete: if false;
       }
 
+      match /guidedFirstJourneys/{versionId} {
+        allow read: if isOwner(uid);
+        allow create: if isOwner(uid) &&
+          versionId == 'v1' &&
+          request.resource.data.keys().hasOnly([
+            'version', 'audience', 'phase', 'worldId', 'gateId',
+            'startedAt', 'updatedAt', 'completedAt'
+          ]) &&
+          request.resource.data.keys().hasAll([
+            'version', 'audience', 'phase', 'worldId', 'gateId',
+            'startedAt', 'updatedAt', 'completedAt'
+          ]) &&
+          request.resource.data.version == 1 &&
+          request.resource.data.audience == 'new' &&
+          (request.resource.data.phase == 'awaiting-first-gate' ||
+            request.resource.data.phase == 'awaiting-quiz-cta' ||
+            request.resource.data.phase == 'completed') &&
+          nonEmptyString(request.resource.data.worldId, 128) &&
+          optionalString(request.resource.data, 'gateId', 128) &&
+          request.resource.data.startedAt is timestamp &&
+          request.resource.data.updatedAt == request.time &&
+          (
+            (request.resource.data.phase == 'completed' && request.resource.data.completedAt is timestamp) ||
+            (request.resource.data.phase != 'completed' && request.resource.data.completedAt == null)
+          );
+        allow update: if isOwner(uid) &&
+          resource.data.version == 1 &&
+          resource.data.audience == 'new' &&
+          resource.data.phase != 'completed' &&
+          request.resource.data.keys() == resource.data.keys() &&
+          request.resource.data.version == resource.data.version &&
+          request.resource.data.audience == resource.data.audience &&
+          request.resource.data.worldId == resource.data.worldId &&
+          request.resource.data.startedAt == resource.data.startedAt &&
+          request.resource.data.updatedAt == request.time &&
+          (
+            (resource.data.phase == 'awaiting-first-gate' &&
+              (request.resource.data.phase == 'awaiting-first-gate' ||
+                request.resource.data.phase == 'awaiting-quiz-cta') &&
+              request.resource.data.completedAt == null) ||
+            (resource.data.phase == 'awaiting-quiz-cta' &&
+              (request.resource.data.phase == 'awaiting-quiz-cta' ||
+                request.resource.data.phase == 'completed') &&
+              (
+                (request.resource.data.phase == 'completed' && request.resource.data.completedAt is timestamp) ||
+                (request.resource.data.phase == 'awaiting-quiz-cta' && request.resource.data.completedAt == null)
+              ))
+          );
+        allow delete: if false;
+      }
+
       match /entryExperiences/{versionId} {
         allow read: if isOwner(uid);
         allow create: if isOwner(uid) &&
