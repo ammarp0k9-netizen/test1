@@ -12834,7 +12834,17 @@ body.guided-first-journey-active .guided-first-journey-deemphasized:focus-visibl
 }
 
 body.guided-first-journey-active .guided-first-journey-locked {
-  opacity: .46;
+  opacity: .4;
+  filter: brightness(.76) saturate(.58);
+}
+
+/* The active route stays usable; only competing navigation recedes visually. */
+body.guided-first-journey-active :is(.sidebar, #legendDock, .bottom-nav, .mobile-nav) {
+  filter: brightness(.84) saturate(.72);
+}
+
+body.guided-first-journey-active :is(.sidebar, #legendDock, .bottom-nav, .mobile-nav) .guided-first-journey-target {
+  filter: none;
 }
 
 body.guided-first-journey-active .guided-first-journey-locked::after {
@@ -12871,8 +12881,36 @@ body.guided-first-journey-active .guided-first-journey-locked::after {
   z-index: 1;
   outline: 3px solid color-mix(in srgb, var(--accent) 72%, transparent);
   outline-offset: 4px;
-  box-shadow: 0 0 0 8px color-mix(in srgb, var(--accent) 13%, transparent);
+  box-shadow: 0 0 0 9px color-mix(in srgb, var(--accent) 17%, transparent), 0 12px 26px color-mix(in srgb, var(--accent) 16%, transparent);
   animation: guidedFirstJourneyPulse 1.9s ease-in-out infinite;
+}
+
+.guided-first-journey-coach {
+  z-index: 10330;
+  width: min(360px, calc(100vw - 24px));
+  padding: 12px 14px;
+  border: 2px solid color-mix(in srgb, var(--accent) 68%, var(--border));
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--card-bg) 92%, var(--accent));
+  box-shadow: 0 18px 42px color-mix(in srgb, #000 34%, transparent), 0 0 0 5px color-mix(in srgb, var(--accent) 11%, transparent);
+  color: var(--text-white);
+  direction: rtl;
+  text-align: start;
+}
+
+.guided-first-journey-coach strong {
+  display: block;
+  margin-bottom: 5px;
+  color: var(--accent);
+  font-size: .82rem;
+  font-weight: 900;
+}
+
+.guided-first-journey-coach p {
+  margin: 0;
+  color: var(--text-white);
+  font-size: .88rem;
+  line-height: 1.55;
 }
 
 @keyframes guidedFirstJourneyPulse {
@@ -12881,6 +12919,13 @@ body.guided-first-journey-active .guided-first-journey-locked::after {
 
 @media (prefers-reduced-motion: reduce) {
   .guided-first-journey-target { animation: none; }
+}
+
+@media (max-width: 420px) {
+  .guided-first-journey-coach {
+    width: min(340px, calc(100vw - 24px));
+    padding: 11px 12px;
+  }
 }
 
 /* Shared account surface. Authentication state and hydration remain owned by cloud.js. */

@@ -627,6 +627,7 @@ try {
       phase: 'awaiting-first-gate',
       worldId: 'world-alpha',
       gateId: '',
+      guestDictionaryAvailable: false,
       startedAt: serverTimestamp(),
       updatedAt: serverTimestamp(),
       completedAt: null,
@@ -635,8 +636,17 @@ try {
     await assertSucceeds(getDoc(reference));
     await assertFails(getDoc(doc(other, path)));
     await assertSucceeds(updateDoc(reference, {
-      phase: 'awaiting-quiz-cta',
+      phase: 'first-gate-opened',
       gateId: 'gate-1',
+      guestDictionaryAvailable: true,
+      updatedAt: serverTimestamp(),
+    }));
+    await assertSucceeds(updateDoc(reference, {
+      phase: 'awaiting-quiz-cta',
+      updatedAt: serverTimestamp(),
+    }));
+    await assertFails(updateDoc(reference, {
+      guestDictionaryAvailable: false,
       updatedAt: serverTimestamp(),
     }));
     await assertSucceeds(updateDoc(reference, {

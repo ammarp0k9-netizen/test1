@@ -30,6 +30,7 @@ function payload(state) {
     phase: normalized.phase,
     worldId: normalized.worldId,
     gateId: normalized.gateId,
+    guestDictionaryAvailable: normalized.guestDictionaryAvailable === true,
     startedAt: normalized.startedAt ? new Date(normalized.startedAt) : serverTimestamp(),
     updatedAt: serverTimestamp(),
     completedAt: normalized.completedAt ? new Date(normalized.completedAt) : null,

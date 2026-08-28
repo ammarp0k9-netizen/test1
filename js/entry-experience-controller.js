@@ -1787,6 +1787,17 @@
   function showJourneyAuthPrompt(intent) {
     closeJourneyAuthPrompt({ silent: true });
     runtime.authPromptFocus = document.activeElement;
+    const guidedState = root.LootLinguaGuidedFirstJourney?.getState?.();
+    const isGuidedGuestFallback = Boolean(
+      guidedState?.guestDictionaryAvailable &&
+      !root.auth?.currentUser
+    );
+    const title = isGuidedGuestFallback
+      ? 'سجّل دخولك لتتابع رحلتك'
+      : 'سجّل دخولك لبدء الرحلة';
+    const body = isGuidedGuestFallback
+      ? 'يمكنك المتابعة كضيف واستكشاف الموقع كاملاً، بما فيه إضافة الكلمات يدويًا من قاموسك الشخصي، أو تسجيل الدخول لحفظ تقدمك والعودة إلى العالم نفسه.'
+      : 'سنحفظ بيانات الضيف أولًا، ثم نعيدك إلى العالم نفسه ونكمل طلبك مرة واحدة.';
     const prompt = document.createElement('div');
     prompt.id = 'journeyAuthPrompt';
     prompt.className = 'journey-auth-prompt';
@@ -1794,8 +1805,8 @@
       <div class="journey-auth-backdrop" aria-hidden="true"></div>
       <section class="journey-auth-dialog" role="dialog" aria-modal="true" aria-labelledby="journeyAuthTitle" aria-describedby="journeyAuthBody">
         <span class="entry-eyebrow">خطوتك محفوظة</span>
-        <h2 id="journeyAuthTitle">سجّل دخولك لبدء الرحلة</h2>
-        <p id="journeyAuthBody">سنحفظ بيانات الضيف أولًا، ثم نعيدك إلى العالم نفسه ونكمل طلبك مرة واحدة.</p>
+        <h2 id="journeyAuthTitle">${title}</h2>
+        <p id="journeyAuthBody">${body}</p>
         <p class="journey-auth-status" id="journeyAuthStatus" role="status" aria-live="polite"></p>
         <div class="journey-auth-actions">
           <button type="button" class="entry-primary" data-journey-auth="login">اختيار طريقة تسجيل الدخول</button>
@@ -1839,6 +1850,7 @@
     }, now);
     if (!intent) return null;
     writeJson(api().pendingIntentStorageKey({}), intent);
+    root.dispatchEvent(new CustomEvent('lootlingua:journey-auth-requested', { detail: { intent } }));
     showJourneyAuthPrompt(intent);
     return intent;
   }

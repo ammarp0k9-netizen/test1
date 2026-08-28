@@ -32,9 +32,20 @@
     document.removeEventListener('pointerdown', current.onPointerDown, true);
     document.removeEventListener('keydown', current.onKeydown, true);
     current.onClose?.();
+    window.dispatchEvent(new CustomEvent('lootlingua:popover-closed', { detail: { id: current.id || '' } }));
     if (!options.silent && current.anchor?.isConnected) {
       requestAnimationFrame(() => current.anchor.focus?.({ preventScroll: true }));
     }
+  }
+
+  function closeIf(id, options = {}) {
+    if (!active || active.id !== id) return false;
+    close(options);
+    return true;
+  }
+
+  function getActiveId() {
+    return active?.id || '';
   }
 
   function open({ id, className, anchor, content, labelledBy, onClose }) {
@@ -56,7 +67,7 @@
     const onKeydown = (event) => {
       if (event.key === 'Escape') { event.preventDefault(); close(); }
     };
-    active = { element, anchor, reposition, onPointerDown, onKeydown, onClose };
+    active = { id: id || '', element, anchor, reposition, onPointerDown, onKeydown, onClose };
     anchor.setAttribute('aria-expanded', 'true');
     reposition();
     window.addEventListener('resize', reposition);
@@ -67,6 +78,6 @@
   }
 
   Object.defineProperty(root, 'LootLinguaPopover', {
-    value: Object.freeze({ open, close, position }), configurable: false, enumerable: true, writable: false,
+    value: Object.freeze({ open, close, closeIf, getActiveId, position }), configurable: false, enumerable: true, writable: false,
   });
 })(window);

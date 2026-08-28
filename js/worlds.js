@@ -5638,6 +5638,12 @@ function renderPublishedGateWords(world, rank, gate, snapshot) {
       'fa-solid fa-lock'
     ));
     root.replaceChildren(section);
+    window.LootLinguaGuidedFirstJourney?.applyRoute?.({
+      type: 'gate',
+      worldId: world.worldId,
+      gateId: gate.gateId,
+      root,
+    });
     return;
   }
 
@@ -6100,6 +6106,7 @@ window.openPublishedRank = function(worldId, rankId) {
 };
 
 window.openPublishedGate = function(worldId, rankId, gateId) {
+  void window.LootLinguaGuidedFirstJourney?.gateOpened?.({ worldId, gateId });
   const route = {
     key: 'gate',
     params: {
@@ -7094,7 +7101,8 @@ window.loadQuizView = function(options = {}) {
   setAppViewRoute('quiz');
 };
 
-window.loadPersonalDictionary = function() {
+window.loadPersonalDictionary = function(options = {}) {
+  if (window.LootLinguaGuidedFirstJourney?.shouldAllowSurface?.('personal', options) === false) return false;
   if (currentView === 'admin' && typeof window.canLeaveAdminView === 'function' &&
       window.canLeaveAdminView('personal') === false) return false;
   window.saveActiveAddFormDraft?.();
