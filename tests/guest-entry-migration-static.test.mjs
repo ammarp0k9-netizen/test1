@@ -183,7 +183,10 @@ test('accepted migration commits learning state before purging the guest namespa
   assert.ok(verifiedProfileCommitIndex > recoveryWriteIndex);
   assert.ok(verifiedProfileCommitIndex < completionIndex);
   assert.ok(purgeIndex > completionIndex);
-  assert.ok(acceptBlock.indexOf('await window.saveWordToCloud') < completionIndex);
+  assert.ok(acceptBlock.indexOf('await window.migrateGuestWordsToCloud') < completionIndex);
+  assert.match(acceptBlock, /setGuestMigrationBusy\(true, [\s\S]*?جارٍ نقل كلماتك بأمان/);
+  assert.match(cloudSource, /async function migrateGuestWordsToCloud[\s\S]*?batch\.create\(item\.canonicalRef[\s\S]*?batch\.create\(item\.legacyRef[\s\S]*?batch\.create\(item\.sourceRef/);
+  assert.match(cloudSource, /guest-migration\/firestore-write-denied/);
   assert.ok(acceptBlock.indexOf('await window.saveGlobalWordMasteryToCloud') < completionIndex);
   assert.ok(acceptBlock.indexOf('await window.saveActiveQuizSessionToCloud') < completionIndex);
   assert.match(acceptBlock, /const guestWorlds = dedupeCustomWorlds\(\[[\s\S]*?readCustomWorldsFromStorage\('guest'\)[\s\S]*?summary\.pendingCustomWorlds/);

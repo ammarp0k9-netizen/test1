@@ -779,6 +779,162 @@
     }
   }
 
+  function guestMigrationError(code, message, details = {}) {
+    const error = wordLifecycleError(code, message);
+    Object.assign(error, details);
+    return error;
+  }
+
+  // Guest words are normally new for the destination account. Creating the
+  // lifecycle trio in small batches avoids a transaction round-trip per word.
+  // Existing records still use the transactional lifecycle writer so their
+  // account data is merged rather than overwritten.
+  async function migrateGuestWordsToCloud(guestWords, options = {}) {
+    const user = auth.currentUser;
+    if (!user) {
+      throw guestMigrationError(
+        'guest-migration/sign-in-required',
+        'A signed-in user is required to migrate guest words.'
+      );
+    }
+    const lifecycle = wordLifecycleApi();
+    const importId = String(options.importId || 'guest-migration').trim() || 'guest-migration';
+    const operationId = String(options.operationId || 'guest-migration').trim() || 'guest-migration';
+    const onProgress = typeof options.onProgress === 'function' ? options.onProgress : null;
+    const unique = [];
+    const seen = new Set();
+
+    (Array.isArray(guestWords) ? guestWords : []).forEach((word, index) => {
+      const identity = lifecycle.normalizeIdentity(word);
+      if (!identity.wordKey || !identity.normalizedWord) {
+        throw guestMigrationError(
+          'guest-migration/invalid-word',
+          'A guest word has no valid identity.',
+          { wordIndex: index, word: word?.word || word?.text || '' }
+        );
+      }
+      if (seen.has(identity.wordKey)) return;
+      seen.add(identity.wordKey);
+      unique.push({ word, identity, index });
+    });
+
+    const ownerId = user.uid;
+    const results = [];
+    // Every item makes three writes and two existsAfter checks; six safely
+    // remains below the Rules document-access limit for one atomic request.
+    const batchSize = 6;
+    const trace = window.LootLinguaOperations?.startTrace('guest-word-migration', {
+      ownerId,
+      wordCount: unique.length,
+    });
+
+    try {
+      for (let offset = 0; offset < unique.length; offset += batchSize) {
+        if (auth.currentUser?.uid !== ownerId) {
+          throw guestMigrationError(
+            'guest-migration/identity-changed',
+            'The signed-in user changed during guest migration.'
+          );
+        }
+        const chunk = unique.slice(offset, offset + batchSize).map((item) => {
+          const source = sourceIdentity({ type: 'import', importId }, item.identity);
+          const canonicalRef = doc(db, 'users', ownerId, 'contentWords', item.identity.wordKey);
+          const legacyWordId = deterministicUserWordId(item.identity.wordKey);
+          return {
+            ...item,
+            source,
+            canonicalRef,
+            sourceRef: doc(canonicalRef, 'sources', source.sourceId),
+            legacyWordId,
+            legacyRef: doc(db, 'users', ownerId, 'words', legacyWordId),
+          };
+        });
+        const existence = await Promise.all(chunk.flatMap((item) => [
+          getDoc(item.canonicalRef),
+          getDoc(item.sourceRef),
+          getDoc(item.legacyRef),
+        ]));
+        trace?.count('firestoreReads', existence.length);
+        const fresh = [];
+        const existing = [];
+        chunk.forEach((item, index) => {
+          const base = index * 3;
+          const known = existence[base].exists() || existence[base + 1].exists() || existence[base + 2].exists();
+          (known ? existing : fresh).push(item);
+        });
+
+        if (fresh.length) {
+          const batch = writeBatch(db);
+          fresh.forEach((item) => {
+            // create() protects an account write racing this migration; a
+            // create conflict is handled through the merge path below.
+            batch.create(item.canonicalRef, canonicalWordPayload(
+              item.word,
+              item.identity,
+              item.legacyWordId,
+              item.source
+            ));
+            batch.create(item.legacyRef, legacyWordPayload(ownerId, item.word, item.identity, {
+              hiddenOnCreate: false,
+              personalDictionaryState: 'active',
+            }));
+            batch.create(item.sourceRef, sourceDocumentPayload(item.source, operationId));
+          });
+          try {
+            await batch.commit();
+            trace?.count('firestoreWrites', fresh.length * 3);
+            fresh.forEach((item) => results.push({
+              status: 'created',
+              created: true,
+              wordId: item.legacyWordId,
+              wordKey: item.identity.wordKey,
+              wordIndex: item.index,
+            }));
+          } catch (error) {
+            if (error?.code === 'permission-denied' || error?.code === 'unauthenticated') {
+              throw guestMigrationError(
+                'guest-migration/firestore-write-denied',
+                'Firestore rejected the guest-word migration batch.',
+                { cause: error, firestoreCode: error?.code || '' }
+              );
+            }
+            existing.push(...fresh);
+          }
+        }
+
+        for (const item of existing) {
+          try {
+            const result = await upsertUserWordWithSource({
+              word: item.word,
+              source: { type: 'import', importId },
+              restoreHidden: true,
+              personalDictionaryState: 'active',
+              operationId,
+            });
+            results.push({ ...result, wordIndex: item.index });
+          } catch (error) {
+            throw guestMigrationError(
+              'guest-migration/word-upsert-failed',
+              'Firestore could not merge a guest word into the account.',
+              {
+                cause: error,
+                firestoreCode: error?.code || '',
+                wordIndex: item.index,
+                word: item.word?.word || item.word?.text || '',
+              }
+            );
+          }
+        }
+        onProgress?.({ completed: results.length, total: unique.length });
+      }
+      trace?.stage('complete').end({ migrated: results.length });
+      return results;
+    } catch (error) {
+      trace?.warn(error?.code || error?.message || 'guest-word-migration-failed').end({ failed: true });
+      throw error;
+    }
+  }
+
   async function getUserWordSourceSummary(wordOrKey) {
     const user = auth.currentUser;
     if (!user) throw wordLifecycleError('word-lifecycle/sign-in-required', 'Sign in is required.');
@@ -1021,6 +1177,7 @@
 
   window.LootLinguaWordLifecycleCloud = Object.freeze({
     upsertUserWordWithSource,
+    migrateGuestWordsToCloud,
     getUserWordSourceSummary,
     setUserWordDictionaryVisibility,
     setPersonalDictionaryState,
@@ -1029,6 +1186,7 @@
     removePrivateWorldMembership,
   });
   window.upsertUserWordWithSource = upsertUserWordWithSource;
+  window.migrateGuestWordsToCloud = migrateGuestWordsToCloud;
   window.getUserWordSourceSummary = getUserWordSourceSummary;
   window.hideUserWordFromDictionary = (wordId) => setUserWordDictionaryVisibility(wordId, false);
   window.restoreUserWordToDictionary = (wordId) => setUserWordDictionaryVisibility(wordId, true);

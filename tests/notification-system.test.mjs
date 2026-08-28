@@ -3,7 +3,7 @@ import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 import vm from 'node:vm';
 
-const [policySource, coreSource, scriptSource, htmlSource, styleSource, worldsSource, dictionarySource] = await Promise.all([
+const [policySource, coreSource, scriptSource, htmlSource, styleSource, worldsSource, dictionarySource, notificationSources] = await Promise.all([
   readFile(new URL('../js/notification-policy.js', import.meta.url), 'utf8'),
   readFile(new URL('../js/core.js', import.meta.url), 'utf8'),
   readFile(new URL('../js/script.js', import.meta.url), 'utf8'),
@@ -11,11 +11,24 @@ const [policySource, coreSource, scriptSource, htmlSource, styleSource, worldsSo
   readFile(new URL('../style.css', import.meta.url), 'utf8'),
   readFile(new URL('../js/worlds.js', import.meta.url), 'utf8'),
   readFile(new URL('../js/dictionary.js', import.meta.url), 'utf8'),
+  readFile(new URL('../js/notification-sources.js', import.meta.url), 'utf8'),
 ]);
 
 const root = {};
 vm.runInContext(policySource, vm.createContext({ window: root, globalThis: root, Date, Math, Set, Object, String, Number }));
 const policy = root.LootLinguaNotificationPolicy;
+
+test('Journey facts calculate structural progress in the Journey scope', () => {
+  const chestStart = notificationSources.indexOf('function chestFacts(now)');
+  const journeyStart = notificationSources.indexOf('async function journeyFacts()');
+  const collectStart = notificationSources.indexOf('async function collect(options = {})');
+  assert.ok(chestStart >= 0 && journeyStart > chestStart && collectStart > journeyStart);
+  const chestBlock = notificationSources.slice(chestStart, journeyStart);
+  const journeyBlock = notificationSources.slice(journeyStart, collectStart);
+  assert.doesNotMatch(chestBlock, /structuralProgressAt/);
+  assert.match(journeyBlock, /const structuralProgressAt = Math\.max\([\s\S]*timestamp\(journey\?\.startedAt\)/);
+  assert.match(journeyBlock, /lastProgressAt: structuralProgressAt/);
+});
 
 test('a short transient message remains toast-only', () => {
   assert.equal(policy.shouldPersist('تم الحفظ', {}), false);

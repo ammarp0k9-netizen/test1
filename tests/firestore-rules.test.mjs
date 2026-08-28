@@ -4052,6 +4052,56 @@ try {
     assert.equal((await getDoc(doc(userA, lifecycleCanonicalPath))).data().sourceCount, 1);
   });
 
+  await test('an owner can atomically create an imported guest word and its source', async () => {
+    const wordKey = 'guest-import-word';
+    const canonicalPath = `users/user-a/contentWords/${wordKey}`;
+    const batch = writeBatch(userA);
+    batch.set(doc(userA, `users/user-a/words/published_${wordKey}`), {
+      text: 'guest import',
+      word: 'guest import',
+      normalizedWord: 'guest import',
+      wordKey,
+      meaning: 'نقل ضيف',
+      translation: 'نقل ضيف',
+      category: 'عام',
+      userId: 'user-a',
+      hiddenFromDictionary: false,
+      hiddenFromDictionaryAt: null,
+      personalDictionaryState: 'active',
+      createdAt: serverTimestamp(),
+    });
+    batch.set(doc(userA, canonicalPath), {
+      canonicalId: wordKey,
+      normalizationVersion: 1,
+      normalizedWord: 'guest import',
+      masteryKey: wordKey,
+      legacyWordId: `published_${wordKey}`,
+      word: 'guest import',
+      wordKey,
+      translation: 'نقل ضيف',
+      meaning: 'نقل ضيف',
+      category: 'عام',
+      forgetCount: 0,
+      primarySource: { sourceId: 'import_guest-migration', addedFrom: 'import', importId: 'guest-migration' },
+      sourceCount: 1,
+      eligibleEvidenceCount: 0,
+      lastEligibleEvidenceAt: null,
+      lastEvidenceEventId: '',
+      evidenceVersion: 1,
+      schemaVersion: 1,
+      createdAt: serverTimestamp(),
+      joinedAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    });
+    batch.set(doc(userA, `${canonicalPath}/sources/import_guest-migration`), {
+      addedFrom: 'import',
+      importId: 'guest-migration',
+      operationId: 'guest-migration',
+      linkedAt: serverTimestamp(),
+    });
+    await assertSucceeds(batch.commit());
+  });
+
   await test('a manual word can gain one published Journey source without a duplicate', async () => {
     await environment.withSecurityRulesDisabled(async (context) => {
       const db = context.firestore();

@@ -2003,6 +2003,21 @@ function resetGuestProgressState() {
   }
 }
 
+function setGuestMigrationBusy(busy, message = 'جارٍ نقل اللوت بأمان...') {
+  const modal = document.getElementById('guestMigrationModal');
+  const progress = document.getElementById('guestMigrationProgress');
+  const progressText = document.getElementById('guestMigrationProgressText');
+  const accept = document.getElementById('guestMigrationAcceptBtn');
+  const decline = document.getElementById('guestMigrationDeclineBtn');
+  if (modal) modal.setAttribute('aria-busy', String(Boolean(busy)));
+  if (progressText) progressText.textContent = message;
+  if (progress) progress.hidden = !busy;
+  [accept, decline].filter(Boolean).forEach((button) => {
+    button.disabled = Boolean(busy);
+    button.setAttribute('aria-disabled', String(Boolean(busy)));
+  });
+}
+
 function renderGuestMigrationModal(summary) {
   const wordCount = summary.words.length;
   const progressStats = getGuestProgressSummary(summary.profile);
@@ -2011,6 +2026,7 @@ function renderGuestMigrationModal(summary) {
   const confirm = document.getElementById('guestMigrationConfirm');
   const decline = document.getElementById('guestMigrationDeclineBtn');
   const accept = document.getElementById('guestMigrationAcceptBtn');
+  setGuestMigrationBusy(false);
   if (msg) {
     const progressText = progressStats.length ? ' ولقينا كمان XP وتقدم وألقاب مخزنة' : '';
     msg.textContent = `يا بطل! لقينا ${wordCount} كلمات مخبأة في جهازك${progressText}.. بدك تنقلهم لحسابك الأسطوري الجديد عشان ما يضيعوا؟`;
@@ -2077,14 +2093,13 @@ window.confirmGuestMigration = async function() {
   const summary = window.__guestMigrationSummary;
   const user = summary?.user || window.auth?.currentUser;
   if (!summary || !user) return;
+  if (window.__guestMigrationRunning) return;
+  window.__guestMigrationRunning = true;
+  let stage = 'preparing';
 
   const accept = document.getElementById('guestMigrationAcceptBtn');
   const decline = document.getElementById('guestMigrationDeclineBtn');
-  if (accept) {
-    accept.disabled = true;
-    accept.textContent = 'جاري نقل اللوت...';
-  }
-  if (decline) decline.disabled = true;
+  setGuestMigrationBusy(true, 'نجهّز اللوت للنقل الآمن...');
 
   try {
     if (window.auth?.currentUser?.uid !== user.uid) {
@@ -2100,23 +2115,26 @@ window.confirmGuestMigration = async function() {
       return true;
     });
 
-    let uploaded = 0;
-    for (const word of toMove) {
-      const realId = window.saveWordToCloud
-        ? await window.saveWordToCloud(
-          word.word || word.text,
-          word.category || 'عام',
-          word.meaning || '',
-          word.example || '',
-          word.order ?? 0,
-          {
-            ...word,
-            lifecycleSource: { type: 'import', importId: 'guest-migration' },
-            operationId: 'guest-migration',
-          }
-        )
-        : null;
-      if (!realId) throw new Error('cloud-upload-failed');
+    stage = 'words';
+    setGuestMigrationBusy(true, toMove.length
+      ? `جارٍ نقل كلماتك بأمان (0/${toMove.length})...`
+      : 'نتحقق من الكلمات الموجودة في حسابك...');
+    if (typeof window.migrateGuestWordsToCloud !== 'function') {
+      const unavailable = new Error('Guest word migration is unavailable.');
+      unavailable.code = 'guest-migration/unavailable';
+      throw unavailable;
+    }
+    const wordResults = await window.migrateGuestWordsToCloud(toMove, {
+      importId: 'guest-migration',
+      operationId: 'guest-migration',
+      onProgress: ({ completed, total }) => {
+        setGuestMigrationBusy(true, `جارٍ نقل كلماتك بأمان (${completed}/${total})...`);
+      },
+    });
+    const uploadedByIndex = new Map(wordResults.map((result) => [result.wordIndex, result.wordId]));
+    toMove.forEach((word, index) => {
+      const realId = uploadedByIndex.get(index);
+      if (!realId) return;
       window.words.unshift({
         ...word,
         id: realId,
@@ -2124,9 +2142,11 @@ window.confirmGuestMigration = async function() {
         category: word.category || 'عام',
         userId: user.uid,
       });
-      uploaded++;
-    }
+    });
+    const uploaded = wordResults.length;
 
+    stage = 'custom-worlds';
+    setGuestMigrationBusy(true, 'جارٍ نقل عوالمك وكلماتها...');
     const guestWorlds = dedupeCustomWorlds([
       ...readCustomWorldsFromStorage('guest'),
       ...(Array.isArray(summary.pendingCustomWorlds) ? summary.pendingCustomWorlds : []),
@@ -2161,6 +2181,8 @@ window.confirmGuestMigration = async function() {
       renderCustomWorldCards();
     }
 
+    stage = 'learning-state';
+    setGuestMigrationBusy(true, 'جارٍ حفظ تقدّم التعلّم...');
     const guestMastery = summary.wordMastery && typeof summary.wordMastery === 'object'
       ? summary.wordMastery
       : {};
@@ -2194,6 +2216,8 @@ window.confirmGuestMigration = async function() {
       }
     }
 
+    stage = 'profile';
+    setGuestMigrationBusy(true, 'جارٍ حفظ XP والتقدّم في حسابك...');
     writeWordsToStorage(window.words, 'normal', user.uid);
     const profileMigrationKey = window.LootLinguaEntryExperience?.profileMigrationStorageKey({ uid: user.uid }) ||
       `lootlingua:guest-profile-migration:v1:user:${user.uid}`;
@@ -2240,6 +2264,8 @@ window.confirmGuestMigration = async function() {
       profileError.code = window.__lootlinguaLastProfileSaveFailure?.code || 'profile/commit-failed';
       throw profileError;
     }
+    stage = 'notifications';
+    setGuestMigrationBusy(true, 'اللمسات الأخيرة على اللوت...');
     const notificationsMigrated = await window.LootLinguaNotificationStore?.migrateGuestToOwner?.(user.uid);
     if (notificationsMigrated === false) {
       const notificationError = new Error('guest-notification-migration-failed');
@@ -2253,7 +2279,15 @@ window.confirmGuestMigration = async function() {
     showToast(uploaded > 0 ? `تم نقل ${uploaded} كلمات لحسابك` : 'ما في كلمات جديدة للنقل، وتم حفظ تقدمك', 'success', 4200);
     window.__resolveGuestMigration?.('accepted');
   } catch (err) {
-    console.error('guestMigration:', err);
+    const diagnostic = {
+      stage,
+      code: String(err?.firestoreCode || err?.cause?.code || err?.code || 'guest-migration/failed'),
+      message: String(err?.cause?.message || err?.message || err || ''),
+      word: String(err?.word || ''),
+      wordIndex: Number.isInteger(err?.wordIndex) ? err.wordIndex : null,
+    };
+    window.__lastGuestMigrationFailure = diagnostic;
+    console.error('guestMigration failed:', diagnostic, err);
     localStorage.removeItem(GUEST_MIGRATION_COMPLETE_KEY);
     localStorage.removeItem(GUEST_MIGRATION_HANDLED_KEY);
     window.__guestMigrationSessionComplete = false;
@@ -2262,16 +2296,20 @@ window.confirmGuestMigration = async function() {
       guestSnapshotId: summary.guestSnapshotId,
       status: 'failed',
     };
+    setGuestMigrationBusy(false);
     if (accept) {
       accept.disabled = false;
       accept.textContent = 'نعم، انقل اللوت!';
     }
     if (decline) decline.disabled = false;
     showToast('ما قدرنا ننقل اللوت الآن. خليناه محفوظ على الجهاز.', 'danger', 4600);
+  } finally {
+    window.__guestMigrationRunning = false;
   }
 };
 
 window.declineGuestMigration = function() {
+  if (window.__guestMigrationRunning) return;
   const summary = window.__guestMigrationSummary;
   const user = window.auth?.currentUser;
   if (!user?.uid || summary?.user?.uid !== user.uid || !summary?.guestSnapshotId) return;

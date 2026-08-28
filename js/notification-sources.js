@@ -150,12 +150,6 @@
         : null;
       const state = availability?.state || (typeof root.getLootState === 'function' ? root.getLootState() : {});
       const lastOpenAt = timestamp(state?.lastOpenAt);
-      const structuralProgressAt = Math.max(
-        timestamp(progress?.loadedAt),
-        timestamp(progress?.clearedAt),
-        timestamp(progress?.unlockedAt),
-        timestamp(journey?.startedAt)
-      ) || timestamp(progress?.lastActivityAt || journey?.updatedAt);
       return {
         hasOpenedBefore: lastOpenAt > 0,
         lastOpenAt,
@@ -187,6 +181,12 @@
       try { trusted = await api.getGateNotificationFacts?.(worldId, rankId, gateId, { progress }); } catch (_) {}
       const readyAt = timestamp(progress?.readyAt);
       const unlockedAt = timestamp(progress?.unlockedAt);
+      const structuralProgressAt = Math.max(
+        timestamp(progress?.loadedAt),
+        timestamp(progress?.clearedAt),
+        timestamp(progress?.unlockedAt),
+        timestamp(journey?.startedAt)
+      ) || timestamp(progress?.lastActivityAt || journey?.updatedAt);
       return {
         journey: {
           actionable: ['available', 'learning', 'ready'].includes(String(progress?.status || '')),

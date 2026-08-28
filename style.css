@@ -4934,6 +4934,7 @@ body.test-clock-active .toast-host {
   min-height: 44px;
 }
 .guest-migration-content {
+  position: relative;
   max-width: 440px;
   border-color: color-mix(in srgb, var(--star) 42%, var(--border));
   background:
@@ -4983,6 +4984,30 @@ body.test-clock-active .toast-host {
 }
 .guest-migration-actions {
   flex-wrap: wrap;
+}
+.guest-migration-progress {
+  position: absolute;
+  z-index: 3;
+  inset: 0;
+  display: grid;
+  place-content: center;
+  justify-items: center;
+  gap: 12px;
+  padding: 28px;
+  border-radius: inherit;
+  background: color-mix(in srgb, var(--card-bg) 84%, rgba(3, 8, 18, 0.96));
+  color: var(--text-white);
+  text-align: center;
+  font-weight: 900;
+  backdrop-filter: blur(4px);
+}
+.guest-migration-progress[hidden] {
+  display: none;
+}
+.guest-migration-progress i {
+  color: var(--star);
+  font-size: 28px;
+  filter: drop-shadow(0 0 12px color-mix(in srgb, var(--star) 62%, transparent));
 }
 
 /* ── Feature unlocks (sidebar) ───────────────────────── */
