@@ -995,7 +995,7 @@
     if (!state.selectedGateId) {
       return `<section class="entry-gate-preview entry-gate-preview-empty" aria-live="polite">
         <i class="fa-regular fa-hand-pointer" aria-hidden="true"></i>
-        <div><small>معاينة البوابة</small><strong>لم تختر بوابة بعد</strong><span>اضغط على أي بوابة أعلاه لترى محتواها، ولن يتغير تقدمك.</span></div>
+        <div><small> معاينة البوابة</small><strong> لم تختر بوابة بعد</strong><span>اضغط على أي بوابة أعلاه لترى محتواها، ولن يتغير تقدمك.</span></div>
       </section>`;
     }
     const gate = state.gatePreview?.gate || selectedGate || {};

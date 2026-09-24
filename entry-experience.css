@@ -440,8 +440,6 @@ body.journey-auth-active {
   justify-items: center;
   gap: 9px;
   padding: clamp(24px, 5vw, 42px);
-  border: 1px dashed color-mix(in srgb, var(--accent) 42%, var(--border));
-  border-radius: 22px;
   background: var(--surface-bg);
   text-align: center;
 }
