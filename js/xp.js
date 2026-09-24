@@ -10,7 +10,11 @@ const XP_RANKS = [
   {min:400, max:599,      label:'Elite',    iconClass:'fa-solid fa-fire', color:'var(--star)'},
   {min:600, max:899,      label:'Master',   iconClass:'fa-solid fa-star', color:'var(--star)'},
   {min:900, max:1299,     label:'Legend',   iconClass:'fa-solid fa-crown', color:'var(--accent)'},
-  {min:1300,max:Infinity, label:'Linguaer', iconClass:'fa-solid fa-trophy', color:'var(--accent2)'},
+  {min:1300,max:2999, label:'Linguaer', iconClass:'fa-solid fa-brain', color:'var(--accent2)'},
+  {min:3000,max:5679, label:'Wordsmith', iconClass:'fa-solid fa-graduation-cap', color:'var(--star)'},
+  {min:5680,max:9769, label:'Linguist', iconClass:'fa-solid fa-pen-fancy', color:'var(--accent2)'},
+  {min:9770,max:Infinity, label:'Virtuoso', iconClass:'fa-solid fa-trophy', color:'var(--success)'},
+
 ];
 
 // userXP already declared in State section above — just reload from localStorage
