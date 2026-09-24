@@ -1,9 +1,9 @@
 // XP & GAMIFICATION
 // ═══════════════════════════════════════════════════════
 const XP_RANKS = [
-  {min:0,   max:14,       label:'Noob',     iconClass:'fa-solid fa-seedling', color:'var(--text-gray)'},
-  {min:15,  max:39,       label:'Wanderer', iconClass:'fa-solid fa-compass', color:'var(--header-grad)'},
-  {min:40,  max:79,       label:'Learner',  iconClass:'fa-solid fa-book-open', color:'var(--accent)'},
+  {min:0,   max:25,       label:'Noob',     iconClass:'fa-solid fa-seedling', color:'var(--text-gray)'},
+  {min:26,  max:49,       label:'Wanderer', iconClass:'fa-solid fa-compass', color:'var(--header-grad)'},
+  {min:50,  max:79,       label:'Learner',  iconClass:'fa-solid fa-book-open', color:'var(--accent)'},
   {min:80,  max:149,      label:'Explorer', iconClass:'fa-solid fa-binoculars', color:'var(--accent2)'},
   {min:150, max:249,      label:'Pro',      iconClass:'fa-solid fa-award', color:'var(--success)'},
   {min:250, max:399,      label:'Veteran',  iconClass:'fa-solid fa-shield-halved', color:'var(--success)'},

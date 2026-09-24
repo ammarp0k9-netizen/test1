@@ -908,7 +908,7 @@
         const selected = String(rank.rankId || '') === selectedRankId;
         return `<button type="button" role="tab" aria-selected="${selected}" class="entry-route-node entry-route-rank${selected ? ' selected' : ''}" data-entry-preview-rank="${escapeHtml(rank.rankId)}">
           <i class="fa-solid fa-ranking-star" aria-hidden="true"></i>
-          <span><small>${selected ? 'الرتبة المعروضة الآن' : `الرتبة ${index + 1}`}</small><strong>${escapeHtml(rank.title || `الرتبة ${index + 1}`)}</strong></span>
+          <span><small>${selected ? ' الرتبة المعروضة الآن' : `الرتبة ${index + 1}`}</small><strong>${escapeHtml(rank.title || `الرتبة ${index + 1}`)}</strong></span>
           <i class="fa-solid fa-circle-check entry-route-selected-icon" aria-hidden="true"></i>
         </button>`;
       }).join('')
@@ -941,7 +941,7 @@
     </div>
     <div class="entry-route-line" aria-hidden="true"></div>
     <div class="entry-preview-stage">
-      <div class="entry-preview-stage-heading"><span>2</span><div><small>البوابة</small><strong>${state.selectedGateId ? 'هذه هي البوابة المحددة الآن' : 'اختر بوابة لتظهر معاينتها'}</strong></div></div>
+      <div class="entry-preview-stage-heading"><span>2</span><div><small>البوابة</small><strong>${state.selectedGateId ? ' هذه هي البوابة المحددة الآن' : ' اختر بوابة لتظهر معاينتها'}</strong></div></div>
       <div class="entry-route-gates" role="listbox" aria-label="بوابات الرتبة">${gateNodes}</div>
     </div>`;
   }
