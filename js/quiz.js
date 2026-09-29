@@ -1221,6 +1221,28 @@ async function startActualQuiz(mode, options = {}) {
   return true;
 }
 
+// Used by the Journey surface only. The normal Quiz setup keeps its own source
+// selector; this entry point receives an already restricted Gate cohort.
+window.startGateQuiz = async function(mode, input = {}) {
+  const selectedMode = QUIZ_MODE_META[mode] ? mode : 'scramble';
+  const words = Array.isArray(input.words) ? input.words.filter(Boolean) : [];
+  if (!words.length) {
+    showToast('لا توجد كلمات محمّلة لهذه البوابة بعد.', 'warning', 4200);
+    return false;
+  }
+  clearActiveQuizSessionStorage();
+  window.__pendingQuizResumeSession = null;
+  window.loadQuizView({ skipResume: true });
+  const sourceParts = [input.worldId, input.rankId, input.gateId]
+    .map((value) => String(value || '').replace(/[^a-zA-Z0-9_-]/g, '_'))
+    .filter(Boolean);
+  return startActualQuiz(selectedMode, {
+    words,
+    source: `journey:${sourceParts.join('~')}`.slice(0, 500),
+    skipAvailabilityCheck: true,
+  });
+};
+
 function gateGapReviewWords(wordKeys) {
   const lifecycle = window.LootLinguaWordLifecycle;
   const wanted = new Set((Array.isArray(wordKeys) ? wordKeys : []).map(String).filter(Boolean));

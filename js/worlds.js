@@ -4258,6 +4258,15 @@ function publishedGateProgressPercent(state, progress) {
   return total ? Math.min(100, Math.round((ready / total) * 100)) : 0;
 }
 
+function animatePublishedGateProgress(fill, percent) {
+  if (!fill) return;
+  const next = Math.max(0, Math.min(100, Number(percent) || 0));
+  fill.style.width = '0%';
+  requestAnimationFrame(() => requestAnimationFrame(() => {
+    if (fill.isConnected) fill.style.width = `${next}%`;
+  }));
+}
+
 // Presentation only: translates existing journey state into one immediate
 // objective and one real outcome. It does not alter SRS, XP, Gate Clear, or
 // any journey data.
@@ -4284,7 +4293,7 @@ function publishedGateMissionBrief(gate, state, progress) {
     },
     learning: {
       label: 'المهمة الحالية',
-      objective: `أتقن ${wordsLabel}${readyWordCount ? ` — أنجزت ${readyWordCount}.` : '.'}`,
+      objective: `أكمل جولات التحقق لـ${wordsLabel}${readyWordCount ? ` — اكتمل ${readyWordCount}.` : '.'}`,
       outcome: 'تصل إلى تحدّي البوابة عند اكتمال الاستعداد.',
       icon: 'fa-solid fa-crosshairs',
     },
@@ -4325,6 +4334,80 @@ function makePublishedGateMissionBrief(gate, state, progress) {
   );
   block.append(icon, copy);
   return block;
+}
+
+const GATE_QUIZ_MODE_CARDS = [
+  { id: 'flashcards', icon: 'fa-solid fa-layer-group', title: 'بطاقات الذاكرة', copy: 'تدريب هادئ على كلمات البوابة فقط. لا يرفع عدّاد الجاهزية وحده.' },
+  { id: 'timeAttack', icon: 'fa-solid fa-stopwatch', title: 'الهروب من النسيان', copy: 'تحدٍّ سريع بكلمات هذه البوابة فقط.' },
+  { id: 'scramble', icon: 'fa-solid fa-shuffle', title: 'الصندوق المشفّر', copy: 'رتّب الحروف لتثبيت كلمات هذه البوابة.' },
+  { id: 'matching', icon: 'fa-solid fa-link', title: 'مطابقة الكلمات', copy: 'اربط كلمات البوابة بمعانيها.' },
+];
+
+async function openPublishedGateQuizPicker(world, rank, gate) {
+  const existing = document.getElementById('publishedGateQuizPicker');
+  if (existing) existing.remove();
+  const progress = publishedContentState.gateProgress;
+  let words = [];
+  try {
+    words = await getJourneyCloudApi().getGateQuizWords(
+      world.worldId,
+      rank.rankId,
+      gate.gateId,
+      { progress, force: true }
+    );
+  } catch (error) {
+    showToast(publishedJourneyErrorText(error), 'danger', 4800);
+    return;
+  }
+  if (!words.length) {
+    showToast('لا توجد كلمات محمّلة لهذه البوابة بعد.', 'warning', 4200);
+    return;
+  }
+  const shell = document.createElement('section');
+  shell.id = 'publishedGateQuizPicker';
+  shell.className = 'published-gate-quiz-picker';
+  shell.setAttribute('role', 'dialog');
+  shell.setAttribute('aria-modal', 'true');
+  shell.setAttribute('aria-label', `تدريب بوابة ${gate.title || ''}`);
+  const close = (returnToGate = true) => {
+    shell.remove();
+    if (returnToGate) window.openPublishedGate(world.worldId, rank.rankId, gate.gateId);
+  };
+  shell.innerHTML = `
+    <button type="button" class="published-gate-quiz-backdrop" aria-label="إغلاق"></button>
+    <div class="published-gate-quiz-card">
+      <button type="button" class="published-gate-quiz-close" aria-label="إغلاق"><i class="fa-solid fa-xmark" aria-hidden="true"></i></button>
+      <span class="published-gate-quiz-kicker"><i class="fa-solid fa-crosshairs" aria-hidden="true"></i> تدريب البوابة</span>
+      <h2>${escapeHtml(gate.title || 'البوابة الحالية')}</h2>
+      <p>اختر نوع التدريب. الأسئلة ستأتي من <strong>${words.length} كلمة محمّلة لهذه البوابة فقط</strong>، ولن تدخل أي كلمة من قاموسك أو بوابة أخرى.</p>
+      <div class="published-gate-quiz-modes"></div>
+      <small class="published-gate-quiz-note">لرفع شريط الجاهزية اختر أحد التحديات الثلاثة، وأجب بشكل صحيح. بطاقات الذاكرة للتدريب فقط.</small>
+    </div>`;
+  const choose = async (mode) => {
+    close(false);
+    const started = await window.startGateQuiz?.(mode, {
+      words,
+      worldId: world.worldId,
+      rankId: rank.rankId,
+      gateId: gate.gateId,
+    });
+    if (!started) window.openPublishedGate(world.worldId, rank.rankId, gate.gateId);
+  };
+  const modes = shell.querySelector('.published-gate-quiz-modes');
+  GATE_QUIZ_MODE_CARDS.forEach((mode) => {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = `published-gate-quiz-mode is-${mode.id}`;
+    button.innerHTML = `<i class="${mode.icon}" aria-hidden="true"></i><span><strong>${mode.title}</strong><small>${mode.copy}</small></span>`;
+    button.addEventListener('click', () => { void choose(mode.id); });
+    modes.append(button);
+  });
+  shell.querySelector('.published-gate-quiz-backdrop')?.addEventListener('click', close);
+  shell.querySelector('.published-gate-quiz-close')?.addEventListener('click', close);
+  shell.addEventListener('keydown', (event) => { if (event.key === 'Escape') close(); });
+  document.body.append(shell);
+  requestAnimationFrame(() => shell.classList.add('is-visible'));
+  shell.querySelector('.published-gate-quiz-mode')?.focus();
 }
 
 function makePublishedGateJourneyNode(world, rank, gate, state, progress, activeJourney, onClick) {
@@ -5035,40 +5118,44 @@ function makePublishedGateJourneyPanel(world, rank, gate) {
     );
     const readiness = publishedElement('div', 'published-gate-readiness');
     const heading = publishedElement('div', 'published-gate-readiness-heading');
-    heading.append(publishedElement('strong', '', 'الاستعداد لاجتياز البوابة'));
+    heading.append(publishedElement('strong', '', 'خطة فتح تحدّي البوابة'));
     const info = publishedElement('button', 'published-readiness-info-btn');
     info.type = 'button';
-    info.title = 'ما معنى الاستعداد؟';
-    info.setAttribute('aria-label', 'شرح الاستعداد لاجتياز البوابة');
+    info.title = 'كيف يتقدم التحدّي؟';
+    info.setAttribute('aria-label', 'شرح خطة فتح تحدّي البوابة');
     info.append(publishedIcon('fa-solid fa-question'));
     info.addEventListener('click', () => window.openGateReadinessInfo());
     heading.append(info);
     const track = publishedElement('span', 'published-gate-readiness-track');
     const fill = publishedElement('span', 'published-gate-readiness-fill');
-    fill.style.width = `${requiredWordCount ? Math.round((readyWordCount / requiredWordCount) * 100) : 0}%`;
+    const readinessPercent = requiredWordCount
+      ? Math.round((readyWordCount / requiredWordCount) * 100)
+      : 0;
+    animatePublishedGateProgress(fill, readinessPercent);
     track.append(fill);
     const counts = publishedElement('div', 'published-gate-readiness-counts');
     const availableToday = Math.max(0, Number(progress?.availableForReviewNowCount) || 0);
     const waitingToday = Math.max(0, Number(progress?.waitingLaterTodayCount) || 0);
     const waitingTomorrow = Math.max(0, Number(progress?.waitingNextDayCount) || 0);
-    appendMetaChip(counts, `اكتملت مراجعتها: ${readyWordCount}`, 'fa-solid fa-circle-check');
-    appendMetaChip(counts, `مراجعات اليوم: ${availableToday + waitingToday}`, 'fa-solid fa-calendar-day');
-    appendMetaChip(counts, `موعدها غدًا: ${waitingTomorrow}`, 'fa-regular fa-calendar');
+    appendMetaChip(counts, `مكتمل: ${readyWordCount} / ${requiredWordCount}`, 'fa-solid fa-circle-check');
+    appendMetaChip(counts, `تدرّب الآن: ${availableToday}`, 'fa-solid fa-play');
+    appendMetaChip(counts, `لاحقًا اليوم: ${waitingToday}`, 'fa-solid fa-clock');
+    appendMetaChip(counts, `تأكيد الغد: ${waitingTomorrow}`, 'fa-regular fa-calendar');
     const readinessCopy = publishedElement('p', 'published-gate-readiness-copy');
     if (state === 'ready') {
-      readinessCopy.textContent = 'أصبحت كل كلمات البوابة جاهزة لاختبار الاجتياز.';
+      readinessCopy.textContent = 'اكتملت الخطة: تحدّي البوابة جاهز الآن.';
     } else if (availableToday > 0) {
-      readinessCopy.textContent = `لديك ${availableToday} كلمات جاهزة للمراجعة اليوم.`;
+      readinessCopy.textContent = `الخطوة المفيدة الآن: تدرب على ${availableToday} كلمات من هذه البوابة.`;
     } else if (waitingToday > 0) {
-      readinessCopy.textContent = 'المراجعة التالية ستتاح لاحقًا اليوم.';
+      readinessCopy.textContent = 'لا يوجد تدريب يرفع التقدم الآن؛ الجولة التالية ستتاح لاحقًا اليوم.';
     } else if (waitingTomorrow > 0) {
-      readinessCopy.textContent = 'تُستكمل مراجعة التأكيد في اليوم التالي.';
+      readinessCopy.textContent = 'أنجزت جولات اليوم؛ ستحتاج جولة تأكيد غدًا لتتقدم.';
     } else {
       readinessCopy.textContent = `اكتملت مراجعة ${readyWordCount} من ${requiredWordCount} كلمات.`;
     }
     readiness.append(heading, track, counts, readinessCopy);
     panel.append(readiness);
-    if (state !== 'ready' && availableToday === 0 && waitingToday > 0) {
+    if (state !== 'ready' && availableToday === 0 && (waitingToday > 0 || waitingTomorrow > 0)) {
       schedulePublishedReadinessTimer(progress, readinessCopy);
     }
   }
@@ -5121,16 +5208,17 @@ function makePublishedGateJourneyPanel(world, rank, gate) {
     actions.append(load);
   } else if (state === 'learning') {
     actions.append(publishedButton(
-      'متابعة التعلم',
-      'published-action-btn published-journey-btn published-journey-cta',
+      'تدرّب على كلمات هذه البوابة — متابعة التعلم',
+      'published-action-btn published-journey-btn published-journey-cta published-gate-practice-cta',
       () => {
         void window.LootLinguaGuidedFirstJourney?.completeFromQuizCta?.({
           worldId: world.worldId,
           gateId: gate.gateId,
         });
         window.loadQuizView();
+        void openPublishedGateQuizPicker(world, rank, gate);
       },
-      'fa-solid fa-gamepad'
+      'fa-solid fa-crosshairs'
     ));
     if (publishedContentState.newGateWords.length) {
       const sync = publishedButton(
@@ -6358,16 +6446,15 @@ function scheduleCurrentGateMasteryRefresh() {
 window.addEventListener('lootlingua:gate-mastery-local-change', scheduleCurrentGateMasteryRefresh);
 window.addEventListener('lootlingua:word-mastery-snapshot', scheduleCurrentGateMasteryRefresh);
 
-window.addEventListener('lootlingua:journey-advanced', (event) => {
+window.addEventListener('lootlingua:journey-changed', (event) => {
   const detail = event.detail || {};
-  const message = detail.journeyCompleted
+  const message = detail.type === 'world-completed'
     ? 'أحسنت! أكملت آخر بوابة في هذا العالم.'
-    : detail.rankUnlocked
-      ? 'فُتحت البوابة التالية في رحلتك.'
-      : `فُتحت بوابة ${detail.nextGateTitle || 'جديدة'}.`;
+    : detail.nextGateId
+      ? 'نجحت! فُتحت البوابة التالية في رحلتك.'
+      : 'تم حفظ تقدّمك في الرحلة.';
   if (typeof pushNotification === 'function') pushNotification(message, 'success');
   showToast(message, 'success', 6500);
-  if (typeof launchConfetti === 'function') launchConfetti();
 });
 
 function normalizeCustomWorldPayload({ name, description, emoji, id } = {}) {

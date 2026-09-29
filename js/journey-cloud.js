@@ -2060,6 +2060,17 @@ async function getGateMasteryView(worldId, rankId, gateId, options) {
   };
 }
 
+// The Gate quiz is intentionally restricted to the immutable loaded cohort.
+// It is read-only and never falls back to the account-wide dictionary.
+async function getGateQuizWords(worldId, rankId, gateId, options) {
+  const progress = options?.progress || await getGateProgress(worldId, rankId, gateId, options);
+  if (!progress?.loadedAt || !['learning', 'ready', 'cleared'].includes(String(progress.status || ''))) {
+    return [];
+  }
+  const words = await listAllGateWords(worldId, rankId, gateId, options);
+  return core().effectiveLoadedGateWords(progress, words).map((word) => ({ ...word }));
+}
+
 // Read-only notification projection. Practice is derived from the canonical
 // trusted-evidence counter and the exact published source link.
 async function getGateNotificationFacts(worldId, rankId, gateId, options) {
@@ -4505,6 +4516,7 @@ const API = Object.freeze({
   updateGateProgress,
   findNewGateWords,
   getGateMasteryView,
+  getGateQuizWords,
   getGateNotificationFacts,
   subscribeGateProgress,
   recordQuizEvidenceBatch,

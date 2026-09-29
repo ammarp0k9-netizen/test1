@@ -88,6 +88,7 @@
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
   <link rel="stylesheet" href="style.css?v=20260811-2">
   <link rel="stylesheet" href="entry-experience.css?v=20260809-1">
+  <link rel="stylesheet" href="gradesquiz.css?v=20260811-2">
 </head>
 <body class="legend-dock-visible">
 
@@ -346,16 +347,22 @@
   <!-- ══ QUIZ FULL-PAGE VIEW (مخفي افتراضياً) ══ -->
   <div id="quizView" class="quiz-view" style="display:none;">
     <button type="button" class="quiz-exit-btn btn-icon-tip" data-tip="رجوع للقاموس" onclick="requestQuizExit('personal')"><i class="fas fa-arrow-right"></i></button>
+    <!-- ══تجربة اضافة درجات صعوبة الإختبارات ══ --> 
+
     <!-- Quiz Modes -->
     <div id="quizViewSetup" class="quiz-view-setup quiz-modes-view">
       <h3><i class="fa-solid fa-brain" aria-hidden="true"></i> اختر وضع الاختبار</h3>
       <p class="quiz-available-count" id="quizAvailableCount">الكلمات المتاحة: 0</p>
       <div class="quiz-modes-grid" aria-label="أوضاع الاختبار">
-        <button type="button" class="quiz-mode-card quiz-mode-flashcards" onclick="openQuizModeSettings('flashcards')">
+        <button type="button" class="quiz-mode-card quiz-mode-flashcards"  onclick="openQuizModeSettings('flashcards')">
+          <div id="easyDifficulty-card"> سهل </div>
           <span class="quiz-mode-icon"><i class="fa-solid fa-layer-group" aria-hidden="true"></i></span>
           <strong>بطاقات الذاكرة</strong>
           <span>اقلب البطاقة، اختبر ذاكرتك، وعلّم الكلمة إذا نسيتها.</span>
         </button>
+
+        <div id="mediumDifficulty-card"> متوسط </div>
+        <div id="hardDifficulty-card"> صعب </div>
         <button type="button" class="quiz-mode-card quiz-mode-time" onclick="openQuizModeSettings('timeAttack')">
           <span class="quiz-mode-icon"><i class="fa-solid fa-stopwatch" aria-hidden="true"></i></span>
           <strong>الهروب من النسيان</strong>
@@ -1018,9 +1025,9 @@
   <div class="modal-content" onclick="event.stopPropagation()">
     <button type="button" class="modal-close-btn" onclick="hideModal('gateReadinessInfoModal')" aria-label="إغلاق"><i class="fa-solid fa-xmark" aria-hidden="true"></i></button>
     <div class="modal-icon"><i class="fa-solid fa-route" aria-hidden="true"></i></div>
-    <h2 id="gateReadinessInfoTitle">ما معنى الاستعداد؟</h2>
-    <p>الاستعداد لاجتياز البوابة يقيس مراجعات قصيرة وموثوقة لكلمات البوابة خلال يومين، حتى يظهر اختبار الاجتياز في الوقت المناسب.</p>
-    <p>ألوان الكلمات تساعدك على متابعة مواعيد المراجعة، أما الإتقان فيأتي بعد ترسيخ الكلمات. لذلك يكفيك شريط الاستعداد على مستوى البوابة.</p>
+    <h2 id="gateReadinessInfoTitle">كيف تفتح تحدّي البوابة؟</h2>
+    <p>هذا الشريط لا يقيس XP ولا الإتقان النهائي. كل كلمة تحتاج إجابة صحيحة الآن، ثم جولة أخرى بعد ساعتين على الأقل، ثم جولة تأكيد في يوم لاحق.</p>
+    <p>اختر «تدرّب على كلمات هذه البوابة» كي تكون أسئلة الاختبار من البوابة نفسها. عند اكتمال كل الكلمات، يظهر تحدّي البوابة الذي يفتح الطريق التالي.</p>
     <div class="modal-buttons">
       <button type="button" class="btn-confirm" onclick="hideModal('gateReadinessInfoModal')">فهمت</button>
     </div>
