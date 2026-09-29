@@ -9485,6 +9485,26 @@ html[dir="ltr"] .worlds-tabs[data-active-tab="custom"]::before {
   white-space: nowrap;
 }
 
+.published-journey-node-mission {
+  width: fit-content;
+  padding: 2px 7px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  color: var(--accent);
+  font-size: 9px;
+  font-weight: 900;
+}
+
+.published-journey-node.is-ready .published-journey-node-mission {
+  background: color-mix(in srgb, var(--star) 15%, transparent);
+  color: var(--star);
+}
+
+.published-journey-node.is-cleared .published-journey-node-mission {
+  background: color-mix(in srgb, var(--success) 14%, transparent);
+  color: var(--success);
+}
+
 .published-journey-new-content {
   width: fit-content;
   color: var(--accent);
@@ -9711,11 +9731,83 @@ html[dir="ltr"] .worlds-tabs[data-active-tab="custom"]::before {
 }
 
 .published-gate-state-card .published-gate-readiness,
+.published-gate-state-card .published-gate-mission,
 .published-gate-state-card .published-journey-actions,
 .published-gate-state-card .published-journey-message,
 .published-gate-state-card .published-journey-progress,
 .published-gate-state-card .published-journey-retry-btn {
   grid-column: 2 / -1;
+}
+
+.published-gate-mission {
+  display: grid;
+  grid-template-columns: 36px minmax(0, 1fr);
+  gap: 10px;
+  align-items: start;
+  padding: 11px 12px;
+  border: 1px solid color-mix(in srgb, var(--accent) 30%, var(--border));
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--accent) 7%, var(--surface-bg));
+}
+
+.published-gate-mission-icon {
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 11px;
+  background: color-mix(in srgb, var(--accent) 16%, var(--card-bg));
+  color: var(--accent);
+}
+
+.published-gate-mission-copy {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.published-gate-mission-copy small {
+  color: var(--accent);
+  font-size: 9px;
+  font-weight: 900;
+}
+
+.published-gate-mission-copy strong {
+  color: var(--text-white);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.published-gate-mission-outcome {
+  color: var(--text-gray);
+  font-size: 10px;
+  line-height: 1.45;
+}
+
+.published-gate-mission.is-ready {
+  border-color: color-mix(in srgb, var(--star) 56%, var(--border));
+  background: color-mix(in srgb, var(--star) 8%, var(--surface-bg));
+}
+
+.published-gate-mission.is-ready .published-gate-mission-icon,
+.published-gate-mission.is-ready .published-gate-mission-copy small {
+  color: var(--star);
+}
+
+.published-gate-mission.is-cleared,
+.published-gate-mission.is-mastered {
+  border-color: color-mix(in srgb, var(--success) 44%, var(--border));
+  background: color-mix(in srgb, var(--success) 7%, var(--surface-bg));
+}
+
+.published-gate-mission.is-cleared .published-gate-mission-icon,
+.published-gate-mission.is-cleared .published-gate-mission-copy small {
+  color: var(--success);
+}
+
+.published-gate-mission.is-mastered .published-gate-mission-icon,
+.published-gate-mission.is-mastered .published-gate-mission-copy small {
+  color: var(--star);
 }
 
 .published-gate-journey-available .published-gate-state-icon { border-color: var(--accent); color: var(--accent); }
@@ -9755,6 +9847,7 @@ html[dir="ltr"] .worlds-tabs[data-active-tab="custom"]::before {
   .published-gate-state-card { grid-template-columns: 42px minmax(0, 1fr); padding: 13px; }
   .published-gate-state-icon { width: 40px; height: 40px; border-radius: 12px; }
   .published-gate-state-card .published-gate-readiness,
+  .published-gate-state-card .published-gate-mission,
   .published-gate-state-card .published-journey-actions,
   .published-gate-state-card .published-journey-message,
   .published-gate-state-card .published-journey-progress,

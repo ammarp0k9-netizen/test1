@@ -4160,6 +4160,75 @@ function publishedGateProgressPercent(state, progress) {
   return total ? Math.min(100, Math.round((ready / total) * 100)) : 0;
 }
 
+// Presentation only: translates existing journey state into one immediate
+// objective and one real outcome. It does not alter SRS, XP, Gate Clear, or
+// any journey data.
+function publishedGateMissionBrief(gate, state, progress) {
+  const wordCount = Math.max(0, Number(gate?.wordCount) || 0);
+  const readyWordCount = Math.max(0, Number(progress?.readyWordCount) || 0);
+  const requiredWordCount = Math.max(
+    readyWordCount,
+    Number(progress?.requiredWordCount) || Number(progress?.wordCountAtLoad) || wordCount
+  );
+  const wordsLabel = requiredWordCount ? `${requiredWordCount} كلمة` : 'كلمات البوابة';
+  const missionByState = {
+    locked: {
+      label: 'المهمة التالية',
+      objective: 'أكمل البوابة السابقة حتى يصبح هذا الطريق متاحًا.',
+      outcome: 'يفتح مسار جديد في رحلتك.',
+      icon: 'fa-solid fa-lock',
+    },
+    available: {
+      label: 'مهمة جديدة',
+      objective: `أضف ${wordCount || ''} ${wordCount ? 'كلمة من البوابة إلى قاموسك.' : 'كلمات البوابة إلى قاموسك.'}`.trim(),
+      outcome: 'تبدأ مرحلة التعلّم والمراجعات.',
+      icon: 'fa-solid fa-scroll',
+    },
+    learning: {
+      label: 'المهمة الحالية',
+      objective: `أتقن ${wordsLabel}${readyWordCount ? ` — أنجزت ${readyWordCount}.` : '.'}`,
+      outcome: 'تصل إلى تحدّي البوابة عند اكتمال الاستعداد.',
+      icon: 'fa-solid fa-crosshairs',
+    },
+    ready: {
+      label: 'تحدّي البوابة',
+      objective: progress?.activeClearAttemptId
+        ? 'أكمل التحدّي الذي بدأته.'
+        : `اختبر إتقانك لـ${wordsLabel}.`,
+      outcome: 'النجاح يفتح الطريق التالي في الرحلة.',
+      icon: 'fa-solid fa-flag-checkered',
+    },
+    cleared: {
+      label: 'مهمة مكتملة',
+      objective: 'أنجزت تحدّي هذه البوابة.',
+      outcome: 'الطريق التالي أصبح متاحًا لك.',
+      icon: 'fa-solid fa-unlock-keyhole',
+    },
+    mastered: {
+      label: 'إتقان مُكتسب',
+      objective: 'حافظ على إتقان كلمات البوابة في مراجعاتك.',
+      outcome: 'شارة الإتقان محفوظة لك.',
+      icon: 'fa-solid fa-crown',
+    },
+  };
+  return missionByState[state] || missionByState.available;
+}
+
+function makePublishedGateMissionBrief(gate, state, progress) {
+  const mission = publishedGateMissionBrief(gate, state, progress);
+  const block = publishedElement('aside', `published-gate-mission is-${state}`);
+  const icon = publishedElement('span', 'published-gate-mission-icon');
+  icon.append(publishedIcon(mission.icon));
+  const copy = publishedElement('span', 'published-gate-mission-copy');
+  copy.append(
+    publishedElement('small', '', mission.label),
+    publishedElement('strong', '', mission.objective),
+    publishedElement('span', 'published-gate-mission-outcome', mission.outcome)
+  );
+  block.append(icon, copy);
+  return block;
+}
+
 function makePublishedGateJourneyNode(world, rank, gate, state, progress, activeJourney, onClick) {
   const presentation = publishedJourneyPresentation(state);
   const current = String(activeJourney?.worldId || '') === String(world?.worldId || '') &&
@@ -4183,6 +4252,8 @@ function makePublishedGateJourneyNode(world, rank, gate, state, progress, active
   if (gate.description || gate.subtitle) {
     copy.append(publishedElement('span', 'published-journey-node-description', gate.description || gate.subtitle));
   }
+  const mission = publishedGateMissionBrief(gate, state, progress);
+  copy.append(publishedElement('small', 'published-journey-node-mission', mission.label));
   const meta = [];
   if (Number.isFinite(Number(gate.wordCount))) meta.push(`${Number(gate.wordCount)} كلمة`);
   if (current) meta.push('موضعك الحالي');
@@ -4823,6 +4894,7 @@ function makePublishedGateJourneyPanel(world, rank, gate) {
     )
   );
   panel.append(stateIcon, copy);
+  panel.append(makePublishedGateMissionBrief(gate, state, progress));
 
   if (state === 'learning' || state === 'ready') {
     const readyWordCount = Math.max(0, Number(progress?.readyWordCount) || 0);
