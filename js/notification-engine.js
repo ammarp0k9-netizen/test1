@@ -10,6 +10,7 @@
     GATE_PRACTICE: 'reminder.gate.practice',
     WORDS_NEW: 'reminder.words.new',
     QUIZ_INACTIVE: 'reminder.quiz.inactive',
+    JOURNEY_NEXT_STEP: 'journey.next.step',
     JOURNEY_INACTIVE: 'reminder.journey.inactive',
     GATE_READY: 'progress.gate.ready',
     CONTENT_UNLOCKED: 'progress.content.unlocked',
@@ -25,6 +26,7 @@
     [TYPE.GATE_PRACTICE]: { priority: 66, actionGroup: 'gate-practice', delay: 21 * HOUR, maxShows: 2 },
     [TYPE.WORDS_NEW]: { priority: 48, actionGroup: 'new-words', delay: 30 * HOUR, maxShows: 1 },
     [TYPE.QUIZ_INACTIVE]: { priority: 58, actionGroup: 'practice', delay: 4 * DAY, maxShows: 2 },
+    [TYPE.JOURNEY_NEXT_STEP]: { priority: 70, actionGroup: 'journey-step', delay: 15 * 60 * 1000, maxShows: 1 },
     [TYPE.JOURNEY_INACTIVE]: { priority: 61, actionGroup: 'journey', delay: 3 * DAY, maxShows: 2 },
     [TYPE.GATE_READY]: { priority: 91, actionGroup: 'gate-ready', delay: 0, maxShows: 1 },
     [TYPE.CONTENT_UNLOCKED]: { priority: 82, actionGroup: 'journey-unlock', delay: 0, maxShows: 2 },
@@ -78,11 +80,13 @@
       case TYPE.REVIEW_DUE:
         return { title: 'مراجعاتك بانتظارك', message: `لديك ${context.dueCount} كلمات مستحقة للمراجعة. جلسة قصيرة الآن تمنع تراكمها.`, cta: ['review-due', 'راجع الآن'], visualType: context.severe ? 'danger' : 'warning' };
       case TYPE.GATE_PRACTICE:
-        return { title: 'تدرّب قبل الاختبار', message: `في بوابة ${context.gateLabel || 'رحلتك'} ${context.unpracticedCount} كلمات موثوقة لم تتمرن عليها بعد.`, cta: ['practice-gate-gap', 'تدرّب على الكلمات'], visualType: 'warning' };
+        return { title: 'تدرّب قبل الاختبار', message: `في بوابة ${context.gateLabel || 'رحلتك'} ${context.unpracticedCount} كلمات موثوقة لم تتمرن عليها بعد.`, cta: ['practice-gate', 'تدرّب في البوابة'], visualType: 'warning' };
       case TYPE.WORDS_NEW:
         return { title: 'ثبّت كلماتك الجديدة', message: `أضفت ${context.wordCount} كلمات جديدة ولم تراجعها بعد. اختبر نفسك عليها الآن.`, cta: ['practice-new-words', 'راجع الكلمات'], visualType: 'info' };
       case TYPE.QUIZ_INACTIVE:
         return { title: 'حان وقت اختبار قصير', message: `لديك ${context.wordCount} كلمات، ومرّ ${context.days} أيام دون Quiz مكتمل وموثوق.`, cta: ['start-quiz', 'ابدأ Quiz'], visualType: 'info' };
+      case TYPE.JOURNEY_NEXT_STEP:
+        return { title: 'مهمتك التالية جاهزة', message: `بوابة ${context.gateLabel || 'رحلتك الحالية'} متاحة. افتحها وحمّل كلماتها لتبدأ المهمة.`, cta: ['open-journey-target', 'افتح المهمة'], visualType: 'info' };
       case TYPE.JOURNEY_INACTIVE:
         return { title: 'رحلتك تنتظرك', message: `بوابة ${context.gateLabel || 'رحلتك الحالية'} ما زالت قابلة للتقدم. عُد بخطوة صغيرة.`, cta: ['open-journey-target', 'تابع الرحلة'], visualType: 'info' };
       case TYPE.GATE_READY:
@@ -181,6 +185,17 @@
     }
 
     const journeyAnchor = numeric(facts.journey.lastProgressAt);
+    if (facts.journey.actionable && facts.journey.status === 'available' && journeyAnchor) {
+      rules.push({
+        type: TYPE.JOURNEY_NEXT_STEP,
+        key: openKey(TYPE.JOURNEY_NEXT_STEP, occurrence(TYPE.JOURNEY_NEXT_STEP, facts.journey.worldId, facts.journey.rankId, facts.journey.gateId, journeyAnchor)),
+        since: journeyAnchor,
+        context: {
+          worldId: clean(facts.journey.worldId), rankId: clean(facts.journey.rankId), gateId: clean(facts.journey.gateId), gateLabel: clean(facts.journey.gateLabel),
+        },
+      });
+    }
+
     if (facts.journey.actionable && journeyAnchor && now - journeyAnchor >= 3 * DAY) {
       rules.push({
         type: TYPE.JOURNEY_INACTIVE,
@@ -254,6 +269,7 @@
   function applyConflicts(rules, facts, reviewEligible) {
     const hasGateReady = rules.find((rule) => rule.type === TYPE.GATE_READY);
     const hasUnlock = rules.find((rule) => rule.type === TYPE.CONTENT_UNLOCKED);
+    const hasJourneyNextStep = rules.find((rule) => rule.type === TYPE.JOURNEY_NEXT_STEP);
     const hasLongInactivity = rules.some((rule) => rule.type === TYPE.INACTIVITY);
     const hasLearningPriority = rules.some((rule) => [
       TYPE.STREAK_RISK, TYPE.REVIEW_DUE, TYPE.GATE_READY,
@@ -264,6 +280,7 @@
       if (hasLongInactivity && rule.type === TYPE.CHEST_READY) return false;
       if (hasGateReady && [TYPE.GATE_PRACTICE, TYPE.JOURNEY_INACTIVE].includes(rule.type) && sameGate(rule, hasGateReady)) return false;
       if (hasUnlock && rule.type === TYPE.JOURNEY_INACTIVE && sameGate(rule, hasUnlock)) return false;
+      if (hasJourneyNextStep && rule.type === TYPE.JOURNEY_INACTIVE && sameGate(rule, hasJourneyNextStep)) return false;
       if (hasLearningPriority && rule.type === TYPE.FEEDBACK_REQUEST) return false;
       return true;
     }).filter((rule, index, values) => {

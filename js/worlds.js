@@ -4410,6 +4410,35 @@ async function openPublishedGateQuizPicker(world, rank, gate) {
   shell.querySelector('.published-gate-quiz-mode')?.focus();
 }
 
+// Smart Journey notifications use this entry point instead of the general
+// Quiz page. The complete hierarchy and its loaded progress are fetched before
+// the picker opens, so the notification stays restricted to this exact Gate.
+window.openPublishedGatePractice = async function openPublishedGatePractice(worldId, rankId, gateId) {
+  try {
+    const content = getPublishedContentApi();
+    const journey = getJourneyCloudApi();
+    const [world, rank, gate, progress] = await Promise.all([
+      content.getPublishedWorld(worldId),
+      content.getPublishedRank(worldId, rankId),
+      content.getPublishedGate(worldId, rankId, gateId),
+      journey.getGateProgress(worldId, rankId, gateId, { force: true }),
+    ]);
+    if (!world || !rank || !gate || !progress?.loadedAt ||
+      !['learning', 'ready', 'cleared'].includes(String(progress.status || ''))) {
+      await window.openPublishedGate?.(worldId, rankId, gateId);
+      return false;
+    }
+    publishedContentState.gateProgress = progress;
+    publishedContentState.gateProgressById.set(String(gateId), progress);
+    window.loadQuizView?.({ skipResume: true });
+    await openPublishedGateQuizPicker(world, rank, gate);
+    return true;
+  } catch (error) {
+    showToast(publishedJourneyErrorText(error), 'danger', 4800);
+    return false;
+  }
+};
+
 function makePublishedGateJourneyNode(world, rank, gate, state, progress, activeJourney, onClick) {
   const presentation = publishedJourneyPresentation(state);
   const current = String(activeJourney?.worldId || '') === String(world?.worldId || '') &&

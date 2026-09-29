@@ -190,6 +190,7 @@
       return {
         journey: {
           actionable: ['available', 'learning', 'ready'].includes(String(progress?.status || '')),
+          status: String(progress?.status || ''),
           worldId, rankId, gateId, gateLabel,
           lastProgressAt: structuralProgressAt,
         },

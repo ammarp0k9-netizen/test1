@@ -251,6 +251,25 @@ test('gate practice waits 21 hours and resolves when trusted unpracticed count f
   assert.equal(practiced.resolutions.length, 1);
 });
 
+test('an available Journey gate receives one focused next-step mission before inactivity', () => {
+  const { engine } = loadSystem();
+  const now = Date.now();
+  const facts = baseFacts({
+    journey: {
+      actionable: true, status: 'available', lastProgressAt: now,
+      worldId: 'w', rankId: 'r', gateId: 'g', gateLabel: 'البداية',
+    },
+  });
+  const pending = engine.evaluate(facts, [], { now: now + 14 * 60 * 1000, ownerId: 'u' });
+  assert.equal(pending.selected, null);
+  const active = engine.evaluate(facts, pending.upserts, { now: now + 15 * 60 * 1000, ownerId: 'u' });
+  assert.equal(active.selected?.record.notificationType, engine.TYPE.JOURNEY_NEXT_STEP);
+  assert.equal(active.selected?.record.cta?.id, 'open-journey-target');
+
+  const old = engine.evaluate(facts, active.upserts, { now: now + 3 * engine.DAY, ownerId: 'u' });
+  assert.equal(old.rules.some((rule) => rule.type === engine.TYPE.JOURNEY_INACTIVE), false);
+});
+
 test('local-day streak gate uses Asia/Amman day instead of UTC day', () => {
   const { engine } = loadSystem();
   const nearMidnight = new Date('2026-08-10T22:30:00Z'); // 01:30 on Aug 11 in Amman

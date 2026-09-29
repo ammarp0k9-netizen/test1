@@ -126,7 +126,13 @@
     else if (action === 'review-due') handled = startWordReview('due');
     else if (action === 'practice-new-words') handled = startWordReview('new');
     else if (action === 'practice-weak-words') handled = startWordReview('weak');
-    else if (action === 'practice-gate-gap') {
+    else if (action === 'practice-gate') {
+      if (typeof root.openPublishedGatePractice === 'function') {
+        handled = await root.openPublishedGatePractice(args.worldId, args.rankId, args.gateId) !== false;
+      } else if (root.openPublishedGate && args.worldId && args.rankId && args.gateId) {
+        await root.openPublishedGate(args.worldId, args.rankId, args.gateId);
+      } else handled = false;
+    } else if (action === 'practice-gate-gap') {
       const context = sources.getActionContext();
       handled = root.startGateGapReview?.(context.gateWordKeys, args) !== false;
     } else if (action === 'start-quiz' || action === 'resume-learning') {
