@@ -9810,6 +9810,75 @@ html[dir="ltr"] .worlds-tabs[data-active-tab="custom"]::before {
   color: var(--star);
 }
 
+.title-unlock-moment {
+  position: fixed;
+  z-index: 12000;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 18px;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity .2s ease;
+}
+
+.title-unlock-moment.is-visible { opacity: 1; pointer-events: auto; }
+
+.title-unlock-moment::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: rgba(4, 9, 22, .76);
+  backdrop-filter: blur(7px);
+}
+
+.title-unlock-moment-glow {
+  position: absolute;
+  width: min(74vw, 550px);
+  aspect-ratio: 1;
+  border-radius: 50%;
+  background: radial-gradient(circle, color-mix(in srgb, var(--star) 37%, transparent), transparent 67%);
+  filter: blur(10px);
+  animation: titleUnlockGlow 1.8s ease-in-out infinite alternate;
+}
+
+.title-unlock-moment-card {
+  position: relative;
+  display: grid;
+  justify-items: center;
+  gap: 8px;
+  width: min(390px, 100%);
+  padding: 29px 25px 23px;
+  border: 1px solid color-mix(in srgb, var(--star) 62%, var(--border));
+  border-radius: 24px;
+  background: linear-gradient(145deg, color-mix(in srgb, var(--card-bg) 91%, var(--star)), var(--card-bg));
+  box-shadow: 0 25px 75px rgba(0, 0, 0, .48), 0 0 46px color-mix(in srgb, var(--star) 22%, transparent);
+  color: var(--text-white);
+  text-align: center;
+  transform: translateY(14px) scale(.94);
+  transition: transform .28s cubic-bezier(.2, .9, .25, 1.2);
+}
+
+.title-unlock-moment.is-visible .title-unlock-moment-card { transform: translateY(0) scale(1); }
+.title-unlock-moment-kicker { color: var(--star); font-size: 11px; font-weight: 900; letter-spacing: .04em; }
+.title-unlock-moment-icon { display: grid; place-items: center; width: 82px; height: 82px; margin: 3px 0; border: 2px solid color-mix(in srgb, var(--star) 74%, var(--border)); border-radius: 50%; background: color-mix(in srgb, var(--star) 14%, var(--card-bg)); box-shadow: 0 0 0 9px color-mix(in srgb, var(--star) 8%, transparent); }
+.title-unlock-moment-icon-art { color: var(--title-color, var(--star)); font-size: 36px; }
+.title-unlock-moment-card > p { margin: 0; color: var(--text-gray); font-size: 12px; }
+.title-unlock-moment-card h2 { margin: 0; color: var(--star); font-size: clamp(23px, 7vw, 31px); }
+.title-unlock-moment-how { max-width: 31ch; color: var(--text-white); font-size: 12px; line-height: 1.65; }
+.title-unlock-moment-card > small { color: var(--text-gray); font-size: 10px; }
+.title-unlock-moment-actions { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; width: 100%; margin-top: 8px; }
+.title-unlock-moment-actions button { min-height: 40px; padding: 8px 15px; border: 1px solid var(--border); border-radius: 11px; background: transparent; color: var(--text-white); font: inherit; font-size: 12px; font-weight: 900; cursor: pointer; }
+.title-unlock-moment-actions .title-unlock-use { border-color: var(--star); background: var(--star); color: var(--main-bg); }
+.title-unlock-moment-actions button:focus-visible { outline: 3px solid color-mix(in srgb, var(--star) 42%, transparent); outline-offset: 2px; }
+
+@keyframes titleUnlockGlow { from { transform: scale(.92); opacity: .7; } to { transform: scale(1.08); opacity: 1; } }
+
+@media (prefers-reduced-motion: reduce) {
+  .title-unlock-moment, .title-unlock-moment-card { transition: none; }
+  .title-unlock-moment-glow { animation: none; }
+}
+
 .published-gate-journey-available .published-gate-state-icon { border-color: var(--accent); color: var(--accent); }
 .published-gate-journey-learning .published-gate-state-icon { border-color: var(--accent); background: var(--accent-soft); color: var(--accent); }
 .published-gate-journey-ready {
@@ -10615,6 +10684,39 @@ body.published-placement-mode .main-content {
 
 .published-placement-result.is-passed {
   border-color: color-mix(in srgb, var(--success) 44%, var(--border));
+}
+
+.published-gate-clear-victory {
+  display: grid;
+  justify-items: center;
+  gap: 5px;
+  width: min(310px, 100%);
+  padding: 10px 12px;
+  border: 1px solid color-mix(in srgb, var(--success) 42%, var(--border));
+  border-radius: 13px;
+  background: color-mix(in srgb, var(--success) 8%, var(--card-bg));
+  animation: gateVictoryEnter .46s cubic-bezier(.2, .9, .25, 1.15) both;
+}
+
+.published-gate-clear-victory strong { color: var(--success); font-size: 13px; }
+.published-gate-clear-victory small { color: var(--text-gray); font-size: 10px; }
+.published-gate-clear-victory-rail { display: grid; grid-template-columns: 30px minmax(65px, 1fr) 30px; align-items: center; width: min(220px, 100%); }
+.published-gate-clear-victory-rail > span { position: relative; z-index: 1; display: grid; place-items: center; width: 30px; height: 30px; border-radius: 50%; }
+.published-gate-clear-victory-rail .is-cleared { background: var(--success); color: #07150d; animation: gateVictoryStamp .42s .1s both; }
+.published-gate-clear-victory-rail .is-unlocked { border: 1px solid color-mix(in srgb, var(--star) 72%, var(--border)); background: color-mix(in srgb, var(--star) 16%, var(--card-bg)); color: var(--star); animation: gateVictoryUnlock .52s .46s both; }
+.published-gate-clear-victory-line { display: block; height: 4px; overflow: hidden; border-radius: 99px; background: color-mix(in srgb, var(--border) 72%, transparent); }
+.published-gate-clear-victory-line::after { content: ''; display: block; width: 100%; height: 100%; border-radius: inherit; background: linear-gradient(90deg, var(--success), var(--star)); transform: translateX(105%); animation: gateVictoryPath .48s .22s ease-out forwards; }
+
+@keyframes gateVictoryEnter { from { opacity: 0; transform: translateY(10px) scale(.95); } to { opacity: 1; transform: translateY(0) scale(1); } }
+@keyframes gateVictoryStamp { from { transform: scale(.35) rotate(-25deg); } 70% { transform: scale(1.14) rotate(5deg); } to { transform: scale(1) rotate(0); } }
+@keyframes gateVictoryPath { to { transform: translateX(0); } }
+@keyframes gateVictoryUnlock { from { opacity: 0; transform: scale(.5) rotate(-25deg); } to { opacity: 1; transform: scale(1) rotate(0); } }
+
+@media (prefers-reduced-motion: reduce) {
+  .published-gate-clear-victory,
+  .published-gate-clear-victory-rail .is-cleared,
+  .published-gate-clear-victory-rail .is-unlocked,
+  .published-gate-clear-victory-line::after { animation: none; transform: none; }
 }
 
 .published-rank-achievement {

@@ -1,6 +1,7 @@
 const LOOT_BOX_COOLDOWN_MS = 24 * 60 * 60 * 1000;
 const LOOT_STATE_KEY = 'lootlinguaDailyLootState';
 const TITLE_STATE_KEY = 'lootlinguaTitlesState';
+const JOURNEY_TITLE_PROGRESS_KEY = 'lootlinguaJourneyTitleProgress';
 const ACTIVE_TITLE_KEY = 'lootlinguaActiveTitleId';
 const ACTIVE_TITLE_NONE = '__none';
 const STREAK_FREEZE_KEY = 'lootlinguaStreakFreezes';
@@ -104,6 +105,30 @@ const TITLE_DEFS = [
     name: 'متسلّق المستويات',
     how: 'وصل إلى Level 5.',
     unlocked: () => getLevelFromXP(loadInt('userXP', 0)) >= 5,
+  },
+  {
+    id: 'gatebreaker',
+    icon: 'fa-solid fa-flag-checkered',
+    color: '#fb923c',
+    name: 'فاتح البوابات',
+    how: 'اجتز أول تحدٍّ لبوابة في رحلة منشورة.',
+    unlocked: () => getJourneyTitleProgress().clearedGateIds.length >= 1,
+  },
+  {
+    id: 'pathfinder',
+    icon: 'fa-solid fa-compass',
+    color: '#38bdf8',
+    name: 'دليل المسار',
+    how: 'اجتز تحدّي 3 بوابات مختلفة.',
+    unlocked: () => getJourneyTitleProgress().clearedGateIds.length >= 3,
+  },
+  {
+    id: 'world_legend',
+    icon: 'fa-solid fa-earth-americas',
+    color: '#a78bfa',
+    name: 'أسطورة عالم',
+    how: 'أكمل جميع البوابات المنشورة في عالم واحد.',
+    unlocked: () => getJourneyTitleProgress().completedWorldIds.length >= 1,
   },
 ];
 
@@ -222,6 +247,34 @@ function saveLootState(state) {
 
 function getTitleState() {
   return loadJSON(TITLE_STATE_KEY, { unlocked: [], lastUnlockedAt: {} });
+}
+
+function getJourneyTitleProgress() {
+  const state = loadJSON(JOURNEY_TITLE_PROGRESS_KEY, {
+    clearedGateIds: [],
+    completedWorldIds: [],
+  });
+  return {
+    clearedGateIds: [...new Set(Array.isArray(state?.clearedGateIds) ? state.clearedGateIds.map(String) : [])],
+    completedWorldIds: [...new Set(Array.isArray(state?.completedWorldIds) ? state.completedWorldIds.map(String) : [])],
+  };
+}
+
+function recordJourneyTitleProgress(world, rank, gate, result) {
+  if (result?.result?.passed !== true) return [];
+  const state = getJourneyTitleProgress();
+  const gateKey = [world?.worldId, rank?.rankId, gate?.gateId]
+    .map((value) => String(value || '').trim())
+    .join('/');
+  if (gateKey && !gateKey.includes('//')) state.clearedGateIds.push(gateKey);
+  if (result?.worldCompleted === true && world?.worldId) {
+    state.completedWorldIds.push(String(world.worldId));
+  }
+  state.clearedGateIds = [...new Set(state.clearedGateIds)].slice(-1000);
+  state.completedWorldIds = [...new Set(state.completedWorldIds)].slice(-200);
+  saveJSON(JOURNEY_TITLE_PROGRESS_KEY, state);
+  if (!hasSignedInUser()) markGuestDataDirty();
+  return evaluateTitleUnlocks(false);
 }
 
 function saveTitleState(state) {
@@ -482,6 +535,7 @@ window.openDailyLootBox = function() {
 function getTitleProgressMetrics() {
   const loot = getLootState();
   const words = getPersonalDictionaryWordsSnapshot();
+  const journeyTitles = getJourneyTitleProgress();
   return {
     loot,
     wordCount: words.length,
@@ -492,6 +546,8 @@ function getTitleProgressMetrics() {
     level: getLevelFromXP(loadInt('userXP', 0)),
     streak: loadInt('dailyStreak', 0),
     masteredWords: words.filter(w => getWordMasteryState(w).mastery_status === 'Mastered').length,
+    clearedGates: journeyTitles.clearedGateIds.length,
+    completedWorlds: journeyTitles.completedWorldIds.length,
   };
 }
 
@@ -506,6 +562,8 @@ function getTitleProgress(def, metrics = getTitleProgressMetrics()) {
     level,
     streak,
     masteredWords,
+    clearedGates,
+    completedWorlds,
   } = metrics;
   const map = {
     first_spark: `${Math.min(loot.totalOpens || 0, 1)} / 1`,
@@ -520,8 +578,49 @@ function getTitleProgress(def, metrics = getTitleProgressMetrics()) {
     strategist: `${Math.min(perfect, 10)} / 10`,
     streak_guard: `${Math.min(streak, 7)} / 7`,
     level_climber: `${Math.min(level, 5)} / 5`,
+    gatebreaker: `${Math.min(clearedGates, 1)} / 1`,
+    pathfinder: `${Math.min(clearedGates, 3)} / 3`,
+    world_legend: `${Math.min(completedWorlds, 1)} / 1`,
   };
   return map[def.id] || '';
+}
+
+function showTitleUnlockMoment(definitions) {
+  const titles = Array.isArray(definitions) ? definitions.filter(Boolean) : [];
+  if (!titles.length || document.getElementById('titleUnlockMoment')) return;
+  const primary = titles[0];
+  const shell = document.createElement('section');
+  shell.id = 'titleUnlockMoment';
+  shell.className = 'title-unlock-moment';
+  shell.setAttribute('role', 'dialog');
+  shell.setAttribute('aria-modal', 'true');
+  shell.setAttribute('aria-label', 'لقب جديد مفتوح');
+  shell.innerHTML = `
+    <div class="title-unlock-moment-glow" aria-hidden="true"></div>
+    <div class="title-unlock-moment-card">
+      <span class="title-unlock-moment-kicker"><i class="fa-solid fa-sparkles" aria-hidden="true"></i> إنجاز جديد</span>
+      <span class="title-unlock-moment-icon">${renderTitleIcon(primary, 'title-unlock-moment-icon-art')}</span>
+      <p>فتحت لقبًا جديدًا</p>
+      <h2>${escapeHtml(primary.name)}</h2>
+      <span class="title-unlock-moment-how">${escapeHtml(primary.how)}</span>
+      ${titles.length > 1 ? `<small>و${titles.length - 1} لقب إضافي.</small>` : ''}
+      <div class="title-unlock-moment-actions">
+        <button type="button" class="title-unlock-use">استخدم اللقب</button>
+        <button type="button" class="title-unlock-close">لاحقًا</button>
+      </div>
+    </div>`;
+  const close = () => shell.remove();
+  shell.querySelector('.title-unlock-use')?.addEventListener('click', () => {
+    window.setActiveLootlinguaTitle?.(primary.id);
+    close();
+  });
+  shell.querySelector('.title-unlock-close')?.addEventListener('click', close);
+  document.body.append(shell);
+  try { window.launchConfetti?.(); } catch (_) {}
+  try { navigator.vibrate?.([35, 35, 75]); } catch (_) {}
+  try { window.playUnlockSound?.(); } catch (_) {}
+  requestAnimationFrame(() => shell.classList.add('is-visible'));
+  shell.querySelector('.title-unlock-use')?.focus();
 }
 
 function evaluateTitleUnlocks(celebrate = false) {
@@ -543,9 +642,7 @@ function evaluateTitleUnlocks(celebrate = false) {
   }
   if (newly.length) saveTitleState(state);
   if (newly.length && celebrate && !isJsonImportBatchActive()) {
-    const first = newly[0];
-    launchConfetti();
-    showToast(`لقب جديد: ${first.name}`, 'success', 5200);
+    showTitleUnlockMoment(newly);
   }
   renderTitlesGrid();
   syncHeroAvatar();
@@ -1335,6 +1432,7 @@ const publishedContentState = {
   gateClearBundle: null,
   gateClearPending: false,
   gateClearFeedback: null,
+  shownGateClearCelebrations: new Set(),
   shownRankCompletionCelebrations: new Set(),
   shownWorldCompletionCelebrations: new Set(),
   readinessTimer: null,
@@ -4651,6 +4749,24 @@ function renderPublishedGateClearResult(world, rank, gate, bundle) {
     'section',
     `published-placement-result ${passed ? 'is-passed' : 'is-learning'}`
   );
+  if (passed) {
+    const reveal = publishedElement('div', 'published-gate-clear-victory');
+    const destinationLabel = worldCompleted
+      ? 'اكتمل العالم'
+      : (rankCompleted ? 'اكتمل هذا المستوى' : 'فُتح الطريق التالي');
+    const rail = publishedElement('div', 'published-gate-clear-victory-rail');
+    const cleared = publishedElement('span', 'is-cleared');
+    cleared.append(publishedIcon('fa-solid fa-flag-checkered'));
+    const unlocked = publishedElement('span', 'is-unlocked');
+    unlocked.append(publishedIcon(worldCompleted ? 'fa-solid fa-earth-americas' : 'fa-solid fa-lock-open'));
+    rail.append(cleared, publishedElement('i', 'published-gate-clear-victory-line'), unlocked);
+    reveal.append(
+      rail,
+      publishedElement('strong', '', destinationLabel),
+      publishedElement('small', '', 'تم حفظ إنجازك وفتح التقدم التالي.'),
+    );
+    section.append(reveal);
+  }
   section.append(
     publishedIcon(
       worldCompleted
@@ -4701,6 +4817,21 @@ function renderPublishedGateClearResult(world, rank, gate, bundle) {
     'fa-solid fa-arrow-right'
   ));
   root.replaceChildren(section);
+  if (passed) {
+    const celebrationKey = [
+      world.worldId,
+      rank.rankId,
+      gate.gateId,
+      attempt?.attemptId || '',
+    ].join(':');
+    if (!publishedContentState.shownGateClearCelebrations.has(celebrationKey)) {
+      publishedContentState.shownGateClearCelebrations.add(celebrationKey);
+      const titles = recordJourneyTitleProgress(world, rank, gate, bundle.result);
+      try { window.launchConfetti?.(); } catch (_) {}
+      try { navigator.vibrate?.([35, 35, 85]); } catch (_) {}
+      if (titles.length) showTitleUnlockMoment(titles);
+    }
+  }
   if (worldCompleted && bundle.result?.worldCompletionRecorded === true) {
     const completionId = String(bundle.result?.worldCompletionId || world.worldId || '');
     if (!publishedContentState.shownWorldCompletionCelebrations.has(completionId)) {
