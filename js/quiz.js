@@ -1225,7 +1225,23 @@ async function startActualQuiz(mode, options = {}) {
 // selector; this entry point receives an already restricted Gate cohort.
 window.startGateQuiz = async function(mode, input = {}) {
   const selectedMode = QUIZ_MODE_META[mode] ? mode : 'scramble';
-  const words = Array.isArray(input.words) ? input.words.filter(Boolean) : [];
+  const sourceParts = [input.worldId, input.rankId, input.gateId]
+    .map((value) => String(value || '').replace(/[^a-zA-Z0-9_-]/g, '_'))
+    .filter(Boolean);
+  const source = `journey:${sourceParts.join('~')}`.slice(0, 500);
+  const resolved = quizCore.resolveQuizCandidates({
+    scope: source,
+    mode: selectedMode,
+    rawWords: Array.isArray(input.words) ? input.words.filter(Boolean) : [],
+    wordKeyOf: (word) => window.LootLinguaWordLifecycle?.wordKeyOf?.(word) || word?.wordKey || '',
+    normalizeCandidate: (word, index) => normalizeQuizWord({
+      ...word,
+      // Published content records do not have the legacy document id. Passing
+      // one through makes matching treat every row as "undefined".
+      id: word?.id || word?.legacyWordId || word?.wordKey || `gate-word-${index}`,
+    }, source, index),
+  });
+  const words = resolved.candidates;
   if (!words.length) {
     showToast('لا توجد كلمات محمّلة لهذه البوابة بعد.', 'warning', 4200);
     return false;
@@ -1233,12 +1249,9 @@ window.startGateQuiz = async function(mode, input = {}) {
   clearActiveQuizSessionStorage();
   window.__pendingQuizResumeSession = null;
   window.loadQuizView({ skipResume: true });
-  const sourceParts = [input.worldId, input.rankId, input.gateId]
-    .map((value) => String(value || '').replace(/[^a-zA-Z0-9_-]/g, '_'))
-    .filter(Boolean);
   return startActualQuiz(selectedMode, {
     words,
-    source: `journey:${sourceParts.join('~')}`.slice(0, 500),
+    source,
     skipAvailabilityCheck: true,
   });
 };

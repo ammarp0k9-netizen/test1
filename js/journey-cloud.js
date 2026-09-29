@@ -2061,14 +2061,62 @@ async function getGateMasteryView(worldId, rankId, gateId, options) {
 }
 
 // The Gate quiz is intentionally restricted to the immutable loaded cohort.
-// It is read-only and never falls back to the account-wide dictionary.
+// Each returned word is also verified against its exact user-word source link.
+// This gives the quiz a stable legacy id for its SRS updates and prevents an
+// unrelated account-wide word from entering a Gate-specific quiz.
 async function getGateQuizWords(worldId, rankId, gateId, options) {
+  const user = requireUser();
   const progress = options?.progress || await getGateProgress(worldId, rankId, gateId, options);
   if (!progress?.loadedAt || !['learning', 'ready', 'cleared'].includes(String(progress.status || ''))) {
     return [];
   }
   const words = await listAllGateWords(worldId, rankId, gateId, options);
-  return core().effectiveLoadedGateWords(progress, words).map((word) => ({ ...word }));
+  const effective = core().effectiveLoadedGateWords(progress, words);
+  const trustedWords = await Promise.all(effective.map(async (word) => {
+    const wordKey = String(word?.wordKey || '');
+    const contentWordId = String(word?.contentWordId || '');
+    if (!wordKey || !contentWordId) return null;
+    const source = {
+      worldId: core().cleanId(worldId, 'World'),
+      rankId: core().cleanId(rankId, 'Rank'),
+      gateId: core().cleanId(gateId, 'Gate'),
+      contentWordId: core().cleanId(contentWordId, 'Word'),
+    };
+    const canonicalRef = doc(
+      db,
+      'users',
+      user.uid,
+      'contentWords',
+      core().cleanId(wordKey, 'Word key')
+    );
+    const [canonicalSnapshot, sourceSnapshot] = await Promise.all([
+      getDoc(canonicalRef),
+      getDoc(doc(canonicalRef, 'sources', core().contentSourceId(source))),
+    ]);
+    if (!canonicalSnapshot.exists() || !sourceSnapshot.exists()) return null;
+
+    const canonical = canonicalSnapshot.data() || {};
+    const legacyWordId = String(canonical.legacyWordId || '');
+    const legacySnapshot = legacyWordId
+      ? await getDoc(doc(db, 'users', user.uid, 'words', legacyWordId))
+      : null;
+    const legacy = legacySnapshot?.exists() ? legacySnapshot.data() || {} : {};
+    return {
+      ...word,
+      ...canonical,
+      ...legacy,
+      id: legacyWordId || wordKey,
+      legacyWordId,
+      wordKey,
+      contentWordId,
+      word: canonical.word || legacy.word || legacy.text || word.word || '',
+      meaning: canonical.meaning || canonical.translation || legacy.meaning ||
+        legacy.translation || word.translation || '',
+      translation: canonical.translation || legacy.translation ||
+        legacy.meaning || word.translation || '',
+    };
+  }));
+  return trustedWords.filter(Boolean);
 }
 
 // Read-only notification projection. Practice is derived from the canonical
