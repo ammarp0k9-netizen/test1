@@ -4384,7 +4384,7 @@ async function openPublishedGateQuizPicker(world, rank, gate) {
       <h2>${escapeHtml(gate.title || 'البوابة الحالية')}</h2>
       <p>اختر نوع التدريب. الأسئلة ستأتي من <strong>${words.length} كلمة محمّلة لهذه البوابة فقط</strong>، ولن تدخل أي كلمة من قاموسك أو بوابة أخرى.</p>
       <div class="published-gate-quiz-modes"></div>
-      <small class="published-gate-quiz-note">لرفع شريط الجاهزية اختر أحد التحديات الثلاثة، وأجب بشكل صحيح. بطاقات الذاكرة للتدريب فقط.</small>
+      <small class="published-gate-quiz-note">لرفع شريط الجاهزية اختر أحد التحديات الثلاثة وأجب صحيحًا من المحاولة الأولى. بطاقات الذاكرة، وتصحيح الخطأ داخل المطابقة، للتدريب فقط.</small>
     </div>`;
   const choose = async (mode) => {
     close(false);

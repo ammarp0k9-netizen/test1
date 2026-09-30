@@ -640,12 +640,16 @@ function renderMatchingBoard() {
       : 'تحقق من إجاباتك';
   if (feedback) {
     if (board.phase === 'correction') {
-      feedback.textContent = 'لديك بعض الإجابات تحتاج مراجعة. صحح الأزواج المعلّمة؛ نتيجتك الأولى محفوظة.';
+      feedback.textContent = activeQuizSession?.sourceType === 'journey'
+        ? 'صحح الأزواج لتعرف الحل. هذا التصحيح تعليمي فقط؛ خطوة البوابة تُحتسب من إجابة صحيحة في جولة بوابة جديدة.'
+        : 'لديك بعض الإجابات تحتاج مراجعة. صحح الأزواج المعلّمة؛ نتيجتك الأولى محفوظة.';
     } else if (board.phase === 'revealed') {
       feedback.textContent = 'راجع الأزواج الصحيحة قبل المتابعة. لم تتغير نتيجة المحاولة الأولى.';
     } else if (board.phase === 'complete') {
       feedback.textContent = board.incorrectWordIds.length
-        ? 'أكملت التصحيح. نتيجة المحاولة الأولى محفوظة.'
+        ? (activeQuizSession?.sourceType === 'journey'
+          ? 'اكتمل التصحيح للتعلّم. لإنجاز خطوة بوابتك، ابدأ تحديًا جديدًا من زر البوابة وأجب من المحاولة الأولى.'
+          : 'أكملت التصحيح. نتيجة المحاولة الأولى محفوظة.')
         : 'ممتاز، جميع الأزواج صحيحة من المحاولة الأولى.';
     } else if (matchingQuizState.pendingWordId) {
       feedback.textContent = 'الآن اختر المعنى المقابل لهذه الكلمة.';
