@@ -138,16 +138,39 @@
   }
 
   function launchDash(context) {
-    const shell = modalShell('اندفاع البوابة', 'حرّك المستكشف بين المسارات واجمع 4 طاقات قبل انتهاء الوقت. هذه لعبة جانبية وليست اختبار كلمات.');
+    const shell = modalShell('اندفاع البوابة', 'اجمع 8 شظايا ذهبية ✦، وتفادَ الشقوق الحمراء ✕. لديك 3 قلوب و35 ثانية. هذه لعبة جانبية، وليست اختبار كلمات.');
+    const target = 8;
     let lane = 1, energy = 0, hits = 0, running = true, elapsed = 0, last = performance.now();
-    const hud = el('div', 'gate-dash-hud', 'طاقة 0 / 4 · درع 3 · 25ث'); const arena = el('div', 'gate-dash-arena'); const player = el('div', 'gate-dash-player'); arena.append(player); shell.modal.append(hud, arena);
+    const hud = el('div', 'gate-dash-hud');
+    const arena = el('div', 'gate-dash-arena');
+    const legend = el('div', 'gate-dash-legend', '✦ اجمعها  ·  ✕ تجنبها');
+    const player = el('div', 'gate-dash-player');
+    const updateHud = () => { hud.textContent = `شظايا ${energy} / ${target} · قلوب ${'♥'.repeat(Math.max(0, 3 - hits))}${'♡'.repeat(Math.min(3, hits))} · ${Math.max(0, 35 - Math.floor(elapsed / 1000))}ث`; };
+    player.style.setProperty('--lane', lane);
+    arena.append(legend, player); shell.modal.append(hud, arena);
     const move = (delta) => { lane = Math.max(0, Math.min(2, lane + delta)); player.style.setProperty('--lane', lane); };
-    const controls = el('div', 'gate-game-controls'); [['يمين', -1], ['يسار', 1]].forEach(([label, delta]) => { const b = el('button', '', label); b.type = 'button'; b.addEventListener('click', () => move(delta)); controls.append(b); }); shell.modal.append(controls);
+    const controls = el('div', 'gate-game-controls'); [['يمين', 1], ['يسار', -1]].forEach(([label, delta]) => { const b = el('button', '', label); b.type = 'button'; b.addEventListener('click', () => move(delta)); controls.append(b); }); shell.modal.append(controls);
     const key = (event) => { if (event.key === 'ArrowLeft' || event.key.toLowerCase() === 'a') move(-1); if (event.key === 'ArrowRight' || event.key.toLowerCase() === 'd') move(1); };
     window.addEventListener('keydown', key);
-    const spawn = (at) => { const good = (hash(`${at}:${energy}:${hits}`) % 4) !== 0; const item = el('div', `gate-dash-item ${good ? 'is-energy' : 'is-hazard'}`); const itemLane = hash(`${at}:lane`) % 3; item.style.setProperty('--lane', itemLane); arena.append(item); setTimeout(() => { if (!running) return; if (itemLane === lane) { if (good) energy++; else hits++; } item.remove(); }, 2100); };
-    const timer = setInterval(() => { if (running) spawn(Date.now()); }, 600);
-    function frame(time) { if (!running) return; elapsed += time - last; last = time; const sec = Math.max(0, 25 - Math.floor(elapsed / 1000)); hud.textContent = `طاقة ${energy} / 4 · درع ${Math.max(0, 3 - hits)} · ${sec}ث`; if (energy >= 4 || hits >= 3 || elapsed >= 25000) { running = false; clearInterval(timer); window.removeEventListener('keydown', key); finish(context, shell, energy >= 4 && hits < 3); return; } requestAnimationFrame(frame); }
+    const spawn = (at) => {
+      const good = (hash(`${at}:${energy}:${hits}`) % 5) !== 0;
+      const item = el('div', `gate-dash-item ${good ? 'is-energy' : 'is-hazard'}`, good ? '✦' : '✕');
+      item.setAttribute('aria-label', good ? 'شظية ذهبية' : 'شق أحمر');
+      const itemLane = hash(`${at}:lane`) % 3;
+      item.style.setProperty('--lane', itemLane); arena.append(item);
+      setTimeout(() => {
+        if (!running) { item.remove(); return; }
+        if (itemLane === lane) {
+          if (good) { energy++; item.classList.add('is-collected'); }
+          else { hits++; player.classList.add('is-hit'); setTimeout(() => player.classList.remove('is-hit'), 260); item.classList.add('is-hit'); }
+          updateHud();
+        }
+        setTimeout(() => item.remove(), itemLane === lane ? 120 : 0);
+      }, 2400);
+    };
+    const timer = setInterval(() => { if (running) spawn(Date.now()); }, 900);
+    updateHud();
+    function frame(time) { if (!running) return; elapsed += time - last; last = time; updateHud(); if (energy >= target || hits >= 3 || elapsed >= 35000) { running = false; clearInterval(timer); window.removeEventListener('keydown', key); finish(context, shell, energy >= target && hits < 3); return; } requestAnimationFrame(frame); }
     requestAnimationFrame(frame);
   }
 
