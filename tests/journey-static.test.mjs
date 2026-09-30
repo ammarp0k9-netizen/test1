@@ -80,13 +80,14 @@ test('partial gate loads remain retryable and learning is written only after ful
   assert.match(worlds, /إعادة المحاولة/);
 });
 
-test('a loaded learning gate continues to the quiz page', () => {
+test('a loaded learning gate opens its Gate-only quiz picker without showing the general quiz', () => {
   const learningActions = worlds.slice(
     worlds.indexOf("} else if (state === 'learning')"),
     worlds.indexOf("} else if (state === 'ready')")
   );
   assert.match(learningActions, /متابعة التعلم/);
-  assert.match(learningActions, /window\.loadQuizView\(\)/);
+  assert.match(learningActions, /openPublishedGateQuizPicker\(world, rank, gate\)/);
+  assert.doesNotMatch(learningActions, /window\.loadQuizView\(\)/);
   assert.doesNotMatch(learningActions, /window\.loadPersonalDictionary\(\)/);
 });
 

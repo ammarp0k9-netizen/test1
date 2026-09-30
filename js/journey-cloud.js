@@ -1275,6 +1275,8 @@ async function evaluateActiveJourneyReadiness() {
     const unchanged = progress.status === readiness.status &&
       Number(progress.readyWordCount) === readiness.readyWordCount &&
       Number(progress.requiredWordCount) === readiness.requiredWordCount &&
+      Number(progress.evidenceStepCount) === readiness.evidenceStepCount &&
+      Number(progress.totalEvidenceSteps) === readiness.totalEvidenceSteps &&
       Number(progress.availableForReviewNowCount) === readiness.availableForReviewNow &&
       Number(progress.waitingLaterTodayCount) === readiness.waitingLaterToday &&
       Number(progress.waitingNextDayCount) === readiness.waitingNextDay;
@@ -1289,6 +1291,8 @@ async function evaluateActiveJourneyReadiness() {
         readyEvidenceCount: readiness.readyWordCount,
         readyWordCount: readiness.readyWordCount,
         requiredWordCount: readiness.requiredWordCount,
+        evidenceStepCount: readiness.evidenceStepCount,
+        totalEvidenceSteps: readiness.totalEvidenceSteps,
         needsEvidenceWordCount: readiness.needsEvidenceWordCount,
         availableForReviewNowCount: readiness.availableForReviewNow,
         waitingLaterTodayCount: readiness.waitingLaterToday,

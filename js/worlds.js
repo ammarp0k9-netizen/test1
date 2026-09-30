@@ -4253,6 +4253,9 @@ function makePublishedRankJourneyNode(world, rank, state, rankProgress, activeJo
 function publishedGateProgressPercent(state, progress) {
   if (state === 'ready' || state === 'cleared' || state === 'mastered') return 100;
   if (state !== 'learning') return 0;
+  const steps = Math.max(0, Number(progress?.evidenceStepCount) || 0);
+  const totalSteps = Math.max(steps, Number(progress?.totalEvidenceSteps) || 0);
+  if (totalSteps) return Math.min(100, Math.round((steps / totalSteps) * 100));
   const ready = Math.max(0, Number(progress?.readyWordCount) || 0);
   const total = Math.max(ready, Number(progress?.requiredWordCount) || Number(progress?.wordCountAtLoad) || 0);
   return total ? Math.min(100, Math.round((ready / total) * 100)) : 0;
@@ -4941,6 +4944,7 @@ function renderPublishedGateClearResult(world, rank, gate, bundle) {
       const titles = recordJourneyTitleProgress(world, rank, gate, bundle.result);
       try { window.launchConfetti?.(); } catch (_) {}
       try { navigator.vibrate?.([35, 35, 85]); } catch (_) {}
+      try { window.playUnlockSound?.(); } catch (_) {}
       if (titles.length) showTitleUnlockMoment(titles);
     }
   }
@@ -5036,7 +5040,7 @@ function schedulePublishedReadinessTimer(progress, statusElement) {
     if (!statusElement.isConnected) return;
     const remaining = nextAt - publishedEffectiveNow();
     if (remaining <= 0) {
-      statusElement.textContent = 'حان موعد مراجعة جديدة.';
+      statusElement.textContent = 'أصبحت الخطوة التالية متاحة الآن. ابدأ كويز هذه البوابة لرفع الشريط.';
       statusElement.classList.add('is-due');
       publishedContentState.readinessTimer = null;
       return;
@@ -5151,36 +5155,40 @@ function makePublishedGateJourneyPanel(world, rank, gate) {
     const info = publishedElement('button', 'published-readiness-info-btn');
     info.type = 'button';
     info.title = 'كيف يتقدم التحدّي؟';
-    info.setAttribute('aria-label', 'شرح خطة فتح تحدّي البوابة');
+    info.setAttribute('aria-label', 'شرح الاستعداد لاجتياز البوابة');
     info.append(publishedIcon('fa-solid fa-question'));
     info.addEventListener('click', () => window.openGateReadinessInfo());
     heading.append(info);
     const track = publishedElement('span', 'published-gate-readiness-track');
     const fill = publishedElement('span', 'published-gate-readiness-fill');
-    const readinessPercent = requiredWordCount
-      ? Math.round((readyWordCount / requiredWordCount) * 100)
-      : 0;
+    const completedSteps = Math.max(0, Number(progress?.evidenceStepCount) || 0);
+    const totalSteps = Math.max(
+      completedSteps,
+      Number(progress?.totalEvidenceSteps) || (requiredWordCount * 3)
+    );
+    const readinessPercent = totalSteps ? Math.round((completedSteps / totalSteps) * 100) : 0;
     animatePublishedGateProgress(fill, readinessPercent);
     track.append(fill);
     const counts = publishedElement('div', 'published-gate-readiness-counts');
     const availableToday = Math.max(0, Number(progress?.availableForReviewNowCount) || 0);
     const waitingToday = Math.max(0, Number(progress?.waitingLaterTodayCount) || 0);
     const waitingTomorrow = Math.max(0, Number(progress?.waitingNextDayCount) || 0);
-    appendMetaChip(counts, `مكتمل: ${readyWordCount} / ${requiredWordCount}`, 'fa-solid fa-circle-check');
-    appendMetaChip(counts, `تدرّب الآن: ${availableToday}`, 'fa-solid fa-play');
-    appendMetaChip(counts, `لاحقًا اليوم: ${waitingToday}`, 'fa-solid fa-clock');
-    appendMetaChip(counts, `تأكيد الغد: ${waitingTomorrow}`, 'fa-regular fa-calendar');
+    appendMetaChip(counts, `خطوات الاستعداد: ${completedSteps} / ${totalSteps}`, 'fa-solid fa-chart-line');
+    appendMetaChip(counts, `كلمات جاهزة للاختبار: ${readyWordCount} / ${requiredWordCount}`, 'fa-solid fa-circle-check');
+    appendMetaChip(counts, `يمكن تحسينها الآن: ${availableToday}`, 'fa-solid fa-play');
+    appendMetaChip(counts, `بانتظار ساعتين: ${waitingToday}`, 'fa-solid fa-clock');
+    appendMetaChip(counts, `بانتظار يوم جديد: ${waitingTomorrow}`, 'fa-regular fa-calendar');
     const readinessCopy = publishedElement('p', 'published-gate-readiness-copy');
     if (state === 'ready') {
-      readinessCopy.textContent = 'اكتملت الخطة: تحدّي البوابة جاهز الآن.';
+      readinessCopy.textContent = 'اكتمل شريط الاستعداد. أصبح اختبار اجتياز البوابة متاحًا الآن.';
     } else if (availableToday > 0) {
-      readinessCopy.textContent = `الخطوة المفيدة الآن: تدرب على ${availableToday} كلمات من هذه البوابة.`;
+      readinessCopy.textContent = `يمكنك رفع الشريط الآن: أجب بشكل صحيح على ${availableToday} كلمات متاحة في كويز هذه البوابة.`;
     } else if (waitingToday > 0) {
-      readinessCopy.textContent = 'لا يوجد تدريب يرفع التقدم الآن؛ الجولة التالية ستتاح لاحقًا اليوم.';
+      readinessCopy.textContent = 'أخذت هذه الكلمات خطوتها الأولى. يمكنك التدريب، لكن الخطوة التالية لها ستفتح بعد ساعتين على الأقل.';
     } else if (waitingTomorrow > 0) {
-      readinessCopy.textContent = 'أنجزت جولات اليوم؛ ستحتاج جولة تأكيد غدًا لتتقدم.';
+      readinessCopy.textContent = 'بقيت خطوة في يوم جديد لهذه الكلمات. التدريب الآن مفيد، لكنه لن يرفع شريط هذه الكلمات قبل ذلك الموعد.';
     } else {
-      readinessCopy.textContent = `اكتملت مراجعة ${readyWordCount} من ${requiredWordCount} كلمات.`;
+      readinessCopy.textContent = `اكتمل استعداد ${readyWordCount} من ${requiredWordCount} كلمات. لكل كلمة ثلاث إجابات صحيحة متباعدة.`;
     }
     readiness.append(heading, track, counts, readinessCopy);
     panel.append(readiness);
@@ -5244,7 +5252,6 @@ function makePublishedGateJourneyPanel(world, rank, gate) {
           worldId: world.worldId,
           gateId: gate.gateId,
         });
-        window.loadQuizView();
         void openPublishedGateQuizPicker(world, rank, gate);
       },
       'fa-solid fa-crosshairs'
@@ -5261,7 +5268,7 @@ function makePublishedGateJourneyPanel(world, rank, gate) {
     }
   } else if (state === 'ready') {
     const clear = publishedButton(
-      progress?.activeClearAttemptId ? 'متابعة اختبار الاجتياز' : 'اختبار اجتياز البوابة',
+      progress?.activeClearAttemptId ? 'متابعة اختبار اجتياز البوابة' : 'ابدأ اختبار اجتياز البوابة النهائي',
       'published-action-btn published-journey-btn published-journey-cta',
       () => beginPublishedGateClear(world, rank, gate),
       'fa-solid fa-flag-checkered'

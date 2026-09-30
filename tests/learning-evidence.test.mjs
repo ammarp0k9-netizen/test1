@@ -145,6 +145,8 @@ test('word and gate readiness require every loaded gate word', () => {
   assert.equal(gate.readyWordCount, 1);
   assert.equal(gate.requiredWordCount, 2);
   assert.equal(gate.needsEvidenceWordCount, 1);
+  assert.equal(gate.evidenceStepCount, 3);
+  assert.equal(gate.totalEvidenceSteps, 4);
 });
 
 test('verified quiz Evidence stays idempotent and separate from reward implementation', () => {

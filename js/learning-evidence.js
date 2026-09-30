@@ -180,6 +180,7 @@
   }
 
   function computeGateReadiness(gateWords, progress, evidenceConfig, now, timezoneOffsetMinutes) {
+    const settings = resolveEvidenceConfig(evidenceConfig);
     const words = Array.isArray(gateWords) ? gateWords.filter(Boolean) : [];
     const currentTime = Math.max(0, Number(now) || effectiveNow());
     const readiness = words.map((word) =>
@@ -187,6 +188,17 @@
     );
     const readyWordCount = readiness.filter((item) => item.ready).length;
     const requiredWordCount = words.length;
+    const requiredEvidenceCount = settings.requiredEvidenceCount;
+    // A word earns one step for each valid, time-separated recall. Keeping
+    // this separate from readyWordCount lets the UI show the first and second
+    // successful recalls without changing the stricter Gate-ready condition.
+    const evidenceStepCount = readiness.reduce((total, item) => {
+      if (item.status === 'ready') return total + requiredEvidenceCount;
+      if (['waiting-next-day', 'next-day-review-available'].includes(item.status)) return total + 2;
+      if (['waiting-second-review', 'second-review-available'].includes(item.status)) return total + 1;
+      return total;
+    }, 0);
+    const totalEvidenceSteps = requiredWordCount * requiredEvidenceCount;
     const ready = requiredWordCount > 0 && readyWordCount === requiredWordCount;
     const availableForReviewNow = readiness.filter((item) => [
       'needs-first-review', 'second-review-available', 'next-day-review-available'
@@ -202,12 +214,15 @@
       readyWordCount,
       readyWords: readyWordCount,
       requiredWordCount,
+      requiredEvidenceCount,
+      evidenceStepCount,
+      totalEvidenceSteps,
       totalEligibleWords: requiredWordCount,
       needsEvidenceWordCount: Math.max(0, requiredWordCount - readyWordCount),
       availableForReviewNow,
       waitingLaterToday,
       waitingNextDay,
-      progressRatio: requiredWordCount ? readyWordCount / requiredWordCount : 0,
+      progressRatio: totalEvidenceSteps ? evidenceStepCount / totalEvidenceSteps : 0,
       nextAvailabilityAt: nextTimes.length ? Math.min(...nextTimes) : null,
       readinessVersion: EVIDENCE_VERSION,
     };

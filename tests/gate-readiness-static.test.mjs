@@ -28,16 +28,16 @@ test('the gate card exposes one aggregate progress bar and the three user catego
   );
   assert.match(panel, /published-gate-readiness-track/);
   assert.match(panel, /published-gate-readiness-fill/);
-  assert.match(panel, /اكتملت مراجعتها:/);
-  assert.match(panel, /مراجعات اليوم:/);
-  assert.match(panel, /موعدها غدًا:/);
+  assert.match(panel, /خطوات الاستعداد:/);
+  assert.match(panel, /بانتظار ساعتين:/);
+  assert.match(panel, /بانتظار يوم جديد:/);
   assert.doesNotMatch(panel, /published-word-readiness|word-readiness-indicator/);
 });
 
 test('readiness help explains review timing and mastery without internal terms', () => {
   assert.match(htmlSource, /id="gateReadinessInfoModal"[^>]*role="dialog"[^>]*aria-modal="true"/);
-  assert.match(htmlSource, /ألوان الكلمات تساعدك على متابعة مواعيد المراجعة/);
-  assert.match(htmlSource, /أما الإتقان فيأتي بعد ترسيخ الكلمات/);
+  assert.match(htmlSource, /لكل كلمة 3 خطوات/);
+  assert.match(htmlSource, /بانتظار ساعتين.*بانتظار يوم جديد/);
   assert.doesNotMatch(htmlSource, />[^<]*SRS[^<]*</);
   assert.match(worldsSource, /aria-label', 'شرح الاستعداد لاجتياز البوابة'/);
   assert.match(scriptSource, /function showModal[\s\S]*getModalFocusableElements/);
