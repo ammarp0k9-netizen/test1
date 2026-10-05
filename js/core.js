@@ -35,7 +35,12 @@
   // CREATE OVERLAY HTML
   // ============================================
   function createOverlay() {
-    if (document.getElementById(OVERLAY_ID)) return;
+    const existing = document.getElementById(OVERLAY_ID);
+    if (existing) {
+      overlayElement = existing;
+      slowWarningElement = document.getElementById(SLOW_WARNING_ID);
+      return existing;
+    }
 
     const overlay = document.createElement('div');
     overlay.id = OVERLAY_ID;
@@ -206,23 +211,26 @@
 
     // Call this when Firebase Auth state is resolved (user or null)
     onAuthResolved: function(user) {
-      if (!user) {
-        console.log('SmartLoadingOverlay: Auth resolved - no user, dismissing');
-        scheduleDismiss();
-        return;
-      }
-      
-      console.log('SmartLoadingOverlay: Auth resolved - user found, waiting for data...');
+      console.log(user
+        ? 'SmartLoadingOverlay: Auth resolved - user found, waiting for first screen decision...'
+        : 'SmartLoadingOverlay: Auth resolved - waiting for first screen decision...');
     },
 
     // Call this when user words data is fully loaded from Firebase
     onUserDataLoaded: function() {
-      console.log('SmartLoadingOverlay: User data loaded, dismissing');
+      console.log('SmartLoadingOverlay: User data loaded, waiting for first screen decision...');
+    },
+
+    // Product Entry owns the first-screen decision. It calls this only after
+    // either its onboarding surface is open or the existing app is confirmed.
+    completeStartup: function() {
+      document.documentElement.classList.remove('startup-pending');
       scheduleDismiss();
     },
 
     // Force hide (emergency fallback)
     forceHide: function() {
+      document.documentElement.classList.remove('startup-pending');
       hideOverlay();
     },
 

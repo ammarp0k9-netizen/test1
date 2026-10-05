@@ -237,6 +237,10 @@
     }));
   }
 
+  function completeStartup() {
+    root.SmartLoadingOverlay?.completeStartup?.();
+  }
+
   function srsEntryCount(user) {
     const owner = user?.uid || 'guest';
     const entries = readJson(`lootlinguaWordMastery_${owner}`, {});
@@ -551,6 +555,7 @@
       runtime.state = entryState;
       announceEntryState();
       close({ silent: true });
+      completeStartup();
       queueMicrotask(() => consumePendingJourneyIntent());
       return;
     }
@@ -565,6 +570,7 @@
     );
     announceEntryState();
     open();
+    completeStartup();
     if (user && runtime.state.currentStep === 'destination') {
       const resumed = await consumePendingJourneyIntent({ allowWhileOpen: true });
       if (resumed && token === runtime.bootToken && runtime.state?.status === 'in-progress') {

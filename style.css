@@ -36,6 +36,12 @@
   pointer-events: auto;
 }
 
+/* The initial screen is decided asynchronously. Keep every app surface out of
+   first paint while the static loader above remains visible. */
+html.startup-pending body > :not(#smartLoadingOverlay):not(script) {
+  visibility: hidden;
+}
+
 /* Blurred backdrop */
 .smart-loading-backdrop {
   position: absolute;

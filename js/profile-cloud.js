@@ -186,7 +186,12 @@ window.loadProfileFromCloud = async function(user, options = {}) {
       detail: window.__lootlinguaProfileSnapshot,
     }));
     if (typeof window.resetLootlinguaProfileState === "function") {
-      window.resetLootlinguaProfileState({ clearDisplayName: true, resetTheme: true });
+      // Keep the early cached appearance until a confirmed cloud theme replaces
+      // it below. Profiles without a theme retain the established default reset.
+      window.resetLootlinguaProfileState({
+        clearDisplayName: true,
+        resetTheme: !cloudData?.theme,
+      });
     }
     if (user.displayName && typeof window.setLootlinguaDisplayName === "function") {
       window.setLootlinguaDisplayName(user.displayName);

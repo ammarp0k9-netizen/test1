@@ -40,6 +40,7 @@
     // Paint the last confirmed local appearance before CSS loads. Auth-scoped
     // preferences replace this cache after Firebase resolves, behind Smart Loading.
     try {
+      document.documentElement.classList.add('startup-pending');
       var earlyTheme = localStorage.getItem('theme');
       var earlyOasisMode = localStorage.getItem('lootlinguaOasisMode');
       if (['lootlingua', 'golden', 'scroll', 'ocean'].includes(earlyTheme)) {
@@ -91,6 +92,16 @@
   <link rel="stylesheet" href="gradesquiz.css?v=20260811-2">
 </head>
 <body class="legend-dock-visible">
+
+<!-- Present before the application shell so first paint is always a loading state. -->
+<div id="smartLoadingOverlay" class="smart-loading-overlay visible" role="status" aria-live="polite" aria-label="جارٍ التحميل...">
+  <div class="smart-loading-backdrop"></div>
+  <div class="smart-loading-content">
+    <div class="smart-loading-spinner" aria-hidden="true"></div>
+    <p class="smart-loading-text">جارٍ التحميل...</p>
+    <p id="smartLoadingSlowWarning" class="smart-loading-slow-warning" aria-live="assertive" style="display: none; opacity: 0;">يبدو أن التحميل يستغرق وقتًا أطول من المعتاد. يرجى التحقق من اتصالك بالإنترنت.</p>
+  </div>
+</div>
 
 <!-- Toast -->
 <div id="toastHost" class="toast-host" aria-live="polite" aria-atomic="true">
@@ -747,7 +758,27 @@
             <div class="theme-preview preview-lootlingua"></div>
             <span class="theme-display-name">LootLingua</span>
             <span class="theme-status-label" aria-hidden="true"></span>
-          </div>
+            </div>
+            
+            <div class="theme-option" data-theme="ocean" data-unlock-level="4" onclick="setTheme('ocean')">
+            <div class="theme-preview preview-ocean"></div>
+            <span class="theme-display-name">واحة الهدوء</span>
+            <span class="theme-status-label" aria-hidden="true"></span>
+           </div>
+
+           <!--الثيم الجديد "الصقيع الهادئ" تم التعليق عليه مؤقتاً لأنه لم يتم الانتهاء من تصميمه بعد. يمكن إلغاء التعليق عند الانتهاء من التصميم.
+           <div class="theme-option"
+                data-theme="frost"
+                  data-unlock-level="6"
+                   onclick="setTheme('frost')">
+
+            <div class="theme-preview preview-frost"></div>
+
+            <span class="theme-display-name">الصقيع الهادئ</span>
+
+             <span class="theme-status-label" aria-hidden="true"></span>
+              </div>-->
+          
           <div class="theme-option" data-theme="golden" data-unlock-level="2" onclick="setTheme('golden')">
             <div class="theme-preview preview-golden"></div>
             <span class="theme-display-name">الكنز الذهبي</span>
@@ -758,11 +789,7 @@
             <span class="theme-display-name">المخطوطة القديمة</span>
             <span class="theme-status-label" aria-hidden="true"></span>
           </div>
-          <div class="theme-option" data-theme="ocean" data-unlock-level="4" onclick="setTheme('ocean')">
-            <div class="theme-preview preview-ocean"></div>
-            <span class="theme-display-name">واحة الهدوء</span>
-            <span class="theme-status-label" aria-hidden="true"></span>
-          </div>
+          
           <div class="theme-option theme-coming-soon"
             data-theme="glass"
             data-unlock-level="5"
