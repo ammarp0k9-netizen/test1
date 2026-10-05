@@ -736,6 +736,9 @@ window.toggleProfileModal = function() {
   renderProfileModalStats();
   renderXPBar();
   refreshFeatureUnlockUI();
+  // Admin code stays out of startup; check and expose its profile entry only
+  // after the user explicitly opens this account surface.
+  void window.prepareLootLinguaAdminEntry?.();
   closeSidebarIfOpen();
   setAppRoute('overlay', 'profile');
 };

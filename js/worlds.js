@@ -6208,6 +6208,7 @@ window.showCustomWorldsTab = function() {
 };
 
 window.loadWorldsView = function() {
+  window.ensureCustomWorldsFromCloud?.();
   prepareWorldsShell();
   setPublishedTabState('published');
   setPublishedTabsVisible(true);
@@ -7385,6 +7386,7 @@ function renderStarredWords() {
 
 // ── Quiz Full-Page View ──
 window.loadQuizView = function(options = {}) {
+  window.ensureCustomWorldsFromCloud?.();
   window.saveActiveAddFormDraft?.();
   if (window.LootLinguaGuidedFirstJourney?.shouldAllowSurface?.('quiz', options) === false) return;
   if (!isFeatureUnlocked('quiz')) {

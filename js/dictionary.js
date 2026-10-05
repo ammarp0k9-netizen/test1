@@ -1621,16 +1621,32 @@ function initWordHunterUI() {
   });
 }
 
+let tesseractLoadPromise = null;
+
+function loadTesseract() {
+  if (window.Tesseract?.recognize) return Promise.resolve(window.Tesseract);
+  if (tesseractLoadPromise) return tesseractLoadPromise;
+  tesseractLoadPromise = new Promise((resolve, reject) => {
+    const script = document.createElement('script');
+    script.src = 'https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js';
+    script.async = true;
+    script.onload = () => window.Tesseract?.recognize
+      ? resolve(window.Tesseract)
+      : reject(new Error('tesseract-api-unavailable'));
+    script.onerror = () => reject(new Error('tesseract-load-failed'));
+    document.head.appendChild(script);
+  }).catch((error) => {
+    tesseractLoadPromise = null;
+    throw error;
+  });
+  return tesseractLoadPromise;
+}
+
 async function handleWordHunterFile(file) {
   if (!file.type.startsWith('image/')) {
     showToast('ارفع صورة فقط يا بطل.', 'warning');
     return;
   }
-  if (!window.Tesseract?.recognize) {
-    showToast('مكتبة قراءة الصور لم تجهز بعد. حدّث الصفحة أو جرّب بعد لحظة.', 'warning', 4200);
-    return;
-  }
-
   wordHunterImageFile = file;
   const dropzone = document.getElementById('wordHunterDropzone');
   const image = document.getElementById('wordHunterImage');
@@ -1658,7 +1674,8 @@ async function handleWordHunterFile(file) {
 
   setWordHunterStatus('جاري استخراج الكلمات من الصورة محلياً...', true);
   try {
-    const result = await window.Tesseract.recognize(wordHunterImageFile, 'eng', {
+    const Tesseract = await loadTesseract();
+    const result = await Tesseract.recognize(wordHunterImageFile, 'eng', {
       logger: (m) => {
         if (m.status === 'recognizing text') {
           const pct = Math.round((m.progress || 0) * 100);

@@ -460,15 +460,21 @@
     runtime.legacyPreferences = user
       ? api().normalizeLegacyPreferences(readJson(api().entryStorageKey(identityFor(user), 1), null))
       : (runtime.capturedGuest?.legacyPreferences || null);
+    const learningPromise = readLearningSignals(user, token);
+    let learning;
     if (user) {
-      const loaded = await loadAccountEntry(user, token);
+      const [loaded, learningResult] = await Promise.all([
+        loadAccountEntry(user, token),
+        learningPromise,
+      ]);
       if (token !== runtime.bootToken) return;
       entryState = loaded.state;
       runtime.legacyPreferences = loaded.legacyPreferences || runtime.legacyPreferences;
       entryCloudReadFailed = loaded.cloudReadFailed;
+      learning = learningResult;
+    } else {
+      learning = await learningPromise;
     }
-
-    const learning = await readLearningSignals(user, token);
     if (!learning || token !== runtime.bootToken) return;
     const guest = runtime.capturedGuest || captureGuestSnapshot() || {};
     const profileData = user ? (profileSnapshot.data || {}) : (guest.profile || {});

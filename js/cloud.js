@@ -130,11 +130,11 @@
       if (typeof window.prepareGuestMigrationForUser === 'function') {
         window.prepareGuestMigrationForUser(user);
       }
-      if (typeof window.clearDictionaryState === 'function') window.clearDictionaryState();
+      // The startup gate remains up until Entry decides the first screen; an
+      // empty intermediate dictionary render cannot be seen or used.
+      if (typeof window.clearDictionaryState === 'function') window.clearDictionaryState({ renderView: false });
       else window.words = [];
-      if (typeof window.render === 'function') window.render();
       loadWordsFromCloud(user);
-      loadCustomWorldsFromCloud(user);
       loadGlobalWordMasteryFromCloud(user);
       setTimeout(() => {
         if (typeof window.retryPendingCustomWorlds === 'function') {
@@ -291,6 +291,9 @@
       if (error.code === "permission-denied" && typeof showToast === "function") {
         showToast("قواعد Firebase لا تسمح بقراءة كلماتك حالياً. راجع Firestore Rules.");
       }
+      // The normal snapshot renders the populated dictionary. Preserve a usable
+      // empty state if that snapshot cannot be established after startup.
+      if (typeof window.render === "function") window.render();
       // Even on error, dismiss the loading overlay
       if (window.SmartLoadingOverlay && window.SmartLoadingOverlay.onUserDataLoaded) {
         window.SmartLoadingOverlay.onUserDataLoaded();
@@ -1198,6 +1201,7 @@
 
   function loadCustomWorldsFromCloud(user) {
     if (!user) return;
+    if (customWorldsUnsubscribe) return;
     const listenerUid = user.uid;
     const q = collection(db, "users", user.uid, "customWorlds");
     console.info("[LootLingua customWorlds] listener starting", {
@@ -1239,6 +1243,13 @@
       }, error);
     });
   }
+
+  window.ensureCustomWorldsFromCloud = function() {
+    const user = auth.currentUser;
+    if (!user) return false;
+    loadCustomWorldsFromCloud(user);
+    return true;
+  };
 
   function loadGlobalWordMasteryFromCloud(user) {
     if (!user) return;

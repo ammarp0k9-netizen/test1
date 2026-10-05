@@ -1395,6 +1395,68 @@ function openRouteOverlay(kind, key) {
   }
 }
 
+let adminFeatureLoadPromise = null;
+let adminRouteLoadPromise = null;
+let adminAccessLoadPromise = null;
+
+function loadFeatureScript(src, options = {}) {
+  return new Promise((resolve, reject) => {
+    const script = document.createElement('script');
+    script.src = src;
+    if (options.module) script.type = 'module';
+    script.onload = resolve;
+    script.onerror = () => reject(new Error(`feature-load-failed:${src}`));
+    document.head.appendChild(script);
+  });
+}
+
+function loadLootLinguaAdminAccess() {
+  if (window.LootLinguaAdminCloud) return Promise.resolve();
+  if (adminAccessLoadPromise) return adminAccessLoadPromise;
+  adminAccessLoadPromise = loadFeatureScript('js/admin-cloud.js?v=20260729-1', { module: true }).catch((error) => {
+    adminAccessLoadPromise = null;
+    throw error;
+  });
+  return adminAccessLoadPromise;
+}
+
+window.loadLootLinguaAdminFeature = function() {
+  if (window.loadAdminView && window.LootLinguaAdminCloud) return Promise.resolve();
+  if (adminFeatureLoadPromise) return adminFeatureLoadPromise;
+  adminFeatureLoadPromise = (async () => {
+    await loadLootLinguaAdminAccess();
+    await loadFeatureScript('js/admin-word-import.js?v=20260729-1');
+    await loadFeatureScript('js/admin.js?v=20260729-1');
+    await loadFeatureScript('js/test-clock.js?v=20260729-2', { module: true });
+  })().catch((error) => {
+    adminFeatureLoadPromise = null;
+    throw error;
+  });
+  return adminFeatureLoadPromise;
+};
+
+window.prepareLootLinguaAdminEntry = function() {
+  return loadLootLinguaAdminAccess()
+    .then(async () => {
+      const state = await window.ensureLootLinguaAdminAccess?.();
+      if (state?.resolved && state.isAdmin) await window.loadLootLinguaAdminFeature();
+    })
+    .catch((error) => console.warn('admin access check:', error));
+};
+
+function showAdminRouteMessage(messageText) {
+  currentView = 'admin';
+  const adminView = document.getElementById('adminView');
+  if (!adminView) return;
+  adminView.hidden = false;
+  adminView.style.display = 'block';
+  adminView.replaceChildren();
+  const message = document.createElement('p');
+  message.className = 'admin-route-error';
+  message.textContent = messageText;
+  adminView.append(message);
+}
+
 function openRouteView(viewKey) {
   if (window.LootLinguaGuidedFirstJourney?.shouldAllowSurface?.(viewKey) === false) return;
   if (viewKey === 'treasure') loadTreasureView();
@@ -1407,17 +1469,17 @@ function openRouteView(viewKey) {
     if (typeof window.loadAdminView === 'function') {
       window.loadAdminView();
     } else {
-      currentView = 'admin';
-      const adminView = document.getElementById('adminView');
-      if (adminView) {
-        adminView.hidden = false;
-        adminView.style.display = 'block';
-        adminView.replaceChildren();
-        const message = document.createElement('p');
-        message.className = 'admin-route-error';
-        message.textContent = 'تعذر تحميل واجهة الإدارة. لم يتم منح أي صلاحية.';
-        adminView.append(message);
-      }
+      if (adminRouteLoadPromise) return;
+      showAdminRouteMessage('جارٍ تجهيز واجهة الإدارة...');
+      adminRouteLoadPromise = window.loadLootLinguaAdminFeature()
+        .then(() => window.loadAdminView?.())
+        .catch((error) => {
+          console.error('admin feature load:', error);
+          showAdminRouteMessage('تعذر تحميل واجهة الإدارة. حاول مرة أخرى.');
+        })
+        .finally(() => {
+          adminRouteLoadPromise = null;
+        });
     }
   }
   else loadPersonalDictionary();
