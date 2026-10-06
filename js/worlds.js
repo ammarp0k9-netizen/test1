@@ -4994,6 +4994,16 @@ async function maybeRenderPublishedGateClearResume(world, rank, gate, progress, 
     );
     if (generation !== publishedContentState.generation) return true;
     if (!bundle) return false;
+    if (!bundle.result && !bundle.question) {
+      console.warn('[Journey] Gate Clear resume returned no renderable state.', {
+        worldId: String(world.worldId),
+        rankId: String(rank.rankId),
+        gateId: String(gate.gateId),
+        attemptId: String(progress.activeClearAttemptId),
+        status: String(bundle.attempt?.status || ''),
+      });
+      return false;
+    }
     publishedContentState.gateClearBundle = bundle;
     renderPublishedGateClearAssessment(world, rank, gate, bundle);
     return true;

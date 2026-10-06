@@ -1427,8 +1427,32 @@ async function resumeGateClearAttempt(worldId, rankId, gateId) {
   const attemptId = String(progress?.activeClearAttemptId || '');
   if (!attemptId) return null;
   const attempt = await getGateClearAttempt(worldId, attemptId, { force: true });
-  if (!attempt || !['active', 'submitting'].includes(attempt.status)) return null;
+  if (!attempt) return null;
+  if (attempt.status === 'submitting') {
+    return finalizeResumedGateClearAttempt(worldId, rankId, gateId, attemptId, attempt);
+  }
+  if (attempt.status !== 'active') return null;
   return gateClearBundle(worldId, rankId, gateId, attempt);
+}
+
+async function finalizeResumedGateClearAttempt(worldId, rankId, gateId, attemptId, fallbackAttempt) {
+  const result = await finalizeGateClearAttempt(worldId, rankId, gateId, attemptId);
+  try {
+    const attempt = await getGateClearAttempt(worldId, attemptId, { force: true });
+    if (!attempt) {
+      throw journeyCloudError('gate-clear/not-found', 'Gate Clear attempt was not found after finalization.');
+    }
+    return { ...await gateClearBundle(worldId, rankId, gateId, attempt), result };
+  } catch (error) {
+    console.warn('[Journey] Gate Clear committed; result decoration failed.', {
+      code: error?.code || error?.message || 'unavailable',
+      worldId: String(worldId),
+      rankId: String(rankId),
+      gateId: String(gateId),
+      attemptId: String(attemptId),
+    });
+    return { attempt: fallbackAttempt || { attemptId }, words: [], question: null, result };
+  }
 }
 
 async function finalizeGateClearAttempt(worldId, rankId, gateId, attemptId) {
@@ -1633,6 +1657,10 @@ async function finalizeGateClearAttempt(worldId, rankId, gateId, attemptId) {
 async function answerGateClearQuestion(worldId, rankId, gateId, attemptId, selectedContentWordId) {
   const user = requireUser();
   const attemptRef = gateClearAttemptRef(user.uid, worldId, attemptId);
+  const persisted = await getGateClearAttempt(worldId, attemptId, { force: true });
+  if (persisted?.status === 'submitting') {
+    return finalizeResumedGateClearAttempt(worldId, rankId, gateId, attemptId, persisted);
+  }
   let nextSession = null;
   await runTransaction(db, async (transaction) => {
     const snapshot = await transaction.get(attemptRef);
@@ -1649,19 +1677,13 @@ async function answerGateClearQuestion(worldId, rankId, gateId, attemptId, selec
   });
   cache.gateClearAttempts.set(`${String(worldId)}/${String(attemptId)}`, nextSession);
   if (nextSession.status === 'submitting') {
-    const result = await finalizeGateClearAttempt(worldId, rankId, gateId, attemptId);
-    try {
-      return { ...await gateClearBundle(worldId, rankId, gateId, nextSession), result };
-    } catch (error) {
-      console.warn('[Journey] Gate Clear committed; result decoration failed.', {
-        code: error?.code || error?.message || 'unavailable',
-        worldId: String(worldId),
-        rankId: String(rankId),
-        gateId: String(gateId),
-        attemptId: String(attemptId),
-      });
-      return { attempt: nextSession, words: [], question: null, result };
-    }
+    return finalizeResumedGateClearAttempt(
+      worldId,
+      rankId,
+      gateId,
+      attemptId,
+      nextSession
+    );
   }
   return gateClearBundle(worldId, rankId, gateId, nextSession);
 }

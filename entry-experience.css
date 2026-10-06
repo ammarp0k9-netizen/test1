@@ -435,6 +435,22 @@ body.journey-auth-active {
   animation: entry-skeleton 1.3s ease-in-out infinite;
 }
 
+/*الثيم الجديد*/
+.preview-frost {
+  background: linear-gradient(
+    135deg,
+    #b9e5ff 0%,
+    #6dbafb 48%,
+    #4f8fe8 100%
+  );
+
+  border: 2px solid #6dbafb;
+
+  box-shadow:
+    0 0 8px rgba(109, 186, 251, 0.28),
+    inset 0 1px 1px rgba(255, 255, 255, 0.45);
+}
+
 .entry-preview-fallback {
   display: grid;
   justify-items: center;
@@ -618,6 +634,66 @@ body.journey-auth-active {
   outline: 3px solid var(--accent);
   outline-offset: 3px;
 }
+/*الثيم الجديد*/
+[data-theme="frost"] {
+  --main-bg: #070b14;
+  --card-bg: #111a2c;
+  --surface-bg: #19263b;
+
+  --accent: #6dbafb;
+  --accent2: #4f8fe8;
+
+  --text-white: #f3f8ff;
+  --text-gray: #9aabc1;
+
+  --danger: #f87171;
+  --success: #4ade80;
+  --star: #fbbf24;
+
+  --border: #31496a;
+
+  --scrollbar-thumb: rgba(109,186,251,0.22);
+  --scrollbar-thumb-hover: rgba(109,186,251,0.40);
+
+  --hover-bg: rgba(109,186,251,0.08);
+  --track-bg: rgba(148,163,184,0.10);
+
+  --accent-soft: rgba(109,186,251,0.13);
+  --danger-soft: rgba(248,113,113,0.13);
+  --success-soft: rgba(74,222,128,0.13);
+  --star-soft: rgba(251,191,36,0.15);
+
+  --overlay-bg: rgba(10,17,30,0.95);
+  --active-nav-bg: rgba(109,186,251,0.12);
+
+  --game-overlay: rgba(8,15,27,0.88);
+  --game-card-bg: rgba(25,38,59,0.78);
+
+  --text-on-accent: #07111f;
+  --text-on-star: #111827;
+
+  --header-grad: linear-gradient(135deg, #6dc6f7 0%, #649ff5 100%);
+  --focus-ring: rgba(109,186,251,0.24);
+
+  --danger-warn-bg: rgba(248,113,113,0.10);
+  --danger-warn-bdr: rgba(248,113,113,0.30);
+  --danger-warn-txt: #fca5a5;
+
+  --heatmap-0: rgba(109,186,251,0.04);
+  --heatmap-1: #294565;
+  --heatmap-2: #35628e;
+  --heatmap-3: #4381bd;
+  --heatmap-4: #63b0ee;
+
+  --tag-verb: #fb7185;
+  --tag-noun: #a78bfa;
+  --tag-adj: #4ade80;
+  --tag-tool: #f87171;
+  --tag-sentence: #2dd4bf;
+  --tag-general: #94a3b8;
+  --tag-adverb: #60a5fa;
+  --tag-game: #fbbf24;
+}
 
 /* Oasis uses one token authority for both modes. */
 [data-theme="ocean"] {
@@ -636,6 +712,7 @@ body.journey-auth-active {
   --heatmap-2: #81d8cd;
   --heatmap-3: #2fb8a9;
   --heatmap-4: #0f766e;
+  --header-grad: #0d9488;
   --border: rgba(15, 118, 110, 0.16);
 
   --scrollbar-thumb: rgba(15, 118, 110, 0.24);
