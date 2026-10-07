@@ -5083,6 +5083,9 @@ window.openGateReadinessInfo = function() {
 };
 
 function makePublishedGateJourneyPanel(world, rank, gate) {
+  // A retired client may have left its local-only overlay/state behind. The
+  // migration is idempotent and does not touch journey, SRS, XP, or Gate Clear.
+  window.LootLinguaGateGameMigration?.migrate?.();
   const progress = publishedContentState.gateProgress;
   const masteryView = publishedContentState.gateMasteryView;
   const state = publishedGateJourneyState(
