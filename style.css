@@ -13152,6 +13152,86 @@ html[data-theme="glass"] body.low-end-device :where(
   }
 }
 
+/* Runner precision pass: keep the decision readable without covering the road. */
+.runner-stage .runner-player {
+  bottom: clamp(14%, 17%, 20%);
+  z-index: 6;
+}
+
+.runner-stage .runner-word-event {
+  top: clamp(12px, 3.2%, 30px);
+  right: auto;
+  left: 50%;
+  width: min(88%, 35rem);
+  transform: translateX(-50%);
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: clamp(3px, .55vw, 7px);
+  padding: clamp(9px, 1.25vw, 14px) clamp(14px, 2.4vw, 24px);
+  text-align: center;
+  color: var(--text-primary, #fff);
+  background: linear-gradient(150deg, color-mix(in srgb, var(--surface, #17212b) 92%, transparent), color-mix(in srgb, var(--surface, #17212b) 78%, transparent));
+  border: 1px solid color-mix(in srgb, var(--accent, #7dd3fc) 48%, transparent);
+  border-radius: clamp(14px, 2vw, 20px);
+  box-shadow: 0 10px 28px rgba(0, 0, 0, .22);
+  pointer-events: none;
+}
+
+.runner-stage .runner-word-event:empty { display: none; }
+.runner-stage .runner-event-kicker { font-size: clamp(.7rem, 1.5vw, .86rem); font-weight: 800; color: var(--accent, #7dd3fc); }
+.runner-stage .runner-word-event strong { font-size: clamp(1.15rem, 3.4vw, 1.75rem); line-height: 1.05; letter-spacing: .02em; }
+.runner-stage .runner-event-instruction { font-size: clamp(.78rem, 1.7vw, .98rem); font-weight: 700; opacity: .92; }
+
+.runner-stage .runner-lane-signs {
+  top: clamp(42%, 47%, 51%);
+  bottom: auto;
+  z-index: 5;
+  align-items: start;
+  padding-inline: clamp(6px, 3vw, 34px);
+}
+
+.runner-stage .runner-lane-sign {
+  position: relative;
+  min-height: clamp(40px, 6.3vw, 58px);
+  padding: clamp(8px, 1vw, 11px) clamp(6px, 1.4vw, 14px);
+  display: grid;
+  place-items: center;
+  text-align: center;
+  font-size: clamp(.72rem, 1.55vw, 1rem);
+  font-weight: 800;
+  line-height: 1.16;
+  color: var(--text-primary, #fff);
+  background: linear-gradient(165deg, color-mix(in srgb, var(--surface, #15212c) 90%, white 10%), color-mix(in srgb, var(--surface, #15212c) 95%, black 5%));
+  border: 1px solid color-mix(in srgb, var(--accent, #7dd3fc) 44%, transparent);
+  border-radius: 12px 12px 8px 8px;
+  box-shadow: 0 7px 13px rgba(0, 0, 0, .20), inset 0 1px 0 rgba(255,255,255,.12);
+}
+
+.runner-stage .runner-lane-sign::after {
+  content: "";
+  position: absolute;
+  top: 100%;
+  left: 50%;
+  width: 3px;
+  height: clamp(11px, 2.2vw, 21px);
+  transform: translateX(-50%);
+  border: 0;
+  border-radius: 0 0 3px 3px;
+  background: color-mix(in srgb, var(--accent, #7dd3fc) 48%, #17212b);
+  opacity: .88;
+}
+
+.runner-stage .runner-lane-sign.is-correct { border-color: #65d89a; box-shadow: 0 0 0 2px rgba(101,216,154,.18), 0 8px 16px rgba(25,124,76,.25); }
+.runner-stage .runner-lane-sign.is-wrong { border-color: #ff8585; box-shadow: 0 0 0 2px rgba(255,133,133,.18), 0 8px 16px rgba(142,38,38,.24); }
+.runner-record-result { color: var(--accent, #7dd3fc); font-weight: 800; }
+
+@media (max-width: 520px), (max-height: 560px) {
+  .runner-stage .runner-player { bottom: 16%; }
+  .runner-stage .runner-word-event { width: min(92%, 31rem); }
+  .runner-stage .runner-lane-signs { top: 48%; padding-inline: 4px; }
+  .runner-stage .runner-lane-sign { min-height: 38px; padding-inline: 4px; font-size: clamp(.66rem, 3.2vw, .82rem); }
+}
+
 .published-gate-state-card .gate-runner-card{grid-column:1 / -1;align-self:stretch;justify-self:start}
 /* Runner polish: decorative layers never participate in collisions. */
 .runner-stage{isolation:isolate;background:linear-gradient(#32537a 0%,#17395c 40%,#18263a 72%,#111827 100%)}.runner-world,.runner-world>*{position:absolute;inset:0;pointer-events:none}.runner-world{z-index:0;overflow:hidden}.runner-skyline{opacity:.48;background:linear-gradient(90deg,transparent 0 5%,rgba(10,25,47,.72) 5% 13%,transparent 13% 19%,rgba(10,25,47,.8) 19% 27%,transparent 27% 41%,rgba(10,25,47,.72) 41% 53%,transparent 53% 65%,rgba(10,25,47,.8) 65% 75%,transparent 75% 88%,rgba(10,25,47,.68) 88% 96%,transparent 96%);clip-path:polygon(0 57%,5% 48%,13% 53%,19% 38%,27% 55%,41% 45%,53% 54%,65% 34%,75% 48%,88% 41%,96% 54%,100% 47%,100% 100%,0 100%)}.runner-hills{top:34%;background:radial-gradient(ellipse 28% 35% at 14% 100%,#244b54 0 60%,transparent 61%),radial-gradient(ellipse 34% 39% at 58% 100%,#1d404b 0 60%,transparent 61%),radial-gradient(ellipse 27% 32% at 93% 100%,#284653 0 60%,transparent 61%);opacity:.92}.runner-arches{top:14%;left:37%;right:37%;bottom:29%;border:clamp(7px,1.3vw,14px) solid rgba(218,199,139,.45);border-bottom:0;border-radius:100% 100% 0 0;box-shadow:0 0 34px rgba(255,221,143,.16)}.runner-scenery{inset:auto;bottom:8%;z-index:1;width:clamp(42px,9vw,110px);height:clamp(90px,20vw,220px);background:linear-gradient(#2d6d6d 0 35%,#754d35 36%);border-radius:50% 50% 14% 14%;opacity:.88}.runner-scenery-left{left:4%}.runner-scenery-right{right:4%}.runner-lights{background:radial-gradient(circle at 16% 49%,#ffe6a3 0 3px,transparent 4px),radial-gradient(circle at 84% 44%,#ffe6a3 0 3px,transparent 4px),radial-gradient(circle at 33% 31%,rgba(255,230,163,.8) 0 2px,transparent 3px),radial-gradient(circle at 67% 29%,rgba(255,230,163,.8) 0 2px,transparent 3px);animation:runnerParallax 6s linear infinite}.runner-tracks{z-index:2}.runner-stage:before{z-index:1;animation:runnerRoad 1.2s linear infinite}.runner-player{z-index:4}.runner-object{z-index:4}.runner-object.is-obstacle{border-radius:4px;background:linear-gradient(135deg,#ff8b68,#b7385a);box-shadow:0 0 0 4px rgba(255,129,110,.18),0 8px 16px rgba(0,0,0,.3)}.runner-object.is-obstacle.is-barrier{border-radius:7px;transform:translateX(-50%) skewX(-12deg);background:repeating-linear-gradient(135deg,#ffdd6d 0 6px,#d95751 6px 12px)}.runner-object.is-coin{animation:runnerCoin .6s ease-in-out infinite alternate}.runner-game.is-coin-pickup .runner-hud-coins{color:#ffe17a;transform:scale(1.13)}.runner-hud{display:flex;gap:clamp(5px,1vw,11px);align-items:center}.runner-hud span{padding:6px 9px;border-radius:999px;background:rgba(7,16,32,.34);font-size:clamp(.72rem,1.8vw,.92rem);transition:transform .18s,color .18s}.runner-hud-hearts{color:#ffd3d9}.runner-word-event{z-index:7;transition:opacity .18s,transform .18s}.runner-game.is-word-event .runner-word-event{animation:runnerEventIn .25s ease-out}.runner-event-kicker{font-size:.76rem!important;letter-spacing:.08em;text-transform:uppercase;color:#ffdf85}.runner-event-instruction{font-weight:800}.runner-lane-signs{position:absolute;z-index:6;inset:35% 4% auto;display:grid;grid-template-columns:repeat(3,1fr);gap:clamp(5px,1.2vw,14px);pointer-events:none}.runner-lane-sign{position:relative;min-height:clamp(46px,7vw,72px);display:grid;place-items:center;padding:7px;border:2px solid rgba(255,255,255,.5);border-radius:12px;background:linear-gradient(160deg,rgba(17,35,59,.94),rgba(7,15,29,.85));box-shadow:0 9px 18px rgba(0,0,0,.27);font-weight:900;font-size:clamp(.76rem,2.1vw,1.12rem);text-align:center}.runner-lane-sign:after{content:"";position:absolute;top:100%;border:10px solid transparent;border-top-color:rgba(7,15,29,.85)}.runner-lane-sign.is-correct{border-color:#8bf0bd;background:#145e54;color:#effff6}.runner-lane-sign.is-wrong{border-color:#ff8c97;background:#722c40;color:#fff5f5}.runner-choice-mark{position:absolute;inset:auto 7px 5px auto;font-size:1.1rem}.runner-game.is-protected .runner-stage{box-shadow:inset 0 0 0 3px rgba(255,225,131,.34)}.runner-game.is-correct .runner-stage{box-shadow:inset 0 0 0 4px #76efad}.runner-game.is-finished .runner-word-event{z-index:20;pointer-events:auto;isolation:isolate;background:rgba(7,15,29,.8);padding:clamp(16px,4vw,30px);border:1px solid rgba(255,255,255,.24);border-radius:20px;box-shadow:0 20px 60px rgba(0,0,0,.42)}.runner-game.is-finished .runner-word-event button{pointer-events:auto;position:relative;z-index:22;min-height:48px}.runner-game.is-finished .runner-stage:after{content:"";position:absolute;inset:0;z-index:10;background:rgba(2,8,18,.27);pointer-events:none}.runner-controls{position:relative;z-index:12}.runner-controls button{font-size:clamp(.84rem,2vw,1rem)}@keyframes runnerCoin{to{transform:translateX(-50%) rotateY(180deg) scale(1.1)}}@keyframes runnerRoad{to{background-position:0 90px}}@keyframes runnerParallax{50%{transform:translateX(1.5%)}}@keyframes runnerEventIn{from{opacity:0;transform:translateY(-12px) scale(.96)}to{opacity:1;transform:none}}@media(max-width:560px){.runner-arches{left:30%;right:30%;bottom:33%}.runner-scenery{opacity:.7}.runner-lane-signs{inset:38% 3% auto}.runner-lane-sign{min-height:52px;padding:5px}.runner-word-event{inset:7% 4% auto}.runner-hud{flex-basis:100%;order:3;justify-content:space-between}}@media(min-width:900px){.runner-scenery{bottom:10%}.runner-lights{transform:scale(1.12)}.runner-stage{min-height:clamp(400px,54vw,590px)}}@media(prefers-reduced-motion:reduce){.runner-lights,.runner-stage:before,.runner-object.is-coin,.runner-game.is-word-event .runner-word-event{animation:none}}
@@ -14495,4 +14575,84 @@ html[data-theme="glass"] body.low-end-device :where(.legend-dock, .treasure-dock
     --glass-v2-card: rgba(78, 120, 149, 0.70);
     --glass-v2-card-soft: rgba(82, 124, 152, 0.62);
   }
+}
+
+/* Runner precision pass: final cascade, deliberately after all legacy runner rules. */
+.runner-stage .runner-player {
+  bottom: clamp(14%, 17%, 20%);
+  z-index: 6;
+}
+
+.runner-stage .runner-word-event {
+  top: clamp(12px, 3.2%, 30px);
+  right: auto;
+  left: 50%;
+  width: min(88%, 35rem);
+  transform: translateX(-50%);
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: clamp(3px, .55vw, 7px);
+  padding: clamp(9px, 1.25vw, 14px) clamp(14px, 2.4vw, 24px);
+  text-align: center;
+  color: var(--text-primary, #fff);
+  background: linear-gradient(150deg, color-mix(in srgb, var(--surface, #17212b) 92%, transparent), color-mix(in srgb, var(--surface, #17212b) 78%, transparent));
+  border: 1px solid color-mix(in srgb, var(--accent, #7dd3fc) 48%, transparent);
+  border-radius: clamp(14px, 2vw, 20px);
+  box-shadow: 0 10px 28px rgba(0, 0, 0, .22);
+  pointer-events: none;
+}
+
+.runner-stage .runner-word-event:empty { display: none; }
+.runner-stage .runner-event-kicker { font-size: clamp(.7rem, 1.5vw, .86rem); font-weight: 800; color: var(--accent, #7dd3fc); }
+.runner-stage .runner-word-event strong { font-size: clamp(1.15rem, 3.4vw, 1.75rem); line-height: 1.05; letter-spacing: .02em; }
+.runner-stage .runner-event-instruction { font-size: clamp(.78rem, 1.7vw, .98rem); font-weight: 700; opacity: .92; }
+
+.runner-stage .runner-lane-signs {
+  top: clamp(42%, 47%, 51%);
+  bottom: auto;
+  z-index: 5;
+  align-items: start;
+  padding-inline: clamp(6px, 3vw, 34px);
+}
+
+.runner-stage .runner-lane-sign {
+  position: relative;
+  min-height: clamp(40px, 6.3vw, 58px);
+  padding: clamp(8px, 1vw, 11px) clamp(6px, 1.4vw, 14px);
+  display: grid;
+  place-items: center;
+  text-align: center;
+  font-size: clamp(.72rem, 1.55vw, 1rem);
+  font-weight: 800;
+  line-height: 1.16;
+  color: var(--text-primary, #fff);
+  background: linear-gradient(165deg, color-mix(in srgb, var(--surface, #15212c) 90%, white 10%), color-mix(in srgb, var(--surface, #15212c) 95%, black 5%));
+  border: 1px solid color-mix(in srgb, var(--accent, #7dd3fc) 44%, transparent);
+  border-radius: 12px 12px 8px 8px;
+  box-shadow: 0 7px 13px rgba(0, 0, 0, .20), inset 0 1px 0 rgba(255,255,255,.12);
+}
+
+.runner-stage .runner-lane-sign::after {
+  content: "";
+  position: absolute;
+  top: 100%;
+  left: 50%;
+  width: 3px;
+  height: clamp(11px, 2.2vw, 21px);
+  transform: translateX(-50%);
+  border: 0;
+  border-radius: 0 0 3px 3px;
+  background: color-mix(in srgb, var(--accent, #7dd3fc) 48%, #17212b);
+  opacity: .88;
+}
+
+.runner-stage .runner-lane-sign.is-correct { border-color: #65d89a; box-shadow: 0 0 0 2px rgba(101,216,154,.18), 0 8px 16px rgba(25,124,76,.25); }
+.runner-stage .runner-lane-sign.is-wrong { border-color: #ff8585; box-shadow: 0 0 0 2px rgba(255,133,133,.18), 0 8px 16px rgba(142,38,38,.24); }
+.runner-record-result { color: var(--accent, #7dd3fc); font-weight: 800; }
+
+@media (max-width: 520px), (max-height: 560px) {
+  .runner-stage .runner-player { bottom: 16%; }
+  .runner-stage .runner-word-event { width: min(92%, 31rem); }
+  .runner-stage .runner-lane-signs { top: 48%; padding-inline: 4px; }
+  .runner-stage .runner-lane-sign { min-height: 38px; padding-inline: 4px; font-size: clamp(.66rem, 3.2vw, .82rem); }
 }
