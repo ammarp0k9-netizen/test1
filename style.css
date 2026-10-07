@@ -99,6 +99,45 @@ html.startup-pending body > :not(#smartLoadingOverlay):not(script) {
   animation: smartLoadingPulse 1.8s ease-in-out infinite;
 }
 
+/* A quiet, delayed hint for longer startup waits. */
+.smart-loading-tip {
+  display: none;
+  width: min(360px, calc(100vw - 48px));
+  margin: -4px 0 0;
+  padding: 10px 14px;
+  color: var(--text-gray, #cbd5e1);
+  background: color-mix(in srgb, var(--surface-bg, #1e293b) 72%, transparent);
+  border: 1px solid color-mix(in srgb, var(--border, #334155) 82%, transparent);
+  border-radius: 12px;
+  box-sizing: border-box;
+  line-height: 1.5;
+}
+
+.smart-loading-tip.is-visible {
+  display: block;
+  opacity: 0.82;
+  animation: smartLoadingTipFadeIn 0.18s ease both;
+}
+
+@keyframes smartLoadingTipFadeIn {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 0.82; transform: translateY(0); }
+}
+
+.smart-loading-tip-title {
+  display: block;
+  margin-bottom: 3px;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--accent, #60a5fa);
+}
+
+.smart-loading-tip-text {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 500;
+}
+
 @keyframes smartLoadingPulse {
   0%, 100% { opacity: 0.7; }
   50% { opacity: 1; }
@@ -180,10 +219,14 @@ body.smart-loading-active {
 
 /* Reduce animations in turbo/stable modes — keep spinner rotating smoothly */
 body.perf-turbo .smart-loading-text,
-body.perf-stable .smart-loading-text {
+body.perf-stable .smart-loading-text,
+body.perf-turbo .smart-loading-tip,
+body.perf-stable .smart-loading-tip {
   animation: none;
-  opacity: 1;
 }
+
+body.perf-turbo .smart-loading-text,
+body.perf-stable .smart-loading-text { opacity: 1; }
 
 body.perf-turbo .smart-loading-content,
 body.perf-stable .smart-loading-content {
@@ -212,6 +255,11 @@ body.perf-stable .smart-loading-overlay {
   
   .smart-loading-text {
     animation: none;
+  }
+
+  .smart-loading-tip {
+    animation: none;
+    transform: translateY(0);
   }
   
   .smart-loading-content {
@@ -1998,6 +2046,26 @@ body.admin-mode .admin-world-row {
   padding: 2rem 0;
   background: transparent;
   border: none;
+}
+
+@media (max-width: 480px) {
+  .smart-loading-content {
+    gap: 16px;
+    padding: 20px 16px;
+  }
+
+  .smart-loading-spinner {
+    width: 48px;
+    height: 48px;
+  }
+
+  .smart-loading-tip {
+    width: min(340px, calc(100vw - 32px));
+    padding: 9px 12px;
+  }
+
+  .smart-loading-tip-text { font-size: 12px; }
+  .smart-loading-slow-warning { max-width: calc(100vw - 32px); }
 }
 
 /* Smart notification lifecycle + contextual action */
