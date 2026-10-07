@@ -5202,13 +5202,12 @@ function makePublishedGateJourneyPanel(world, rank, gate) {
     }
     readiness.append(heading, track, counts, readinessCopy);
     panel.append(readiness);
-    const expedition = window.LootLinguaGateExpedition?.render?.({
+    const runner = window.LootLinguaGateRunner?.render?.({
       worldId: world.worldId,
       rankId: rank.rankId,
       gateId: gate.gateId,
-      progress,
     });
-    if (expedition) panel.append(expedition);
+    if (runner) panel.append(runner);
     if (state !== 'ready' && availableToday === 0 && (waitingToday > 0 || waitingTomorrow > 0)) {
       schedulePublishedReadinessTimer(progress, readinessCopy);
     }
