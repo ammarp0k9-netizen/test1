@@ -1807,6 +1807,9 @@ window.getLootlinguaProfilePayload = function() {
     gameDictAdds:     loadInt('lootlinguaGameDictAdds', 0),
     perfectQuizzes:   loadInt('lootlinguaPerfectQuizzes', 0),
     extraChests:      loadJSON('lootlinguaExtraChests', []),
+    // Runner rewards are cosmetic-only and deliberately separate from XP/SRS.
+    runnerCoins:      loadInt('lootlingua.runner.coins.v1', 0),
+    runnerBestDistance: loadInt('lootlingua.runner.best-distance.v1', 0),
   };
 };
 
@@ -1836,6 +1839,8 @@ window.resetLootlinguaProfileState = function(options = {}) {
     'lootlinguaGameDictAdds',
     'lootlinguaPerfectQuizzes',
     'lootlinguaExtraChests',
+    'lootlingua.runner.coins.v1',
+    'lootlingua.runner.best-distance.v1',
   ].forEach((key) => localStorage.removeItem(key));
   clearDailyQuestStorage();
   if (clearDisplayName) localStorage.removeItem('lootlinguaDisplayName');
@@ -1949,6 +1954,8 @@ window.mergeLootlinguaProfileFromCloud = function(d) {
   if (d.freezeSaves !== undefined) saveInt('lootlinguaFreezeSaves', Math.max(loadInt('lootlinguaFreezeSaves', 0), Number(d.freezeSaves) || 0));
   if (d.gameDictAdds !== undefined) saveInt('lootlinguaGameDictAdds', Math.max(loadInt('lootlinguaGameDictAdds', 0), Number(d.gameDictAdds) || 0));
   if (d.perfectQuizzes !== undefined) saveInt('lootlinguaPerfectQuizzes', Math.max(loadInt('lootlinguaPerfectQuizzes', 0), Number(d.perfectQuizzes) || 0));
+  if (d.runnerCoins !== undefined) saveInt('lootlingua.runner.coins.v1', Math.max(loadInt('lootlingua.runner.coins.v1', 0), Number(d.runnerCoins) || 0));
+  if (d.runnerBestDistance !== undefined) saveInt('lootlingua.runner.best-distance.v1', Math.max(loadInt('lootlingua.runner.best-distance.v1', 0), Number(d.runnerBestDistance) || 0));
   if (Array.isArray(d.extraChests)) {
     const localExtra = loadJSON('lootlinguaExtraChests', []);
     const seen = new Set();
