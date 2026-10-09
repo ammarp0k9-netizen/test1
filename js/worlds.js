@@ -5179,6 +5179,7 @@ function makePublishedGateJourneyPanel(world, rank, gate) {
     const readiness = publishedElement('div', 'published-gate-readiness');
     const heading = publishedElement('div', 'published-gate-readiness-heading');
     heading.append(publishedElement('strong', '', 'خطة فتح تحدّي البوابة')); 
+    const counts = publishedElement('div', 'published-gate-readiness-counts');
     appendMetaChip(counts, ` ${completedSteps} / ${totalSteps}`, 'fa-solid fa-chart-line');
     const info = publishedElement('button', 'published-readiness-info-btn');
     info.type = 'button';
@@ -5197,7 +5198,6 @@ function makePublishedGateJourneyPanel(world, rank, gate) {
     const readinessPercent = totalSteps ? Math.round((completedSteps / totalSteps) * 100) : 0;
     animatePublishedGateProgress(fill, readinessPercent);
     track.append(fill);
-    const counts = publishedElement('div', 'published-gate-readiness-counts');
     const availableToday = Math.max(0, Number(progress?.availableForReviewNowCount) || 0);
     const waitingToday = Math.max(0, Number(progress?.waitingLaterTodayCount) || 0);
     const waitingTomorrow = Math.max(0, Number(progress?.waitingNextDayCount) || 0);
