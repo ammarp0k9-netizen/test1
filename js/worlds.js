@@ -5175,7 +5175,8 @@ function makePublishedGateJourneyPanel(world, rank, gate) {
     );
     const readiness = publishedElement('div', 'published-gate-readiness');
     const heading = publishedElement('div', 'published-gate-readiness-heading');
-    heading.append(publishedElement('strong', '', 'خطة فتح تحدّي البوابة'));
+    heading.append(publishedElement('strong', '', 'خطة فتح تحدّي البوابة')); 
+    appendMetaChip(counts, ` ${completedSteps} / ${totalSteps}`, 'fa-solid fa-chart-line');
     const info = publishedElement('button', 'published-readiness-info-btn');
     info.type = 'button';
     info.title = 'كيف يتقدم التحدّي؟';
@@ -5197,7 +5198,7 @@ function makePublishedGateJourneyPanel(world, rank, gate) {
     const availableToday = Math.max(0, Number(progress?.availableForReviewNowCount) || 0);
     const waitingToday = Math.max(0, Number(progress?.waitingLaterTodayCount) || 0);
     const waitingTomorrow = Math.max(0, Number(progress?.waitingNextDayCount) || 0);
-    appendMetaChip(counts, `خطوات الاستعداد: ${completedSteps} / ${totalSteps}`, 'fa-solid fa-chart-line');
+    //المكان القديم ل"خطوات الاستعداد"
     appendMetaChip(counts, `كلمات جاهزة للاختبار: ${readyWordCount} / ${requiredWordCount}`, 'fa-solid fa-circle-check');
     if (availableToday > 0) {appendMetaChip(counts,`كلمات يمكن تحسينها الآن: ${availableToday}`,'fa-solid fa-play');
     }
