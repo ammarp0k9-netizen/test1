@@ -5199,11 +5199,11 @@ function makePublishedGateJourneyPanel(world, rank, gate) {
     const waitingTomorrow = Math.max(0, Number(progress?.waitingNextDayCount) || 0);
     appendMetaChip(counts, `خطوات الاستعداد: ${completedSteps} / ${totalSteps}`, 'fa-solid fa-chart-line');
     appendMetaChip(counts, `كلمات جاهزة للاختبار: ${readyWordCount} / ${requiredWordCount}`, 'fa-solid fa-circle-check');
-    if (availableToday > 0) {appendMetaChip(counts,`يمكن تحسينها الآن: ${availableToday}`,'fa-solid fa-play');
+    if (availableToday > 0) {appendMetaChip(counts,`كلمات يمكن تحسينها الآن: ${availableToday}`,'fa-solid fa-play');
     }
-    if (waitingToday > 0) {appendMetaChip(counts,`بانتظار ساعتين: ${waitingToday}`,'fa-solid fa-clock');
+    if (waitingToday > 0) {appendMetaChip(counts,`كلمات بانتظار ساعتين: ${waitingToday}`,'fa-solid fa-clock');
     }
-    if (waitingTomorrow > 0) {appendMetaChip(counts,`بانتظار يوم جديد: ${waitingTomorrow}`,'fa-regular fa-calendar');
+    if (waitingTomorrow > 0) {appendMetaChip(counts,`كلمات بانتظار يوم جديد: ${waitingTomorrow}`,'fa-regular fa-calendar');
     }
     const readinessCopy = publishedElement('p', 'published-gate-readiness-copy');
     if (state === 'ready') {
