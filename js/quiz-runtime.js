@@ -100,6 +100,8 @@ async function commitVerifiedQuizResults(trace, onStage) {
         completed: true,
         entries: transitionEntries,
         projectReadiness: false,
+        officialReviewGate: window.getActiveVerifiedQuizCommitContext?.(activeQuizSession.id)?.officialReviewGate || null,
+        officialReviewDueWordKeys: window.getActiveVerifiedQuizCommitContext?.(activeQuizSession.id)?.officialReviewDueWordKeys || [],
       });
       trace?.stage('evidence-write-end', { ...evidence, fallback: true });
     }

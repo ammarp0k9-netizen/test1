@@ -244,6 +244,8 @@ function applyStoredQuizSession(session) {
     source: session.source || 'personal',
     sourceType: session.sourceType || quizCore.parseSourceScope(session.source || 'personal').sourceType,
     sourceId: session.sourceId || quizCore.parseSourceScope(session.source || 'personal').sourceId,
+    officialReviewGate: session.officialReviewGate || null,
+    officialReviewDueWordKeys: Array.isArray(session.officialReviewDueWordKeys) ? session.officialReviewDueWordKeys : [],
     createdAt: session.createdAt || Date.now(),
     words: session.words,
     pool: Array.isArray(session.pool) && session.pool.length ? session.pool : session.words,
@@ -743,6 +745,8 @@ window.getActiveVerifiedQuizCommitContext = function(sessionId) {
     sessionId: requestedSessionId,
     mode: activeQuizSession.mode,
     source: activeQuizSession.source || currentQuizSource,
+    officialReviewGate: activeQuizSession.officialReviewGate || null,
+    officialReviewDueWordKeys: Array.isArray(activeQuizSession.officialReviewDueWordKeys) ? activeQuizSession.officialReviewDueWordKeys : [],
   };
 };
 
@@ -1181,6 +1185,8 @@ async function startActualQuiz(mode, options = {}) {
     source: sessionSource,
     sourceType: sourceInfo.sourceType,
     sourceId: sourceInfo.sourceId,
+    officialReviewGate: options.officialReviewGate || null,
+    officialReviewDueWordKeys: Array.isArray(options.officialReviewDueWordKeys) ? options.officialReviewDueWordKeys : [],
     createdAt: Date.now(),
     words: selectedWords,
     pool: currentQuizPool,
@@ -1252,6 +1258,8 @@ window.startGateQuiz = async function(mode, input = {}) {
   return startActualQuiz(selectedMode, {
     words,
     source,
+    officialReviewGate: input.officialReviewGate || null,
+    officialReviewDueWordKeys: Array.isArray(input.officialReviewDueWordKeys) ? input.officialReviewDueWordKeys : [],
     skipAvailabilityCheck: true,
   });
 };

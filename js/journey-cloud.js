@@ -1066,6 +1066,38 @@ function deterministicPrivateMembershipId(wordKey) {
   return `published_${core().cleanId(wordKey, 'Word key')}`.slice(0, 500);
 }
 
+function officialReviewGate(input) {
+  const gate = input?.officialReviewGate;
+  if (!gate || typeof gate !== 'object') return null;
+  const worldId = String(gate.worldId || '').trim();
+  const rankId = String(gate.rankId || '').trim();
+  const gateId = String(gate.gateId || '').trim();
+  const dueWordKeys = Array.from(new Set((input?.officialReviewDueWordKeys || []).map(String).filter(Boolean))).slice(0, 2000);
+  return worldId && rankId && gateId && dueWordKeys.length ? { worldId, rankId, gateId, dueWordKeys } : null;
+}
+
+function currentGateDueWordKeys(words, timezoneOffsetMinutes) {
+  const evidence = evidenceCore(), lifecycle = window.LootLinguaWordLifecycle;
+  return Array.from(new Set((words || []).map((word) => {
+    const state = evidence.getWordGateReadiness(word, undefined, Date.now(), timezoneOffsetMinutes);
+    return ['needs-first-review', 'second-review-available', 'next-day-review-available'].includes(state.status) ? String(lifecycle?.wordKeyOf?.(word) || word?.wordKey || '') : '';
+  }).filter(Boolean))).sort();
+}
+
+async function recordOfficialRunnerReview(user, input, sessionId) {
+  const review = officialReviewGate(input);
+  if (!review) return false;
+  const ref = gateProgressRef(user.uid, review.worldId, review.rankId, review.gateId);
+  await runTransaction(db, async (transaction) => {
+    const snapshot = await transaction.get(ref), progress = snapshot.data() || {};
+    if (!snapshot.exists() || !['learning', 'ready'].includes(progress.status)) return;
+    const loaded = new Set((progress.loadedWordKeys || []).map(String));
+    if (!review.dueWordKeys.every((key) => loaded.has(key))) return;
+    transaction.update(ref, { runnerReviewCompletedSessionId: sessionId, runnerReviewCompletedDueWordKeys: review.dueWordKeys, lastActivityAt: serverTimestamp() });
+  });
+  return true;
+}
+
 async function ensureQuizEvidenceSession(user, input, entries) {
   const sessionId = core().cleanId(input?.sessionId, 'Quiz session');
   const source = String(input?.source || 'personal');
@@ -1074,6 +1106,7 @@ async function ensureQuizEvidenceSession(user, input, entries) {
   const wordKeys = Array.from(new Set(entries.map((entry) =>
     window.LootLinguaWordLifecycle?.wordKeyOf?.(entry.word)
   ).filter(Boolean)));
+  const review = officialReviewGate(input);
   const correctWordKeys = Array.from(new Set(entries
     .filter((entry) => entry.result?.correct === true)
     .map((entry) => window.LootLinguaWordLifecycle?.wordKeyOf?.(entry.word))
@@ -1103,9 +1136,14 @@ async function ensureQuizEvidenceSession(user, input, entries) {
       totalCount: wordKeys.length,
       correctCount: correctWordKeys.length,
       evidenceVersion: evidenceCore().EVIDENCE_VERSION,
+      officialReviewWorldId: review?.worldId || '',
+      officialReviewRankId: review?.rankId || '',
+      officialReviewGateId: review?.gateId || '',
+      officialReviewDueWordKeys: review?.dueWordKeys || [],
       completedAt: serverTimestamp(),
     });
   });
+  await recordOfficialRunnerReview(user, input, sessionId);
   return { sessionId, sourceType, privateWorldId, wordKeys, correctWordKeys };
 }
 
@@ -1265,6 +1303,7 @@ async function evaluateActiveJourneyReadiness() {
       words.find((word) => Number.isInteger(Number(word?.evidenceTimezoneOffsetMinutes)))
         ?.evidenceTimezoneOffsetMinutes ?? new Date().getTimezoneOffset()
     );
+    const dueWordKeys = currentGateDueWordKeys(words, timezoneOffsetMinutes);
     const readiness = evidenceCore().computeGateReadiness(
       words,
       progress,
@@ -1279,7 +1318,8 @@ async function evaluateActiveJourneyReadiness() {
       Number(progress.totalEvidenceSteps) === readiness.totalEvidenceSteps &&
       Number(progress.availableForReviewNowCount) === readiness.availableForReviewNow &&
       Number(progress.waitingLaterTodayCount) === readiness.waitingLaterToday &&
-      Number(progress.waitingNextDayCount) === readiness.waitingNextDay;
+      Number(progress.waitingNextDayCount) === readiness.waitingNextDay &&
+      JSON.stringify((progress.runnerReviewDueWordKeys || []).slice().sort()) === JSON.stringify(dueWordKeys);
     if (unchanged) return readiness;
     const targetRef = gateProgressRef(user.uid, worldId, rankId, gateId);
     const saved = await runTransaction(db, async (transaction) => {
@@ -1302,6 +1342,7 @@ async function evaluateActiveJourneyReadiness() {
           : null,
         readinessTimezoneOffsetMinutes: timezoneOffsetMinutes,
         readinessVersion: readiness.readinessVersion,
+        runnerReviewDueWordKeys: dueWordKeys,
         readyAt: readiness.ready && !current.readyAt ? serverTimestamp() : (current.readyAt || null),
         lastActivityAt: serverTimestamp(),
       });
@@ -4523,6 +4564,8 @@ function installQuizEvidenceBeforeRewardHook() {
       completed: true,
       entries,
       projectReadiness: false,
+      officialReviewGate: context.officialReviewGate || null,
+      officialReviewDueWordKeys: context.officialReviewDueWordKeys || [],
     });
     options.trace?.stage('evidence-write-end', evidence);
     options.trace?.stage('xp-journey-start');

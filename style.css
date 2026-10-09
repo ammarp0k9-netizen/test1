@@ -1,4 +1,4 @@
-﻿/* ============================================
+/* ============================================
    SMART LOADING OVERLAY STYLES
    Full-screen blurred overlay with spinner
    ============================================ */
@@ -14656,3 +14656,13 @@ html[data-theme="glass"] body.low-end-device :where(.legend-dock, .treasure-dock
   .runner-stage .runner-lane-signs { top: 48%; padding-inline: 4px; }
   .runner-stage .runner-lane-sign { min-height: 38px; padding-inline: 4px; font-size: clamp(.66rem, 3.2vw, .82rem); }
 }
+
+/* Runner input/physics alignment: the visible player and pointer surface own the gesture. */
+.runner-input-active { overscroll-behavior: contain; }
+.runner-input-active .runner-overlay { overscroll-behavior: contain; }
+.runner-stage .runner-player { left: calc(var(--player-x, .5) * 100%); }
+.gate-runner-launch:disabled { opacity: .48; cursor: not-allowed; filter: saturate(.55); }
+.gate-runner-review-lock { flex-basis: 100%; margin: 0; color: var(--text, #f7f8ff); font-size: .82rem; line-height: 1.45; }
+.runner-game.debug-hitboxes .runner-player { outline: 2px solid #6ff; outline-offset: -2px; }
+.runner-game.debug-hitboxes .runner-object.is-obstacle { outline: 2px solid #ff6677; }
+.runner-game.debug-hitboxes .runner-object.is-coin { outline: 2px solid #ffd45a; }

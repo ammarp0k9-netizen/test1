@@ -1106,6 +1106,7 @@ function isMobileSwipeDevice() {
 }
 
 function isAppSwipeNavigationAvailable() {
+  if (window.__lootlinguaRunnerInputActive) return false;
   const dock = document.getElementById('legendDock');
   if (!dock || getComputedStyle(dock).display === 'none') return false;
   return document.body.classList.contains('legend-dock-visible') ||
@@ -1113,6 +1114,7 @@ function isAppSwipeNavigationAvailable() {
 }
 
 function isSwipeBlockedTarget(target) {
+  if (window.__lootlinguaRunnerInputActive) return true;
   if (!target?.closest) return false;
   return Boolean(target.closest([
     'input',
@@ -1224,6 +1226,9 @@ function initTreasureSwipeNavigation() {
   }, { passive: true });
   document.addEventListener('touchcancel', resetAppSwipeState, { passive: true });
 }
+
+window.addEventListener('lootlingua:runner-input-active', resetAppSwipeState);
+window.addEventListener('lootlingua:runner-input-inactive', resetAppSwipeState);
 
 initTreasureSwipeNavigation();
 
@@ -4386,6 +4391,10 @@ async function openPublishedGateQuizPicker(world, rank, gate) {
       <div class="published-gate-quiz-modes"></div>
       <small class="published-gate-quiz-note">لرفع شريط الجاهزية اختر أحد التحديات الثلاثة وأجب صحيحًا من المحاولة الأولى. بطاقات الذاكرة، وتصحيح الخطأ داخل المطابقة، للتدريب فقط.</small>
     </div>`;
+  const officialReviewDueWordKeys = Number(progress?.availableForReviewNowCount) > 0 ? words.map((word) => {
+    const status = window.LootLinguaLearningEvidence?.getWordGateReadiness?.(word)?.status;
+    return ['needs-first-review', 'second-review-available', 'next-day-review-available'].includes(status) ? String(window.LootLinguaWordLifecycle?.wordKeyOf?.(word) || word?.wordKey || '') : '';
+  }).filter(Boolean) : [];
   const choose = async (mode) => {
     close(false);
     const started = await window.startGateQuiz?.(mode, {
@@ -4393,6 +4402,8 @@ async function openPublishedGateQuizPicker(world, rank, gate) {
       worldId: world.worldId,
       rankId: rank.rankId,
       gateId: gate.gateId,
+      officialReviewGate: officialReviewDueWordKeys.length ? { worldId: world.worldId, rankId: rank.rankId, gateId: gate.gateId } : null,
+      officialReviewDueWordKeys,
     });
     if (!started) window.openPublishedGate(world.worldId, rank.rankId, gate.gateId);
   };
@@ -5188,9 +5199,12 @@ function makePublishedGateJourneyPanel(world, rank, gate) {
     const waitingTomorrow = Math.max(0, Number(progress?.waitingNextDayCount) || 0);
     appendMetaChip(counts, `خطوات الاستعداد: ${completedSteps} / ${totalSteps}`, 'fa-solid fa-chart-line');
     appendMetaChip(counts, `كلمات جاهزة للاختبار: ${readyWordCount} / ${requiredWordCount}`, 'fa-solid fa-circle-check');
-    appendMetaChip(counts, `يمكن تحسينها الآن: ${availableToday}`, 'fa-solid fa-play');
-    appendMetaChip(counts, `بانتظار ساعتين: ${waitingToday}`, 'fa-solid fa-clock');
-    appendMetaChip(counts, `بانتظار يوم جديد: ${waitingTomorrow}`, 'fa-regular fa-calendar');
+    if (availableToday > 0) {appendMetaChip(counts,`يمكن تحسينها الآن: ${availableToday}`,'fa-solid fa-play');
+    }
+    if (waitingToday > 0) {appendMetaChip(counts,`بانتظار ساعتين: ${waitingToday}`,'fa-solid fa-clock');
+    }
+    if (waitingTomorrow > 0) {appendMetaChip(counts,`بانتظار يوم جديد: ${waitingTomorrow}`,'fa-regular fa-calendar');
+    }
     const readinessCopy = publishedElement('p', 'published-gate-readiness-copy');
     if (state === 'ready') {
       readinessCopy.textContent = 'اكتمل شريط الاستعداد. أصبح اختبار اجتياز البوابة متاحًا الآن.';
@@ -5203,12 +5217,14 @@ function makePublishedGateJourneyPanel(world, rank, gate) {
     } else {
       readinessCopy.textContent = `اكتمل استعداد ${readyWordCount} من ${requiredWordCount} كلمات. لكل كلمة ثلاث إجابات صحيحة متباعدة.`;
     }
+
     readiness.append(heading, track, counts, readinessCopy);
     panel.append(readiness);
     const runner = window.LootLinguaGateRunner?.render?.({
       worldId: world.worldId,
       rankId: rank.rankId,
       gateId: gate.gateId,
+      progress,
     });
     if (runner) panel.append(runner);
     if (state !== 'ready' && availableToday === 0 && (waitingToday > 0 || waitingTomorrow > 0)) {
