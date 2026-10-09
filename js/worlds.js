@@ -3811,6 +3811,10 @@ function publishedErrorMessage(level, error) {
 }
 
 function renderPublishedError(level, error, retry) {
+  console.error(`[published-content:${level}]`, error);
+  console.trace('مكان استدعاء renderPublishedError');
+
+
   const root = publishedViewRoot();
   if (!root) return;
   const notFound = error?.code === 'published/not-found';
