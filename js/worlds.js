@@ -3797,8 +3797,7 @@ function renderPublishedLoading(message) {
 
 function logPublishedContentError(context, error) {
   const localHost = ['localhost', '127.0.0.1', '::1'].includes(location.hostname);
-  if (localHost) console.error(`[published-content:${context}]`, error);
-}
+if (localHost) console.error(`[published-content:${context}]`, error);}
 
 function publishedErrorMessage(level, error) {
   if (error?.code === 'published/not-found') return 'هذا المحتوى غير موجود أو لم يعد منشورًا.';
