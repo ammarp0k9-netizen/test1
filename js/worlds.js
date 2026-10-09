@@ -5179,8 +5179,6 @@ function makePublishedGateJourneyPanel(world, rank, gate) {
     const readiness = publishedElement('div', 'published-gate-readiness');
     const heading = publishedElement('div', 'published-gate-readiness-heading');
     heading.append(publishedElement('strong', '', 'خطة فتح تحدّي البوابة')); 
-    const counts = publishedElement('div', 'published-gate-readiness-counts');
-    appendMetaChip(counts, ` ${completedSteps} / ${totalSteps}`, 'fa-solid fa-chart-line');
     const info = publishedElement('button', 'published-readiness-info-btn');
     info.type = 'button';
     info.title = 'كيف يتقدم التحدّي؟';
@@ -5190,6 +5188,7 @@ function makePublishedGateJourneyPanel(world, rank, gate) {
     heading.append(info);
     const track = publishedElement('span', 'published-gate-readiness-track');
     const fill = publishedElement('span', 'published-gate-readiness-fill');
+    const counts = publishedElement('div', 'published-gate-readiness-counts');
     const completedSteps = Math.max(0, Number(progress?.evidenceStepCount) || 0);
     const totalSteps = Math.max(
       completedSteps,
@@ -5201,7 +5200,7 @@ function makePublishedGateJourneyPanel(world, rank, gate) {
     const availableToday = Math.max(0, Number(progress?.availableForReviewNowCount) || 0);
     const waitingToday = Math.max(0, Number(progress?.waitingLaterTodayCount) || 0);
     const waitingTomorrow = Math.max(0, Number(progress?.waitingNextDayCount) || 0);
-    //المكان القديم ل"خطوات الاستعداد"
+    appendMetaChip(counts, ` ${completedSteps} / ${totalSteps}`, 'fa-solid fa-chart-line');
     appendMetaChip(counts, `كلمات جاهزة للاختبار: ${readyWordCount} / ${requiredWordCount}`, 'fa-solid fa-circle-check');
     if (availableToday > 0) {appendMetaChip(counts,`كلمات يمكن تحسينها الآن: ${availableToday}`,'fa-solid fa-play');
     }
