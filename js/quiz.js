@@ -1254,8 +1254,10 @@ window.startGateQuiz = async function(mode, input = {}) {
   }
   clearActiveQuizSessionStorage();
   window.__pendingQuizResumeSession = null;
-  window.loadQuizView({ skipResume: true });
-  return startActualQuiz(selectedMode, {
+  window.loadQuizView({
+    skipResume: true,
+    guided: true,
+  });  return startActualQuiz(selectedMode, {
     words,
     source,
     officialReviewGate: input.officialReviewGate || null,
@@ -1304,8 +1306,11 @@ window.startGateGapReview = function(wordKeys, context = {}) {
   }
   clearActiveQuizSessionStorage();
   window.__pendingQuizResumeSession = null;
-  window.loadQuizView({ skipResume: true });
-  const sourceParts = [context.worldId, context.rankId, context.gateId]
+  window.loadQuizView({
+    skipResume: true,
+    guided: true,
+});  
+const sourceParts = [context.worldId, context.rankId, context.gateId]
     .map((value) => String(value || '').replace(/[^a-zA-Z0-9_-]/g, '_'))
     .filter(Boolean);
   startActualQuiz('scramble', {
@@ -1331,7 +1336,7 @@ window.startNotificationWordReview = function(wordKeys, context = {}) {
   }
   clearActiveQuizSessionStorage();
   window.__pendingQuizResumeSession = null;
-  window.loadQuizView({ skipResume: true });
+  window.loadQuizView({ skipResume: true, guided: true });
   startActualQuiz('scramble', {
     words: reviewWords,
     source: `notification:${String(context.kind || 'review')}`.slice(0, 500),
