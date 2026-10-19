@@ -4447,7 +4447,11 @@ window.openPublishedGatePractice = async function openPublishedGatePractice(worl
     }
     publishedContentState.gateProgress = progress;
     publishedContentState.gateProgressById.set(String(gateId), progress);
-    window.loadQuizView?.({ skipResume: true });
+    // Pass guided:true so the onboarding guard does not block this legitimate
+    // gate-practice entry point (notification-triggered practice on the user's
+    // active gate should always open during an active guided journey).
+    const viewOpened = window.loadQuizView?.({ skipResume: true, guided: true });
+    if (viewOpened === false) return false;
     await openPublishedGateQuizPicker(world, rank, gate);
     return true;
   } catch (error) {
@@ -5288,10 +5292,10 @@ function makePublishedGateJourneyPanel(world, rank, gate) {
         : 'تدرّب على كلمات هذه البوابة — متابعة التعلم',
       'published-action-btn published-journey-btn published-journey-cta published-gate-practice-cta',
       () => {
-        void window.LootLinguaGuidedFirstJourney?.completeFromQuizCta?.({
-          worldId: world.worldId,
-          gateId: gate.gateId,
-        });
+        // Do NOT call completeFromQuizCta here — opening the picker is not
+        // completion. The guided-first-journey controller listens for
+        // lootlingua:trusted-quiz-completed and will complete the journey only
+        // after the actual gate quiz finishes successfully.
         void openPublishedGateQuizPicker(world, rank, gate);
       },
       'fa-solid fa-crosshairs'
@@ -7419,11 +7423,11 @@ function renderStarredWords() {
 window.loadQuizView = function(options = {}) {
   window.ensureCustomWorldsFromCloud?.();
   window.saveActiveAddFormDraft?.();
-  if (window.LootLinguaGuidedFirstJourney?.shouldAllowSurface?.('quiz', options) === false) return;
+  if (window.LootLinguaGuidedFirstJourney?.shouldAllowSurface?.('quiz', options) === false) return false;
   if (!isFeatureUnlocked('quiz')) {
     openUnlockExplainModal('quiz');
     refreshFeatureUnlockUI();
-    return;
+    return false;
   }
   beginViewSwitch();
   saveCurrentViewScroll();
@@ -7467,6 +7471,7 @@ window.loadQuizView = function(options = {}) {
   restoreViewScroll('quiz');
   refreshFeatureUnlockUI();
   setAppViewRoute('quiz');
+  return true;
 };
 
 window.loadPersonalDictionary = function(options = {}) {

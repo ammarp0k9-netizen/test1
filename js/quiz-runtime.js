@@ -293,11 +293,36 @@ function finishQuizRun() {
   if (fullyCompleted && commit.total > 0) {
     incrementDailyCountBy(commit.total);
     checkAndUpdateStreak({ learningEvent: true });
+    // Capture gate context from the session BEFORE activeQuizSession is cleared
+    // below. The guided-first-journey controller needs worldId and gateId to
+    // validate that the finished quiz actually belongs to the onboarding gate.
+    //
+    // Source format for gate quizzes: "journey:worldId~rankId~gateId"
+    // officialReviewGate is only set when SRS review words are due, so it is
+    // null on a new user's very first gate pass — parse the source string too.
+    const sessionSource = String(activeQuizSession?.source || '');
+    const officialGate = activeQuizSession?.officialReviewGate || null;
+    const commitContext = window.getActiveVerifiedQuizCommitContext?.(activeQuizSession?.id);
+    const resolvedGate = officialGate || commitContext?.officialReviewGate || null;
+    let detailWorldId = resolvedGate?.worldId || '';
+    let detailGateId = resolvedGate?.gateId || '';
+    if ((!detailWorldId || !detailGateId) && sessionSource.startsWith('journey:')) {
+      // "journey:worldId~rankId~gateId" — split on '~' to get the three parts.
+      const parts = sessionSource.slice('journey:'.length).split('~');
+      if (parts.length >= 3) {
+        detailWorldId = detailWorldId || parts[0];
+        detailGateId = detailGateId || parts[2];
+      }
+    }
     dispatchTrustedQuizCompletedSafely({
       sessionId: String(activeQuizSession?.id || ''),
       completedAt: Date.now(),
       correctCount: Number(commit.correctCount) || 0,
       total: Number(commit.total) || 0,
+      source: sessionSource,
+      officialReviewGate: resolvedGate,
+      worldId: detailWorldId,
+      gateId: detailGateId,
     });
   }
   if (fullyCompleted && accuracy >= 0.9) recordHighAccuracyVerifiedQuiz(activeQuizSession.id);

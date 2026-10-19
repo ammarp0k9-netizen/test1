@@ -169,7 +169,12 @@
   }
 
   function shouldAllowSurface(surface, options) {
-    if (!active() || options?.guided === true) return true;
+    // guided:true is an explicit override for known system-initiated quiz entry
+    // points (startGateQuiz, startGateGapReview, startNotificationWordReview,
+    // openPublishedGatePractice). All four call loadQuizView, which passes
+    // surface='quiz'. Restrict the bypass to that surface only so that accidental
+    // or future callers cannot suppress guards for unrelated surfaces.
+    if (!active() || (options?.guided === true && surface === 'quiz')) return true;
     const guestExploring = Boolean(runtime.state?.guestDictionaryAvailable && !user());
     if (guestExploring) return true;
     if (surface === 'personal') {
@@ -262,6 +267,37 @@
   root.addEventListener('lootlingua:auth-state', () => { runtime.loadedOwner = ''; runtime.handoffAttempts = 0; void boot(); });
   root.addEventListener('lootlingua:guided-first-journey-cloud-ready', () => { runtime.loadedOwner = ''; void boot(); });
   root.addEventListener('lootlingua:initial-data-ready', () => { void boot(); });
+
+  // ── Quiz completion wiring ────────────────────────────────────────────────
+  // completeFromQuizCta must fire only when the gate quiz ACTUALLY finishes,
+  // not when the mode picker opens. quiz-runtime.js dispatches this event after
+  // the verified quiz result is durably committed and SRS state is saved.
+  //
+  // Validation rules (all must hold to accept the completion):
+  //   1. The journey must still be active (not already completed).
+  //   2. The current phase must be awaiting-quiz-cta (gate words were loaded).
+  //   3. The event must carry a journey: source (gate quiz, not a personal quiz).
+  //   4. The worldId from the event must match the onboarding world.
+  //   5. The gateId from the event must match the onboarding gate (when present).
+  //   6. A signed-in user must own this journey (guest cannot reach this phase).
+  // The contract's transition() is idempotent: a duplicate event returns the
+  // same state object unchanged, so concurrent or replayed events are harmless.
+  root.addEventListener('lootlingua:trusted-quiz-completed', (event) => {
+    const detail = event.detail || {};
+    const source = String(detail.source || '');
+    // Only gate quizzes carry a "journey:" source prefix.
+    if (!source.startsWith('journey:')) return;
+    // Must be active and in the phase that awaits quiz completion.
+    if (!active()) return;
+    if (runtime.state?.phase !== 'awaiting-quiz-cta') return;
+    // A signed-in owner is required — guest cannot reach awaiting-quiz-cta.
+    if (!user()) return;
+    const eventWorldId = String(detail.worldId || '');
+    const eventGateId = String(detail.gateId || '');
+    if (!eventWorldId) return; // Cannot validate without a world ID.
+    void completeFromQuizCta({ worldId: eventWorldId, gateId: eventGateId });
+  });
+
   queueMicrotask(boot);
 
   Object.defineProperty(root, 'LootLinguaGuidedFirstJourney', {

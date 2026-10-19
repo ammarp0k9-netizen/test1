@@ -1254,10 +1254,15 @@ window.startGateQuiz = async function(mode, input = {}) {
   }
   clearActiveQuizSessionStorage();
   window.__pendingQuizResumeSession = null;
-  window.loadQuizView({
+  // loadQuizView now returns false if the guided guard or feature lock blocks
+  // the transition. In that case, abort entirely — do NOT call startActualQuiz
+  // or hide docks, which would leave the interface in a broken half-state.
+  const viewOpened = window.loadQuizView({
     skipResume: true,
     guided: true,
-  });  return startActualQuiz(selectedMode, {
+  });
+  if (viewOpened === false) return false;
+  return startActualQuiz(selectedMode, {
     words,
     source,
     officialReviewGate: input.officialReviewGate || null,
