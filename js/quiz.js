@@ -246,6 +246,9 @@ function applyStoredQuizSession(session) {
     sourceId: session.sourceId || quizCore.parseSourceScope(session.source || 'personal').sourceId,
     officialReviewGate: session.officialReviewGate || null,
     officialReviewDueWordKeys: Array.isArray(session.officialReviewDueWordKeys) ? session.officialReviewDueWordKeys : [],
+    journeyWorldId: session.journeyWorldId || '',
+    journeyRankId: session.journeyRankId || '',
+    journeyGateId: session.journeyGateId || '',
     createdAt: session.createdAt || Date.now(),
     words: session.words,
     pool: Array.isArray(session.pool) && session.pool.length ? session.pool : session.words,
@@ -1187,6 +1190,9 @@ async function startActualQuiz(mode, options = {}) {
     sourceId: sourceInfo.sourceId,
     officialReviewGate: options.officialReviewGate || null,
     officialReviewDueWordKeys: Array.isArray(options.officialReviewDueWordKeys) ? options.officialReviewDueWordKeys : [],
+    journeyWorldId: options.journeyWorldId || '',
+    journeyRankId: options.journeyRankId || '',
+    journeyGateId: options.journeyGateId || '',
     createdAt: Date.now(),
     words: selectedWords,
     pool: currentQuizPool,
@@ -1267,6 +1273,9 @@ window.startGateQuiz = async function(mode, input = {}) {
     source,
     officialReviewGate: input.officialReviewGate || null,
     officialReviewDueWordKeys: Array.isArray(input.officialReviewDueWordKeys) ? input.officialReviewDueWordKeys : [],
+    journeyWorldId: input.worldId || '',
+    journeyRankId: input.rankId || '',
+    journeyGateId: input.gateId || '',
     skipAvailabilityCheck: true,
   });
 };
@@ -1311,11 +1320,12 @@ window.startGateGapReview = function(wordKeys, context = {}) {
   }
   clearActiveQuizSessionStorage();
   window.__pendingQuizResumeSession = null;
-  window.loadQuizView({
+  const viewOpened = window.loadQuizView({
     skipResume: true,
     guided: true,
-});  
-const sourceParts = [context.worldId, context.rankId, context.gateId]
+  });
+  if (viewOpened === false) return false;
+  const sourceParts = [context.worldId, context.rankId, context.gateId]
     .map((value) => String(value || '').replace(/[^a-zA-Z0-9_-]/g, '_'))
     .filter(Boolean);
   startActualQuiz('scramble', {
@@ -1341,7 +1351,8 @@ window.startNotificationWordReview = function(wordKeys, context = {}) {
   }
   clearActiveQuizSessionStorage();
   window.__pendingQuizResumeSession = null;
-  window.loadQuizView({ skipResume: true, guided: true });
+  const viewOpened = window.loadQuizView({ skipResume: true, guided: true });
+  if (viewOpened === false) return false;
   startActualQuiz('scramble', {
     words: reviewWords,
     source: `notification:${String(context.kind || 'review')}`.slice(0, 500),
@@ -1433,4 +1444,3 @@ function requeueForgotQuizWord(updatedWord, fromIndex) {
   const insertAt = Math.min(fromIndex + gap, currentQuizWords.length);
   currentQuizWords.splice(insertAt, 0, { ...updatedWord });
 }
-
