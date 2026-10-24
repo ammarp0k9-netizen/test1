@@ -297,20 +297,23 @@ function finishQuizRun() {
     // below. The guided-first-journey controller needs worldId and gateId to
     // validate that the finished quiz actually belongs to the onboarding gate.
     //
-    // Source format for gate quizzes: "journey:worldId~rankId~gateId"
-    // officialReviewGate is only set when SRS review words are due, so it is
-    // null on a new user's very first gate pass — parse the source string too.
+    // Gate quizzes carry the exact hierarchy on the verified session. Prefer it
+    // over officialReviewGate/source parsing: officialReviewGate is only present
+    // when SRS review words are due, and the journey: source string was already
+    // sanitized when the session started.
     const sessionSource = String(activeQuizSession?.source || '');
     const officialGate = activeQuizSession?.officialReviewGate || null;
     const commitContext = window.getActiveVerifiedQuizCommitContext?.(activeQuizSession?.id);
     const resolvedGate = officialGate || commitContext?.officialReviewGate || null;
-    let detailWorldId = resolvedGate?.worldId || '';
-    let detailGateId = resolvedGate?.gateId || '';
+    let detailWorldId = String(activeQuizSession?.journeyWorldId || resolvedGate?.worldId || '');
+    let detailRankId = String(activeQuizSession?.journeyRankId || resolvedGate?.rankId || '');
+    let detailGateId = String(activeQuizSession?.journeyGateId || resolvedGate?.gateId || '');
     if ((!detailWorldId || !detailGateId) && sessionSource.startsWith('journey:')) {
       // "journey:worldId~rankId~gateId" — split on '~' to get the three parts.
       const parts = sessionSource.slice('journey:'.length).split('~');
       if (parts.length >= 3) {
         detailWorldId = detailWorldId || parts[0];
+        detailRankId = detailRankId || parts[1];
         detailGateId = detailGateId || parts[2];
       }
     }
@@ -322,6 +325,7 @@ function finishQuizRun() {
       source: sessionSource,
       officialReviewGate: resolvedGate,
       worldId: detailWorldId,
+      rankId: detailRankId,
       gateId: detailGateId,
     });
   }
