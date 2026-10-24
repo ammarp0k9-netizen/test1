@@ -294,7 +294,9 @@
     if (!user()) return;
     const eventWorldId = String(detail.worldId || '');
     const eventGateId = String(detail.gateId || '');
-    if (!eventWorldId) return; // Cannot validate without a world ID.
+    if (!eventWorldId || !eventGateId) return; // Both IDs are required to prove the exact gate.
+    if (eventWorldId !== runtime.state.worldId) return;
+    if (runtime.state.gateId && eventGateId !== runtime.state.gateId) return;
     void completeFromQuizCta({ worldId: eventWorldId, gateId: eventGateId });
   });
 
