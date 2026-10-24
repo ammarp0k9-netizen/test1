@@ -2,13 +2,15 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 
-const [contractSource, controllerSource, worldsSource, htmlSource, rulesSource, popoverSource] = await Promise.all([
+const [contractSource, controllerSource, worldsSource, htmlSource, rulesSource, popoverSource, quizSource, quizRuntimeSource] = await Promise.all([
   readFile(new URL('../js/guided-first-journey-contract.js', import.meta.url), 'utf8'),
   readFile(new URL('../js/guided-first-journey-controller.js', import.meta.url), 'utf8'),
   readFile(new URL('../js/worlds.js', import.meta.url), 'utf8'),
   readFile(new URL('../index.html', import.meta.url), 'utf8'),
   readFile(new URL('../firestore.rules', import.meta.url), 'utf8'),
   readFile(new URL('../js/popover.js', import.meta.url), 'utf8'),
+  readFile(new URL('../js/quiz.js', import.meta.url), 'utf8'),
+  readFile(new URL('../js/quiz-runtime.js', import.meta.url), 'utf8'),
 ]);
 
 const root = {};
@@ -66,6 +68,121 @@ test('state keys isolate a guest and every account', () => {
   assert.match(guided.storageKey({ uid: 'account-a' }), /guided-first-journey:v1:user:account-a$/);
 });
 
+class MemoryStorage {
+  constructor(seed = {}) {
+    this.values = new Map(Object.entries(seed).map(([key, value]) => [key, String(value)]));
+  }
+
+  getItem(key) {
+    return this.values.has(String(key)) ? this.values.get(String(key)) : null;
+  }
+
+  setItem(key, value) {
+    this.values.set(String(key), String(value));
+  }
+
+  removeItem(key) {
+    this.values.delete(String(key));
+  }
+}
+
+function createControllerHarness() {
+  const listeners = new Map();
+  const classList = { toggle() {}, add() {}, remove() {}, contains() { return false; } };
+  const document = {
+    documentElement: { classList },
+    body: { classList },
+    querySelectorAll: () => [],
+    createElement: () => ({
+      className: '',
+      id: '',
+      textContent: '',
+      classList,
+      append() {},
+      setAttribute() {},
+    }),
+  };
+  const root = {
+    auth: { currentUser: { uid: 'guided-user' } },
+    document,
+    localStorage: new MemoryStorage(),
+    sessionStorage: new MemoryStorage(),
+    addEventListener(type, listener) {
+      const entries = listeners.get(type) || [];
+      entries.push(listener);
+      listeners.set(type, entries);
+    },
+    removeEventListener(type, listener) {
+      const entries = listeners.get(type) || [];
+      listeners.set(type, entries.filter((candidate) => candidate !== listener));
+    },
+    dispatchEvent(event) {
+      const dispatched = {
+        type: event.type,
+        detail: event.detail,
+        target: root,
+        preventDefault() {},
+      };
+      for (const listener of listeners.get(event.type) || []) listener.call(root, dispatched);
+      return true;
+    },
+  };
+  const evaluate = new Function(
+    'window',
+    'globalThis',
+    `const localStorage = window.localStorage;
+const sessionStorage = window.sessionStorage;
+const document = window.document;
+${contractSource}
+${controllerSource}
+return window.LootLinguaGuidedFirstJourney;`
+  );
+  return { root, controller: evaluate(root, root) };
+}
+
+test('trusted quiz completion requires the exact onboarding gate hierarchy', async () => {
+  const { controller, root } = createControllerHarness();
+  await controller.beginFromEntry({
+    presentation: { classification: 'brand-new', audience: 'new' },
+    worldId: 'world-alpha',
+  });
+  await controller.gateOpened({ worldId: 'world-alpha', gateId: 'gate-1' });
+  await controller.gateWordsLoaded({ worldId: 'world-alpha', gateId: 'gate-1' });
+  assert.equal(controller.getState().phase, 'awaiting-quiz-cta');
+
+  const completedDetail = {
+    source: 'journey:world-alpha~rank-a~gate-1',
+    worldId: 'world-alpha',
+    rankId: 'rank-a',
+    gateId: 'gate-1',
+    total: 3,
+  };
+
+  root.dispatchEvent({
+    type: 'lootlingua:trusted-quiz-completed',
+    detail: { ...completedDetail, gateId: 'gate-2' },
+  });
+  assert.equal(controller.getState().phase, 'awaiting-quiz-cta');
+
+  root.dispatchEvent({
+    type: 'lootlingua:trusted-quiz-completed',
+    detail: { ...completedDetail, worldId: 'world-beta' },
+  });
+  assert.equal(controller.getState().phase, 'awaiting-quiz-cta');
+
+  root.dispatchEvent({
+    type: 'lootlingua:trusted-quiz-completed',
+    detail: { ...completedDetail, gateId: '' },
+  });
+  assert.equal(controller.getState().phase, 'awaiting-quiz-cta');
+
+  root.dispatchEvent({
+    type: 'lootlingua:trusted-quiz-completed',
+    detail: completedDetail,
+  });
+  assert.equal(controller.getState().phase, 'completed');
+});
+
 test('the app uses a small persisted UX layer without changing Entry or Journey semantics', () => {
   assert.match(htmlSource, /guided-first-journey-contract\.js/);
   assert.match(htmlSource, /guided-first-journey-controller\.js/);
@@ -79,7 +196,13 @@ test('the app uses a small persisted UX layer without changing Entry or Journey 
   assert.match(controllerSource, /استكشاف الموقع كاملاً كضيف/);
   assert.match(worldsSource, /if \(!syncOnly\)[\s\S]*gateWordsLoaded/);
   assert.match(worldsSource, /completeFromQuizCta/);
-  assert.match(worldsSource, /window\.loadQuizView\(\)/);
+  assert.match(worldsSource, /\bloadQuizView\(\)/);
+  assert.match(quizSource, /journeyWorldId: input\.worldId/);
+  assert.match(quizSource, /journeyGateId: input\.gateId/);
+  assert.match(quizRuntimeSource, /activeQuizSession\?\.journeyWorldId/);
+  assert.match(quizRuntimeSource, /worldId: detailWorldId/);
+  assert.match(controllerSource, /eventWorldId !== runtime\.state\.worldId/);
+  assert.match(controllerSource, /eventGateId !== runtime\.state\.gateId/);
   assert.match(rulesSource, /match \/guidedFirstJourneys\/\{versionId\}/);
   assert.match(controllerSource, /LootLinguaPopover/);
   assert.match(controllerSource, /lootlingua:journey-auth-requested/);
