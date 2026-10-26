@@ -310,8 +310,12 @@
     if (eventWorldId !== runtime.state.worldId) return;
     if (runtime.state.gateId && eventGateId !== runtime.state.gateId) return;
 
-    // A completed, verified gate quiz proves that its exact gate was loaded.
-    // Recover the phase if a persisted cloud snapshot lagged behind the route.
+    // A completed, verified gate quiz proves that its exact gate was opened
+    // and its words were loaded. Recover from a lagging persisted UX phase, but
+    // never replace a known, different gate ID.
+    if (runtime.state.phase === 'awaiting-first-gate' && !runtime.state.gateId) {
+      await gateOpened({ worldId: eventWorldId, gateId: eventGateId });
+    }
     if (
       runtime.state.phase === 'first-gate-opened' &&
       runtime.state.gateId === eventGateId

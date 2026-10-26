@@ -193,8 +193,7 @@ test('verified completion recovers if the journey cloud phase lags behind its co
     presentation: { classification: 'brand-new', audience: 'new' },
     worldId: 'world-alpha',
   });
-  await controller.gateOpened({ worldId: 'world-alpha', gateId: 'gate-1' });
-  assert.equal(controller.getState().phase, 'first-gate-opened');
+  assert.equal(controller.getState().phase, 'awaiting-first-gate');
 
   root.dispatchEvent({
     type: 'lootlingua:trusted-quiz-completed',
