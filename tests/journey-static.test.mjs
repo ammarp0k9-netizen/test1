@@ -135,7 +135,9 @@ test('Journey source linking reports the exact failed transaction without cleari
 
 test('interrupted gate loads reconstruct exact progress from source links and resume missing words', () => {
   assert.match(cloud, /async function getGateLoadProgress\(/);
-  assert.match(cloud, /sourceSnapshot\.exists\(\) && personalIndex\.has\(identity\.wordKey\)/);
+  assert.match(cloud, /if \(!sourceSnapshot\.exists\(\)\) return \{ word, wordKey: identity\.wordKey, loaded: false \}/);
+  assert.match(cloud, /if \(personalIndex instanceof Map\)/);
+  assert.match(cloud, /legacySnapshot\.exists\(\)/);
   assert.match(cloud, /const pendingWords = linkStatuses\.filter\(\(status\) => !status\.loaded\)/);
   assert.match(cloud, /let completed = alreadyLoaded\.length/);
   assert.match(cloud, /total: targetWords\.length/);

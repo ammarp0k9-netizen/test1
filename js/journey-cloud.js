@@ -1085,13 +1085,26 @@ async function getGateWordLinkStatuses(uid, worldId, rankId, gateId, words, pers
       const sourceSnapshot = await getDoc(
         doc(db, 'users', uid, 'contentWords', identity.wordKey, 'sources', sourceId)
       );
-      // Count only words whose source link and personal dictionary row both exist.
-      // If either is missing, the next run must repair that word.
-      return {
-        word,
-        wordKey: identity.wordKey,
-        loaded: sourceSnapshot.exists() && personalIndex.has(identity.wordKey),
-      };
+      if (!sourceSnapshot.exists()) return { word, wordKey: identity.wordKey, loaded: false };
+
+      // The operation already has a full personal index, so reuse it there.
+      // Route recovery avoids scanning the entire dictionary: inspect only the
+      // canonical word and its legacy dictionary row when the source exists.
+      if (personalIndex instanceof Map) {
+        return {
+          word,
+          wordKey: identity.wordKey,
+          loaded: personalIndex.has(identity.wordKey),
+        };
+      }
+      const canonicalSnapshot = await getDoc(
+        doc(db, 'users', uid, 'contentWords', identity.wordKey)
+      );
+      if (!canonicalSnapshot.exists()) return { word, wordKey: identity.wordKey, loaded: false };
+      const canonicalData = canonicalSnapshot.data() || {};
+      const legacyWordId = String(canonicalData.legacyWordId || deterministicLegacyWordId(identity.wordKey));
+      const legacySnapshot = await getDoc(doc(db, 'users', uid, 'words', legacyWordId));
+      return { word, wordKey: identity.wordKey, loaded: legacySnapshot.exists() };
     }));
     statuses.push(...batchStatuses);
   }
@@ -1100,9 +1113,8 @@ async function getGateWordLinkStatuses(uid, worldId, rankId, gateId, words, pers
 
 async function getGateLoadProgress(worldId, rankId, gateId, options = {}) {
   const user = requireUser();
-  const [allWords, personalIndex, progress] = await Promise.all([
+  const [allWords, progress] = await Promise.all([
     listAllGateWords(worldId, rankId, gateId, { force: Boolean(options.force) }),
-    readPersonalWordIndex(user.uid),
     options.progress
       ? Promise.resolve(options.progress)
       : getGateProgress(worldId, rankId, gateId, { force: Boolean(options.force) }),
@@ -1114,7 +1126,7 @@ async function getGateLoadProgress(worldId, rankId, gateId, options = {}) {
     ? allWords.filter((word) => newContentIds.has(String(word.contentWordId || '')))
     : allWords;
   const statuses = await getGateWordLinkStatuses(
-    user.uid, worldId, rankId, gateId, targetWords, personalIndex
+    user.uid, worldId, rankId, gateId, targetWords, null
   );
   const loaded = statuses.filter((status) => status.loaded);
   return {
