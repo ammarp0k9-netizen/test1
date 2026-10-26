@@ -1062,6 +1062,72 @@ async function listAllGateWords(worldId, rankId, gateId, options) {
   return words;
 }
 
+// A gate's aggregate progress is only committed after the entire load succeeds.
+// Per-word source documents are durable checkpoints when a page refresh interrupts a partial load.
+async function getGateWordLinkStatuses(uid, worldId, rankId, gateId, words, personalIndex) {
+  const statuses = [];
+  const batchSize = 25;
+  for (let offset = 0; offset < words.length; offset += batchSize) {
+    const batch = words.slice(offset, offset + batchSize);
+    const batchStatuses = await Promise.all(batch.map(async (word) => {
+      const identity = schemaApi().normalizeWordIdentity(word);
+      const contentWordId = String(word?.contentWordId || '');
+      if (!identity.wordKey || !contentWordId) {
+        return { word, wordKey: identity.wordKey || '', loaded: false };
+      }
+      const source = {
+        worldId: core().cleanId(word.worldId || worldId, 'World'),
+        rankId: core().cleanId(word.rankId || rankId, 'Rank'),
+        gateId: core().cleanId(word.gateId || gateId, 'Gate'),
+        contentWordId: core().cleanId(contentWordId, 'Word'),
+      };
+      const sourceId = core().contentSourceId(source);
+      const sourceSnapshot = await getDoc(
+        doc(db, 'users', uid, 'contentWords', identity.wordKey, 'sources', sourceId)
+      );
+      // Count only words whose source link and personal dictionary row both exist.
+      // If either is missing, the next run must repair that word.
+      return {
+        word,
+        wordKey: identity.wordKey,
+        loaded: sourceSnapshot.exists() && personalIndex.has(identity.wordKey),
+      };
+    }));
+    statuses.push(...batchStatuses);
+  }
+  return statuses;
+}
+
+async function getGateLoadProgress(worldId, rankId, gateId, options = {}) {
+  const user = requireUser();
+  const [allWords, personalIndex, progress] = await Promise.all([
+    listAllGateWords(worldId, rankId, gateId, { force: Boolean(options.force) }),
+    readPersonalWordIndex(user.uid),
+    options.progress
+      ? Promise.resolve(options.progress)
+      : getGateProgress(worldId, rankId, gateId, { force: Boolean(options.force) }),
+  ]);
+  const newContentIds = options.onlyNew
+    ? core().detectNewContentWordIds(allWords, progress)
+    : null;
+  const targetWords = newContentIds
+    ? allWords.filter((word) => newContentIds.has(String(word.contentWordId || '')))
+    : allWords;
+  const statuses = await getGateWordLinkStatuses(
+    user.uid, worldId, rankId, gateId, targetWords, personalIndex
+  );
+  const loaded = statuses.filter((status) => status.loaded);
+  return {
+    total: targetWords.length,
+    completed: loaded.length,
+    remaining: Math.max(0, targetWords.length - loaded.length),
+    complete: targetWords.length > 0 && loaded.length === targetWords.length,
+    onlyNew: options.onlyNew === true,
+    loadedContentWordIds: loaded.map((status) => String(status.word?.contentWordId || '')).filter(Boolean),
+    loadedWordKeys: loaded.map((status) => String(status.wordKey || '')).filter(Boolean),
+  };
+}
+
 function deterministicPrivateMembershipId(wordKey) {
   return `published_${core().cleanId(wordKey, 'Word key')}`.slice(0, 500);
 }
@@ -1949,11 +2015,16 @@ async function runGateWordOperation(worldId, rankId, gateId, options) {
     : allWords;
   const operationId = createOperationId(gateId);
   const personalIndex = await readPersonalWordIndex(user.uid);
+  const linkStatuses = await getGateWordLinkStatuses(
+    user.uid, worldId, rankId, gateId, targetWords, personalIndex
+  );
+  const alreadyLoaded = linkStatuses.filter((status) => status.loaded);
+  const pendingWords = linkStatuses.filter((status) => !status.loaded).map((status) => status.word);
   const failures = [];
   let firstFailure = null;
-  let completed = 0;
+  let completed = alreadyLoaded.length;
   let linkedSources = 0;
-  let existingWords = 0;
+  let existingWords = alreadyLoaded.length;
   const lifecycleSummary = window.LootLinguaWordLifecycle?.emptySummary?.() || {
     created: 0,
     restored: 0,
@@ -1963,8 +2034,15 @@ async function runGateWordOperation(worldId, rankId, gateId, options) {
     failed: 0,
     hiddenPreserved: 0,
   };
+  lifecycleSummary.alreadyLinked += alreadyLoaded.length;
+  options?.onProgress?.({
+    completed,
+    failed: 0,
+    total: targetWords.length,
+    resumed: completed > 0,
+  });
 
-  for (const word of targetWords) {
+  for (const word of pendingWords) {
     try {
       const result = await linkPublishedWord(
         user.uid,
@@ -2000,6 +2078,7 @@ async function runGateWordOperation(worldId, rankId, gateId, options) {
       completed,
       failed: failures.length,
       total: targetWords.length,
+      resumed: alreadyLoaded.length > 0,
     });
   }
 
@@ -4630,6 +4709,7 @@ const API = Object.freeze({
   canAccessGate: core().canAccessGate,
   loadGateWords,
   syncNewGateWords,
+  getGateLoadProgress,
   updateGateProgress,
   findNewGateWords,
   getGateMasteryView,

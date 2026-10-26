@@ -132,6 +132,20 @@ test('Journey source linking reports the exact failed transaction without cleari
   assert.doesNotMatch(resumeBlock, /renderPublishedError/);
 });
 
+
+test('interrupted gate loads reconstruct exact progress from source links and resume missing words', () => {
+  assert.match(cloud, /async function getGateLoadProgress\(/);
+  assert.match(cloud, /sourceSnapshot\.exists\(\) && personalIndex\.has\(identity\.wordKey\)/);
+  assert.match(cloud, /const pendingWords = linkStatuses\.filter\(\(status\) => !status\.loaded\)/);
+  assert.match(cloud, /let completed = alreadyLoaded\.length/);
+  assert.match(cloud, /total: targetWords\.length/);
+  assert.match(worlds, /publishedGateLoadTasks = new Map\(\)/);
+  assert.match(worlds, /getGateLoadProgress\([\\s\\S]*onlyNew: true/);
+  assert.match(worlds, /gateLoadResume = \{ type: 'load', \.\.\.cloudProgress, active: false \}/);
+  assert.match(worlds, /runPublishedGateLoad\([\\s\\S]*initialProgress: gateLoadResume/);
+  assert.match(worlds, /gateLoadPending/);
+});
+
 test('journey loading does not award XP or touch quests, streaks, or chests', () => {
   assert.doesNotMatch(cloud, /awardXP|markDailyQuest|recordChest|dailyStreak|showXPBadge/);
   assert.doesNotMatch(cloud, /httpsCallable|getFunctions|firebase-functions|functions\//);

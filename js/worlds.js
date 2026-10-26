@@ -1449,6 +1449,28 @@ const publishedContentState = {
   error: null,
 };
 
+// Keep in-flight work independent from route DOM. A rerender clears the view state,
+// but the task and its progress survive and can restore the counter on the new panel.
+const publishedGateLoadTasks = new Map();
+
+function publishedGateLoadTaskKey(syncOnly, world, rank, gate) {
+  return JSON.stringify([
+    String(window.auth?.currentUser?.uid || ''),
+    String(world?.worldId || ''),
+    String(rank?.rankId || ''),
+    String(gate?.gateId || ''),
+    syncOnly ? 'sync' : 'load',
+  ]);
+}
+
+function canRecoverInterruptedGateLoad(progress) {
+  if (progress?.loadedAt) return false;
+  if (!progress?.status || progress.status === 'available') return true;
+  return progress.status === 'cleared' &&
+    progress.clearedBy === 'level-placement' &&
+    progress.placementClearedWithoutLoad === true;
+}
+
 const WORLDS_TOUCH_TARGET_SELECTOR = [
   '.published-card',
   '.published-word-card',
@@ -1882,13 +1904,17 @@ window.addEventListener('lootlingua:entry-state-ready', () => {
   }
 });
 
-function isCurrentPublishedGate(worldId, rankId, gateId, generation) {
+function isPublishedGateRoute(worldId, rankId, gateId) {
   const params = publishedContentState.route?.params || {};
-  return generation === publishedContentState.generation &&
-    publishedContentState.route?.key === 'gate' &&
+  return publishedContentState.route?.key === 'gate' &&
     String(params.worldId || '') === String(worldId || '') &&
     String(params.rankId || '') === String(rankId || '') &&
     String(params.gateId || '') === String(gateId || '');
+}
+
+function isCurrentPublishedGate(worldId, rankId, gateId, generation) {
+  return generation === publishedContentState.generation &&
+    isPublishedGateRoute(worldId, rankId, gateId);
 }
 
 async function refreshPublishedGateMasteryView(
@@ -1903,7 +1929,6 @@ async function refreshPublishedGateMasteryView(
   // Gate-progress snapshots can arrive once per linked word. During a load,
   // keep the in-memory state fresh but never rebuild the route mid-operation.
   if (!isCurrentPublishedGate(worldId, rankId, gateId, generation)) return false;
-  if (isPublishedGateWordsLoading()) return false;
   if (!progress?.loadedAt) {
     publishedContentState.gateMasteryView = null;
     publishedContentState.newGateWords = [];
@@ -1920,8 +1945,8 @@ async function refreshPublishedGateMasteryView(
     if (!isCurrentPublishedGate(worldId, rankId, gateId, generation)) return false;
     publishedContentState.gateMasteryView = view;
     publishedContentState.newGateWords = view.newContentWords || [];
-    // A load might have started while this request was in flight.
-    if (!isPublishedGateWordsLoading() && !options.suppressRender) rerenderPublishedRoute();
+    // Rerendering is safe during a load: the pending action owns the spinner and counter.
+    if (!options.suppressRender) rerenderPublishedRoute();
     return true;
   } catch (error) {
     logPublishedContentError('gate-mastery-view', error);
@@ -1946,9 +1971,8 @@ function watchPublishedGateProgress(worldId, rankId, gateId, initialProgress, ge
         if (progress) publishedContentState.gateProgressById.set(String(gateId), progress);
         const forceWords = firstSnapshot;
         firstSnapshot = false;
-        // The load API owns progress reporting while words are being linked.
-        // Defer live-snapshot refreshes until that operation finishes.
-        if (isPublishedGateWordsLoading()) return;
+        // Keep the cloud listener live during a load; its rerender is safe now
+        // because journeyAction retains the real per-word completion counter.
         refreshPublishedGateMasteryView(
           worldId,
           rankId,
@@ -3085,10 +3109,53 @@ function isPublishedGateWordsLoading() {
   return Boolean(action?.pending && ['load', 'sync'].includes(String(action.type || '')));
 }
 
-async function runPublishedGateLoad(syncOnly) {
+async function runPublishedGateLoad(syncOnly, resumeOptions = {}) {
   const { world, rank, gate } = publishedContentState;
-  if (!world || !rank || !gate || isPublishedGateWordsLoading()) return;
-  const generation = publishedContentState.generation;
+  if (!world || !rank || !gate) return;
+  const taskKey = publishedGateLoadTaskKey(syncOnly, world, rank, gate);
+  const activeTask = publishedGateLoadTasks.get(taskKey);
+  if (activeTask) {
+    if (isPublishedGateRoute(world.worldId, rank.rankId, gate.gateId)) {
+      publishedContentState.journeyAction = {
+        type: activeTask.type,
+        pending: true,
+        completed: activeTask.completed,
+        total: activeTask.total,
+        resumed: true,
+      };
+      rerenderPublishedRoute();
+    }
+    return activeTask.promise;
+  }
+  if (isPublishedGateWordsLoading() && resumeOptions.resume !== true) return;
+
+  const initial = resumeOptions.initialProgress || {};
+  const taskState = {
+    type: syncOnly ? 'sync' : 'load',
+    completed: Math.max(0, Number(initial.completed) || 0),
+    total: Math.max(
+      0,
+      Number(initial.total) || (syncOnly
+        ? publishedContentState.newGateWords.length
+        : Number(gate.wordCount) || 0)
+    ),
+    promise: null,
+  };
+  const task = performPublishedGateLoad(syncOnly, resumeOptions, taskState);
+  taskState.promise = task;
+  publishedGateLoadTasks.set(taskKey, taskState);
+  try {
+    return await task;
+  } finally {
+    if (publishedGateLoadTasks.get(taskKey) === taskState) {
+      publishedGateLoadTasks.delete(taskKey);
+    }
+  }
+}
+
+async function performPublishedGateLoad(syncOnly, resumeOptions, taskState) {
+  const { world, rank, gate } = publishedContentState;
+  if (!world || !rank || !gate) return;
   if (!window.auth?.currentUser) {
     requestJourneySignIn({ action: 'start-journey', worldId: world?.worldId, source: 'world' });
     return;
@@ -3100,91 +3167,108 @@ async function runPublishedGateLoad(syncOnly) {
     return;
   }
 
+  const expectedTotal = Math.max(
+    0,
+    Number(resumeOptions.initialProgress?.total) ||
+      taskState.total ||
+      (syncOnly ? publishedContentState.newGateWords.length : Number(gate.wordCount) || 0)
+  );
+  taskState.total = expectedTotal;
+  taskState.completed = Math.min(expectedTotal || Number.MAX_SAFE_INTEGER, taskState.completed);
   publishedContentState.journeyAction = {
     type: syncOnly ? 'sync' : 'load',
     pending: true,
-    completed: 0,
-    total: syncOnly ? publishedContentState.newGateWords.length : Number(gate.wordCount) || 0,
+    completed: taskState.completed,
+    total: expectedTotal,
+    resumed: resumeOptions.resume === true || taskState.completed > 0,
   };
   rerenderPublishedRoute();
   try {
     const api = getJourneyCloudApi();
-    const options = {
+    const operationOptions = {
       onProgress(progress) {
+        taskState.completed = Math.max(0, Number(progress.completed) || 0);
+        taskState.total = Math.max(0, Number(progress.total) || 0);
+        if (!isPublishedGateRoute(world.worldId, rank.rankId, gate.gateId)) return;
         publishedContentState.journeyAction = {
           ...publishedContentState.journeyAction,
+          type: syncOnly ? 'sync' : 'load',
           ...progress,
+          pending: true,
         };
         updatePublishedGateProgressText(progress);
       },
     };
     const result = syncOnly
-      ? await api.syncNewGateWords(world.worldId, rank.rankId, gate.gateId, options)
-      : await api.loadGateWords(world.worldId, rank.rankId, gate.gateId, options);
-    if (result.advancement?.advanced) {
+      ? await api.syncNewGateWords(world.worldId, rank.rankId, gate.gateId, operationOptions)
+      : await api.loadGateWords(world.worldId, rank.rankId, gate.gateId, operationOptions);
+
+    if (result.advancement?.advanced && isPublishedGateRoute(world.worldId, rank.rankId, gate.gateId)) {
       const journeyContext = await readPublishedJourneyContext(world.worldId, { force: true });
       publishedContentState.journey = journeyContext.journey;
       publishedContentState.activeJourney = journeyContext.activeJourney;
     }
-    publishedContentState.gateProgress = await api.getGateProgress(
+    const freshGateProgress = await api.getGateProgress(
       world.worldId,
       rank.rankId,
       gate.gateId,
       { force: true }
     );
-    publishedContentState.gateProgressById.set(
-      String(gate.gateId),
-      publishedContentState.gateProgress
-    );
-    publishedContentState.newGateWords = result.partial
-      ? publishedContentState.newGateWords
-      : [];
-    if (result.partial) {
-      const partialError = new Error(
-        result.errorMessage ||
-          `Gate loaded ${result.completed} of ${result.total} words.`
-      );
-      partialError.code = result.errorCode || 'journey/gate-load-incomplete';
-      partialError.operation = result.errorOperation || 'link-published-word';
-      const journeyError = setPublishedJourneyError(
-        partialError,
-        partialError.operation,
-        () => runPublishedGateLoad(syncOnly),
-        world.worldId
-      );
-      publishedContentState.journeyAction = {
-        type: syncOnly ? 'sync' : 'load',
-        pending: false,
-        completed: result.completed,
-        total: result.total,
-        partial: true,
-      };
-    } else {
-      publishedContentState.journeyAction = null;
-      clearPublishedJourneyError();
-      if (!syncOnly) {
-        // The behavioural milestone is the completed first gate load, never a
-        // click or a partially-linked result.
-        void window.LootLinguaGuidedFirstJourney?.gateWordsLoaded?.({
-          worldId: world.worldId,
-          gateId: gate.gateId,
-        });
+    const stillOnThisGate = isPublishedGateRoute(world.worldId, rank.rankId, gate.gateId);
+    if (stillOnThisGate) {
+      publishedContentState.gateProgress = freshGateProgress;
+      publishedContentState.gateProgressById.set(String(gate.gateId), freshGateProgress);
+      publishedContentState.newGateWords = result.partial
+        ? publishedContentState.newGateWords
+        : [];
+      if (result.partial) {
+        const partialError = new Error(
+          result.errorMessage ||
+            `Gate loaded ${result.completed} of ${result.total} words.`
+        );
+        partialError.code = result.errorCode || 'journey/gate-load-incomplete';
+        partialError.operation = result.errorOperation || 'link-published-word';
+        const journeyError = setPublishedJourneyError(
+          partialError,
+          partialError.operation,
+          () => runPublishedGateLoad(syncOnly),
+          world.worldId
+        );
+        publishedContentState.journeyAction = {
+          type: syncOnly ? 'sync' : 'load',
+          pending: false,
+          completed: result.completed,
+          total: result.total,
+          partial: true,
+        };
+      } else {
+        publishedContentState.journeyAction = null;
+        clearPublishedJourneyError();
       }
     }
-    // Refresh gate mastery once after the batch has settled. Per-word cloud
-    // snapshots are intentionally ignored while the load is pending.
-    await refreshPublishedGateMasteryView(
-      world.worldId,
-      rank.rankId,
-      gate.gateId,
-      publishedContentState.gateProgress,
-      generation,
-      true,
-      { suppressRender: true }
-    );
-    if (isCurrentPublishedGate(world.worldId, rank.rankId, gate.gateId, generation)) {
-      rerenderPublishedRoute();
+
+    if (!result.partial && !syncOnly) {
+      void window.LootLinguaGuidedFirstJourney?.gateWordsLoaded?.({
+        worldId: world.worldId,
+        gateId: gate.gateId,
+      });
     }
+
+    if (stillOnThisGate) {
+      await refreshPublishedGateMasteryView(
+        world.worldId,
+        rank.rankId,
+        gate.gateId,
+        freshGateProgress,
+        publishedContentState.generation,
+        true,
+        { suppressRender: true }
+      );
+      if (isPublishedGateRoute(world.worldId, rank.rankId, gate.gateId)) {
+        rerenderPublishedRoute();
+      }
+    }
+
     if (!result.advancement?.advanced) {
       const summary = result.summary || {};
       const parts = [
@@ -3212,6 +3296,7 @@ async function runPublishedGateLoad(syncOnly) {
       );
     }
   } catch (error) {
+    if (!isPublishedGateRoute(world.worldId, rank.rankId, gate.gateId)) return;
     const journeyError = setPublishedJourneyError(
       error,
       syncOnly ? 'sync-gate-words' : 'load-gate-words',
@@ -3221,6 +3306,8 @@ async function runPublishedGateLoad(syncOnly) {
     publishedContentState.journeyAction = {
       type: syncOnly ? 'sync' : 'load',
       pending: false,
+      completed: taskState.completed,
+      total: taskState.total,
     };
     if (publishedContentState.gateProgress?.loadedAt) {
       await refreshPublishedGateMasteryView(
@@ -3228,14 +3315,12 @@ async function runPublishedGateLoad(syncOnly) {
         rank.rankId,
         gate.gateId,
         publishedContentState.gateProgress,
-        generation,
+        publishedContentState.generation,
         true,
         { suppressRender: true }
       );
     }
-    if (isCurrentPublishedGate(world.worldId, rank.rankId, gate.gateId, generation)) {
-      rerenderPublishedRoute();
-    }
+    rerenderPublishedRoute();
     showToast(journeyError.text, 'danger', 4800);
   }
 }
@@ -6468,6 +6553,63 @@ async function loadPublishedRouteData(route, options) {
       journeyContext.journey,
       gateProgress
     );
+    let gateLoadResume = null;
+    if (
+      window.auth?.currentUser &&
+      String(journeyContext.activeJourney?.worldId || '') === String(params.worldId || '') &&
+      canRevealPublishedGateWords(gateState, journeyContext.journey)
+    ) {
+      const loadTask = publishedGateLoadTasks.get(
+        publishedGateLoadTaskKey(false, world, rank, gate)
+      );
+      const syncTask = publishedGateLoadTasks.get(
+        publishedGateLoadTaskKey(true, world, rank, gate)
+      );
+      const activeTask = loadTask || syncTask;
+      if (activeTask) {
+        gateLoadResume = {
+          type: activeTask.type,
+          completed: activeTask.completed,
+          total: activeTask.total,
+          active: true,
+        };
+      } else if (gateState === 'available' && canRecoverInterruptedGateLoad(gateProgress)) {
+        try {
+          const cloudProgress = await getJourneyCloudApi().getGateLoadProgress(
+            params.worldId, params.rankId, params.gateId, { force: true }
+          );
+          if (generation !== publishedContentState.generation) return;
+          if (cloudProgress.total > 0 && cloudProgress.completed > 0) {
+            gateLoadResume = { type: 'load', ...cloudProgress, active: false };
+          }
+        } catch (error) {
+          // If inspection fails, leave the normal load button available.
+          logPublishedContentError('gate-load-progress-recovery', error);
+        }
+      } else if (gateState === 'learning' && gateProgress?.loadedAt) {
+        try {
+          const cloudProgress = await getJourneyCloudApi().getGateLoadProgress(
+            params.worldId, params.rankId, params.gateId,
+            { force: true, onlyNew: true, progress: gateProgress }
+          );
+          if (generation !== publishedContentState.generation) return;
+          if (cloudProgress.total > 0 && cloudProgress.completed > 0) {
+            gateLoadResume = { type: 'sync', ...cloudProgress, active: false };
+          }
+        } catch (error) {
+          logPublishedContentError('gate-sync-progress-recovery', error);
+        }
+      }
+      if (gateLoadResume) {
+        publishedContentState.journeyAction = {
+          type: gateLoadResume.type,
+          pending: true,
+          completed: gateLoadResume.completed,
+          total: gateLoadResume.total,
+          resumed: true,
+        };
+      }
+    }
     if (!canRevealPublishedGateWords(gateState, journeyContext.journey)) {
       renderPublishedGateWords(world, rank, gate, null);
       return;
@@ -6485,6 +6627,12 @@ async function loadPublishedRouteData(route, options) {
       gateProgress,
       generation
     );
+    if (gateLoadResume) {
+      void runPublishedGateLoad(
+        gateLoadResume.type === 'sync',
+        { resume: true, initialProgress: gateLoadResume }
+      );
+    }
   } catch (error) {
     if (generation !== publishedContentState.generation) return;
     logPublishedContentError(key, error);

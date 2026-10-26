@@ -229,8 +229,10 @@ test('gate word loading stays visible while per-word cloud progress updates arri
     worldsSource.indexOf('window.openPublishedGatePractice')
   );
 
-  assert.match(refreshBody, /if \(isPublishedGateWordsLoading\(\)\) return false;/);
-  assert.match(watcherBody, /if \(isPublishedGateWordsLoading\(\)\) return;/);
+  assert.doesNotMatch(refreshBody, /if \(isPublishedGateWordsLoading\(\)\) return false;/);
+  assert.doesNotMatch(watcherBody, /if \(isPublishedGateWordsLoading\(\)\) return;/);
+  assert.match(refreshBody, /if \(!options\.suppressRender\) rerenderPublishedRoute\(\);/);
+  assert.match(watcherBody, /refreshPublishedGateMasteryView\(/);
   assert.match(panelBody, /const gateLoadPending = isPublishedGateWordsLoading\(\)/);
   assert.match(panelBody, /if \(gateLoadPending\) \{[\s\S]*?loading\.disabled = true;/);
   assert.ok(
