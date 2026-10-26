@@ -183,6 +183,36 @@ test('trusted quiz completion requires the exact onboarding gate hierarchy', asy
   assert.equal(controller.getState().phase, 'completed');
 });
 
+
+test('gate word loading stays visible while per-word cloud progress updates arrive', () => {
+  const refreshBody = worldsSource.slice(
+    worldsSource.indexOf('async function refreshPublishedGateMasteryView'),
+    worldsSource.indexOf('function watchPublishedGateProgress')
+  );
+  const watcherBody = worldsSource.slice(
+    worldsSource.indexOf('function watchPublishedGateProgress'),
+    worldsSource.indexOf('function requestJourneySignIn')
+  );
+  const panelBody = worldsSource.slice(
+    worldsSource.indexOf('function makePublishedGateJourneyPanel'),
+    worldsSource.indexOf('function appendPublishedHeader')
+  );
+  const pickerBody = worldsSource.slice(
+    worldsSource.indexOf('async function openPublishedGateQuizPicker'),
+    worldsSource.indexOf('window.openPublishedGatePractice')
+  );
+
+  assert.match(refreshBody, /if \(isPublishedGateWordsLoading\(\)\) return false;/);
+  assert.match(watcherBody, /if \(isPublishedGateWordsLoading\(\)\) return;/);
+  assert.match(panelBody, /const gateLoadPending = isPublishedGateWordsLoading\(\)/);
+  assert.match(panelBody, /if \(gateLoadPending\) \{[\s\S]*?loading\.disabled = true;/);
+  assert.ok(
+    panelBody.indexOf('if (gateLoadPending)') < panelBody.indexOf("} else if (state === 'learning')"),
+    'the loading state must take precedence over the learning CTA'
+  );
+  assert.match(pickerBody, /if \(isPublishedGateWordsLoading\(\)\)/);
+});
+
 test('the app uses a small persisted UX layer without changing Entry or Journey semantics', () => {
   assert.match(htmlSource, /guided-first-journey-contract\.js/);
   assert.match(htmlSource, /guided-first-journey-controller\.js/);

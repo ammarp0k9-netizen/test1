@@ -1897,14 +1897,18 @@ async function refreshPublishedGateMasteryView(
   gateId,
   progress,
   generation,
-  forceWords = false
+  forceWords = false,
+  options = {}
 ) {
-  if (!isCurrentPublishedGate(worldId, rankId, gateId, generation)) return;
+  // Gate-progress snapshots can arrive once per linked word. During a load,
+  // keep the in-memory state fresh but never rebuild the route mid-operation.
+  if (!isCurrentPublishedGate(worldId, rankId, gateId, generation)) return false;
+  if (isPublishedGateWordsLoading()) return false;
   if (!progress?.loadedAt) {
     publishedContentState.gateMasteryView = null;
     publishedContentState.newGateWords = [];
-    rerenderPublishedRoute();
-    return;
+    if (!options.suppressRender) rerenderPublishedRoute();
+    return true;
   }
   try {
     const view = await getJourneyCloudApi().getGateMasteryView(
@@ -1913,12 +1917,15 @@ async function refreshPublishedGateMasteryView(
       gateId,
       { progress, force: forceWords }
     );
-    if (!isCurrentPublishedGate(worldId, rankId, gateId, generation)) return;
+    if (!isCurrentPublishedGate(worldId, rankId, gateId, generation)) return false;
     publishedContentState.gateMasteryView = view;
     publishedContentState.newGateWords = view.newContentWords || [];
-    rerenderPublishedRoute();
+    // A load might have started while this request was in flight.
+    if (!isPublishedGateWordsLoading() && !options.suppressRender) rerenderPublishedRoute();
+    return true;
   } catch (error) {
     logPublishedContentError('gate-mastery-view', error);
+    return false;
   }
 }
 
@@ -1939,6 +1946,9 @@ function watchPublishedGateProgress(worldId, rankId, gateId, initialProgress, ge
         if (progress) publishedContentState.gateProgressById.set(String(gateId), progress);
         const forceWords = firstSnapshot;
         firstSnapshot = false;
+        // The load API owns progress reporting while words are being linked.
+        // Defer live-snapshot refreshes until that operation finishes.
+        if (isPublishedGateWordsLoading()) return;
         refreshPublishedGateMasteryView(
           worldId,
           rankId,
@@ -3070,9 +3080,15 @@ function updatePublishedGateProgressText(progress) {
   target.textContent = `تم تحميل ${progress.completed} من ${progress.total}`;
 }
 
+function isPublishedGateWordsLoading() {
+  const action = publishedContentState.journeyAction;
+  return Boolean(action?.pending && ['load', 'sync'].includes(String(action.type || '')));
+}
+
 async function runPublishedGateLoad(syncOnly) {
   const { world, rank, gate } = publishedContentState;
-  if (!world || !rank || !gate) return;
+  if (!world || !rank || !gate || isPublishedGateWordsLoading()) return;
+  const generation = publishedContentState.generation;
   if (!window.auth?.currentUser) {
     requestJourneySignIn({ action: 'start-journey', worldId: world?.worldId, source: 'world' });
     return;
@@ -3155,7 +3171,20 @@ async function runPublishedGateLoad(syncOnly) {
         });
       }
     }
-    rerenderPublishedRoute();
+    // Refresh gate mastery once after the batch has settled. Per-word cloud
+    // snapshots are intentionally ignored while the load is pending.
+    await refreshPublishedGateMasteryView(
+      world.worldId,
+      rank.rankId,
+      gate.gateId,
+      publishedContentState.gateProgress,
+      generation,
+      true,
+      { suppressRender: true }
+    );
+    if (isCurrentPublishedGate(world.worldId, rank.rankId, gate.gateId, generation)) {
+      rerenderPublishedRoute();
+    }
     if (!result.advancement?.advanced) {
       const summary = result.summary || {};
       const parts = [
@@ -3193,7 +3222,20 @@ async function runPublishedGateLoad(syncOnly) {
       type: syncOnly ? 'sync' : 'load',
       pending: false,
     };
-    rerenderPublishedRoute();
+    if (publishedContentState.gateProgress?.loadedAt) {
+      await refreshPublishedGateMasteryView(
+        world.worldId,
+        rank.rankId,
+        gate.gateId,
+        publishedContentState.gateProgress,
+        generation,
+        true,
+        { suppressRender: true }
+      );
+    }
+    if (isCurrentPublishedGate(world.worldId, rank.rankId, gate.gateId, generation)) {
+      rerenderPublishedRoute();
+    }
     showToast(journeyError.text, 'danger', 4800);
   }
 }
@@ -4355,6 +4397,10 @@ const GATE_QUIZ_MODE_CARDS = [
 ];
 
 async function openPublishedGateQuizPicker(world, rank, gate) {
+  if (isPublishedGateWordsLoading()) {
+    showToast('استنى لحد ما يكتمل تحميل كلمات البوابة، وبعدها ابدأ الاختبار.', 'info', 4200);
+    return;
+  }
   const existing = document.getElementById('publishedGateQuizPicker');
   if (existing) existing.remove();
   const progress = publishedContentState.gateProgress;
@@ -5242,6 +5288,7 @@ function makePublishedGateJourneyPanel(world, rank, gate) {
   const action = publishedContentState.journeyAction;
   const journeyError = currentPublishedJourneyError(world.worldId);
   const pending = Boolean(action?.pending);
+  const gateLoadPending = isPublishedGateWordsLoading();
   const actions = publishedElement('div', 'published-journey-actions');
   const activeForWorld = String(publishedContentState.activeJourney?.worldId || '') ===
     String(world.worldId);
@@ -5249,7 +5296,16 @@ function makePublishedGateJourneyPanel(world, rank, gate) {
     publishedContentState.journeyAction?.type === 'choose-start' ||
     publishedContentState.journey?.placementStatus === 'not-started';
 
-  if (state === 'locked') {
+  if (gateLoadPending) {
+    const loading = publishedButton(
+      action?.type === 'sync' ? 'جارٍ مزامنة الكلمات' : 'نضيف الكلمات',
+      'published-action-btn published-journey-btn published-journey-cta',
+      () => {},
+      'fa-solid fa-circle-notch fa-spin'
+    );
+    loading.disabled = true;
+    actions.append(loading);
+  } else if (state === 'locked') {
     const locked = publishedButton(
       'تحميل البوابة',
       'published-action-btn published-journey-btn',
