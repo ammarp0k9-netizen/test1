@@ -140,9 +140,9 @@ test('interrupted gate loads reconstruct exact progress from source links and re
   assert.match(cloud, /let completed = alreadyLoaded\.length/);
   assert.match(cloud, /total: targetWords\.length/);
   assert.match(worlds, /publishedGateLoadTasks = new Map\(\)/);
-  assert.match(worlds, /getGateLoadProgress\([\\s\\S]*onlyNew: true/);
+  assert.match(worlds, /getGateLoadProgress\([\s\S]*onlyNew: true/);
   assert.match(worlds, /gateLoadResume = \{ type: 'load', \.\.\.cloudProgress, active: false \}/);
-  assert.match(worlds, /runPublishedGateLoad\([\\s\\S]*initialProgress: gateLoadResume/);
+  assert.match(worlds, /runPublishedGateLoad\([\s\S]*initialProgress: gateLoadResume/);
   assert.match(worlds, /gateLoadPending/);
 });
 
