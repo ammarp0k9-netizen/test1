@@ -162,24 +162,52 @@ test('trusted quiz completion requires the exact onboarding gate hierarchy', asy
     type: 'lootlingua:trusted-quiz-completed',
     detail: { ...completedDetail, gateId: 'gate-2' },
   });
+  await new Promise((resolve) => setTimeout(resolve, 0));
   assert.equal(controller.getState().phase, 'awaiting-quiz-cta');
 
   root.dispatchEvent({
     type: 'lootlingua:trusted-quiz-completed',
     detail: { ...completedDetail, worldId: 'world-beta' },
   });
+  await new Promise((resolve) => setTimeout(resolve, 0));
   assert.equal(controller.getState().phase, 'awaiting-quiz-cta');
 
   root.dispatchEvent({
     type: 'lootlingua:trusted-quiz-completed',
     detail: { ...completedDetail, gateId: '' },
   });
+  await new Promise((resolve) => setTimeout(resolve, 0));
   assert.equal(controller.getState().phase, 'awaiting-quiz-cta');
 
   root.dispatchEvent({
     type: 'lootlingua:trusted-quiz-completed',
     detail: completedDetail,
   });
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.equal(controller.getState().phase, 'completed');
+});
+
+test('verified completion recovers if the journey cloud phase lags behind its completed gate quiz', async () => {
+  const { controller, root } = createControllerHarness();
+  await controller.beginFromEntry({
+    presentation: { classification: 'brand-new', audience: 'new' },
+    worldId: 'world-alpha',
+  });
+  await controller.gateOpened({ worldId: 'world-alpha', gateId: 'gate-1' });
+  assert.equal(controller.getState().phase, 'first-gate-opened');
+
+  root.dispatchEvent({
+    type: 'lootlingua:trusted-quiz-completed',
+    detail: {
+      source: 'verified-session',
+      journeyContext: true,
+      worldId: 'world-alpha',
+      rankId: 'rank-a',
+      gateId: 'gate-1',
+      total: 3,
+    },
+  });
+  await new Promise((resolve) => setTimeout(resolve, 0));
   assert.equal(controller.getState().phase, 'completed');
 });
 

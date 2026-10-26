@@ -323,6 +323,7 @@ function finishQuizRun() {
       correctCount: Number(commit.correctCount) || 0,
       total: Number(commit.total) || 0,
       source: sessionSource,
+      journeyContext: Boolean(activeQuizSession?.journeyWorldId && activeQuizSession?.journeyGateId),
       officialReviewGate: resolvedGate,
       worldId: detailWorldId,
       rankId: detailRankId,

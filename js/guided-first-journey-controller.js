@@ -1,7 +1,10 @@
 (function attachGuidedFirstJourneyController(root) {
   'use strict';
 
-  const runtime = { state: null, loadedOwner: '', loading: null, handoff: null, lastRoute: null, handoffAttempts: 0, reengagementOwner: '' };
+  const runtime = {
+    state: null, loadedOwner: '', loading: null, persistQueue: Promise.resolve(),
+    handoff: null, lastRoute: null, handoffAttempts: 0, reengagementOwner: '',
+  };
   const COACH_ID = 'guidedFirstJourneyCoach';
   const HANDOFF_KEY = 'lootlingua:guided-first-journey:auth-handoff:v1';
 
@@ -64,11 +67,33 @@
   }
 
   async function persist(state) {
-    saveLocal(state);
+    // A previous phase may still be awaiting Firestore while the user has
+    // already completed the quiz. Never let that older phase overwrite the
+    // newest local or cloud state.
+    const latest = runtime.state && Number(runtime.state.updatedAt) > Number(state.updatedAt)
+      ? runtime.state
+      : state;
+    saveLocal(latest);
     const current = user();
-    if (!current || !cloud()?.save) return state;
-    try { await cloud().save(state, current); } catch (_) { /* local state remains safely owner-scoped until retry */ }
-    return state;
+    if (!current || !cloud()?.save) return latest;
+    const ownerId = current.uid;
+    const write = runtime.persistQueue.catch(() => {}).then(async () => {
+      if (user()?.uid !== ownerId) return latest;
+      const currentState = runtime.state &&
+        Number(runtime.state.updatedAt) > Number(latest.updatedAt)
+        ? runtime.state
+        : latest;
+      saveLocal(currentState);
+      await cloud().save(currentState, current);
+      return currentState;
+    });
+    runtime.persistQueue = write.then(() => undefined, () => undefined);
+    try { await write; } catch (_) {
+      // Owner-scoped local state remains available if cloud persistence fails.
+    }
+    return runtime.state && Number(runtime.state.updatedAt) > Number(latest.updatedAt)
+      ? runtime.state
+      : latest;
   }
 
   async function boot() {
@@ -268,36 +293,43 @@
   root.addEventListener('lootlingua:guided-first-journey-cloud-ready', () => { runtime.loadedOwner = ''; void boot(); });
   root.addEventListener('lootlingua:initial-data-ready', () => { void boot(); });
 
-  // ── Quiz completion wiring ────────────────────────────────────────────────
-  // completeFromQuizCta must fire only when the gate quiz ACTUALLY finishes,
-  // not when the mode picker opens. quiz-runtime.js dispatches this event after
-  // the verified quiz result is durably committed and SRS state is saved.
-  //
-  // Validation rules (all must hold to accept the completion):
-  //   1. The journey must still be active (not already completed).
-  //   2. The current phase must be awaiting-quiz-cta (gate words were loaded).
-  //   3. The event must carry a journey: source (gate quiz, not a personal quiz).
-  //   4. The worldId from the event must match the onboarding world.
-  //   5. The gateId from the event must match the onboarding gate (when present).
-  //   6. A signed-in user must own this journey (guest cannot reach this phase).
-  // The contract's transition() is idempotent: a duplicate event returns the
-  // same state object unchanged, so concurrent or replayed events are harmless.
-  root.addEventListener('lootlingua:trusted-quiz-completed', (event) => {
-    const detail = event.detail || {};
-    const source = String(detail.source || '');
-    // Only gate quizzes carry a "journey:" source prefix.
-    if (!source.startsWith('journey:')) return;
-    // Must be active and in the phase that awaits quiz completion.
-    if (!active()) return;
-    if (runtime.state?.phase !== 'awaiting-quiz-cta') return;
-    // A signed-in owner is required — guest cannot reach awaiting-quiz-cta.
+  // ── Verified gate quiz completion ────────────────────────────────────────
+  // Wait for controller boot before evaluating the event. The page may restore
+  // the published journey and its quiz session while the cloud-backed UX state
+  // is still loading; dropping this event would leave the entire app locked.
+  async function handleTrustedQuizCompleted(detail) {
+    const source = String(detail?.source || '');
+    const eventWorldId = String(detail?.worldId || '');
+    const eventGateId = String(detail?.gateId || '');
+    const hasJourneyContext = detail?.journeyContext === true || source.startsWith('journey:');
+    if (!hasJourneyContext || !eventWorldId || !eventGateId || Number(detail?.total) < 1) return;
     if (!user()) return;
-    const eventWorldId = String(detail.worldId || '');
-    const eventGateId = String(detail.gateId || '');
-    if (!eventWorldId || !eventGateId) return; // Both IDs are required to prove the exact gate.
+
+    await boot();
+    if (!active() || !user()) return;
     if (eventWorldId !== runtime.state.worldId) return;
     if (runtime.state.gateId && eventGateId !== runtime.state.gateId) return;
-    void completeFromQuizCta({ worldId: eventWorldId, gateId: eventGateId });
+
+    // A completed, verified gate quiz proves that its exact gate was loaded.
+    // Recover the phase if a persisted cloud snapshot lagged behind the route.
+    if (
+      runtime.state.phase === 'first-gate-opened' &&
+      runtime.state.gateId === eventGateId
+    ) {
+      await gateWordsLoaded({ worldId: eventWorldId, gateId: eventGateId });
+    }
+    if (runtime.state?.phase !== 'awaiting-quiz-cta') return;
+    if (runtime.state.gateId !== eventGateId) return;
+
+    await completeFromQuizCta({ worldId: eventWorldId, gateId: eventGateId });
+  }
+
+  root.addEventListener('lootlingua:trusted-quiz-completed', (event) => {
+    void handleTrustedQuizCompleted(event.detail || {}).catch((error) => {
+      root.LootLinguaOperations?.diagnostic?.('guided-first-journey-completion-error', {
+        message: String(error?.message || error),
+      });
+    });
   });
 
   queueMicrotask(boot);
