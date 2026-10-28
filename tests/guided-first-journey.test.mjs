@@ -242,18 +242,15 @@ test('gate word loading stays visible while per-word cloud progress updates arri
   assert.match(pickerBody, /if \(isPublishedGateWordsLoading\(\)\)/);
 });
 
-test('the app uses a small persisted UX layer without changing Entry or Journey semantics', () => {
+test('the public-world journey stays separate from feature eligibility', () => {
   assert.match(htmlSource, /guided-first-journey-contract\.js/);
   assert.match(htmlSource, /guided-first-journey-controller\.js/);
   assert.match(htmlSource, /guided-first-journey-cloud\.js/);
   assert.match(controllerSource, /beginFromEntry/);
-  assert.match(controllerSource, /\['quiz', 'minecraft', 'pubg', 'starred', 'treasure', 'custom-worlds'\]/);
-  assert.match(controllerSource, /surface === 'personal'/);
+  assert.doesNotMatch(controllerSource, /\['quiz', 'minecraft', 'pubg', 'starred', 'treasure', 'custom-worlds'\]/);
+  assert.match(controllerSource, /must not become a global feature lock/);
   assert.match(controllerSource, /enableGuestDictionary/);
-  assert.match(controllerSource, /guestExploring/);
-  assert.match(controllerSource, /if \(guestExploring\) return true/);
   assert.match(controllerSource, /استكشاف الموقع كاملاً كضيف/);
-  assert.match(worldsSource, /if \(!syncOnly\)[\s\S]*gateWordsLoaded/);
   assert.match(worldsSource, /completeFromQuizCta/);
   assert.match(worldsSource, /\bloadQuizView\(\)/);
   assert.match(quizSource, /journeyWorldId: input\.worldId/);
