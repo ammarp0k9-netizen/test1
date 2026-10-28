@@ -17,7 +17,8 @@ const debugPort = 9700 + portOffset;
 const appUrl = `http://127.0.0.1:${serverPort}/app`;
 const profileDir = fs.mkdtempSync(path.join(os.tmpdir(), 'lootlingua-smoke-'));
 const baseline = JSON.parse(fs.readFileSync(path.join(root, 'reports', 'refactor-baseline.json'), 'utf8'));
-const requiredGlobals = baseline.inlineHandlers.requiredGlobals;
+const removedLegacyGlobals = new Set(['loadGameDictionary', 'openGameGamerAiSearch', 'searchGameWords']);
+const requiredGlobals = baseline.inlineHandlers.requiredGlobals.filter(name => !removedLegacyGlobals.has(name));
 
 const server = spawn(process.execPath, [path.join(root, 'tools', 'static-server.mjs'), String(serverPort)], {
   cwd: root,
@@ -266,7 +267,7 @@ try {
     result?.quizProbe?.timeAttackReady === true &&
     result?.quizProbe?.scrambleReady === true &&
     result?.quizProbe?.resumeStable === true;
-  if (!result?.hasMainContent || result?.readyState !== 'complete' || !result?.firebaseReady || result?.missingHandlerGlobals?.length || result?.missingCloudFunctions?.length || JSON.stringify(result?.behaviorInvariants) !== expectedBehavior || result?.viewNavigation?.worldsReady !== true || result?.viewNavigation?.gameReady !== true || result?.viewNavigation?.backReady !== true || result?.viewNavigation?.personalReady !== true || !quizProbePassed || result?.themeProbe?.availableThemesApplied !== true || exceptions.length) {
+  if (!result?.hasMainContent || result?.readyState !== 'complete' || !result?.firebaseReady || result?.missingHandlerGlobals?.length || result?.missingCloudFunctions?.length || JSON.stringify(result?.behaviorInvariants) !== expectedBehavior || result?.viewNavigation?.worldsReady !== true || result?.viewNavigation?.publishedWorldsReady !== true || result?.viewNavigation?.backReady !== true || result?.viewNavigation?.personalReady !== true || !quizProbePassed || result?.themeProbe?.availableThemesApplied !== true || exceptions.length) {
     process.exitCode = 1;
   }
 } finally {

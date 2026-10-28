@@ -1400,7 +1400,7 @@ window.loadLootLinguaAdminFeature = function() {
   adminFeatureLoadPromise = (async () => {
     await loadLootLinguaAdminAccess();
     await loadFeatureScript('js/admin-word-import.js?v=20260729-1');
-    await loadFeatureScript('js/admin.js?v=20260729-1');
+    await loadFeatureScript('js/admin.js?v=20261028-legacy-game-removal-fix-1');
     await loadFeatureScript('js/test-clock.js?v=20260729-2', { module: true });
   })().catch((error) => {
     adminFeatureLoadPromise = null;

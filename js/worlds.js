@@ -745,6 +745,20 @@ function renderTreasureRoom() {
   }, 1000);
 }
 
+const viewScrollY = { personal: 0, worlds: 0, starred: 0, quiz: 0, treasure: 0 };
+
+function saveCurrentViewScroll() {
+  const key = isEditableDictionaryView() ? getActiveDictionaryStorageScope() : currentView;
+  viewScrollY[key] = window.scrollY || window.pageYOffset || 0;
+}
+
+function restoreViewScroll(viewKey) {
+  const targetY = viewScrollY[viewKey] || 0;
+  requestAnimationFrame(() => {
+    window.scrollTo({ top: targetY, behavior: 'auto' });
+  });
+}
+
 // ═══════════════════════════════════════════════════════
 function setTreasureMode(active) {
   document.body.classList.toggle('treasure-mode', Boolean(active));
