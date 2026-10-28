@@ -42,26 +42,13 @@
 
   function announce() {
     const on = active();
-    // Once the guest reaches the sign-in handoff, this small UX layer must not
-    // lock any app surface. Product-owned progression locks remain untouched.
-    const guestExploring = Boolean(on && runtime.state?.guestDictionaryAvailable && !user());
     document.documentElement.classList.toggle('guided-first-journey-active', on);
     document.body.classList.toggle('guided-first-journey-active', on);
-    document.querySelectorAll('[data-feature]').forEach((element) => {
-      const feature = String(element.getAttribute('data-feature') || '');
-      const locked = on && !guestExploring && (
-        ['quiz', 'minecraft', 'pubg', 'starred', 'treasure'].includes(feature) ||
-        feature === 'personal'
-      );
-      element.classList.toggle('guided-first-journey-locked', locked);
-      if (locked) element.setAttribute('data-guided-lock', 'true');
-      else element.removeAttribute('data-guided-lock');
-    });
-    document.querySelectorAll('[data-dock-view="personal"], [data-view="personal"]').forEach((element) => {
-      element.classList.toggle('guided-first-journey-deemphasized', false);
-      element.classList.toggle('guided-first-journey-locked', on && !guestExploring);
-      if (on && !guestExploring) element.setAttribute('data-guided-lock', 'true');
-      else element.removeAttribute('data-guided-lock');
+    // A public-world gate journey must not become a global feature lock. Each
+    // feature owns its normal unlock rule and its own discovery progress.
+    document.querySelectorAll('[data-feature], [data-dock-view="personal"], [data-view="personal"]').forEach((element) => {
+      element.classList.remove('guided-first-journey-deemphasized', 'guided-first-journey-locked');
+      element.removeAttribute('data-guided-lock');
     });
     root.dispatchEvent(new CustomEvent('lootlingua:guided-first-journey-change', { detail: { state: runtime.state } }));
   }
@@ -199,17 +186,10 @@
     // openPublishedGatePractice). All four call loadQuizView, which passes
     // surface='quiz'. Restrict the bypass to that surface only so that accidental
     // or future callers cannot suppress guards for unrelated surfaces.
-    if (!active() || (options?.guided === true && surface === 'quiz')) return true;
-    const guestExploring = Boolean(runtime.state?.guestDictionaryAvailable && !user());
-    if (guestExploring) return true;
-    if (surface === 'personal') {
-      root.showToast?.('خطوتك الحالية داخل العالم. سيفتح القاموس عندما تحتاجه في المسار.', 'info', 3400);
-      return false;
-    }
-    const blocked = new Set(['quiz', 'minecraft', 'pubg', 'starred', 'treasure', 'custom-worlds']);
-    if (!blocked.has(surface)) return true;
-    root.showToast?.('خطوتك الحالية موجودة داخل البوابة المفتوحة. أكملها أولاً ثم ستتسع الرحلة.', 'info', 3600);
-    return false;
+    // Guided First Journey is a public-world progress record, not a feature
+    // eligibility system. Keep its special gate quiz metadata, but never use
+    // it to block the ordinary quiz, private worlds, or game dictionaries.
+    return true;
   }
 
   function applyRoute(payload) {
