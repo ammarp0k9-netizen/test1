@@ -2213,7 +2213,6 @@ body.admin-mode .admin-world-row {
   --overlay-bg:     rgba(2,6,23,0.95);
   --active-nav-bg:  rgba(59,130,246,0.12);
   --game-overlay:   rgba(2,6,23,0.75);
-  --game-card-bg:   rgba(15,23,42,0.82);
   --text-on-accent: #ffffff;
   --text-on-star:   #1a1a1a;
   --header-grad:    #60a5fa;
@@ -2259,7 +2258,6 @@ body.admin-mode .admin-world-row {
   --overlay-bg:     rgba(10,10,10,0.95);
   --active-nav-bg:  rgba(184,134,11,0.12);
   --game-overlay:   rgba(10,10,10,0.85);
-  --game-card-bg:   rgba(23,23,23,0.9);
   --text-on-accent: #ffffff;
   --text-on-star:   #000000;
   --header-grad:    #fbbf24;
@@ -2305,7 +2303,6 @@ body.admin-mode .admin-world-row {
   --overlay-bg:     rgba(184,172,142,0.95);
   --active-nav-bg:  rgba(74,55,40,0.12);
   --game-overlay:   rgba(184,172,142,0.88);
-  --game-card-bg:   rgba(232,224,212,0.75);
   --text-on-accent: #ffffff;
   --text-on-star:   #ffffff;
   --header-grad:    #634a35;
@@ -2351,7 +2348,6 @@ body.admin-mode .admin-world-row {
   --overlay-bg:     rgba(203,213,225,0.95);
   --active-nav-bg:  rgba(37,99,235,0.12);
   --game-overlay:   rgba(148,163,184,0.85);
-  --game-card-bg:   rgba(255,255,255,0.92);
   --text-on-accent: #ffffff;
   --text-on-star:   #ffffff;
   --header-grad:    #3b82f6;
@@ -2422,7 +2418,6 @@ body.admin-mode .admin-world-row {
   --overlay-bg: rgba(3, 9, 22, 0.66);
   --active-nav-bg: rgba(121, 216, 255, 0.14);
   --game-overlay: rgba(3, 9, 22, 0.64);
-  --game-card-bg: rgba(18, 40, 74, 0.42);
   --text-on-accent: #06111c;
   --text-on-star: #211700;
   --header-grad: #79d8ff;
@@ -2757,53 +2752,12 @@ body.quiz-active .main-content {
   }
   .main-content { transition: none; }
   .sidebar { transition: right 0.3s cubic-bezier(0.25, 0.8, 0.25, 1), box-shadow 0.25s ease; }
-  .game-card, .word-card { animation: none; }
-  body.game-bg-active::before {
-    background-attachment: scroll !important;
-    filter: none;
-    backdrop-filter: none;
-    -webkit-backdrop-filter: none;
-  }
-  body.game-bg-active .game-card {
-    -webkit-backdrop-filter: none;
-    backdrop-filter: none;
-  }
   .streak-wrap.streak-hot { animation: none; }
   .xp-fill::after { animation: none; display: none; }
 }
-@media (max-width: 768px) and (prefers-reduced-motion: reduce) {
-  .game-card, .streak-wrap, .nav-link, .sidebar, .word-card, .side-label { transition: none !important; }
-}
-
-.page-header h1 {
-  margin: 0 0 6px; font-size: 22px;
-  background: linear-gradient(135deg, var(--text-white), var(--header-grad));
-  -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;
-}
 
 /* للصفحات اللي فيها خلفية ألعاب - عنوان أوضح */
-body.game-bg-active .view-nav-bar .view-back-btn {
-  background: color-mix(in srgb, var(--card-bg) 42%, transparent);
-}
-body.game-bg-active .page-header {
-  background: var(--game-card-bg);
-  backdrop-filter: blur(8px);
-  -webkit-backdrop-filter: blur(8px);
-  padding: 16px 20px;
-  border-radius: 14px;
-  border: 1px solid var(--accent);
-  box-shadow: 0 4px 20px rgba(0,0,0,0.2);
-  margin-bottom: 20px;
-}
 
-body.game-bg-active .page-header h1 {
-  background: none;
-  -webkit-background-clip: initial;
-  -webkit-text-fill-color: initial;
-  background-clip: initial;
-  color: var(--text-white);
-  text-shadow: 0 2px 8px rgba(0,0,0,0.3);
-}
 
 
 /* ── Card Box ─────────────────────────────── */
@@ -3148,6 +3102,7 @@ select option { background: var(--card-bg); color: var(--text-white); }
   vertical-align: middle;
 }
 
+/* ── Buttons ──────────────────────────────── */
 /* ── قفل بحث AI للزوار (Guest Trial) ── */
 .search-zone {
   position: relative;
@@ -3158,7 +3113,6 @@ select option { background: var(--card-bg); color: var(--text-white); }
   transition: filter 0.35s ease, opacity 0.35s ease;
 }
 .search-zone.search-locked .search-zone-inner,
-.search-zone.search-locked > .game-gamer-ai-wrap,
 .search-zone.search-locked.gamer-meaning-bubble .gamer-meaning-btn {
   filter: grayscale(0.85) blur(1.2px);
   opacity: 0.55;
@@ -3324,62 +3278,7 @@ select option { background: var(--card-bg); color: var(--text-white); }
 .sug-suggest-btn i { color: var(--accent); font-size: 15px; }
 .sug-ex-en { margin-bottom: 2px; }
 
-/* ── AI ألعاب داخل قواميس Minecraft / PUBG ── */
-.game-gamer-ai-wrap {
-  margin-top: 10px;
-  display: grid;
-  gap: 8px;
-}
-.game-gamer-ask-btn {
-  width: 100%;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-  padding: 12px 14px;
-  border-radius: 12px;
-  border: 1px dashed color-mix(in srgb, var(--accent) 50%, var(--border));
-  background: color-mix(in srgb, var(--accent) 8%, var(--card-bg));
-  color: var(--text-white);
-  font-size: 13px;
-  font-weight: 700;
-  font-family: inherit;
-  cursor: pointer;
-  transition: background 0.2s, border-color 0.2s, transform 0.15s;
-  text-align: center;
-  line-height: 1.4;
-}
-.game-gamer-ask-btn:hover:not(:disabled) {
-  border-color: var(--accent);
-  background: color-mix(in srgb, var(--accent) 18%, var(--card-bg));
-  transform: translateY(-1px);
-}
-.game-gamer-ask-btn:disabled,
-.game-gamer-ask-btn.loading { opacity: 0.7; cursor: wait; }
-.game-gamer-ask-btn i { color: var(--accent); }
-.game-gamer-ai-panel {
-  border: 1px solid color-mix(in srgb, var(--accent) 35%, var(--border));
-  border-radius: 12px;
-  background: color-mix(in srgb, var(--accent) 5%, var(--surface-bg));
-  overflow: hidden;
-}
-.game-gamer-results .sug-result-card { background: transparent; }
-.game-empty-search {
-  text-align: center;
-  padding: 36px 16px;
-  color: var(--text-gray);
-}
-.game-empty-icon { font-size: 32px; margin-bottom: 8px; }
-.game-empty-search p { margin: 0 0 14px; }
-.game-empty-hint {
-  margin: 0;
-  font-size: 13px;
-  color: var(--text-gray);
-  line-height: 1.6;
-  max-width: 420px;
-}
 
-/* ── Buttons ──────────────────────────────── */
 .btn-main {
   width: 100%; background: var(--accent); color: var(--text-on-accent);
   border: none; padding: 14px; border-radius: 10px;
@@ -5178,68 +5077,6 @@ body.test-clock-active .toast-host {
 .btn-cancel:hover { background: var(--card-bg); }
 
 /* ══════════════════════════════════════════
-   GAME CARDS
-   ══════════════════════════════════════════ */
-.game-card {
-  background: var(--card-bg); backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
-  border: 1px solid var(--accent); padding: 15px;
-  border-radius: 12px; margin-bottom: 12px;
-  display: flex; justify-content: space-between; align-items: center;
-  box-shadow: 0 4px 15px rgba(0,0,0,0.3); animation: slideIn 0.25s ease;
-}
-/* للثيمات الفاتحة - كروت اللعبة بيضاء */
-[data-theme="ocean"] .game-card,
-[data-theme="scroll"] .game-card {
-  background: var(--card-bg);
-  backdrop-filter: blur(8px);
-  -webkit-backdrop-filter: blur(8px);
-  box-shadow: 0 8px 24px rgba(0,0,0,0.12), 0 2px 8px rgba(0,0,0,0.08);
-  border: 1px solid var(--border);
-}
-
-.game-info { display: flex; align-items: center; gap: 15px; }
-.game-icon {
-  width: 50px; height: 50px; border-radius: 8px;
-  object-fit: cover; border: 2px solid var(--border); flex-shrink: 0;
-}
-.game-icon-symbol {
-  display: grid;
-  place-items: center;
-  background: linear-gradient(135deg, color-mix(in srgb, var(--accent) 24%, var(--surface-bg)), var(--surface-bg));
-  color: var(--accent);
-  font-size: 22px;
-  object-fit: initial;
-}
-.game-icon-symbol i {
-  line-height: 1;
-}
-.btn-add-mine {
-  background: var(--star); color: var(--text-on-star); border: none;
-  padding: 8px 12px; border-radius: 8px; font-weight: bold;
-  cursor: pointer; transition: 0.3s; white-space: nowrap; flex-shrink: 0;
-  font-family: inherit; font-size: 13px;
-}
-.btn-add-mine:hover { transform: scale(1.05); background: var(--star); filter: brightness(1.15); }
-
-/* ── Responsive ────────────────────────────── */
-@media (max-width: 480px) {
-  .actions { flex-direction: row; }
-  .card-container { height: 48vh; min-height: 320px; }
-  .quiz-word    { font-size: 28px; }
-  .quiz-meaning { font-size: 24px; }
-  .quiz-example { font-size: 15px; }
-  .quiz-view-setup { padding: 24px; }
-  .quiz-modes-grid { grid-template-columns: 1fr; }
-  .quiz-choice-grid { grid-template-columns: 1fr; }
-  .quiz-segmented { grid-template-columns: 1fr; }
-  .setup-btn { padding: 14px; font-size: 15px; }
-  .quiz-btn { padding: 15px; font-size: 15px; }
-  .quiz-sound-btn { width: 40px; height: 40px; font-size: 18px; }
-  .game-card { flex-direction: column; align-items: flex-start; gap: 12px; }
-  .btn-add-mine { width: 100%; text-align: center; }
-}
-
-/* ══════════════════════════════════════════
    GAME HEADER BAR (لرأس صفحة الألعاب)
    ══════════════════════════════════════════ */
 .game-header-bar {
@@ -5314,11 +5151,9 @@ body.test-clock-active .toast-host {
 /* ══════════════════════════════════════════
    GAME SEARCH BAR
    ══════════════════════════════════════════ */
-.game-search-bar {
   margin-bottom: 16px;
 }
 
-.game-search-inner {
   position: relative;
   display: flex;
   align-items: center;
@@ -5333,7 +5168,6 @@ body.test-clock-active .toast-host {
   z-index: 1;
 }
 
-.game-search-inner input {
   width: 100%;
   padding-right: 40px;
   background: var(--surface-bg);
@@ -5344,25 +5178,19 @@ body.test-clock-active .toast-host {
   backdrop-filter: blur(4px); -webkit-backdrop-filter: blur(4px);
 }
 
-.game-search-inner input:focus {
   border-color: var(--accent2);
   box-shadow: 0 0 0 3px var(--focus-ring);
 }
 
-.game-search-inner input::placeholder {
   color: var(--text-gray);
 }
 
 /* للثيمات الفاتحة - حقل البحث أبيض */
-[data-theme="ocean"] .game-search-inner input,
-[data-theme="scroll"] .game-search-inner input {
   background: var(--card-bg);
   border: 1px solid var(--border);
   box-shadow: 0 2px 8px rgba(0,0,0,0.08);
 }
 
-/* مثال الجملة داخل game-card */
-.game-example {
   font-size: 12px;
   color: var(--text-gray);
   font-style: italic;
@@ -5393,112 +5221,6 @@ body.test-clock-active .toast-host {
   background: var(--accent);
   border-radius: 3px 0 0 3px;
 }
-/* ══════════════════════════════════════════
-   GAME BACKGROUND — overlay كحلي مع صورة
-   ══════════════════════════════════════════ */
-
-/* الـ pseudo-element يحمل الصورة خلف المحتوى */
-body.game-bg-active::before {
-  content: '';
-  position: fixed;
-  inset: 0;
-  z-index: -1;
-  background-size: cover;
-  background-position: center;
-  background-attachment: fixed;
-  /* overlay: كحلي بشفافية 70% فوق الصورة */
-  background-color: var(--game-overlay);
-  background-blend-mode: multiply;
-}
-
-@media (min-width: 769px) {
-  body {
-    background-attachment: fixed;
-  }
-  body.game-bg-active::before {
-    background-attachment: fixed;
-  }
-}
-
-@media (max-width: 768px) {
-  body.game-bg-active::before {
-    background-attachment: scroll;
-  }
-}
-
-/* Minecraft */
-body[data-game="minecraft"].game-bg-active::before {
-  background-image: url('https://gaming-cdn.com/images/products/442/orig/minecraft-java-and-bedrock-edition-pc-mac-cover.jpg?v=1769503807');
-  filter: blur(1px) brightness(0.55) saturate(0.7);
-}
-
-/* PUBG */
-body[data-game="pubg"].game-bg-active::before {
-  background-image: url('https://images.alphacoders.com/901/901375.jpg');
-  filter: blur(1px) brightness(0.45) saturate(0.65);
-}
-
-/* المحتوى فوق الخلفية */
-body.game-bg-active .main-content {
-  position: relative;
-  z-index: 1;
-}
-
-/* game-card يصبح أكثر شفافية لتبين الخلفية قليلاً */
-body.game-bg-active .game-card {
-  background: var(--game-card-bg);
-  backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
-  border: 1px solid var(--accent);
-}
-
-body.game-bg-active .page-header h1 {
-  text-shadow: 0 2px 12px rgba(0,0,0,0.8);
-}
-
-/* للثيمات الفاتحة - خلفية الألعاب تكون أوضح */
-[data-theme="ocean"].game-bg-active::before,
-[data-theme="scroll"].game-bg-active::before {
-  filter: blur(2px) brightness(0.7) saturate(0.8);
-  background-blend-mode: normal;
-}
-
-[data-theme="ocean"].game-bg-active .game-card,
-[data-theme="scroll"].game-bg-active .game-card {
-  backdrop-filter: blur(12px) saturate(1.1); -webkit-backdrop-filter: blur(12px) saturate(1.1);
-  box-shadow: 0 4px 20px rgba(0,0,0,0.15);
-}
-
-/* ══════════════════════════════════════════
-   GAME CARD ACTIONS (صوت + إضافة)
-   ══════════════════════════════════════════ */
-.game-card-actions {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 8px;
-  flex-shrink: 0;
-  margin-right: 4px;
-}
-
-/* زر الصوت داخل game-card */
-.game-sound-btn {
-  width: 34px;
-  height: 34px;
-  font-size: 13px;
-}
-
-/* زر ➕ مضغوط بدون نص */
-.btn-add-mine {
-  width: 34px;
-  height: 34px;
-  padding: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 16px;
-  border-radius: 8px;
-}
-
 /* ══════════════════════════════════════════
    TOOLTIP
    ══════════════════════════════════════════ */
@@ -5569,13 +5291,12 @@ body.game-bg-active .page-header h1 {
 }
 
 /* إزالة أي overflow: hidden أو clip من العناصر الأب الشائعة حول الأزرار */
-.card-box, .sidebar, .main-content, .stat-card, .game-card, .word-card {
+.card-box, .sidebar, .main-content, .stat-card, .word-card {
   overflow: visible !important;
 }
 
 /* Responsive */
 @media (max-width: 480px) {
-  .game-card-actions { flex-direction: row; }
 }
 
 /* ══════════════════════════════════════════
@@ -5986,7 +5707,6 @@ body.game-bg-active .page-header h1 {
   /* تأثير ضغط للكروت والقوائم */
   .card-box:active,
   .word-card:active,
-  .game-card:active,
   .stat-card:active,
   .nav-link:active,
   .cat-tag:active {
@@ -6052,7 +5772,6 @@ body.game-bg-active .page-header h1 {
     .btn-delete:hover,
     .card-box:hover,
     .word-card:hover,
-    .game-card:hover,
     .stat-card:hover,
     .nav-link:hover,
     .search-btn:hover {
@@ -6106,7 +5825,6 @@ body.game-bg-active .page-header h1 {
     /* 4. Card tap effect - BUT NOT when clicking action buttons */
     .card-box:active:not(:has(.btn-audio:active, .btn-edit:active, .btn-delete:active)),
     .word-card:active:not(:has(.btn-audio:active, .btn-edit:active, .btn-delete:active)),
-    .game-card:active:not(:has(.btn-audio:active, .btn-edit:active, .btn-delete:active)),
     .stat-card:active {
       transform: scale(0.98) !important;
       transition: transform 0.12s ease-out !important;
@@ -6153,7 +5871,6 @@ body.game-bg-active .page-header h1 {
     .btn-delete,
     .card-box,
     .word-card,
-    .game-card {
       -webkit-user-select: none !important;
       user-select: none !important;
       -webkit-touch-callout: none !important;
@@ -6167,7 +5884,6 @@ body.game-bg-active .page-header h1 {
   .setup-btn,
   .card-box,
   .word-card,
-  .game-card,
   .stat-card,
   .nav-link {
     will-change: transform;
@@ -8056,11 +7772,6 @@ body.perf-balanced .modal-content,
 body.perf-balanced .stats-box,
 body.perf-balanced .card-box,
 body.perf-balanced .word-card,
-body.perf-balanced .game-card,
-body.perf-balanced .game-search-bar,
-body.perf-balanced .game-search-inner,
-body.perf-balanced .game-gamer-ai-wrap,
-body.perf-balanced .gamer-ai-result,
 body.perf-balanced .treasure-card,
 body.perf-balanced .treasure-stage,
 body.perf-balanced .quiz-card,
@@ -8076,11 +7787,6 @@ body.perf-stable .modal-content,
 body.perf-stable .stats-box,
 body.perf-stable .card-box,
 body.perf-stable .word-card,
-body.perf-stable .game-card,
-body.perf-stable .game-search-bar,
-body.perf-stable .game-search-inner,
-body.perf-stable .game-gamer-ai-wrap,
-body.perf-stable .gamer-ai-result,
 body.perf-stable .treasure-card,
 body.perf-stable .treasure-stage,
 body.perf-stable .quiz-card,
@@ -8096,11 +7802,6 @@ body.perf-turbo .modal-content,
 body.perf-turbo .stats-box,
 body.perf-turbo .card-box,
 body.perf-turbo .word-card,
-body.perf-turbo .game-card,
-body.perf-turbo .game-search-bar,
-body.perf-turbo .game-search-inner,
-body.perf-turbo .game-gamer-ai-wrap,
-body.perf-turbo .gamer-ai-result,
 body.perf-turbo .treasure-card,
 body.perf-turbo .treasure-stage,
 body.perf-turbo .quiz-card,
@@ -8116,11 +7817,6 @@ body.low-end-device .modal-content,
 body.low-end-device .stats-box,
 body.low-end-device .card-box,
 body.low-end-device .word-card,
-body.low-end-device .game-card,
-body.low-end-device .game-search-bar,
-body.low-end-device .game-search-inner,
-body.low-end-device .game-gamer-ai-wrap,
-body.low-end-device .gamer-ai-result,
 body.low-end-device .treasure-card,
 body.low-end-device .treasure-stage,
 body.low-end-device .quiz-card,
@@ -8139,11 +7835,6 @@ body.perf-stable .modal-content,
 body.perf-stable .stats-box,
 body.perf-stable .card-box,
 body.perf-stable .word-card,
-body.perf-stable .game-card,
-body.perf-stable .game-search-bar,
-body.perf-stable .game-search-inner,
-body.perf-stable .game-gamer-ai-wrap,
-body.perf-stable .gamer-ai-result,
 body.perf-stable .treasure-card,
 body.perf-stable .treasure-stage,
 body.perf-stable .quiz-card,
@@ -8159,11 +7850,6 @@ body.perf-turbo .modal-content,
 body.perf-turbo .stats-box,
 body.perf-turbo .card-box,
 body.perf-turbo .word-card,
-body.perf-turbo .game-card,
-body.perf-turbo .game-search-bar,
-body.perf-turbo .game-search-inner,
-body.perf-turbo .game-gamer-ai-wrap,
-body.perf-turbo .gamer-ai-result,
 body.perf-turbo .treasure-card,
 body.perf-turbo .treasure-stage,
 body.perf-turbo .quiz-card,
@@ -8258,11 +7944,6 @@ body.perf-balanced .profile-modal-sheet {
 body.perf-balanced .modal-content,
 body.perf-balanced .stats-box,
 body.perf-balanced .card-box,
-body.perf-balanced .game-card,
-body.perf-balanced .game-search-bar,
-body.perf-balanced .game-search-inner,
-body.perf-balanced .game-gamer-ai-wrap,
-body.perf-balanced .gamer-ai-result,
 body.perf-balanced .treasure-card,
 body.perf-balanced .treasure-stage,
 body.perf-balanced .quiz-card,
@@ -8320,36 +8001,7 @@ body.low-end-device .confetti {
   animation: none !important;
   filter: none !important;
 }
-body.perf-stable.game-bg-active::before,
-body.perf-turbo.game-bg-active::before,
-body.low-end-device.game-bg-active::before {
-  background-image: none !important;
-  background: var(--main-bg) !important;
-  filter: none !important;
-  opacity: 0 !important;
-}
-body.perf-stable.game-bg-active .game-card,
-body.perf-stable.game-bg-active .game-search-bar,
-body.perf-stable.game-bg-active .game-search-inner,
-body.perf-turbo.game-bg-active .game-card,
-body.perf-turbo.game-bg-active .game-search-bar,
-body.perf-turbo.game-bg-active .game-search-inner,
-body.low-end-device.game-bg-active .game-card,
-body.low-end-device.game-bg-active .game-search-bar,
-body.low-end-device.game-bg-active .game-search-inner {
-  background: var(--card-bg) !important;
-  box-shadow: none !important;
-  border-color: var(--border) !important;
-}
-body.perf-stable .game-icon,
-body.perf-stable .game-card img,
-body.perf-turbo .game-icon,
-body.perf-turbo .game-card img,
-body.low-end-device .game-icon,
-body.low-end-device .game-card img {
-  filter: none !important;
-  box-shadow: none !important;
-}
+
 .profile-theme-selector.theme-selector {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(130px, 1fr));
@@ -11066,8 +10718,6 @@ body.published-placement-mode .main-content {
   background: var(--accent-soft);
   color: var(--star);
 }
-.world-card-minecraft .world-card-icon { color: #4ade80; }
-.world-card-pubg .world-card-icon { color: #f87171; }
 .world-card-starred .world-card-icon { color: var(--star); }
 .world-card strong { font-size: 18px; }
 .world-card-desc { font-size: 13px; color: var(--text-gray); }
@@ -12318,11 +11968,11 @@ html[data-theme="glass"] .notif-hub.notif-open .notif-popover {
   opacity: 1 !important;
   pointer-events: auto !important;
 }
-html[data-theme="glass"] :where(.word-card, .game-card, .published-word-card) {
+html[data-theme="glass"] :where(.word-card, .published-word-card) {
   overflow: visible !important;
 }
-html[data-theme="glass"] :where(.word-card, .game-card, .published-word-card):hover,
-html[data-theme="glass"] :where(.word-card, .game-card, .published-word-card):focus-within {
+html[data-theme="glass"] :where(.word-card, .published-word-card):hover,
+html[data-theme="glass"] :where(.word-card, .published-word-card):focus-within {
   position: relative;
   z-index: 60;
 }
@@ -12427,7 +12077,6 @@ html[data-theme="glass"] :where(
   .card-box,
   #personalControls,
   .word-card,
-  .game-card,
   .stat-card,
   .theme-option,
   .profile-stat-chip,
@@ -12444,10 +12093,6 @@ html[data-theme="glass"] :where(
   .published-journey-panel,
   .published-gate-journey,
   .published-world-achievement,
-  .game-search-bar,
-  .game-search-inner,
-  .game-gamer-ai-wrap,
-  .gamer-ai-result,
   .selection-action-bar,
   #suggestionsBox
 ) {
@@ -12614,8 +12259,8 @@ html[data-theme="glass"] .published-gate-readiness-fill {
 }
 
 /* Existing semantic pseudo-elements are preserved; old global reflections stay retired. */
-html[data-theme="glass"] :where(.card-box, .game-card, .stat-card)::before,
-html[data-theme="glass"] :where(.card-box, .game-card, .stat-card)::after {
+html[data-theme="glass"] :where(.card-box, .stat-card)::before,
+html[data-theme="glass"] :where(.card-box, .stat-card)::after {
   content: none !important;
   display: none !important;
 }
@@ -12867,7 +12512,6 @@ html[data-theme="glass"] .dictionary-filter-search .voice-search-btn.is-listenin
 }
 
 /* Difficult-words/game search: one shell only; the layout wrapper stays invisible. */
-html[data-theme="glass"] .game-search-bar {
   background: transparent !important;
   background-image: none !important;
   border: 0 !important;
@@ -12875,7 +12519,6 @@ html[data-theme="glass"] .game-search-bar {
   backdrop-filter: none !important;
   -webkit-backdrop-filter: none !important;
 }
-html[data-theme="glass"] .game-search-inner {
   background:
     radial-gradient(100% 140% at 16% -38%, rgba(255,255,255,0.15), transparent 46%),
     linear-gradient(180deg, rgba(255,255,255,0.075), rgba(255,255,255,0.009)),
@@ -12888,7 +12531,6 @@ html[data-theme="glass"] .game-search-inner {
   backdrop-filter: none !important;
   -webkit-backdrop-filter: none !important;
 }
-html[data-theme="glass"] .game-search-inner:focus-within {
   border-color: rgba(235,248,255,0.34) !important;
   box-shadow:
     inset 0 1px 0 rgba(255,255,255,0.22),
@@ -12896,7 +12538,6 @@ html[data-theme="glass"] .game-search-inner:focus-within {
     0 0 0 2px rgba(255,255,255,0.12),
     0 0 0 4px rgba(255,255,255,0.052) !important;
 }
-html[data-theme="glass"] .game-search-inner input {
   background: transparent !important;
   background-image: none !important;
   border: 0 !important;
@@ -13013,7 +12654,6 @@ html[data-theme="glass"] body::-webkit-scrollbar-thumb {
 @media (hover: hover) and (pointer: fine) {
   html[data-theme="glass"] body.perf-ultra :where(
     .word-card,
-    .game-card,
     .stat-card,
     .theme-option,
     .world-card,
@@ -13022,7 +12662,6 @@ html[data-theme="glass"] body::-webkit-scrollbar-thumb {
   ):hover,
   html[data-theme="glass"] body.perf-balanced :where(
     .word-card,
-    .game-card,
     .stat-card,
     .theme-option,
     .world-card,
@@ -13040,7 +12679,6 @@ html[data-theme="glass"] body::-webkit-scrollbar-thumb {
 
 html[data-theme="glass"] body.perf-stable :where(
   .word-card,
-  .game-card,
   .stat-card,
   .theme-option,
   .world-card,
@@ -13049,7 +12687,6 @@ html[data-theme="glass"] body.perf-stable :where(
 ),
 html[data-theme="glass"] body.perf-turbo :where(
   .word-card,
-  .game-card,
   .stat-card,
   .theme-option,
   .world-card,
@@ -13058,7 +12695,6 @@ html[data-theme="glass"] body.perf-turbo :where(
 ),
 html[data-theme="glass"] body.low-end-device :where(
   .word-card,
-  .game-card,
   .stat-card,
   .theme-option,
   .world-card,
@@ -13071,7 +12707,6 @@ html[data-theme="glass"] body.low-end-device :where(
 
 html[data-theme="glass"] body.perf-stable :where(
   .word-card,
-  .game-card,
   .stat-card,
   .world-card,
   .published-card,
@@ -13085,7 +12720,6 @@ html[data-theme="glass"] body.perf-stable :where(
 
 html[data-theme="glass"] body.perf-turbo :where(
   .word-card,
-  .game-card,
   .stat-card,
   .world-card,
   .published-card,
@@ -13093,7 +12727,6 @@ html[data-theme="glass"] body.perf-turbo :where(
 ),
 html[data-theme="glass"] body.low-end-device :where(
   .word-card,
-  .game-card,
   .stat-card,
   .world-card,
   .published-card,
@@ -13115,7 +12748,6 @@ html[data-theme="glass"] body.low-end-device :where(
 
   html[data-theme="glass"] :where(
     .word-card,
-    .game-card,
     .stat-card,
     .theme-option,
     .world-card,

@@ -275,8 +275,8 @@ test('world cards and tabs provide coarse-pointer feedback and animated navigati
 });
 
 test('published words reuse existing TTS and provide resilient themed visuals', () => {
-  assert.match(worldsSource, /typeof window\.playGameSound === 'function'/);
-  assert.match(worldsSource, /window\.playGameSound\(spokenWord, event\)/);
+  assert.match(worldsSource, /typeof window\.playWordSound === 'function'/);
+  assert.match(worldsSource, /window\.playWordSound\(spokenWord, event\)/);
   assert.match(worldsSource, /sound\.disabled = !soundAvailable/);
   assert.match(worldsSource, /function getPublishedVisualFallback\(item, kind\)/);
   assert.match(worldsSource, /image\.addEventListener\('error', showFallback/);

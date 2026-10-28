@@ -62,18 +62,18 @@
   </script>
 
   <title>LootLingua | قاموس الأساطير</title>
-  <meta name="description" content="LootLingua قاموس إنجليزي عربي مع قواميس Minecraft وPUBG، كويزات، XP، مستويات، وصندوق كنز يومي لتعلم الكلمات.">
-  <meta name="keywords" content="LootLingua, قاموس إنجليزي عربي, قاموس ألعاب, Minecraft dictionary, PUBG terms, تعلم الإنجليزية, كلمات إنجليزية, كويزات, XP, مستويات, صندوق كنز">
+  <meta name="description" content="LootLingua قاموس إنجليزي عربي مع عوالم منشورة، كويزات، XP، مستويات، وصندوق كنز يومي لتعلم الكلمات.">
+  <meta name="keywords" content="LootLingua, قاموس إنجليزي عربي, عوالم تعليمية, تعلم الإنجليزية, كلمات إنجليزية, كويزات, XP, مستويات, صندوق كنز">
   <meta name="author" content="LootLingua">
   <meta name="robots" content="index, follow">
   <meta property="og:title" content="LootLingua | قاموس الأساطير">
-  <meta property="og:description" content="قاموس إنجليزي عربي مع قواميس Minecraft وPUBG، كويزات، XP، مستويات، وصندوق كنز يومي.">
+  <meta property="og:description" content="قاموس إنجليزي عربي مع عوالم تعليمية، كويزات، XP، مستويات، وصندوق كنز يومي.">
   <meta property="og:type" content="website">
   <meta property="og:url" content="https://loot-lingua.vercel.app/">
   <meta name="twitter:card" content="summary">
   <meta name="twitter:title" content="LootLingua | قاموس الأساطير">
-  <meta name="twitter:description" content="تعلم الكلمات الإنجليزية عبر قاموس ألعاب، كويزات، XP، مستويات، وصندوق كنز يومي.">
-  <!-- Dictionary API on Render: POST /api/dictionary (عادي) + POST /api/gamer-dictionary (جيمر→جيمر). Backend: dictionary-server/index.js -->
+  <meta name="twitter:description" content="تعلم الكلمات الإنجليزية عبر عوالم تعليمية، كويزات، XP، مستويات، وصندوق كنز يومي.">
+  <!-- Dictionary API on Render: POST /api/dictionary. Backend: dictionary-server/index.js -->
    <link
     id="site-favicon"
    rel="icon"
@@ -177,14 +177,7 @@
     <a href="#" class="nav-link" id="navStarred" data-feature="starred" data-view="starred" data-tip="الكلمات الصعبة" onclick="return onSidebarFeatureClick(event, 'starred', function () { loadStarredView(); });">
       <i class="fas fa-star"></i> <span class="side-label">الكلمات الصعبة</span>
     </a>
-    <div class="sidebar-divider"><span class="side-label">موسوعة الأساطير</span></div>
-    <a href="#" class="nav-link" data-feature="minecraft" data-view="minecraft" data-tip="Minecraft Dict" onclick="return onSidebarFeatureClick(event, 'minecraft', function () { loadGameDictionary('minecraft'); });">
-      <i class="fas fa-cube"></i> <span class="side-label">Minecraft Dict</span>
-    </a>
-    <a href="#" class="nav-link" data-feature="pubg" data-view="pubg" data-tip="PUBG Terms" onclick="return onSidebarFeatureClick(event, 'pubg', function () { loadGameDictionary('pubg'); });">
-      <i class="fas fa-crosshairs"></i> <span class="side-label">PUBG Terms</span>
-    </a>
-    <!-- إحصائيات + كويز — بعد قواميس الألعاب بنفس فاصل sidebar-divider -->
+    <!-- إحصائيات + كويز -->
     <div class="sidebar-divider"><span class="side-label">الأدوات</span></div>
     <a href="#" class="nav-link" data-feature="stats" data-tip="إحصائياتي" onclick="return onSidebarFeatureClick(event, 'stats', function () { openStatsPanel(); });">
       <i class="fas fa-chart-bar"></i> <span class="side-label">إحصائياتي</span>
@@ -252,29 +245,6 @@
         </div>
         <button class="btn-main" id="addBtn" onclick="addWord()">إضافة للقاموس</button>
       </div>
-    </div>
-  </div>
-
-  <!-- ── مربع بحث قواميس الألعاب (مخفي افتراضياً) ── -->
-  <div id="gameSearchBar" class="game-search-bar" style="display:none;">
-    <div class="game-search-inner">
-      <i class="fas fa-search game-search-icon"></i>
-      <input type="text" id="gameSearchInput"
-             placeholder="ابحث في كلمات اللعبة..."
-             oninput="searchGameWords()"
-             dir="ltr">
-    </div>
-    <div id="gamerAiSearchZone" class="search-zone" data-search-type="gamer">
-      <div id="gameGamerAiWrap" class="game-gamer-ai-wrap">
-        <button type="button" class="game-gamer-ask-btn" onclick="openGameGamerAiSearch()">
-          <i class="fa-solid fa-wand-magic-sparkles" aria-hidden="true"></i>
-          <span>ما لقيت مصطلحك؟ اسأل الـ AI عن أي كلمة ألعاب</span>
-        </button>
-        <div id="gameGamerAiPanel" class="game-gamer-ai-panel" style="display:none;" aria-live="polite"></div>
-      </div>
-      <button type="button" class="search-lock-overlay" aria-label="بحث الألعاب مقفل — سجّل دخولك" tabindex="-1">
-        <i class="fa-solid fa-lock" aria-hidden="true"></i>
-      </button>
     </div>
   </div>
 
@@ -572,22 +542,6 @@
     </div>
     <div id="customWorldsPanel" class="worlds-tab-panel" role="tabpanel" aria-labelledby="customWorldsTab" hidden>
       <div class="worlds-grid" id="worldsGrid">
-        <button type="button" class="world-card world-card-minecraft" data-feature="minecraft" onclick="return onWorldCardClick(event, 'minecraft', function () { loadGameDictionary('minecraft'); });">
-          <span class="world-card-icon-wrap">
-            <span class="world-card-icon"><i class="fas fa-cube" aria-hidden="true"></i></span>
-            <span class="world-card-lock-overlay" aria-hidden="true"><i class="fa-solid fa-lock"></i></span>
-          </span>
-          <strong>Minecraft</strong>
-          <span class="world-card-desc">قاموس بلوكات ومغامرات</span>
-        </button>
-        <button type="button" class="world-card world-card-pubg" data-feature="pubg" onclick="return onWorldCardClick(event, 'pubg', function () { loadGameDictionary('pubg'); });">
-          <span class="world-card-icon-wrap">
-            <span class="world-card-icon"><i class="fas fa-crosshairs" aria-hidden="true"></i></span>
-            <span class="world-card-lock-overlay" aria-hidden="true"><i class="fa-solid fa-lock"></i></span>
-          </span>
-          <strong>PUBG</strong>
-          <span class="world-card-desc">مصطلحات البقاء والمعركة</span>
-        </button>
         <button type="button" class="world-card world-card-starred" data-feature="starred" onclick="return onWorldCardClick(event, 'starred', function () { loadStarredView(); });">
           <span class="world-card-icon-wrap">
             <span class="world-card-icon"><i class="fas fa-star" aria-hidden="true"></i></span>

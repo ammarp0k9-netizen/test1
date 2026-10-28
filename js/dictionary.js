@@ -1089,13 +1089,6 @@ function clearGamerSuggestionsUI() {
   document.getElementById('gamerSuggestionsPanel')?.remove();
 }
 
-function clearGameGamerAiPanel() {
-  const panel = document.getElementById('gameGamerAiPanel');
-  if (panel) {
-    panel.style.display = 'none';
-    panel.innerHTML = '';
-  }
-}
 
 function sugAttr(str) {
   return encodeURIComponent(String(str ?? ''));
@@ -1116,8 +1109,6 @@ function pickSuggestionFields(s) {
 }
 
 function getSuggestionGameLabel() {
-  if (currentView === 'minecraft') return 'Minecraft';
-  if (currentView === 'pubg') return 'PUBG';
   return '';
 }
 
@@ -1171,8 +1162,7 @@ async function addAiMeaningCore({ word, ar, pos, ex, game }, btn) {
   if (btn) { btn.disabled = true; btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i>'; }
 
   const xpGain = 0;
-  const inGameDict = currentView === 'minecraft' || currentView === 'pubg';
-  const category = inGameDict ? (game || 'لعبة') : (pos || 'مصطلح ألعاب');
+  const category = pos || 'مصطلح ألعاب';
   let added = false;
 
   try {
@@ -1205,7 +1195,6 @@ async function addAiMeaningCore({ word, ar, pos, ex, game }, btn) {
         }));
         persistDictionary();
         if (isEditableDictionaryView()) render();
-        if (inGameDict && typeof recordGameDictionaryAdd === 'function') recordGameDictionaryAdd();
         pushNotification(`تمت الإضافة إلى ${getActiveDictionaryMessageLabel()}!`, 'success');
         added = true;
       } else {
@@ -1213,7 +1202,6 @@ async function addAiMeaningCore({ word, ar, pos, ex, game }, btn) {
         window.words.unshift(nw);
         persistDictionary();
         if (isEditableDictionaryView()) render();
-        if (inGameDict && typeof recordGameDictionaryAdd === 'function') recordGameDictionaryAdd();
         pushNotification(`تمت الإضافة إلى ${getActiveDictionaryMessageLabel()} محلياً — سجّل دخول للمزامنة`, 'success');
         added = true;
       }
@@ -1222,7 +1210,6 @@ async function addAiMeaningCore({ word, ar, pos, ex, game }, btn) {
       window.words.unshift(nw);
       persistDictionary();
       if (isEditableDictionaryView()) render();
-      if (inGameDict && typeof recordGameDictionaryAdd === 'function') recordGameDictionaryAdd();
       pushNotification(`تمت الإضافة إلى ${getActiveDictionaryMessageLabel()}!`, 'success');
       added = true;
     }
@@ -1872,71 +1859,6 @@ window.fetchWordHunterGamerMeaning = async function(event) {
   }
 };
 
-window.openGameGamerAiSearch = function() {
-  if (!guardGuestAiSearch('gamer')) return;
-  const input = document.getElementById('gameSearchInput');
-  const word = (input?.value || '').trim();
-  if (!word) {
-    showToast('اكتب المصطلح اللي بدك تسأل عنه بالإنجليزي');
-    input?.focus();
-    return;
-  }
-  fetchGameGamerSuggestions(word);
-};
-
-window.fetchGameGamerSuggestions = async function(forcedWord) {
-  const word = (forcedWord || document.getElementById('gameSearchInput')?.value || '').trim();
-  if (!word) {
-    showToast('اكتب كلمة أولاً');
-    return;
-  }
-  if (!guardGuestAiSearch('gamer')) return;
-  if (!rateLimit('fetchGameGamerSuggestions', 4, 45000)) return;
-
-  const panel = document.getElementById('gameGamerAiPanel');
-  const askBtn = document.querySelector('.game-gamer-ask-btn');
-  if (!panel) return;
-
-  if (askBtn) { askBtn.disabled = true; askBtn.classList.add('loading'); }
-  panel.style.display = 'block';
-  panel.innerHTML = '<p class="gamer-suggestions-loading"><i class="fas fa-spinner fa-spin"></i> جاري سؤال الـ AI عن معنى الألعاب...</p>';
-
-  const gameLabel = getSuggestionGameLabel() || 'ألعاب';
-
-  try {
-    const { data, fromCache } = await fetchAiMeaningsWithCache(word, 'gamer');
-    if (!data.length) {
-      panel.innerHTML = '<p class="gamer-suggestions-empty">ما لقينا معنى جيمر واضح. جرّب تهجئة ثانية أو كلمة ثانية.</p>';
-      return;
-    }
-
-    const cacheNote = fromCache
-      ? ' <span class="ai-cache-tag">من الذاكرة المشتركة</span>'
-      : '';
-    let html = `<p class="gamer-suggestions-title"><i class="fa-solid fa-gamepad"></i> نتائج AI — ${escapeHtml(gameLabel)}${cacheNote}</p>`;
-    html += '<div class="game-gamer-results">';
-    html += renderSuggestionHtml(data, 'gamer-sug-item', {
-      sourceWord: word,
-      game: gameLabel,
-      allowSelect: false,
-      showActions: true,
-      listSelector: '.game-gamer-results',
-    });
-    html += '</div>';
-    panel.innerHTML = html;
-    panel.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-  } catch (err) {
-    if (err.code === 403) return;
-    const msg = String(err.message || '').includes('fetch') || err.message === 'sleeping'
-      ? 'السيرفر كان نايم.. جرّب بعد شوي.'
-      : (err.message || 'فشل جلب معنى الألعاب');
-    panel.innerHTML = `<p class="gamer-suggestions-error">${escapeHtml(msg)}</p>`;
-  } finally {
-    if (askBtn) { askBtn.disabled = false; askBtn.classList.remove('loading'); }
-  }
-};
-
-// ═══════════════════════════════════════════════════════
 // Filter
 // ═══════════════════════════════════════════════════════
 function setFilter(f) {
@@ -2096,7 +2018,7 @@ function showBackupHelp(type, event) {
 const JSON_IMPORT_MAX_BYTES = 2 * 1024 * 1024;
 const JSON_IMPORT_MAX_WORDS = 500;
 const JSON_IMPORT_MAX_FIELD = 500;
-const JSON_IMPORT_FEATURE_PRIORITY = ['quiz', 'pubg', 'minecraft', 'treasure', 'starred'];
+const JSON_IMPORT_FEATURE_PRIORITY = ['quiz', 'treasure', 'starred'];
 
 function isJsonImportBatchActive() {
   return window.__jsonImportBatchActive === true;

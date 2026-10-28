@@ -6,7 +6,6 @@ const ACTIVE_TITLE_KEY = 'lootlinguaActiveTitleId';
 const ACTIVE_TITLE_NONE = '__none';
 const STREAK_FREEZE_KEY = 'lootlinguaStreakFreezes';
 const FREEZE_SAVES_KEY = 'lootlinguaFreezeSaves';
-const GAME_DICT_ADDS_KEY = 'lootlinguaGameDictAdds';
 const EXTRA_CHESTS_KEY = 'lootlinguaExtraChests';
 
 const TITLE_DEFS = [
@@ -33,14 +32,6 @@ const TITLE_DEFS = [
     name: 'درع الستريك',
     how: 'خلّي Streak Freeze ينقذ سلسلتك مرة واحدة.',
     unlocked: () => loadInt(FREEZE_SAVES_KEY, 0) >= 1,
-  },
-  {
-    id: 'game_explorer',
-    icon: 'fa-solid fa-dice-d20',
-    color: '#a78bfa',
-    name: 'رحّالة الألعاب',
-    how: 'أضف كلمة من أي قاموس ألعاب إلى قاموسك.',
-    unlocked: () => loadInt(GAME_DICT_ADDS_KEY, 0) >= 1,
   },
   {
     id: 'word_collector',
@@ -328,12 +319,6 @@ function saveStreakFreezeCount(count) {
   requestProfileCloudSave();
 }
 
-function recordGameDictionaryAdd() {
-  saveInt(GAME_DICT_ADDS_KEY, loadInt(GAME_DICT_ADDS_KEY, 0) + 1);
-  if (!hasSignedInUser()) markGuestDataDirty();
-  if (typeof evaluateTitleUnlocks === 'function') evaluateTitleUnlocks(true);
-  requestProfileCloudSave();
-}
 
 function describeLootReward(reward) {
   if (!reward) return 'لوت غامض';
@@ -542,7 +527,6 @@ function getTitleProgressMetrics() {
     starred: words.filter(w => w.starred).length,
     perfect: loadInt('lootlinguaPerfectQuizzes', 0),
     freezeSaves: loadInt(FREEZE_SAVES_KEY, 0),
-    gameAdds: loadInt(GAME_DICT_ADDS_KEY, 0),
     level: getLevelFromXP(loadInt('userXP', 0)),
     streak: loadInt('dailyStreak', 0),
     masteredWords: words.filter(w => getWordMasteryState(w).mastery_status === 'Mastered').length,
@@ -569,7 +553,6 @@ function getTitleProgress(def, metrics = getTitleProgressMetrics()) {
     first_spark: `${Math.min(loot.totalOpens || 0, 1)} / 1`,
     loot_hunter: `${Math.min(loot.streak || 0, 7)} / 7`,
     streak_savior: `${Math.min(freezeSaves, 1)} / 1`,
-    game_explorer: `${Math.min(gameAdds, 1)} / 1`,
     word_collector: `${Math.min(wordCount, 25)} / 25`,
     dictionary_keeper: `${Math.min(wordCount, 50)} / 50`,
     star_chaser: `${Math.min(starred, 10)} / 10`,
@@ -763,269 +746,6 @@ function renderTreasureRoom() {
 }
 
 // ═══════════════════════════════════════════════════════
-// Game Dictionaries
-// ═══════════════════════════════════════════════════════
-
-// ── صور موثوقة من Wikimedia Commons وروابط مستقرة ──────
-// Minecraft: نستخدم Wikimedia مباشرة
-// PUBG: نستخدم SVG icons من cdnjs / svg repos
-
-const gameData = {
-  minecraft: {
-    title: "Minecraft Dictionary",
-    titleIcon: "https://raw.githubusercontent.com/twitter/twemoji/master/assets/svg/26cf.svg", // ⛏
-    desc:  "اجمع الموارد وافهم كل مصطلحات اللعبة!",
-    bg:    "https://images.alphacoders.com/109/1099238.png",
-    words: [
-      {
-        text: "Obsidian",
-        meaning: "حجر بركاني صلب جداً — يتكوّن من تلاقي الماء مع الحمم",
-        example: "You need Obsidian to build a Nether portal.",
-        img: "https://minecraft.wiki/images/Obsidian_JE3_BE2.png?format=original"
-      },
-      {
-        text: "Creeper",
-        meaning: "وحش أخضر صامت يقترب منك وينفجر",
-        example: "A Creeper snuck up behind me and exploded!",
-        img: "https://minecraft.wiki/images/Creeper_face_1.png?b6233"
-      },
-      {
-        text: "Nether",
-        meaning: "العالم السفلي — بيئة جهنمية تحت عالم العادي",
-        example: "Build a portal to travel to the Nether.",
-        img: "https://minecraft.wiki/images/Netherrack_JE4_BE2.png?8a940"
-      },
-      {
-        text: "Enchant",
-        meaning: "تحسين الأسلحة والأدوات بقوى سحرية",
-        example: "Enchant your sword with Sharpness V.",
-        img: "https://minecraft.wiki/images/Enchanting_Table_JE4_BE2.png?format=original"
-      },
-      {
-        text: "Respawn",
-        meaning: "العودة للحياة من جديد بعد الموت",
-        example: "Set your respawn point using a bed.",
-        img: "https://minecraft.wiki/images/thumb/Respawn_Anchor_%280%29_JE1.png/150px-Respawn_Anchor_%280%29_JE1.png?23b57"
-      },
-      {
-        text: "Crafting",
-        meaning: "صنع الأدوات والأسلحة من الموارد المجموعة",
-        example: "Open the crafting table to build a sword.",
-        img: "https://minecraft.wiki/images/Crafting_Table_JE4_BE3.png?format=original"
-      },
-      {
-        text: "Biome",
-        meaning: "منطقة جغرافية في العالم لها طبيعة وكائنات خاصة",
-        example: "The desert biome is dry and sandy.",
-        img: "https://minecraft.wiki/images/thumb/Biome_preview.png/350px-Biome_preview.png?4d6f7"
-      },
-      {
-        text: "Mob",
-        meaning: "كائن حي متحرك في اللعبة — عدائي أو ودّي",
-        example: "Zombies are hostile mobs that spawn at night.",
-        img: "https://minecraft.wiki/images/NPCFace.png?2fe0f"
-      },
-      { 
-        text: "Spawn Point", 
-        meaning: "مكان إعادة الإحياء بعد الموت", 
-        example: "I slept in the bed to reset my spawn point near the village.", 
-        img: "https://minecraft.wiki/images/White_Bed_JE2_BE2.png" 
-      },
-      { 
-        text: "Mob Spawner", 
-        meaning: "قفص توليد الوحوش التلقائي", 
-        example: "We found a spider mob spawner and turned it into an XP farm.", 
-        img: "https://minecraft.wiki/images/thumb/Monster_Spawner_JE4.png/150px-Monster_Spawner_JE4.png?64df6" 
-      },
-      { 
-        text: "Hardcore Mode", 
-        meaning: "طور اللعبة بحياة واحدة فقط", 
-        example: "I've survived for 500 days in my Hardcore mode world!", 
-        img: "https://minecraft.wiki/images/Hardcore_Heart.svg?dcc51" 
-      },
-      { 
-        text: "Durability", 
-        meaning: "مدى تحمل الأداة قبل الكسر", 
-        example: "My diamond pickaxe has low durability, I need to mend it.", 
-        img: "https://minecraft.wiki/images/thumb/Durability_bars.png/544px-Durability_bars.png?dda91" 
-      },
-      { 
-        text: "XP (Experience)", 
-        meaning: "نقاط الخبرة: النقاط اللي بتجمعها عشان تطور أسلحتك.", 
-        example: "I need to kill more mobs to get XP for my sword enchantments.", 
-        img: "https://minecraft.wiki/images/Experience_Orb_Value_3-6.png?6de8c" 
-      },
-      { 
-        text: "AFK (Away From Keyboard)", 
-        meaning: "بعيد عن الجهاز: لما تترك اللعبة شغالة وتروح تعمل إشي ثاني.", 
-        example: "I’ll be AFK for 10 minutes at the iron farm.", 
-        img: "https://minecraft.wiki/images/Human_face.png?db4dc" 
-      },
-      { 
-        text: "Smelting", 
-        meaning: "صهر: عملية تحويل الخامات (زي الحديد) لسبائك باستخدام الفرن.", 
-        example: "I’m smelting the iron ore in the furnace to get iron ingots.", 
-        img: "https://minecraft.wiki/images/Furnace_GUI.png?8d780" 
-      },
-      { 
-        text: "Inventory", 
-        meaning: "قائمة الأغراض: الشاشة اللي بتعرض كل الأغراض اللي معك.", 
-        example: "My inventory is full of dirt; I need to throw some away.", 
-        img: "https://minecraft.wiki/images/thumb/Inventory.png/176px-Inventory.png?9e5ea" 
-      },
-      { 
-        text: "Pillagers", 
-        meaning: "النهّابون: الأعداء اللي بشنوا غارات على القرى.", 
-        example: "A group of Pillagers is attacking the village, get your bow!", 
-        img: "https://minecraft.wiki/images/Pillager_face.png?7f2f5" 
-      },
-      { 
-        text: "Enderman", 
-        meaning: "أندرمان: وحش طويل القامة ينتقل آنياً، ويهاجمك إذا نظرت في عينيه.", 
-        example: "Don't look the Enderman in the eyes, or he will teleport and attack you!", 
-        img: "https://minecraft.wiki/images/Enderman_face.png?8ebeb" 
-      },
-      { 
-        text: "Stronghold", 
-        meaning: "الحصن: بناء تحت الأرض يحتوي على بوابة عالم الإند(The End).", 
-        example: "We used Eyes of Ender to locate the stronghold and find the End Portal.", 
-        img: "https://minecraft.wiki/images/thumb/StrongholdPortalRoom.png/250px-StrongholdPortalRoom.png?ff423" 
-      },
-      { 
-        text: "Beacon", 
-        meaning: "المنارة: بلوكة نادرة تعطي اللاعبين القريبين منها قدرات خارقة (بوفات).", 
-        example: "A beacon provides powerful status effects like Haste and Strength to nearby players.", 
-        img: "https://minecraft.wiki/images/thumb/Beacon_JE6_BE2.png/150px-Beacon_JE6_BE2.png?684bf" 
-      },
-      { 
-        text: "Iron Golem", 
-        meaning: "جولم الحديد: الحارس العملاق اللي بيحمي القرويين من الوحوش.", 
-        example: "The Iron Golem attacked the zombies to protect the village.", 
-        img: "https://minecraft.wiki/images/Iron_Golem_face.png?e15db" 
-      },
-      { 
-        text: "Warden", 
-        meaning: "وحش أعمى قوي جداً يعيش في الـ Ancient City", 
-        example: "Keep quiet! The Warden can hear your footsteps from far away.", 
-        img: "https://minecraft.wiki/images/thumb/Warden_face.png/120px-Warden_face.png?1b626" 
-      },
-      { 
-        text: "Elder Guardian", 
-        meaning: "وحش بحري ضخم يحرس معبد المحيط", 
-        example: "The Elder Guardian gave me a mining fatigue effect in the temple.", 
-        img: "https://minecraft.wiki/images/Guardian_face_1.png?2168d" 
-      },
-      { 
-        text: "Ender Dragon", 
-        meaning: "تنين عالم النهاية وهو زعيم اللعبة", 
-        example: "We need many beds and arrows to defeat the Ender Dragon.", 
-        img: "https://minecraft.wiki/images/Ender_Dragon_face.png?0c1e7" 
-      },
-      { 
-        text: "Ancient City", 
-        meaning: "مدينة قديمة غامضة في أعمق نقطة تحت الأرض", 
-        example: "The Ancient City is full of loot, but beware of the Warden.", 
-        img: "https://minecraft.wiki/images/thumb/Deep_Dark_Light.png/480px-Deep_Dark_Light.png?12f2a" 
-      },
-      { 
-        text: "Copper", 
-        meaning: "معدن النحاس المستخدم في البناء والصواعق", 
-        example: "I used copper blocks to build the roof of my house.", 
-        img: "https://minecraft.wiki/images/Invicon_Block_of_Copper.png?60e78" 
-      },
-      { 
-        text: "Villager", 
-        meaning: "سكان القرى المسالمين الذين يمكنك التجارة معهم", 
-        example: "I traded some paper with the Villager to get emeralds.", 
-        img: "https://minecraft.wiki/images/Villager_face.png?c2d14" 
-      },
-      { 
-        text: "Skeleton", 
-        meaning: "هيكل عظمي: وحش سريع بستخدم القوس والسهم وبحترق تحت الشمس", 
-        example: "The Skeleton shot me with an arrow from behind the tree.", 
-        img: "https://minecraft.wiki/images/Skeleton_face.png?652cd" 
-      },
-      { 
-        text: "Silverfish", 
-        meaning: "سمكة الفضة: حشرات صغيرة ومزعجة بتطلع من البلوكات في الحصون.", 
-        example: "Don't break that block! It might hide a silverfish.", 
-        img: "https://minecraft.wiki/images/Silverfish_face.png?1f7e0" 
-      }
-    ]
-  },
-  pubg: {
-    title: "PUBG Terms",
-    titleIcon: "https://raw.githubusercontent.com/twitter/twemoji/master/assets/svg/1fa82.svg", // 🪂
-    desc:  "دليلك للنجاة والحصول على عشاء الدجاج!",
-    bg:    "https://images.alphacoders.com/901/901375.jpg",
-    words: [
-      {
-        text: "Airdrop",
-        meaning: "صندوق إمدادات نادر يسقط من طائرة — يحتوي على أسلحة قوية",
-        example: "Rush the airdrop before the enemy gets there!",
-        icon: "fa-solid fa-parachute-box"
-      },
-      {
-        text: "Flank",
-        meaning: "الالتفاف حول العدو من الجانب أو الخلف",
-        example: "Let's flank them from the left side.",
-        icon: "fa-solid fa-route"
-      },
-      {
-        text: "Loot",
-        meaning: "جمع الغنائم والأسلحة والمعدات من الخريطة",
-        example: "Good loot spawns in military compounds.",
-        icon: "fa-solid fa-box-open"
-      },
-      {
-        text: "Snipe",
-        meaning: "القنص والاستهداف من مسافة بعيدة جداً",
-        example: "He sniped me from 400 meters away.",
-        icon: "fa-solid fa-crosshairs"
-      },
-      {
-        text: "Revive",
-        meaning: "إنقاذ زميلك الساقط وإعادته للمعركة",
-        example: "Quick, revive me before they push!",
-        icon: "fa-solid fa-kit-medical"
-      },
-      {
-        text: "Zone",
-        meaning: "الدائرة الآمنة — يجب البقاء داخلها أو تضرر من السم",
-        example: "The zone is closing in, move now!",
-        icon: "fa-solid fa-circle-dot"
-      },
-      {
-        text: "Prone",
-        meaning: "الاستلقاء على الأرض للاختباء أو تفادي الرصاص",
-        example: "Go prone in the grass to stay hidden.",
-        icon: "fa-solid fa-person-rifle"
-      },
-      {
-        text: "Push",
-        meaning: "الهجوم على العدو والتقدم نحوه بقوة",
-        example: "They're reloading — push them now!",
-        icon: "fa-solid fa-forward-fast"
-      }
-    ]
-  }
-};
-
-// ── متغير يحفظ الكلمات المفلترة الحالية للبحث ──
-let currentGameWords = [];
-const viewScrollY = { personal: 0, worlds: 0, minecraft: 0, pubg: 0, starred: 0, quiz: 0, treasure: 0 };
-
-function saveCurrentViewScroll() {
-  viewScrollY[isEditableDictionaryView() ? getActiveDictionaryStorageScope() : currentView] = window.scrollY || window.pageYOffset || 0;
-}
-
-function restoreViewScroll(viewKey) {
-  const targetY = viewScrollY[viewKey] || 0;
-  requestAnimationFrame(() => {
-    window.scrollTo({ top: targetY, behavior: 'auto' });
-  });
-}
-
 function setTreasureMode(active) {
   document.body.classList.toggle('treasure-mode', Boolean(active));
   if (active) {
@@ -1043,7 +763,7 @@ function setTreasureEntryVisible(visible) {
 }
 
 function setTreasureDockActive(viewKey) {
-  const dockKey = viewKey === 'minecraft' || viewKey === 'pubg' || viewKey === 'starred' ? 'worlds' : viewKey;
+  const dockKey = viewKey === 'starred' ? 'worlds' : viewKey;
   const buttons = document.querySelectorAll('#legendDock .treasure-dock-btn, #treasureDock .treasure-dock-btn');
   buttons.forEach(btn => {
     btn.classList.remove('active', 'dock-tip-show');
@@ -1061,7 +781,7 @@ function setTreasureDockActive(viewKey) {
 }
 
 function unloadListForView(nextView) {
-  const usesList = ['personal', 'starred', 'minecraft', 'pubg'];
+  const usesList = ['personal', 'starred'];
   if (!usesList.includes(nextView)) {
     const list = document.getElementById('list');
     if (list) list.innerHTML = '';
@@ -1078,7 +798,7 @@ function animateTreasureRoute(direction) {
   }, 360);
 }
 
-const WORLDS_VIEWS = new Set(['worlds', 'minecraft', 'pubg', 'starred', 'customWorld']);
+const WORLDS_VIEWS = new Set(['worlds', 'starred', 'customWorld']);
 
 function animateWorldsRoute(direction) {
   document.body.classList.remove('worlds-route-next', 'worlds-route-back');
@@ -1141,8 +861,6 @@ function getSwipeTargetView(direction) {
   const rightToLeftTargets = {
     personal: 'treasure',
     worlds: 'personal',
-    minecraft: 'worlds',
-    pubg: 'worlds',
     starred: 'worlds',
     quiz: 'worlds'
   };
@@ -1150,8 +868,6 @@ function getSwipeTargetView(direction) {
     treasure: 'personal',
     personal: 'worlds',
     worlds: 'quiz',
-    minecraft: 'quiz',
-    pubg: 'quiz',
     starred: 'quiz'
   };
   return direction === 'right-to-left' ? rightToLeftTargets[view] : leftToRightTargets[view];
@@ -1232,152 +948,19 @@ window.addEventListener('lootlingua:runner-input-inactive', resetAppSwipeState);
 
 initTreasureSwipeNavigation();
 
-window.loadGameDictionary = function(gameKey) {
-  window.saveActiveAddFormDraft?.();
-  cleanupQuizSessionIfActive();
-  if (window.LootLinguaGuidedFirstJourney?.shouldAllowSurface?.(gameKey) === false) return;
-  if (!isFeatureUnlocked(gameKey)) {
-    openUnlockExplainModal(gameKey);
-    refreshFeatureUnlockUI();
-    return;
-  }
-  const fromPersonal = currentView === 'personal';
-  const fromWorlds = currentView === 'worlds';
-  if (fromPersonal || fromWorlds) animateWorldsRoute('next');
-  beginViewSwitch();
-  saveCurrentViewScroll();
-  closeSidebarIfOpen();
-  setTreasureMode(false);
-  const game = gameData[gameKey];
-  if (!game) return;
 
-  unloadListForView(gameKey);
-  currentView      = gameKey;
-  currentGameWords = [...game.words];
-  viewBackTarget = 'worlds';
-
-  setActiveNavLink(gameKey);
-  document.body.classList.add('game-bg-active');
-  document.body.setAttribute('data-game', gameKey);
-
-  hideAllViewElements();
-  setViewBackBar(true, 'رجوع لعوالم الأساطير');
-  setTreasureEntryVisible(true);
-  setTreasureDockActive('worlds');
-  document.getElementById('list').style.display = '';
-
-  // إظهار search bar الألعاب وتفريغه
-  const gameSearch = document.getElementById('gameSearchBar');
-  gameSearch.style.display = 'block';
-  gameSearch.querySelector('input').value = '';
-
-  // تحديث العنوان
-  document.querySelector('.page-header h1').innerHTML =
-    `<img src="${game.titleIcon}" width="24" height="24" style="vertical-align:middle;margin-left:6px;" alt=""> ${game.title}`;
-
-  clearGameGamerAiPanel();
-  renderGameWords(currentGameWords);
-  restoreViewScroll(gameKey);
-  refreshFeatureUnlockUI();
-  setAppViewRoute(gameKey);
-};
-
-function renderGameWords(words) {
-  const query = (document.getElementById('gameSearchInput')?.value || '').toLowerCase().trim();
-
-  let filtered = words.filter(w =>
-    w.text.toLowerCase().includes(query) || w.meaning.includes(query)
-  );
-
-  // ترتيب ذكي: الكلمات اللي تبدأ بالـ query أول
-  if (query) {
-    filtered.sort((a, b) => {
-      const aStarts = a.text.toLowerCase().startsWith(query);
-      const bStarts = b.text.toLowerCase().startsWith(query);
-      if (aStarts && !bStarts) return -1;
-      if (!aStarts && bStarts) return 1;
-      return a.text.localeCompare(b.text);
-    });
-  }
-
-  document.getElementById('list').innerHTML = filtered.length === 0
-    ? `<li class="game-empty-search" style="list-style:none;">
-         <div class="game-empty-icon">🔍</div>
-         <p>ما لقيت مصطلحك بالقاموس</p>
-         <p class="game-empty-hint">ما لقيته؟ استخدم زر «اسأل الـ AI» فوق عشان تبحث عن معنى أي مصطلح.</p>
-       </li>`
-    : filtered.map(w => {
-        const safeWord = w.text.replace(/'/g,"\\'");
-        const safeMeaning = w.meaning.replace(/'/g,"\\'");
-        const safeExample = (w.example||'').replace(/'/g,"\\'");
-        // highlight النص إذا فيه query
-        const dispText    = query ? hlGame(w.text, query)    : escapeHtml(w.text);
-        const dispMeaning = query ? hlGame(w.meaning, query) : escapeHtml(w.meaning);
-        const exEsc = escapeHtml(w.example || '');
-        const media = w.icon
-          ? `<span class="game-icon game-icon-symbol" aria-hidden="true"><i class="${escapeHtml(w.icon)}"></i></span>`
-          : `<img src="${escapeHtml(w.img)}" class="game-icon" alt="${escapeHtml(w.text)}"
-                   onerror="this.src='https://cdn-icons-png.flaticon.com/512/686/686589.png'">`;
-        return `
-          <li class="game-card">
-            <div class="game-info">
-              ${media}
-              <div>
-                <div class="word-text">${dispText}</div>
-                <div class="meaning-text">${dispMeaning}</div>
-                ${w.example ? `<div class="game-example">"${exEsc}"</div>` : ''}
-              </div>
-            </div>
-            <div class="game-card-actions">
-              <div class="tooltip-wrap">
-                <button class="icon-circle sound-btn game-sound-btn"
-                        onclick="playGameSound('${safeWord}',event)">
-                  <i class="fas fa-volume-up"></i>
-                </button>
-                <span class="tooltip-text">استمع</span>
-              </div>
-              <div class="tooltip-wrap">
-                <button class="btn-add-mine ${wordExists(w.text)?' btn-already-added':''}"
-                        onclick="addFromGame('${safeWord}','${safeMeaning}','${safeExample}',this)"
-                        ${wordExists(w.text)?'disabled':''}>
-                  ${wordExists(w.text)?'✓':'➕'}
-                </button>
-                <span class="tooltip-text">${wordExists(w.text)?'موجودة في قاموسك':'أضف للقاموس'}</span>
-              </div>
-            </div>
-          </li>`;
-      }).join('');
-}
-
-// highlight للألعاب
-function hlGame(text, query) {
-  if (!query || !text) return text || '';
-  try {
-    return text.replace(new RegExp(`(${query.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')})`, 'gi'),
-      '<span class="highlight">$1</span>');
-  } catch { return text; }
-}
-
-// صوت مباشر للكلمة (بدون id)
-window.playGameSound = function(word, event) {
+window.playWordSound = function(word, event) {
   if (event) event.stopPropagation();
   if (!word || !('speechSynthesis' in window)) return;
   window.speechSynthesis.cancel();
-  const utt   = new SpeechSynthesisUtterance(word.trim());
-  utt.lang    = 'en-US';
-  utt.rate    = 0.9;
-  const voice = window.speechSynthesis.getVoices().find(v => v.lang.startsWith('en'));
-  if (voice) utt.voice = voice;
-  window.speechSynthesis.speak(utt);
+  const utterance = new SpeechSynthesisUtterance(String(word).trim());
+  utterance.lang = 'en-US';
+  utterance.rate = 0.9;
+  const voice = window.speechSynthesis.getVoices().find((item) => item.lang.startsWith('en'));
+  if (voice) utterance.voice = voice;
+  window.speechSynthesis.speak(utterance);
 };
 
-// البحث داخل قاموس اللعبة
-window.searchGameWords = function() {
-  clearGameGamerAiPanel();
-  renderGameWords(currentGameWords);
-};
-
-// ── Hide all non-personal view elements ──
 function hideAllViewElements() {
   document.body.classList.remove('admin-mode');
   document.getElementById('personalControls').style.display = 'none';
@@ -1385,7 +968,6 @@ function hideAllViewElements() {
   document.getElementById('selectionActionBar').hidden      = true;
   document.getElementById('bulkDeleteBar').style.display    = 'none';
   document.querySelector('.backup-zone').style.display      = 'none';
-  document.getElementById('gameSearchBar').style.display    = 'none';
   document.getElementById('starredSearchBar').style.display = 'none';
   document.getElementById('quizView').style.display         = 'none';
   const treasureView = document.getElementById('treasureView');
@@ -5963,7 +5545,7 @@ function makePublishedWordCard(word) {
   const soundAvailable = Boolean(
     spokenWord &&
     'speechSynthesis' in window &&
-    typeof window.playGameSound === 'function'
+    typeof window.playWordSound === 'function'
   );
   const sound = publishedElement('button', 'published-word-icon-btn published-word-sound');
   sound.type = 'button';
@@ -5974,7 +5556,7 @@ function makePublishedWordCard(word) {
   if (soundAvailable) {
     sound.addEventListener('click', (event) => {
       sound.classList.add('is-speaking');
-      window.playGameSound(spokenWord, event);
+      window.playWordSound(spokenWord, event);
       clearTimeout(sound.__publishedSpeakingTimer);
       sound.__publishedSpeakingTimer = setTimeout(() => {
         sound.classList.remove('is-speaking');
@@ -6302,8 +5884,6 @@ function prepareWorldsShell() {
   currentView = 'worlds';
 
   setActiveNavLink(null);
-  document.body.classList.remove('game-bg-active');
-  document.body.removeAttribute('data-game');
   setTreasureMode(false);
 
   hideAllViewElements();
@@ -6946,8 +6526,6 @@ window.loadCustomWorld = function(worldId) {
   window.words = applyStoredWordOrder(readCustomWorldWordsFromStorage(activeCustomWorldId));
   if (dictionarySortMode !== 'auto') window.words = sortDictionaryWords(window.words);
   renderLimit = 20;
-  document.body.classList.remove('game-bg-active');
-  document.body.removeAttribute('data-game');
   setTreasureMode(false);
   hideAllViewElements();
   document.getElementById('personalControls').style.display = 'block';
@@ -7469,8 +7047,6 @@ window.loadTreasureView = function() {
   currentView = 'treasure';
 
   setActiveNavLink(null);
-  document.body.classList.remove('game-bg-active');
-  document.body.removeAttribute('data-game');
 
   hideAllViewElements();
   setViewBackBar(false);
@@ -7534,8 +7110,6 @@ window.loadStarredView = function() {
 
   setActiveNavLink('starred');
 
-  document.body.classList.remove('game-bg-active');
-  document.body.removeAttribute('data-game');
   setTreasureMode(false);
 
   hideAllViewElements();
@@ -7642,8 +7216,6 @@ window.loadQuizView = function(options = {}) {
   setActiveNavLink('quiz');
 
   // Remove game background
-  document.body.classList.remove('game-bg-active');
-  document.body.removeAttribute('data-game');
   setTreasureMode(false);
 
   // Hide personal controls, show only quiz view
@@ -7706,9 +7278,7 @@ window.loadPersonalDictionary = function(options = {}) {
   }
 
   // إزالة خلفية اللعبة
-  document.body.classList.remove('game-bg-active');
   document.body.classList.remove('admin-mode');
-  document.body.removeAttribute('data-game');
   setTreasureMode(false);
 
   // إظهار كل عناصر القاموس الشخصي
@@ -7720,7 +7290,6 @@ window.loadPersonalDictionary = function(options = {}) {
   restoreActiveAddFormDraft();
 
   // إخفاء search bar الألعاب والكلمات الصعبة والكويز
-  document.getElementById('gameSearchBar').style.display    = 'none';
   document.getElementById('starredSearchBar').style.display = 'none';
   document.getElementById('quizView').style.display         = 'none';
   const treasureView = document.getElementById('treasureView');
@@ -7747,73 +7316,5 @@ window.loadPersonalDictionary = function(options = {}) {
   return true;
 };
 
-window.addFromGame = async function(text, meaning, example, btnEl) {
-  const xpGain = 0;
-  const existingWord = window.LootLinguaWordLifecycle?.findUserWordByKey(
-    getPersonalDictionaryWordsSnapshot(),
-    text
-  );
-  // تحقق من التكرار
-  if (existingWord && !isDictionaryWordHidden(existingWord)) {
-    showToast('هذه الكلمة موجودة بالفعل في قاموسك');
-    if (btnEl) { btnEl.textContent='✓'; btnEl.disabled=true; btnEl.classList.add('btn-already-added'); }
-    return;
-  }
-  // Spam protection
-  if (!rateLimit('addFromGame', 10, 30000)) return;
-
-  if (btnEl) { btnEl.textContent='...'; btnEl.disabled=true; }
-
-  const canUseCloud = Boolean(window.auth?.currentUser && window.saveWordToCloud);
-  const refreshAfterGameDictionaryAdd = () => {
-    if (currentView === 'personal') render();
-    else if (currentView === 'minecraft' || currentView === 'pubg') renderGameWords(currentGameWords);
-    refreshFeatureUnlockUI();
-  };
-  if (canUseCloud) {
-    const realId = await window.saveWordToCloud(
-      text,
-      'لعبة',
-      meaning,
-      example || '',
-      0,
-      { lifecycleSource: { type: 'dictionary-search' }, existingWordId: existingWord?.id }
-    );
-    if (realId) {
-      if (existingWord) {
-        window.words = window.words.map((word) => String(word.id) === String(existingWord.id)
-          ? { ...word, hiddenFromDictionary: false, hiddenFromDictionaryAt: null }
-          : word);
-      } else {
-        window.words.unshift({id:realId,word:text,meaning,example:example||'',category:'لعبة',starred:false,forgetCount:0,xpValue:xpGain,createdAt:new Date().toISOString()});
-      }
-      persistDictionary();
-      showToast(existingWord
-        ? `تمت استعادة كلمة ”${text}“، وتقدمها السابق محفوظ.`
-        : 'تمت الإضافة لقاموسك');
-      recordGameDictionaryAdd();
-      refreshAfterGameDictionaryAdd();
-      if (btnEl) { btnEl.textContent='✓'; btnEl.classList.add('btn-already-added'); }
-    } else {
-      const nw={id:Date.now().toString(),word:text,meaning,example:example||'',category:'لعبة',starred:false,forgetCount:0,xpValue:xpGain,createdAt:new Date().toISOString()};
-      window.words.unshift(nw);
-      persistDictionary();
-      showToast('تمت الإضافة محلياً');
-      recordGameDictionaryAdd();
-      refreshAfterGameDictionaryAdd();
-      if (btnEl) { btnEl.textContent='✓'; btnEl.classList.add('btn-already-added'); }
-    }
-  } else {
-    const nw={id:Date.now().toString(),word:text,meaning,example:example||'',category:'لعبة',starred:false,forgetCount:0,xpValue:xpGain,createdAt:new Date().toISOString()};
-    window.words.unshift(nw);
-    persistDictionary();
-    showToast('تمت الإضافة للقاموس المحلي');
-    recordGameDictionaryAdd();
-    refreshAfterGameDictionaryAdd();
-    if (btnEl) { btnEl.textContent='✓'; btnEl.classList.add('btn-already-added'); }
-  }
-};
-
-// ═══════════════════════════════════════════════════════
 // Render (القاموس الشخصي)
 // ═══════════════════════════════════════════════════════

@@ -1,4 +1,4 @@
-﻿let currentFilter    = 'all';
+let currentFilter    = 'all';
 let editId           = null;
 let isReorderMode    = false;
 let selectedIndices  = [];
@@ -219,7 +219,7 @@ let pendingDeleteId  = null;
 let userXP           = parseInt(localStorage.getItem('userXP')) || 0;
 let dailyStreak      = loadInt('dailyStreak', 0);
 let lastActivity     = localStorage.getItem('lastActivityDate') || '';
-let currentView      = 'personal'; // 'personal' | 'customWorld' | 'worlds' | 'minecraft' | 'pubg' | 'starred' | 'quiz' | 'treasure'
+let currentView      = 'personal'; // 'personal' | 'customWorld' | 'worlds' | 'starred' | 'quiz' | 'treasure'
 let customWorlds     = readCustomWorldsFromStorage();
 let activeCustomWorldId = null;
 let pendingCustomWorldModalMode = 'create';
@@ -712,7 +712,7 @@ function syncSelectedIndicesFromBulkSelection() {
 })();
 
 function setActiveNavLink(key) {
-  // key: 'personal' | 'minecraft' | 'pubg'
+  // key: 'personal' | 'starred' | 'quiz'
   document.querySelectorAll('.nav-link[data-view]').forEach(l => {
     l.classList.toggle('active', l.dataset.view === key);
   });
@@ -742,8 +742,6 @@ function computeDefaultUnlockedFeatures() {
     u.add('treasure');
   }
   if (p.wordCount >= 5) u.add('starred');
-  if (p.wordCount >= 2 || p.userXP >= 10) u.add('minecraft');
-  if (p.wordCount >= 2 || p.userXP >= 10) u.add('pubg');
   if (p.wordCount >= 5) u.add('quiz');
   return u;
 }
@@ -784,28 +782,6 @@ const UNLOCK_EXPLAIN = {
       const need = 5;
       const n = p.wordCount;
       return n >= need ? `تقدّمك: ${n} كلمة (تم استيفاء الشرط).` : `تقدّمك: ${n} من ${need} كلمة في القاموس.`;
-    },
-  },
-  minecraft: {
-    title: 'قاموس Minecraft',
-    why: 'قاموس اللعبة يفتح بسرعة بعد شوية كلمات جديدة.',
-    how: 'أضف 2 كلمة فقط إلى قاموسك.',
-    progress: (p) => {
-      const ok = p.wordCount >= 2 || p.userXP >= 10;
-      return ok
-        ? `تقدّمك: ${p.wordCount} كلمة، ${p.userXP} XP (تم استيفاء الشرط).`
-        : `تقدّمك: ${p.wordCount} من 2 كلمات، و${p.userXP} من 10 XP.`;
-    },
-  },
-  pubg: {
-    title: 'مصطلحات PUBG',
-    why: 'قاموس PUBG يفتح بسرعة بعد شوية كلمات جديدة.',
-    how: 'أضف 2 كلمة فقط إلى قاموسك.',
-    progress: (p) => {
-      const ok = p.wordCount >= 2 || p.userXP >= 10;
-      return ok
-        ? `تقدّمك: ${p.wordCount} كلمة، ${p.userXP} XP (تم استيفاء الشرط).`
-        : `تقدّمك: ${p.wordCount} من 2 كلمات، و${p.userXP} من 10 XP.`;
     },
   },
   quiz: {
@@ -1215,8 +1191,6 @@ const APP_VIEW_ROUTES = {
   personal: 'dictionary',
   treasure: 'treasure',
   worlds: 'worlds',
-  minecraft: 'minecraft',
-  pubg: 'pubg',
   starred: 'hard-words',
   quiz: 'quiz',
   admin: 'admin',
@@ -1461,8 +1435,6 @@ function openRouteView(viewKey) {
   if (window.LootLinguaGuidedFirstJourney?.shouldAllowSurface?.(viewKey) === false) return;
   if (viewKey === 'treasure') loadTreasureView();
   else if (viewKey === 'worlds') loadWorldsView();
-  else if (viewKey === 'minecraft') loadGameDictionary('minecraft');
-  else if (viewKey === 'pubg') loadGameDictionary('pubg');
   else if (viewKey === 'starred') loadStarredView();
   else if (viewKey === 'quiz') loadQuizView();
   else if (viewKey === 'admin') {

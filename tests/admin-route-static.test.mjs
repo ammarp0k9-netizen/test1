@@ -41,7 +41,7 @@ test('admin entry normalizes layout state and remembers every supported origin v
   assert.match(admin, /ui\.returnView = originView/);
   assert.match(admin, /ui\.returnCustomWorldId/);
   assert.match(admin, /setTreasureMode\(false\)/);
-  assert.match(admin, /document\.body\.classList\.remove\([\s\S]*?'treasure-mode'[\s\S]*?'game-bg-active'/);
+  assert.match(admin, /document\.body\.classList\.remove\([\s\S]*?'treasure-mode'/);
   assert.match(admin, /document\.body\.classList\.add\('admin-mode'\)/);
   assert.match(admin, /viewBackTarget = 'admin-origin'/);
 });
@@ -50,7 +50,7 @@ test('admin back navigation restores the captured route instead of assuming pers
   assert.match(core, /currentView === 'admin'[\s\S]*?window\.returnFromAdminView\(\)/);
   assert.match(admin, /function returnFromAdminView\(\)/);
   assert.match(admin, /returnView === 'customWorld'/);
-  assert.match(admin, /returnView === 'minecraft' \|\| returnView === 'pubg'/);
+  assert.doesNotMatch(admin, /loadGameDictionary|minecraft|pubg/);
   for (const loader of [
     'loadTreasureView',
     'loadWorldsView',

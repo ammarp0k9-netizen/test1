@@ -38,13 +38,11 @@ function getVisibleSearchInput() {
   const preferredByView = {
     personal: 'searchInput',
     customWorld: 'searchInput',
-    minecraft: 'gameSearchInput',
-    pubg: 'gameSearchInput',
     starred: 'starredSearchInput'
   };
   const preferred = document.getElementById(preferredByView[currentView]);
   if (isElementVisible(preferred)) return preferred;
-  return ['searchInput', 'gameSearchInput', 'starredSearchInput']
+  return ['searchInput', 'starredSearchInput']
     .map(id => document.getElementById(id))
     .find(isElementVisible);
 }
@@ -54,7 +52,6 @@ function clearSearchInput(input) {
   input.value = '';
   input.dispatchEvent(new Event('input', { bubbles: true }));
   if (input.id === 'searchInput' && typeof render === 'function') render();
-  else if (input.id === 'gameSearchInput' && typeof searchGameWords === 'function') searchGameWords();
   else if (input.id === 'starredSearchInput' && typeof renderStarredWords === 'function') renderStarredWords();
 }
 
@@ -89,7 +86,7 @@ function closeOpenModalByShortcut() {
 
 function handleEscapeShortcut(e) {
   const active = document.activeElement;
-  if (active && ['searchInput', 'gameSearchInput', 'starredSearchInput'].includes(active.id)) {
+  if (active && ['searchInput', 'starredSearchInput'].includes(active.id)) {
     if (active.value) {
       e.preventDefault();
       clearSearchInput(active);
@@ -134,7 +131,6 @@ document.addEventListener('keydown', function(e) {
   const active = document.activeElement;
   if (active.id === 'wordInput') { e.preventDefault(); window.fetchSuggestions(); }
   else if (active.id === 'scrambleInput') { e.preventDefault(); submitScrambleAnswer(); }
-  else if (active.id === 'gameSearchInput') { /* لا شيء - oninput يتعامل معه */ }
   else if (!['INPUT','TEXTAREA','BUTTON','SELECT'].includes(active.tagName)) {
     e.preventDefault();
     document.getElementById('addBtn')?.click();

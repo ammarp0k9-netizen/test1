@@ -146,8 +146,8 @@ try {
       refreshFeatureUnlockUI();
       loadWorldsView();
       const worldsReady = currentView === 'worlds' && getComputedStyle(document.getElementById('worldsView')).display !== 'none';
-      loadGameDictionary('minecraft');
-      const gameReady = currentView === 'minecraft';
+      loadWorldsView();
+      const publishedWorldsReady = currentView === 'worlds';
       goBackFromSubView();
       const backReady = currentView === 'worlds';
       loadPersonalDictionary();
@@ -156,7 +156,7 @@ try {
       if (navigationStoredXP === null) localStorage.removeItem('userXP');
       else localStorage.setItem('userXP', navigationStoredXP);
       refreshFeatureUnlockUI();
-      viewNavigation = { worldsReady, gameReady, backReady, personalReady };
+      viewNavigation = { worldsReady, publishedWorldsReady, backReady, personalReady };
     } catch (error) {
       viewNavigation = { error: String(error?.stack || error) };
     }

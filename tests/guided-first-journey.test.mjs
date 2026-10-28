@@ -219,8 +219,6 @@ test('an active public-world journey does not override ordinary feature eligibil
   assert.equal(controller.getState().phase, 'awaiting-first-gate');
   assert.equal(controller.shouldAllowSurface('quiz'), true);
   assert.equal(controller.shouldAllowSurface('custom-worlds'), true);
-  assert.equal(controller.shouldAllowSurface('minecraft'), true);
-  assert.equal(controller.shouldAllowSurface('pubg'), true);
 });
 
 
@@ -260,7 +258,7 @@ test('the public-world journey stays separate from feature eligibility', () => {
   assert.match(htmlSource, /guided-first-journey-controller\.js/);
   assert.match(htmlSource, /guided-first-journey-cloud\.js/);
   assert.match(controllerSource, /beginFromEntry/);
-  assert.doesNotMatch(controllerSource, /\['quiz', 'minecraft', 'pubg', 'starred', 'treasure', 'custom-worlds'\]/);
+  assert.doesNotMatch(controllerSource, /minecraft|pubg/);
   assert.match(controllerSource, /must not become a global feature lock/);
   assert.match(controllerSource, /enableGuestDictionary/);
   assert.match(controllerSource, /استكشاف الموقع كاملاً كضيف/);

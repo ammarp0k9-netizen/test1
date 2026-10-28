@@ -74,15 +74,11 @@ test('a claimed guest snapshot is consumed, while later guest progress is a new 
   assert.equal(controller.getStatus('treasure', true), 'completed');
 });
 
-test('Minecraft and PUBG cards remain private-world-panel game dictionaries', () => {
-  const panelStart = htmlSource.indexOf('id="customWorldsPanel"');
-  const panelEnd = htmlSource.indexOf('</section>', panelStart);
-  const privatePanel = htmlSource.slice(panelStart, panelEnd);
-  assert.match(privatePanel, /world-card-minecraft[\s\S]*?data-feature="minecraft"[\s\S]*?loadGameDictionary\('minecraft'\)/);
-  assert.match(privatePanel, /world-card-pubg[\s\S]*?data-feature="pubg"[\s\S]*?loadGameDictionary\('pubg'\)/);
-  assert.match(privatePanel, /قاموس بلوكات ومغامرات/);
-  assert.match(privatePanel, /مصطلحات البقاء والمعركة/);
-  assert.match(worldsSource, /const gameData = \{[\s\S]*?minecraft:[\s\S]*?pubg:/);
+test('legacy game dictionaries are absent while the private-world panel remains', () => {
+  assert.match(htmlSource, /id="customWorldsPanel"/);
+  assert.match(htmlSource, /id="worldsGrid"/);
+  assert.doesNotMatch(htmlSource, /world-card-(minecraft|pubg)|loadGameDictionary|gameSearchBar/);
+  assert.doesNotMatch(worldsSource, /const gameData|loadGameDictionary|currentGameWords|renderGameWords|addFromGame/);
   assert.doesNotMatch(controllerSource, /minecraft|pubg/);
 });
 

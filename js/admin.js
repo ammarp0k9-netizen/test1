@@ -5962,13 +5962,11 @@
     if (typeof setTreasureMode === 'function') setTreasureMode(false);
     document.body.classList.remove(
       'treasure-mode',
-      'game-bg-active',
       'treasure-route-next',
       'treasure-route-back',
       'worlds-route-next',
       'worlds-route-back'
     );
-    document.body.removeAttribute('data-game');
     if (typeof hideAllViewElements === 'function') hideAllViewElements();
     if (typeof currentView !== 'undefined') currentView = 'admin';
     if (typeof viewBackTarget !== 'undefined') viewBackTarget = 'admin-origin';
@@ -5995,11 +5993,6 @@
     document.body.classList.remove('admin-mode');
     if (returnView === 'customWorld' && customWorldId && typeof root.loadCustomWorld === 'function') {
       root.loadCustomWorld(customWorldId);
-      return true;
-    }
-    if ((returnView === 'minecraft' || returnView === 'pubg') &&
-        typeof root.loadGameDictionary === 'function') {
-      root.loadGameDictionary(returnView);
       return true;
     }
     const loaders = {
