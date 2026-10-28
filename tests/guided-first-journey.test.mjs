@@ -210,6 +210,19 @@ test('verified completion recovers if the journey cloud phase lags behind its co
   assert.equal(controller.getState().phase, 'completed');
 });
 
+test('an active public-world journey does not override ordinary feature eligibility', async () => {
+  const { controller } = createControllerHarness();
+  await controller.beginFromEntry({
+    presentation: { classification: 'brand-new', audience: 'new' },
+    worldId: 'world-alpha',
+  });
+  assert.equal(controller.getState().phase, 'awaiting-first-gate');
+  assert.equal(controller.shouldAllowSurface('quiz'), true);
+  assert.equal(controller.shouldAllowSurface('custom-worlds'), true);
+  assert.equal(controller.shouldAllowSurface('minecraft'), true);
+  assert.equal(controller.shouldAllowSurface('pubg'), true);
+});
+
 
 test('gate word loading stays visible while per-word cloud progress updates arrive', () => {
   const refreshBody = worldsSource.slice(

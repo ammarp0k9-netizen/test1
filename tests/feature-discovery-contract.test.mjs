@@ -5,6 +5,8 @@ import test from 'node:test';
 const source = await readFile(new URL('../js/feature-discovery-contract.js', import.meta.url), 'utf8');
 const controllerSource = await readFile(new URL('../js/feature-discovery-controller.js', import.meta.url), 'utf8');
 const scriptSource = await readFile(new URL('../js/script.js', import.meta.url), 'utf8');
+const htmlSource = await readFile(new URL('../index.html', import.meta.url), 'utf8');
+const worldsSource = await readFile(new URL('../js/worlds.js', import.meta.url), 'utf8');
 const root = {};
 new Function('window', 'globalThis', `${source}\nreturn window.LootLinguaFeatureDiscoveryContract;`)(root, root);
 const discovery = root.LootLinguaFeatureDiscoveryContract;
@@ -34,7 +36,7 @@ test('guest migration preserves completed discovery and never resets an account 
   assert.equal(discovery.stateFor(discovery.merge(accountCompleted, guest), 'treasure', true).completedAt, 50);
 });
 
-test('the controller claims a guest record once and retains separate account keys', () => {
+test('a claimed guest snapshot is consumed, while later guest progress is a new record', () => {
   const values = new Map();
   const listeners = new Map();
   const rootWithStorage = {
@@ -42,6 +44,7 @@ test('the controller claims a guest record once and retains separate account key
     localStorage: {
       getItem: (key) => values.get(key) ?? null,
       setItem: (key, value) => values.set(key, String(value)),
+      removeItem: (key) => values.delete(key),
     },
     addEventListener(type, listener) { listeners.set(type, listener); },
     dispatchEvent() {},
@@ -49,12 +52,38 @@ test('the controller claims a guest record once and retains separate account key
   new Function('window', 'globalThis', 'localStorage', `${source}\n${controllerSource}\nreturn window.LootLinguaFeatureDiscovery;`)(rootWithStorage, rootWithStorage, rootWithStorage.localStorage);
   const controller = rootWithStorage.LootLinguaFeatureDiscovery;
   controller.complete('treasure');
+  const guestKey = discovery.storageKey({});
   rootWithStorage.auth.currentUser = { uid: 'account-a' };
   listeners.get('lootlingua:auth-state')?.({});
   assert.equal(controller.getStatus('treasure', true), 'completed');
+  assert.equal(values.has(guestKey), false, 'the claimed guest snapshot is consumed');
+  listeners.get('lootlingua:auth-state')?.({});
+  assert.equal(controller.getStatus('treasure', true), 'completed', 'the same account can sign in again without reset');
+  // A later guest session may safely create new progress, but it must not
+  // resurrect the treasure completion already transferred to account A.
+  rootWithStorage.auth.currentUser = null;
+  listeners.get('lootlingua:auth-state')?.({});
+  controller.start('quiz');
+  assert.equal(controller.getStatus('quiz', true), 'in-progress');
   rootWithStorage.auth.currentUser = { uid: 'account-b' };
   listeners.get('lootlingua:auth-state')?.({});
+  assert.equal(controller.getStatus('quiz', true), 'in-progress');
   assert.equal(controller.getStatus('treasure', true), 'available');
+  rootWithStorage.auth.currentUser = { uid: 'account-a' };
+  listeners.get('lootlingua:auth-state')?.({});
+  assert.equal(controller.getStatus('treasure', true), 'completed');
+});
+
+test('Minecraft and PUBG cards remain private-world-panel game dictionaries', () => {
+  const panelStart = htmlSource.indexOf('id="customWorldsPanel"');
+  const panelEnd = htmlSource.indexOf('</section>', panelStart);
+  const privatePanel = htmlSource.slice(panelStart, panelEnd);
+  assert.match(privatePanel, /world-card-minecraft[\s\S]*?data-feature="minecraft"[\s\S]*?loadGameDictionary\('minecraft'\)/);
+  assert.match(privatePanel, /world-card-pubg[\s\S]*?data-feature="pubg"[\s\S]*?loadGameDictionary\('pubg'\)/);
+  assert.match(privatePanel, /قاموس بلوكات ومغامرات/);
+  assert.match(privatePanel, /مصطلحات البقاء والمعركة/);
+  assert.match(worldsSource, /const gameData = \{[\s\S]*?minecraft:[\s\S]*?pubg:/);
+  assert.doesNotMatch(controllerSource, /minecraft|pubg/);
 });
 
 test('default feature gates and lock copy use the same word thresholds', () => {

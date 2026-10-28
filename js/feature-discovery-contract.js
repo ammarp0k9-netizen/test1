@@ -26,10 +26,6 @@
     return `lootlingua:feature-discovery:v${VERSION}:${owner(identity)}`;
   }
 
-  function guestClaimStorageKey() {
-    return `lootlingua:feature-discovery-guest-claim:v${VERSION}`;
-  }
-
   function normalizeFeature(raw) {
     if (!raw || Object.prototype.toString.call(raw) !== '[object Object]') return null;
     const status = clean(raw.status, 40);
@@ -98,6 +94,6 @@
     return normalize({ version: VERSION, features });
   }
 
-  const API = Object.freeze({ VERSION, FEATURES, STATUSES, storageKey, guestClaimStorageKey, normalize, create, stateFor, transition, merge });
+  const API = Object.freeze({ VERSION, FEATURES, STATUSES, storageKey, normalize, create, stateFor, transition, merge });
   Object.defineProperty(root, 'LootLinguaFeatureDiscoveryContract', { value: API, configurable: false, writable: false });
 })(typeof window !== 'undefined' ? window : globalThis);

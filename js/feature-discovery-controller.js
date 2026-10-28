@@ -13,18 +13,6 @@
   function write(next, identityValue) {
     localStorage.setItem(api().storageKey(identityValue), JSON.stringify(next));
   }
-  function guestUpdatedAt(snapshot) {
-    return Math.max(0, ...Object.values(snapshot?.features || {}).map((item) => Number(item.updatedAt) || 0));
-  }
-  function canClaimGuest(current, guest) {
-    const claim = (() => { try { return JSON.parse(localStorage.getItem(api().guestClaimStorageKey())); } catch (_) { return null; } })();
-    return !claim || Number(claim.guestUpdatedAt) !== guestUpdatedAt(guest) || claim.uid === current.uid;
-  }
-  function claimGuest(current, guest) {
-    localStorage.setItem(api().guestClaimStorageKey(), JSON.stringify({
-      uid: current.uid, guestUpdatedAt: guestUpdatedAt(guest), claimedAt: Date.now(),
-    }));
-  }
   function load() {
     if (!api()) return null;
     const current = identity();
@@ -33,10 +21,14 @@
     let next = read(current) || api().create();
     if (current.uid) {
       const guest = read({});
-      if (guest && canClaimGuest(current, guest)) {
+      if (guest) {
         next = api().merge(next, guest);
+        // The guest snapshot is consumed only after the merged account state
+        // is stored. A later guest session starts from a fresh record, so a
+        // timestamp change cannot make an already-claimed snapshot eligible
+        // for a different account.
         write(next, current);
-        claimGuest(current, guest);
+        localStorage.removeItem(api().storageKey({}));
       }
     }
     state = next;

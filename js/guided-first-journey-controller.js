@@ -180,12 +180,7 @@
     return next;
   }
 
-  function shouldAllowSurface(surface, options) {
-    // guided:true is an explicit override for known system-initiated quiz entry
-    // points (startGateQuiz, startGateGapReview, startNotificationWordReview,
-    // openPublishedGatePractice). All four call loadQuizView, which passes
-    // surface='quiz'. Restrict the bypass to that surface only so that accidental
-    // or future callers cannot suppress guards for unrelated surfaces.
+  function shouldAllowSurface() {
     // Guided First Journey is a public-world progress record, not a feature
     // eligibility system. Keep its special gate quiz metadata, but never use
     // it to block the ordinary quiz, private worlds, or game dictionaries.
