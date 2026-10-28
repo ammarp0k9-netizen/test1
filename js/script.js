@@ -739,9 +739,9 @@ function computeDefaultUnlockedFeatures() {
   const p = getUnlockProgressSnapshot();
   const u = new Set(['personal', 'stats']);
   if (p.wordCount >= 1) {
-    u.add('starred');
     u.add('treasure');
   }
+  if (p.wordCount >= 5) u.add('starred');
   if (p.wordCount >= 2 || p.userXP >= 10) u.add('minecraft');
   if (p.wordCount >= 2 || p.userXP >= 10) u.add('pubg');
   if (p.wordCount >= 5) u.add('quiz');
@@ -779,9 +779,9 @@ const UNLOCK_EXPLAIN = {
   starred: {
     title: 'الكلمات الصعبة',
     why: 'نفعّل قائمة الكلمات الصعبة بعد ما يصير عندك كلمات تقدر تعلّم عليها نجمة.',
-    how: 'أضف كلمة واحدة على الأقل إلى قاموسك.',
+    how: 'أضف 5 كلمات على الأقل إلى قاموسك.',
     progress: (p) => {
-      const need = 1;
+      const need = 5;
       const n = p.wordCount;
       return n >= need ? `تقدّمك: ${n} كلمة (تم استيفاء الشرط).` : `تقدّمك: ${n} من ${need} كلمة في القاموس.`;
     },
@@ -821,10 +821,10 @@ const UNLOCK_EXPLAIN = {
   },
   treasure: {
     title: 'صندوق المكافآت',
-    why: 'صندوق المكافآت يفتح بعد ما تضيف 5 كلمات لقاموسك عشان يكون له قيمة.',
-    how: 'ابحث عن 5 كلمات وأضفها لقاموسك الشخصي أو ابدأ رحلة عالم.',
+    why: 'صندوق المكافآت يفتح عند إضافة أول كلمة إلى قاموسك.',
+    how: 'أضف كلمة واحدة على الأقل إلى قاموسك الشخصي.',
     progress: (p) => {
-      const need = 5;
+      const need = 1;
       return p.wordCount >= need
         ? `تقدّمك: ${p.wordCount} كلمة (تم استيفاء الشرط).`
         : `تقدّمك: ${p.wordCount} من ${need} كلمة في القاموس.`;
