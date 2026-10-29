@@ -123,6 +123,7 @@
     const args = record.cta?.args || record.context || {};
     let handled = true;
     if (action === 'open-treasure') root.loadTreasureView?.();
+    else if (action === 'open-feature-discovery') handled = root.LootLinguaFeatureDiscovery?.open?.(String(args.feature || '')) === true;
     else if (action === 'review-due') handled = startWordReview('due');
     else if (action === 'practice-new-words') handled = startWordReview('new');
     else if (action === 'practice-weak-words') handled = startWordReview('weak');

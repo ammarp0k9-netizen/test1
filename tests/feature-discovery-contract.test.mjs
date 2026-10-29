@@ -7,6 +7,7 @@ const controllerSource = await readFile(new URL('../js/feature-discovery-control
 const scriptSource = await readFile(new URL('../js/script.js', import.meta.url), 'utf8');
 const htmlSource = await readFile(new URL('../index.html', import.meta.url), 'utf8');
 const worldsSource = await readFile(new URL('../js/worlds.js', import.meta.url), 'utf8');
+const notificationRuntimeSource = await readFile(new URL('../js/notification-runtime.js', import.meta.url), 'utf8');
 const root = {};
 new Function('window', 'globalThis', `${source}\nreturn window.LootLinguaFeatureDiscoveryContract;`)(root, root);
 const discovery = root.LootLinguaFeatureDiscoveryContract;
@@ -90,4 +91,95 @@ test('default feature gates and lock copy use the same word thresholds', () => {
   assert.match(unlockBlock, /if \(p\.wordCount >= 5\) u\.add\('quiz'\)/);
   assert.match(explanationBlock, /starred:[\s\S]*?const need = 5/);
   assert.match(explanationBlock, /treasure:[\s\S]*?const need = 1/);
+});
+
+test('coordinator offers eligible discovery through existing notifications without opening a feature', () => {
+  const values = new Map();
+  const listeners = new Map();
+  const records = new Map();
+  let notificationWrites = 0;
+  const calls = { treasure: 0, quiz: 0, starred: 0, worlds: 0, customWorlds: 0 };
+  const owner = {
+    auth: { currentUser: null },
+    words: [{ id: 'word-1', word: 'one' }],
+    localStorage: {
+      getItem: (key) => values.get(key) ?? null,
+      setItem: (key, value) => values.set(key, String(value)),
+      removeItem: (key) => values.delete(key),
+    },
+    addEventListener(type, listener) { listeners.set(type, listener); },
+    dispatchEvent() {},
+    isFeatureUnlocked(feature) { return feature === 'treasure'; },
+    LootLinguaNotificationStore: {
+      upsert(record) { notificationWrites += 1; records.set(record.occurrenceKey, record); },
+      resolve(key) { records.delete(key); },
+      find(key) { return records.get(key) || null; },
+    },
+    loadTreasureView() { calls.treasure += 1; },
+    loadQuizView() { calls.quiz += 1; },
+    loadStarredView() { calls.starred += 1; },
+    loadWorldsView() { calls.worlds += 1; },
+    showCustomWorldsTab() { calls.customWorlds += 1; },
+  };
+  new Function('window', 'globalThis', 'localStorage', 'setTimeout', 'clearTimeout',
+    `${source}\n${controllerSource}\nreturn window.LootLinguaFeatureDiscovery;`
+  )(owner, owner, owner.localStorage, () => 0, () => {});
+  const controller = owner.LootLinguaFeatureDiscovery;
+
+  controller.evaluate();
+  assert.equal(records.has('feature-discovery:treasure'), true);
+  assert.equal(records.has('feature-discovery:quiz'), false);
+  assert.equal(calls.treasure, 0, 'eligibility only creates an optional invite');
+  controller.evaluate();
+  assert.equal(notificationWrites, 1, 're-evaluation does not rewrite an existing invitation');
+
+  assert.equal(controller.open('treasure'), true);
+  assert.equal(calls.treasure, 1);
+  assert.equal(controller.getStatus('treasure', true), 'completed');
+  assert.equal(records.has('feature-discovery:treasure'), false);
+
+  owner.words = Array.from({ length: 5 }, (_, index) => ({ id: `word-${index}`, word: `word-${index}` }));
+  owner.isFeatureUnlocked = (feature) => ['treasure', 'quiz', 'starred'].includes(feature);
+  controller.evaluate();
+  assert.deepEqual([...records.keys()].sort(), [
+    'feature-discovery:custom-worlds',
+    'feature-discovery:quiz',
+    'feature-discovery:starred',
+  ]);
+});
+
+test('coordinator defers invitations while Entry or a public-gate journey is active', () => {
+  const values = new Map();
+  const records = new Map();
+  const owner = {
+    __entryExperienceActive: true,
+    auth: { currentUser: null },
+    words: [{ id: 'word-1', word: 'one' }],
+    localStorage: { getItem: (key) => values.get(key) ?? null, setItem: (key, value) => values.set(key, String(value)), removeItem: (key) => values.delete(key) },
+    addEventListener() {}, dispatchEvent() {}, isFeatureUnlocked: () => true,
+    LootLinguaNotificationStore: { upsert(record) { records.set(record.occurrenceKey, record); }, resolve(key) { records.delete(key); } },
+  };
+  new Function('window', 'globalThis', 'localStorage', 'setTimeout', 'clearTimeout',
+    `${source}\n${controllerSource}\nreturn window.LootLinguaFeatureDiscovery;`
+  )(owner, owner, owner.localStorage, () => 0, () => {});
+  const controller = owner.LootLinguaFeatureDiscovery;
+  controller.evaluate();
+  assert.equal(records.size, 0);
+  assert.equal(controller.open('treasure'), false);
+
+  owner.__entryExperienceActive = false;
+  owner.LootLinguaGuidedFirstJourney = { getState: () => ({ phase: 'awaiting-first-gate' }) };
+  owner.LootLinguaGuidedFirstJourneyContract = { isActive: () => true };
+  controller.evaluate();
+  assert.equal(records.size, 0, 'an active public-gate journey also defers discovery');
+});
+
+test('discovery notification CTA delegates to the coordinator instead of launching a quiz or gate directly', () => {
+  assert.match(notificationRuntimeSource, /action === 'open-feature-discovery'/);
+  assert.match(notificationRuntimeSource, /LootLinguaFeatureDiscovery\?\.open\?\.\(String\(args\.feature/);
+  assert.match(controllerSource, /lootlingua:learning-data-changed/);
+  assert.match(controllerSource, /lootlingua:guided-first-journey-change/);
+  assert.match(controllerSource, /loadQuizView\?\.\(\)/);
+  assert.doesNotMatch(controllerSource, /showToast/);
+  assert.doesNotMatch(controllerSource, /trusted-quiz-completed/);
 });

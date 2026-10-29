@@ -5320,6 +5320,22 @@ body.test-clock-active .toast-host {
 }
 .header-widgets { display:flex; align-items:center; gap:12px; flex-shrink:0; }
 
+/* Quiet optional-discovery marker; it never changes a feature's lock state. */
+.feature-discovery-ready { position: relative; }
+.feature-discovery-ready::after {
+  content: '';
+  position: absolute;
+  inset-block-start: 5px;
+  inset-inline-end: 5px;
+  width: 7px;
+  height: 7px;
+  border: 2px solid var(--card-bg);
+  border-radius: 999px;
+  background: var(--accent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 22%, transparent);
+}
+.worlds-tab.feature-discovery-ready::after { inset-block-start: 8px; inset-inline-end: 8px; }
+
 .streak-wrap {
   display:flex; align-items:center; gap:5px; cursor:pointer;
   padding:5px 10px; border-radius:20px;
