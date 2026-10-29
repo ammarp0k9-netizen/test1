@@ -32,7 +32,7 @@ test('the Entry Gate preview forwards the Gate owner rankId only to the internal
   const preview = section(
     entrySource,
     '  async function inspectPreviewGate(gateId) {',
-    '  function clearGamerGuide() {'
+    '  async function saveCheckpoint(label) {'
   );
   assert.match(preview, /selectedGate\?\.rankId/);
   assert.match(preview, /provider\.loadGatePreview/);

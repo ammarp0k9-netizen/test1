@@ -5304,6 +5304,20 @@ body.test-clock-active .toast-host {
    ══════════════════════════════════════════ */
 .header-top { display:flex; flex-wrap:wrap; justify-content:space-between; align-items:flex-start; gap:8px; margin-bottom:4px; }
 .header-top h1 { flex: 1; min-width: 0; margin: 0; }
+/* Shared route title: only the app header, never modal/card headings. */
+#pageTitle {
+  color: var(--accent);
+  -webkit-text-fill-color: currentColor;
+  background: none;
+  font-size: clamp(20px, 4vw, 22px);
+  font-weight: 800;
+  line-height: 1.3;
+  letter-spacing: 0;
+}
+#pageTitle > i { color: currentColor; }
+@media (max-width: 480px) {
+  #pageTitle { font-size: 20px; }
+}
 .header-widgets { display:flex; align-items:center; gap:12px; flex-shrink:0; }
 
 .streak-wrap {

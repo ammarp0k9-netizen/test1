@@ -570,14 +570,6 @@ body.journey-auth-active {
 .entry-journey-recap > i,
 .entry-saved-route > i { color: var(--entry-muted); opacity: .65; }
 
-.entry-context-layout { display: grid; justify-items: center; text-align: center; }
-.entry-context-layout .entry-copy { max-width: 650px; }
-.entry-context-icon { display: grid; place-items: center; width: 72px; height: 72px; margin-bottom: 14px; border-radius: 23px; background: var(--accent-soft); color: var(--accent); font-size: 1.9rem; }
-.entry-context-example { display: flex; align-items: center; justify-content: center; flex-wrap: wrap; gap: 9px; padding: 14px 18px; border: 1px solid var(--border); border-radius: 18px; background: var(--surface-bg); }
-.entry-context-example strong { font-size: 1.25rem; }
-.entry-context-example span { padding: 7px 10px; border-radius: 10px; background: var(--card-bg); color: var(--entry-muted); font-size: .82rem; }
-.entry-context-example span:last-child { color: var(--accent); }
-
 .entry-saved-route { padding: clamp(18px, 4vw, 30px); border: 1px solid var(--border); border-radius: 22px; background: var(--surface-bg); }
 .entry-saved-route.reviewed { border-color: var(--accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 12%, transparent); }
 .entry-saved-route strong { max-width: 170px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -589,29 +581,6 @@ body.journey-auth-active {
 .entry-journey-recap span { display: inline-flex; align-items: center; gap: 5px; }
 .entry-journey-recap span i { color: var(--accent); }
 
-.entry-gamer-guide {
-  position: fixed;
-  z-index: 10350;
-  inset-inline: max(12px, env(safe-area-inset-right)) auto;
-  bottom: max(16px, env(safe-area-inset-bottom));
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
-  align-items: center;
-  gap: 12px;
-  width: min(620px, calc(100vw - 24px));
-  padding: 16px;
-  border: 1px solid color-mix(in srgb, var(--accent) 52%, var(--border));
-  border-radius: 20px;
-  background: color-mix(in srgb, var(--card-bg) 96%, transparent);
-  color: var(--text-white);
-  box-shadow: 0 24px 70px rgba(0, 0, 0, .42);
-  backdrop-filter: blur(16px);
-}
-.entry-gamer-guide > i { display: grid; place-items: center; width: 44px; height: 44px; border-radius: 14px; background: var(--accent-soft); color: var(--accent); font-size: 1.2rem; }
-.entry-gamer-guide > div { display: grid; gap: 4px; }
-.entry-gamer-guide p { margin: 0; color: var(--entry-muted); font-size: .8rem; line-height: 1.55; }
-.entry-guide-step { position: absolute; inset-block-start: -11px; inset-inline-end: 16px; padding: 3px 9px; border-radius: 999px; background: var(--accent); color: var(--text-on-accent, #fff); font-size: .7rem; font-weight: 900; }
-.entry-guided-search-target { position: relative; z-index: 10340 !important; outline: 4px solid var(--accent) !important; outline-offset: 5px !important; box-shadow: 0 0 0 10px color-mix(in srgb, var(--accent) 18%, transparent) !important; }
 .entry-action-destinations {
   display: flex;
   align-items: center;
@@ -835,8 +804,6 @@ body.journey-auth-active {
   .entry-saved-route { gap: 7px; }
   .entry-learning-loop > i,
   .entry-saved-route > i { transform: scale(.82); }
-  .entry-gamer-guide { inset-inline: 12px; grid-template-columns: auto 1fr; width: auto; }
-  .entry-gamer-guide .entry-secondary { grid-column: 1 / -1; width: 100%; }
   .entry-action-screen { justify-content: flex-start; padding: 4px 0 24px; }
   .entry-action-icon { width: 64px; height: 64px; margin-bottom: 14px; }
   .entry-action-destinations { align-items: stretch; flex-direction: column; }
@@ -865,7 +832,6 @@ body.journey-auth-active {
   .entry-learning-loop > i,
   .entry-saved-route > i { transform: rotate(90deg); }
   .entry-journey-recap { gap: 6px; padding-inline: 8px; }
-  .entry-context-example > i { transform: rotate(90deg); }
   .entry-actions { align-items: stretch; }
   .entry-primary, .entry-secondary { padding-inline: 12px; }
   .entry-footer {

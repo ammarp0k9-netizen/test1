@@ -37,7 +37,7 @@
       gateError: null,
     },
     returnPreview: { status: 'idle', worldId: '', model: null, error: null },
-    gamerGuide: null,
+    guestFirstRouteHandled: false,
   };
 
   function api() {
@@ -424,6 +424,20 @@
     };
   }
 
+  async function routeGuestDirectlyToLearning(action) {
+    if (!action) return;
+    try {
+      const destination = await openEntryDestination(action.id, action);
+      if (destination?.focusWordInput) {
+        root.showToast?.('ابدأ بالبحث عن كلمة ثم أضفها إلى قاموسك.', 'info', 4200);
+        setTimeout(() => document.getElementById('wordInput')?.focus(), 0);
+      }
+    } catch (_) {
+      // A missing optional destination must not hold the initial loading UI.
+      // The normal app navigation remains available as the safe fallback.
+    }
+  }
+
   async function boot() {
     if (!runtime.initialized || !api() || !root.__lootlinguaAuthResolved) return;
     if (!root.__lootlinguaInitialDataReady) return;
@@ -478,8 +492,12 @@
     if (!learning || token !== runtime.bootToken) return;
     const guest = runtime.capturedGuest || captureGuestSnapshot() || {};
     const profileData = user ? (profileSnapshot.data || {}) : (guest.profile || {});
+    const accountWords = Array.isArray(root.words) ? root.words : [];
+    // The word migration can finish after the first authenticated snapshot.
+    // Keep the captured guest words visible to Entry during that hand-off so a
+    // real returning learner is never classified as a brand-new account.
     const words = user
-      ? (Array.isArray(root.words) ? root.words : [])
+      ? (accountWords.length ? accountWords : (guest.words || []))
       : (guest.words || readGuestWords());
     const accountCreation = user?.metadata?.creationTime || '';
     const accountLastSignIn = user?.metadata?.lastSignInTime || '';
@@ -523,12 +541,10 @@
       hasPublishedWorld: true,
     };
     let presentation = api().classifyUser(rawSignals);
-    if (
-      user &&
-      !entryState &&
-      guest.words?.length &&
-      presentation.classification !== 'brand-new'
-    ) {
+    const hasGuestLearningData = Boolean(
+      guest.words?.length || guest.srsEntryCount || guest.hasLocalLearningDraft
+    );
+    if (user && !entryState && hasGuestLearningData) {
       presentation = {
         ...presentation,
         classification: 'returning-guest-with-local-data',
@@ -556,6 +572,37 @@
       selectedWorldId: entryState?.selectedWorldId || '',
     });
     runtime.baselinePreferences = baselinePreferences(user, entryState, profileSnapshot);
+
+    if (user && !entryState && hasGuestLearningData) {
+      // Do not manufacture completion for a guest who has never taken the
+      // account Entry route. A single resumable destination preserves their
+      // learning data and avoids replaying the setup from the first step.
+      entryState = api().normalizeEntryState({
+        ...api().createEntryDraft(runtime.presentation, existingPreferences(user, null, profileSnapshot)),
+        currentStep: 'destination',
+        journeyStatus: 'structure-explored',
+        source: 'guest-migration',
+      });
+      persistLocalState(entryState, user);
+    }
+
+    // Anonymous learners start in the product, rather than receiving the
+    // account-focused setup flow. Their existing quiz/Journey destination is
+    // still honoured; a completely empty dictionary goes directly to the
+    // existing new-user-start action and focuses the word field.
+    if (!user && !entryState && !runtime.guestFirstRouteHandled) {
+      runtime.guestFirstRouteHandled = true;
+      const hasWords = Number(signals.wordCount || 0) > 0 || Number(signals.srsCount || 0) > 0;
+      const guestAction = hasWords || signals.activeJourney || signals.resumableQuiz
+        ? runtime.action
+        : { id: 'new-user-start' };
+      runtime.state = null;
+      announceEntryState();
+      close({ silent: true });
+      completeStartup();
+      await routeGuestDirectlyToLearning(guestAction);
+      return;
+    }
 
     if (entryState && !api().shouldPresent(entryState)) {
       runtime.state = entryState;
@@ -619,10 +666,7 @@
   }
 
   function stepIndicator(step) {
-    const hasGames = runtime.state?.interestIds?.includes('games');
-    const order = hasGames
-      ? ['interests', 'theme', 'worlds', 'journey', 'context', 'destination']
-      : ['interests', 'theme', 'worlds', 'journey', 'destination'];
+    const order = ['interests', 'theme', 'worlds', 'journey', 'destination'];
     const index = Math.max(0, order.indexOf(step)) + 1;
     return `الخطوة ${index} من ${order.length}`;
   }
@@ -1073,32 +1117,6 @@
     bindPanelActions();
   }
 
-  function renderContextFeature() {
-    const panel = panelElement();
-    if (!panel || !runtime.state) return;
-    const status = runtime.state.gamerStatus;
-    const guestQuotaUnavailable = !runtime.user && (
-      localStorage.getItem('hasUsedNormalGuestShot') === '1' ||
-      localStorage.getItem('hasUsedGamerGuestShot') === '1'
-    );
-    const finished = ['completed', 'unavailable'].includes(status);
-    panel.innerHTML = `
-      <header class="entry-header"><div><span class="entry-eyebrow">ميزة من سياق اهتمامك</span><span class="entry-step-label">${stepIndicator('context')}</span></div></header>
-      <div class="entry-context-layout">
-        <span class="entry-context-icon"><i class="fa-solid fa-gamepad" aria-hidden="true"></i></span>
-        <div class="entry-copy entry-copy-compact"><h1 id="entryExperienceTitle">الكلمة العامة قد تتغير داخل اللعبة</h1><p>يمكنك تجربة البحث الحقيقي: تظهر الترجمة العامة أولًا، ثم تختار بنفسك زر «معنى الألعاب» الموجود تحت النتائج.</p></div>
-        <div class="entry-context-example" aria-hidden="true"><strong lang="en" dir="ltr">Spawn</strong><span>ترجمة عامة</span><i class="fa-solid fa-arrow-left"></i><span><i class="fa-solid fa-gamepad"></i> سياق الألعاب</span></div>
-        ${guestQuotaUnavailable ? '<p class="entry-context-note"><i class="fa-solid fa-circle-info" aria-hidden="true"></i> تجربة البحث المجانية استُخدمت على هذا الجهاز. لن نطلب تسجيل الدخول بسبب ذلك؛ يمكنك متابعة الجولة.</p>' : ''}
-        ${finished ? `<p class="entry-context-note ${status === 'completed' ? 'success' : ''}"><i class="fa-solid ${status === 'completed' ? 'fa-circle-check' : 'fa-circle-info'}" aria-hidden="true"></i>${status === 'completed' ? 'جرّبت الفرق داخل البحث الحقيقي.' : 'لم تتوفر نتيجة سياقية هذه المرة، ويمكنك المحاولة لاحقًا من القاموس.'}</p>` : ''}
-      </div>
-      <footer class="entry-footer"><p class="entry-helper ready">هذه الميزة اختيارية ولا تحدد نجاح الجولة.</p><div class="entry-actions">
-        ${finished ? '<button type="button" class="entry-secondary" data-entry-action="back"><i class="fa-solid fa-arrow-right" aria-hidden="true"></i> رجوع</button><button type="button" class="entry-primary" data-entry-action="continue-context">تابع إلى خطوتك <i class="fa-solid fa-arrow-left" aria-hidden="true"></i></button>' : `
-          <button type="button" class="entry-secondary" data-entry-action="skip-gamer-demo">ليس الآن</button>
-          <button type="button" class="entry-primary" data-entry-action="start-gamer-demo" ${guestQuotaUnavailable ? 'disabled' : ''}>${status === 'running' ? 'استأنف البحث الحقيقي' : 'جرّبها في البحث الحقيقي'} <i class="fa-solid fa-arrow-up-right-from-square" aria-hidden="true"></i></button>`}
-      </div></footer>`;
-    bindPanelActions();
-  }
-
   function renderReturnJourney() {
     const panel = panelElement();
     if (!panel || !runtime.state) return;
@@ -1164,7 +1182,6 @@
     if (!runtime.state) return;
     if (runtime.state.status !== 'in-progress' || runtime.state.currentStep === 'destination') renderDestination();
     else if (runtime.state.currentStep === 'return') renderReturnJourney();
-    else if (runtime.state.currentStep === 'context') renderContextFeature();
     else if (runtime.state.currentStep === 'journey') renderJourneyStructure();
     else if (runtime.state.currentStep === 'worlds') renderWorldsOnboarding();
     else if (runtime.state.currentStep === 'theme') renderTheme();
@@ -1402,128 +1419,6 @@
     }
   }
 
-  function clearGamerGuide() {
-    const guide = runtime.gamerGuide;
-    if (guide?.listener) root.removeEventListener('lootlingua:dictionary-search-result', guide.listener);
-    document.getElementById('entryGamerGuide')?.remove();
-    document.querySelectorAll('.entry-guided-search-target').forEach((element) => {
-      element.classList.remove('entry-guided-search-target');
-    });
-    root.__lootlinguaEntryGamerGuideActive = false;
-    runtime.gamerGuide = null;
-  }
-
-  function targetGamerGuide(selector) {
-    document.querySelectorAll('.entry-guided-search-target').forEach((element) => {
-      element.classList.remove('entry-guided-search-target');
-    });
-    const target = document.querySelector(selector);
-    target?.classList?.add('entry-guided-search-target');
-    target?.scrollIntoView?.({ block: 'center', behavior: 'smooth' });
-    return target;
-  }
-
-  function updateGamerGuide(phase) {
-    const coach = document.getElementById('entryGamerGuide');
-    if (!coach) return;
-    const title = coach.querySelector('[data-entry-guide-title]');
-    const body = coach.querySelector('[data-entry-guide-body]');
-    const badge = coach.querySelector('[data-entry-guide-step]');
-    if (phase === 'gamer') {
-      if (badge) badge.textContent = '2 من 2';
-      if (title) title.textContent = 'الآن اطلب معنى الألعاب';
-      if (body) body.textContent = 'ظهرت الترجمة العامة. اضغط زر «معنى ألعاب؟» الحقيقي أسفل النتائج لترى الفرق.';
-      targetGamerGuide('#gamerMeaningBubble .gamer-meaning-btn');
-    } else {
-      if (badge) badge.textContent = '1 من 2';
-      if (title) title.textContent = 'ابدأ بالترجمة العامة';
-      if (body) body.textContent = 'جهزنا كلمة Spawn كمثال. اضغط زر «ابحث عن معنى» الحقيقي؛ لن نضيف الكلمة إلى قاموسك.';
-      targetGamerGuide('#searchBtn');
-    }
-  }
-
-  async function finishGamerGuide(outcome) {
-    if (!runtime.state || runtime.state.currentStep !== 'context') return;
-    clearGamerGuide();
-    try {
-      transition({ type: 'finish-gamer-demo', outcome });
-      transition({ type: 'continue-context' });
-      await saveCheckpoint('جاري العودة إلى جولتك…');
-    } catch (error) {
-      setBusy(false);
-    }
-    open();
-    render();
-    focusEntryHeading();
-  }
-
-  async function skipActiveGamerGuide() {
-    if (!runtime.state || runtime.state.currentStep !== 'context') return;
-    clearGamerGuide();
-    try {
-      transition({ type: 'skip-gamer-demo' });
-      await saveCheckpoint('جاري العودة إلى جولتك…');
-    } catch (error) {
-      setBusy(false);
-    }
-    open();
-    render();
-    focusEntryHeading();
-  }
-
-  async function launchGamerGuide() {
-    if (!runtime.state || runtime.state.currentStep !== 'context') return;
-    const unavailable = !runtime.user && (
-      localStorage.getItem('hasUsedNormalGuestShot') === '1' ||
-      localStorage.getItem('hasUsedGamerGuestShot') === '1'
-    );
-    if (unavailable || typeof root.fetchSuggestions !== 'function' || typeof root.fetchGamerSuggestions !== 'function') {
-      await finishGamerGuide('unavailable');
-      return;
-    }
-    try {
-      if (runtime.state.gamerStatus !== 'running') {
-        transition({ type: 'start-gamer-demo' });
-        await saveCheckpoint('جاري فتح البحث الحقيقي…');
-      }
-    } catch (error) {
-      setBusy(false);
-      return;
-    }
-
-    close({ silent: true });
-    root.loadPersonalDictionary?.();
-    root.__lootlinguaEntryGamerGuideActive = true;
-    const coach = document.createElement('aside');
-    coach.id = 'entryGamerGuide';
-    coach.className = 'entry-gamer-guide';
-    coach.setAttribute('role', 'dialog');
-    coach.setAttribute('aria-labelledby', 'entryGamerGuideTitle');
-    coach.innerHTML = `<span class="entry-guide-step" data-entry-guide-step>1 من 2</span>
-      <i class="fa-solid fa-gamepad" aria-hidden="true"></i>
-      <div><strong id="entryGamerGuideTitle" data-entry-guide-title>ابدأ بالترجمة العامة</strong><p data-entry-guide-body>جهزنا كلمة Spawn كمثال. اضغط زر «ابحث عن معنى» الحقيقي؛ لن نضيف الكلمة إلى قاموسك.</p></div>
-      <button type="button" class="entry-secondary" data-entry-guide-skip>تخطي التجربة</button>`;
-    document.body.appendChild(coach);
-    const listener = (event) => {
-      const detail = event.detail || {};
-      if (detail.type === 'normal') {
-        if (detail.status === 'success') updateGamerGuide('gamer');
-        else if (['empty', 'error', 'blocked'].includes(detail.status)) finishGamerGuide('unavailable');
-      } else if (detail.type === 'gamer') {
-        finishGamerGuide(detail.status === 'success' ? 'completed' : 'unavailable');
-      }
-    };
-    runtime.gamerGuide = { listener };
-    root.addEventListener('lootlingua:dictionary-search-result', listener);
-    coach.querySelector('[data-entry-guide-skip]')?.addEventListener('click', skipActiveGamerGuide);
-    const input = document.getElementById('wordInput');
-    if (input) {
-      input.value = 'Spawn';
-      input.dispatchEvent(new Event('input', { bubbles: true }));
-    }
-    updateGamerGuide('normal');
-  }
-
   async function saveCheckpoint(label) {
     persistLocalState(runtime.state, runtime.user);
     if (!runtime.user || !cloud()?.save) {
@@ -1641,12 +1536,6 @@
         return;
       }
       else if (action === 'continue-journey') transition({ type: 'continue-journey' });
-      else if (action === 'start-gamer-demo') {
-        await launchGamerGuide();
-        return;
-      }
-      else if (action === 'skip-gamer-demo') transition({ type: 'skip-gamer-demo' });
-      else if (action === 'continue-context') transition({ type: 'continue-context' });
       else if (action === 'review-return') transition({ type: 'review-return' });
       else if (action === 'continue-return') transition({ type: 'continue-return' });
       else if (action === 'complete') {

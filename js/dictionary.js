@@ -962,13 +962,11 @@ window.refreshGuestSearchLocks = function() {
 
 function showGuestTrialBlocked() {
   pushNotification('عذراً يا بطل! ميزة البحث مخصصة للأساطير المسجلين فقط. سجل الآن مجاناً!', 'warning');
-  if (window.__lootlinguaEntryGamerGuideActive) return;
   window.openAppAuth?.('login');
 }
 
 function showSearchLockRegisterHint() {
   pushNotification('عذراً يا بطل! ميزة البحث مخصصة للأساطير المسجلين فقط. سجل الآن مجاناً!', 'warning');
-  if (window.__lootlinguaEntryGamerGuideActive) return;
   window.openAppAuth?.('login');
 }
 

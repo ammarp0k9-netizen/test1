@@ -464,6 +464,9 @@ async function createHarness(options = {}) {
   const appSurface = document.createElement('main');
   appSurface.id = 'appSurface';
   document.body.appendChild(appSurface);
+  const wordInput = document.createElement('input');
+  wordInput.id = 'wordInput';
+  document.body.appendChild(wordInput);
 
   const root = createEventRoot();
   const calls = {
@@ -730,7 +733,8 @@ function persistedState(storage, key) {
 }
 
 test('the destination screen stays in-progress until its CTA opens the concrete selected World', async () => {
-  const harness = await createHarness();
+  const user = freshUser('destination-proof');
+  const harness = await createHarness({ user });
   await harness.reachRevealedAction();
 
   const awaitingAction = harness.controller.getState();
@@ -739,7 +743,7 @@ test('the destination screen stays in-progress until its CTA opens the concrete 
   assert.equal(harness.controller.isActive(), true);
   assert.ok(harness.panel.querySelector('[data-entry-cta="open-selected-world"]'));
   assert.equal(
-    persistedState(harness.storage, contract.entryStorageKey({})).status,
+    persistedState(harness.storage, contract.entryStorageKey({ uid: user.uid })).status,
     'in-progress'
   );
 
@@ -749,7 +753,7 @@ test('the destination screen stays in-progress until its CTA opens the concrete 
   assert.equal(harness.controller.getState().status, 'completed');
   assert.equal(harness.controller.isActive(), false);
   assert.equal(
-    persistedState(harness.storage, contract.entryStorageKey({})).status,
+    persistedState(harness.storage, contract.entryStorageKey({ uid: user.uid })).status,
     'completed'
   );
 });
@@ -932,68 +936,33 @@ test('a guest terminal state observed with account A cannot silently complete fr
   );
 });
 
-test('matrix: a fresh guest sees the full Journey onboarding and reaches a guest-safe World destination', async () => {
+test('matrix: a fresh guest starts in the personal dictionary without account onboarding', async () => {
   const harness = await createHarness();
 
   assert.equal(harness.controller.getPresentation().classification, 'brand-new');
-  assert.equal(harness.controller.getState().currentStep, 'interests');
-  assert.equal(harness.controller.isActive(), true);
-
-  await harness.reachRevealedAction();
-  assert.ok(harness.panel.querySelector('[data-entry-cta="open-selected-world"]'));
-  await harness.click('[data-entry-cta="open-selected-world"]');
-
-  assert.equal(harness.calls.worlds, 1);
-  assert.deepEqual(harness.calls.openedWorlds, ['world-study']);
-  assert.equal(harness.controller.getState().status, 'completed');
+  assert.equal(harness.controller.getState(), null);
+  assert.equal(harness.calls.dictionary, 1);
+  assert.equal(harness.document.activeElement.id, 'wordInput');
   assert.equal(harness.controller.isActive(), false);
 });
 
-test('games interest alone offers the real search guide, while success and AI unavailability both return safely', async (t) => {
-  for (const outcome of ['success', 'empty', 'error']) {
-    await t.test(outcome, async () => {
-      const harness = await createHarness({
-        enableGamerSearch: true,
-        gamerStatus: outcome,
-      });
-      await harness.click('[data-entry-interest="games"]');
-      await harness.click('[data-entry-action="continue-interests"]');
-      await harness.click('[data-entry-theme="lootlingua"]');
-      await harness.click('[data-entry-action="continue-theme"]');
-      await harness.click('[data-entry-world="world-games"]');
-      await harness.click('[data-entry-action="continue-worlds"]');
-      await harness.click('[data-entry-route-node]');
-      await harness.click('[data-entry-action="continue-journey"]');
-      assert.equal(harness.controller.getState().currentStep, 'context');
-
-      await harness.click('[data-entry-action="start-gamer-demo"]');
-      assert.equal(harness.controller.getState().gamerStatus, 'running');
-      assert.equal(harness.controller.isActive(), false);
-      await harness.root.fetchSuggestions();
-      await settle();
-      await harness.root.fetchGamerSuggestions();
-      await settle(12);
-
-      assert.equal(harness.controller.getState().currentStep, 'destination');
-      assert.equal(
-        harness.controller.getState().gamerStatus,
-        outcome === 'success' ? 'completed' : 'unavailable'
-      );
-      assert.equal(harness.controller.isActive(), true);
-      assert.equal(harness.document.getElementById('journeyAuthPrompt'), null);
-      assert.ok(harness.panel.querySelector('[data-entry-cta="open-selected-world"]'));
-    });
-  }
-});
-
-test('non-games interests never insert the gamer-meaning step', async () => {
-  const harness = await createHarness({ enableGamerSearch: true });
-  await harness.reachRevealedAction();
+test('games interest does not insert a retired search demo before the selected World destination', async () => {
+  const harness = await createHarness({ user: freshUser('games-interest') });
+  await harness.click('[data-entry-interest="games"]');
+  await harness.click('[data-entry-action="continue-interests"]');
+  await harness.click('[data-entry-theme="lootlingua"]');
+  await harness.click('[data-entry-action="continue-theme"]');
+  await harness.click('[data-entry-world="world-games"]');
+  await harness.click('[data-entry-action="continue-worlds"]');
+  await harness.click('[data-entry-route-node]');
+  await harness.click('[data-entry-action="continue-journey"]');
   assert.equal(harness.controller.getState().currentStep, 'destination');
   assert.equal(harness.controller.getState().gamerStatus, 'not-applicable');
+  assert.ok(harness.panel.querySelector('[data-entry-cta="open-selected-world"]'));
+  assert.equal(harness.panel.querySelector('[data-entry-action="start-gamer-demo"]'), null);
 });
 
-test('matrix: guest words alone are returning-light data, not Journey progress, and keep the full first action', async () => {
+test('matrix: a guest with words returns to the dictionary without restarting Entry Experience', async () => {
   const storage = new MemoryStorage({
     words_normal_guest: JSON.stringify([
       { id: 'guest-word-one', word: 'lantern', meaning: 'فانوس' },
@@ -1002,27 +971,36 @@ test('matrix: guest words alone are returning-light data, not Journey progress, 
   const harness = await createHarness({ storage });
 
   assert.equal(harness.controller.getPresentation().classification, 'returning-guest-with-local-data');
-  assert.equal(harness.controller.getState().currentStep, 'interests');
-  await harness.reachRevealedAction();
-  assert.ok(harness.panel.querySelector('[data-entry-cta="review-words"]'));
-  await harness.click('[data-entry-cta="review-words"]');
-
   assert.equal(harness.calls.dictionary, 1);
-  assert.equal(harness.controller.getState().status, 'completed');
+  assert.equal(harness.controller.getState(), null);
+  assert.equal(harness.controller.isActive(), false);
 });
 
-test('matrix: guest XP alone remains light local use and does not shorten Product Entry', async () => {
+test('guest sign-in with saved words resumes one account destination instead of restarting Entry', async () => {
+  const storage = new MemoryStorage({
+    words_normal_guest: JSON.stringify([
+      { id: 'guest-word-after-sign-in', word: 'harbor', meaning: 'Ù…ÙŠÙ†Ø§Ø¡' },
+    ]),
+  });
+  const harness = await createHarness({ storage });
+
+  await harness.switchUser(freshUser('guest-word-account'));
+
+  assert.equal(harness.controller.getPresentation().classification, 'returning-guest-with-local-data');
+  assert.equal(harness.controller.getState().currentStep, 'destination');
+  assert.equal(harness.controller.getState().journeyStatus, 'structure-explored');
+  assert.ok(harness.panel.querySelector('[data-entry-cta="review-words"]'));
+  assert.equal(harness.controller.isActive(), true);
+});
+
+test('matrix: guest XP alone still begins at the personal dictionary without Product Entry', async () => {
   const storage = new MemoryStorage({ userXP: '25' });
   const harness = await createHarness({ storage });
 
   assert.equal(harness.controller.getPresentation().classification, 'returning-guest-with-local-data');
-  assert.equal(harness.controller.getState().currentStep, 'interests');
-  await harness.reachRevealedAction();
-  assert.ok(harness.panel.querySelector('[data-entry-cta="open-selected-world"]'));
-  await harness.click('[data-entry-cta="open-selected-world"]');
-
-  assert.equal(harness.calls.worlds, 1);
-  assert.equal(harness.controller.getState().status, 'completed');
+  assert.equal(harness.calls.dictionary, 1);
+  assert.equal(harness.controller.getState(), null);
+  assert.equal(harness.controller.isActive(), false);
 });
 
 test('matrix: a fresh account with an existing empty profile is still brand-new and sees every step', async () => {
@@ -1288,31 +1266,32 @@ test('matrix: a proven completed v2 account remains once-only and never reopens 
 
 test('matrix: refresh restores interests, theme, Worlds, and Journey stages without manufacturing completion', async () => {
   const storage = new MemoryStorage();
-  const interests = await createHarness({ storage });
+  const user = freshUser('refresh-entry-draft');
+  const interests = await createHarness({ storage, user });
   await interests.click('[data-entry-interest="games"]');
   assert.equal(interests.controller.getState().currentStep, 'interests');
 
-  const interestsRefresh = await createHarness({ storage });
+  const interestsRefresh = await createHarness({ storage, user });
   assert.equal(interestsRefresh.controller.getState().currentStep, 'interests');
   assert.deepEqual(interestsRefresh.controller.getState().interestIds, ['games']);
   assert.ok(interestsRefresh.panel.querySelector('[data-entry-action="continue-interests"]'));
   await interestsRefresh.click('[data-entry-action="continue-interests"]');
   await interestsRefresh.click('[data-entry-theme="ocean"]');
 
-  const themeRefresh = await createHarness({ storage });
+  const themeRefresh = await createHarness({ storage, user });
   assert.equal(themeRefresh.controller.getState().currentStep, 'theme');
   assert.equal(themeRefresh.controller.getState().themeId, 'ocean');
   assert.equal(themeRefresh.controller.getState().status, 'in-progress');
   assert.ok(themeRefresh.panel.querySelector('[data-entry-action="continue-theme"]'));
   await themeRefresh.click('[data-entry-action="continue-theme"]');
 
-  const worldsRefresh = await createHarness({ storage });
+  const worldsRefresh = await createHarness({ storage, user });
   assert.equal(worldsRefresh.controller.getState().currentStep, 'worlds');
   assert.equal(worldsRefresh.controller.getState().status, 'in-progress');
   await worldsRefresh.click('[data-entry-world="world-games"]');
   await worldsRefresh.click('[data-entry-action="continue-worlds"]');
 
-  const journeyRefresh = await createHarness({ storage });
+  const journeyRefresh = await createHarness({ storage, user });
   assert.equal(journeyRefresh.controller.getState().currentStep, 'journey');
   assert.equal(journeyRefresh.controller.getState().selectedWorldId, 'world-games');
   assert.equal(journeyRefresh.controller.getState().journeyStatus, 'world-selected');

@@ -82,7 +82,7 @@ test('the versioned Entry Experience contract exposes frozen central enums and A
   assert.equal(entry.CONTRACT_VERSION, 2);
   assert.deepEqual(Array.from(entry.STATUSES), ['in-progress', 'completed']);
   assert.deepEqual(Array.from(entry.AUDIENCES), ['new', 'returning', 'returning-guest']);
-  assert.deepEqual(Array.from(entry.STEPS), ['interests', 'theme', 'worlds', 'journey', 'context', 'destination', 'return']);
+  assert.deepEqual(Array.from(entry.STEPS), ['interests', 'theme', 'worlds', 'journey', 'destination', 'return']);
   assert.deepEqual(Array.from(entry.JOURNEY_STATUSES), ['pending', 'world-selected', 'structure-explored', 'return-reviewed']);
   assert.ok(Object.isFrozen(entry));
   assert.ok(Object.isFrozen(entry.INTERESTS));
@@ -532,14 +532,11 @@ test('the full v2 route requires a real World choice and a Journey-structure int
   assert.equal(explored.journeyStatus, 'structure-explored');
   assert.equal(explored.status, 'in-progress');
 
-  const context = entry.transitionState(explored, { type: 'continue-journey' }, FIXED_NOW + 7000);
-  assert.equal(context.currentStep, 'context');
-  assert.equal(context.gamerStatus, 'offered');
-  const skippedContext = entry.transitionState(context, { type: 'skip-gamer-demo' }, FIXED_NOW + 8000);
-  assert.equal(skippedContext.currentStep, 'destination');
-  assert.equal(skippedContext.gamerStatus, 'skipped');
+  const destination = entry.transitionState(explored, { type: 'continue-journey' }, FIXED_NOW + 7000);
+  assert.equal(destination.currentStep, 'destination');
+  assert.equal(destination.gamerStatus, 'not-applicable');
 
-  const completed = entry.transitionState(skippedContext, { type: 'complete' }, FIXED_NOW + 9000);
+  const completed = entry.transitionState(destination, { type: 'complete' }, FIXED_NOW + 9000);
   assert.equal(completed.status, 'completed');
   assert.equal(completed.currentStep, 'destination');
   assert.equal(completed.journeyStatus, 'structure-explored');
@@ -587,13 +584,12 @@ test('v2 cannot be globally skipped, and v1 is preference input rather than v2 c
   });
 });
 
-test('normalization restores every v2 stage and its interaction proof after refresh', () => {
+test('normalization restores supported v2 stages and advances the removed context step safely', () => {
   const stages = [
     v2State(),
     v2State({ currentStep: 'theme', interestsStatus: 'selected', interestIds: ['games'] }),
     v2State({ currentStep: 'worlds', interestsStatus: 'selected', interestIds: ['games'], themeStatus: 'selected', themeId: 'ocean' }),
     v2State({ currentStep: 'journey', interestsStatus: 'selected', interestIds: ['games'], journeyStatus: 'world-selected', selectedWorldId: 'world-a' }),
-    v2State({ currentStep: 'context', interestsStatus: 'selected', interestIds: ['games'], journeyStatus: 'structure-explored', selectedWorldId: 'world-a', gamerStatus: 'running' }),
     v2State({ currentStep: 'destination', journeyStatus: 'structure-explored', selectedWorldId: 'world-a' }),
     v2State({ currentStep: 'return', classification: 'returning-with-progress' }),
   ];
@@ -605,6 +601,16 @@ test('normalization restores every v2 stage and its interaction proof after refr
     assert.equal(restored.selectedWorldId, saved.selectedWorldId);
     assert.equal(entry.shouldPresent(restored), true);
   });
+  const legacyContext = v2State({
+    currentStep: 'context', interestsStatus: 'selected', interestIds: ['games'],
+    journeyStatus: 'structure-explored', selectedWorldId: 'world-a', gamerStatus: 'running',
+  });
+  const migrated = entry.normalizeEntryState(plain(legacyContext));
+  assert.equal(migrated.currentStep, 'destination');
+  assert.equal(migrated.journeyStatus, 'structure-explored');
+  assert.equal(migrated.selectedWorldId, 'world-a');
+  assert.equal(migrated.gamerStatus, 'running');
+  assert.equal(entry.shouldPresent(migrated), true);
 });
 
 test('only completed v2 with Journey proof is once-only for the same scoped account', () => {

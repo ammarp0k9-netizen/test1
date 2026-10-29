@@ -8,7 +8,7 @@
 
   const STATUSES = Object.freeze(['in-progress', 'completed']);
   const TERMINAL_STATUSES = Object.freeze(['completed']);
-  const STEPS = Object.freeze(['interests', 'theme', 'worlds', 'journey', 'context', 'destination', 'return']);
+  const STEPS = Object.freeze(['interests', 'theme', 'worlds', 'journey', 'destination', 'return']);
   const JOURNEY_STATUSES = Object.freeze(['pending', 'world-selected', 'structure-explored', 'return-reviewed']);
   const GAMER_STATUSES = Object.freeze(['not-applicable', 'offered', 'running', 'completed', 'unavailable', 'skipped']);
   const AUDIENCES = Object.freeze(['new', 'returning', 'returning-guest']);
@@ -156,11 +156,13 @@
       CLASSIFICATIONS,
       cleanEnum(source.classification, CLASSIFICATIONS, audience === 'new' ? 'brand-new' : 'returning-light')
     );
-    const currentStep = cleanEnum(
-      raw.currentStep,
-      STEPS,
-      status === 'in-progress' ? 'interests' : 'destination'
-    );
+    const rawStep = cleanString(raw.currentStep, 80);
+    // v2 previously inserted a game-search context step after the Journey
+    // preview. That surface no longer exists; preserve saved progress by
+    // continuing at the next safe step instead of restarting Entry.
+    const currentStep = rawStep === 'context'
+      ? 'destination'
+      : cleanEnum(rawStep, STEPS, status === 'in-progress' ? 'interests' : 'destination');
     const interestsStatus = cleanEnum(raw.interestsStatus, INTEREST_STATUSES, 'pending');
     const interestIds = interestsStatus === 'selected'
       ? uniqueStrings(raw.interestIds, INTEREST_IDS, INTEREST_IDS.length)
@@ -831,34 +833,8 @@
       if (next.currentStep !== 'journey' || next.journeyStatus !== 'structure-explored') {
         throw new RangeError('Journey structure must be explored before continuing.');
       }
-      if (next.interestIds.includes('games')) {
-        next.currentStep = 'context';
-        if (next.gamerStatus === 'not-applicable') next.gamerStatus = 'offered';
-      } else {
-        next.currentStep = 'destination';
-        next.gamerStatus = 'not-applicable';
-      }
-    } else if (type === 'start-gamer-demo') {
-      if (next.currentStep !== 'context') {
-        throw new RangeError('The contextual feature step must be active.');
-      }
-      next.gamerStatus = 'running';
-    } else if (type === 'finish-gamer-demo') {
-      if (next.currentStep !== 'context') {
-        throw new RangeError('The contextual feature step must be active.');
-      }
-      next.gamerStatus = action.outcome === 'completed' ? 'completed' : 'unavailable';
-    } else if (type === 'skip-gamer-demo') {
-      if (next.currentStep !== 'context') {
-        throw new RangeError('The contextual feature step must be active.');
-      }
-      next.gamerStatus = 'skipped';
       next.currentStep = 'destination';
-    } else if (type === 'continue-context') {
-      if (next.currentStep !== 'context' || !['completed', 'unavailable', 'skipped'].includes(next.gamerStatus)) {
-        throw new RangeError('The contextual feature must finish or be skipped before continuing.');
-      }
-      next.currentStep = 'destination';
+      next.gamerStatus = 'not-applicable';
     } else if (type === 'review-return') {
       if (next.currentStep !== 'return') {
         throw new RangeError('The saved Journey reminder must be active.');
@@ -885,12 +861,7 @@
       if (next.currentStep === 'theme') next.currentStep = 'interests';
       else if (next.currentStep === 'worlds') next.currentStep = 'theme';
       else if (next.currentStep === 'journey') next.currentStep = 'worlds';
-      else if (next.currentStep === 'context') next.currentStep = 'journey';
-      else if (next.currentStep === 'destination') {
-        next.currentStep = next.interestIds.includes('games') && next.gamerStatus !== 'not-applicable'
-          ? 'context'
-          : 'journey';
-      }
+      else if (next.currentStep === 'destination') next.currentStep = 'journey';
     } else {
       throw new RangeError('Unsupported entry state transition.');
     }

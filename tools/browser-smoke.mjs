@@ -17,7 +17,10 @@ const debugPort = 9700 + portOffset;
 const appUrl = `http://127.0.0.1:${serverPort}/app`;
 const profileDir = fs.mkdtempSync(path.join(os.tmpdir(), 'lootlingua-smoke-'));
 const baseline = JSON.parse(fs.readFileSync(path.join(root, 'reports', 'refactor-baseline.json'), 'utf8'));
-const removedLegacyGlobals = new Set(['loadGameDictionary', 'openGameGamerAiSearch', 'searchGameWords']);
+const removedLegacyGlobals = new Set([
+  'dismissWelcomeModal', 'handleOnboardingReplayClick', 'loadGameDictionary',
+  'openGameGamerAiSearch', 'searchGameWords', 'setWorldManageAction',
+]);
 const requiredGlobals = baseline.inlineHandlers.requiredGlobals.filter(name => !removedLegacyGlobals.has(name));
 
 const server = spawn(process.execPath, [path.join(root, 'tools', 'static-server.mjs'), String(serverPort)], {
@@ -122,6 +125,7 @@ try {
     let viewNavigation = null;
     let quizProbe = null;
     let themeProbe = null;
+    let pageTitleStyles = null;
     try {
       const day = 24 * 60 * 60 * 1000;
       const now = Date.now();
@@ -236,6 +240,23 @@ try {
     } catch (error) {
       themeProbe = { error: String(error?.stack || error) };
     }
+    try {
+      const title = document.getElementById('pageTitle');
+      const previousTheme = document.documentElement.getAttribute('data-theme') || 'lootlingua';
+      const previousOasisMode = document.documentElement.getAttribute('data-oasis-mode') || 'light';
+      pageTitleStyles = ['lootlingua', 'ocean', 'scroll', 'glass'].map((theme) => {
+        setTheme(theme, true);
+        if (theme === 'ocean') {
+          setProfileOasisMode('light');
+        }
+        const style = getComputedStyle(title);
+        return { theme, color: style.color, fontSize: style.fontSize, fontWeight: style.fontWeight };
+      });
+      setTheme(previousTheme, true);
+      document.documentElement.setAttribute('data-oasis-mode', previousOasisMode);
+    } catch (error) {
+      pageTitleStyles = { error: String(error?.stack || error) };
+    }
     return {
       readyState: document.readyState,
       title: document.title,
@@ -248,6 +269,7 @@ try {
       viewNavigation,
       quizProbe,
       themeProbe,
+      pageTitleStyles,
       scriptSources: Array.from(document.scripts).map(s => ({ type: s.type || 'classic', src: s.getAttribute('src') || 'inline' })),
     };
   })()`;
@@ -267,7 +289,10 @@ try {
     result?.quizProbe?.timeAttackReady === true &&
     result?.quizProbe?.scrambleReady === true &&
     result?.quizProbe?.resumeStable === true;
-  if (!result?.hasMainContent || result?.readyState !== 'complete' || !result?.firebaseReady || result?.missingHandlerGlobals?.length || result?.missingCloudFunctions?.length || JSON.stringify(result?.behaviorInvariants) !== expectedBehavior || result?.viewNavigation?.worldsReady !== true || result?.viewNavigation?.publishedWorldsReady !== true || result?.viewNavigation?.backReady !== true || result?.viewNavigation?.personalReady !== true || !quizProbePassed || result?.themeProbe?.availableThemesApplied !== true || exceptions.length) {
+  const titleStylesPassed = Array.isArray(result?.pageTitleStyles) && result.pageTitleStyles.every((style) => (
+    style.fontSize === '22px' && style.fontWeight === '800' && !['rgb(255, 255, 255)', 'rgb(248, 250, 252)'].includes(style.color)
+  ));
+  if (!result?.hasMainContent || result?.readyState !== 'complete' || !result?.firebaseReady || result?.missingHandlerGlobals?.length || result?.missingCloudFunctions?.length || JSON.stringify(result?.behaviorInvariants) !== expectedBehavior || result?.viewNavigation?.worldsReady !== true || result?.viewNavigation?.publishedWorldsReady !== true || result?.viewNavigation?.backReady !== true || result?.viewNavigation?.personalReady !== true || !quizProbePassed || result?.themeProbe?.availableThemesApplied !== true || !titleStylesPassed || exceptions.length) {
     process.exitCode = 1;
   }
 } finally {

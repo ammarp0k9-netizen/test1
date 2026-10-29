@@ -83,15 +83,7 @@ test('opening one card among 180 words only updates that card and preserves scro
   assert.equal(context.window.scrollY, 912);
 });
 
-test('the optional Entry gamer guide observes the real dictionary search and gamer-meaning button', () => {
-  assert.match(dictionarySource, /new CustomEvent\('lootlingua:dictionary-search-result'/);
-  for (const status of ['success', 'empty', 'error', 'blocked']) {
-    assert.match(dictionarySource, new RegExp(`announceDictionarySearchResult\\([^\\n]+['"]${status}['"]`));
-  }
-  assert.match(dictionarySource, /window\.__lootlinguaEntryGamerGuideActive\) return;/);
-  assert.match(entryControllerSource, /typeof root\.fetchSuggestions !== 'function'/);
-  assert.match(entryControllerSource, /typeof root\.fetchGamerSuggestions !== 'function'/);
-  assert.match(entryControllerSource, /targetGamerGuide\('#searchBtn'\)/);
-  assert.match(entryControllerSource, /targetGamerGuide\('#gamerMeaningBubble \.gamer-meaning-btn'\)/);
-  assert.doesNotMatch(entryControllerSource, /fetch\(|\/api\/gamer-dictionary/);
+test('Entry no longer attaches a game-dictionary search guide to the personal dictionary', () => {
+  assert.doesNotMatch(entryControllerSource, /fetchSuggestions|fetchGamerSuggestions|targetGamerGuide|__lootlinguaEntryGamerGuideActive/);
+  assert.doesNotMatch(dictionarySource, /__lootlinguaEntryGamerGuideActive/);
 });
