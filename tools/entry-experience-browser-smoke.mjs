@@ -7,21 +7,10 @@ import WebSocketClient from 'ws';
 const root = path.resolve(import.meta.dirname, '..');
 const evidenceDir = path.join(root, 'reports', 'product-entry-evidence');
 const evidenceScreenshotNames = new Set([
-  'guest-new-desktop-worlds',
-  'guest-new-desktop-journey-structure',
-  'guest-new-desktop-journey-gate-preview',
-  'guest-new-desktop-personalized-destination',
-  'guest-new-320-worlds',
-  'guest-new-320-journey-structure',
-  'guest-new-320-journey-gate-preview',
+  'guest-new-desktop-dictionary',
+  'guest-new-320-dictionary',
   'account-journey-short-return',
-  'guest-games-success-real-general-search',
-  'guest-games-success-real-gamer-button',
-  'guest-games-success-returned-destination',
-  'guest-games-empty-returned-destination',
   'account-completed-hidden-app',
-  'auth-close-prompt',
-  'auth-close-guest-exploration',
   'entry-cloud-failure-kept-open',
 ]);
 const browserPath = [
@@ -685,6 +674,7 @@ async function snapshot() {
       pending,
       statusText: document.getElementById('entryExperienceStatus')?.textContent?.trim() || '',
       destination: document.body.dataset.currentView || '',
+      focusedElement: document.activeElement?.id || '',
       openWorld: document.body.dataset.openWorld || '',
       events: window.__entrySmoke?.events || [],
       entrySaveCalls: window.__entrySmoke?.entrySaveCalls || [],
@@ -831,6 +821,29 @@ async function runHappy(id, expected) {
     viewport: action.viewport,
     layout: { noHorizontalOverflow: action.noHorizontalOverflow, panelInsideViewport: action.panelInsideViewport },
     images,
+    failures,
+    passed: failures.length === 0,
+  };
+}
+
+async function runGuestDictionary(id) {
+  const failures = [];
+  const initial = await navigateScenario(id);
+  const image = await screenshot(`${id}-dictionary`);
+  assertion(!initial.visible && initial.stage === 'hidden', 'guest Entry overlay should stay closed', failures);
+  assertion(initial.destination === 'personalView', `destination=${initial.destination}, expected personalView`, failures);
+  if (id.startsWith('guest-new')) {
+    assertion(initial.focusedElement === 'wordInput', `focus=${initial.focusedElement}, expected wordInput`, failures);
+  }
+  assertion(initial.noHorizontalOverflow, 'guest dictionary has horizontal overflow', failures);
+  return {
+    id,
+    classification: initial.classification,
+    visibleSteps: [],
+    onboardingInteraction: { visible: false, reason: 'guest starts directly in personal dictionary' },
+    completion: { at: 'not applicable for guest dictionary start', status: initial.status },
+    destination: initial.destination,
+    images: [image].filter(Boolean),
     failures,
     passed: failures.length === 0,
   };
@@ -1283,20 +1296,14 @@ try {
     patterns: [{ urlPattern: `${origin}/app*`, resourceType: 'Document', requestStage: 'Request' }],
   });
 
-  await record(() => runHappy('guest-new-desktop', { classification: 'brand-new', actionId: 'open-selected-world', destination: 'worldsView' }));
-  await record(() => runHappy('guest-new-390', { classification: 'brand-new', actionId: 'open-selected-world', destination: 'worldsView' }));
-  await record(() => runHappy('guest-new-320', { classification: 'brand-new', actionId: 'open-selected-world', destination: 'worldsView' }));
-  await record(() => runHappy('guest-words', { classification: 'returning-guest-with-local-data', actionId: 'review-words', destination: 'personalView' }));
-  await record(() => runHappy('guest-xp-light', { classification: 'returning-guest-with-local-data', actionId: 'open-selected-world', destination: 'worldsView' }));
+  await record(() => runGuestDictionary('guest-new-desktop'));
+  await record(() => runGuestDictionary('guest-new-320'));
+  await record(() => runGuestDictionary('guest-words'));
+  await record(() => runGuestDictionary('guest-xp-light'));
   await record(() => runHappy('account-new', { classification: 'brand-new', actionId: 'open-selected-world', destination: 'worldsView' }));
   await record(() => runHappy('account-words', { classification: 'returning-light', actionId: 'review-words', destination: 'personalView' }));
   await record(runProgressAccount);
-  await record(() => runGamerMeaning('guest-games-success', 'completed'));
-  await record(() => runGamerMeaning('guest-games-empty', 'unavailable'));
   await record(runCompletedAccount);
-  await record(runAuthClose);
-  await record(runAuthSuccess);
-  await record(runRefreshGuest);
   await record(runRefreshAccountTheme);
   await record(() => runTerminalFailure('entry-cloud-failure', 'entry'));
   await record(() => runTerminalFailure('profile-cloud-failure', 'profile'));

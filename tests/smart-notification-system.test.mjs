@@ -561,8 +561,13 @@ test('static integration wires v3 store/cloud/runtime, contextual CTA, trusted g
   assert.match(coreSource, /markVisibleRead/);
   assert.match(coreSource, /notif-cta-btn/);
   assert.match(cloudSource, /runTransaction/);
-  assert.match(rulesSource, /match \/notifications\/\{notificationId\}/);
-  assert.match(rulesSource, /Lifecycle evidence is intentionally tombstoned/);
+  const notificationRules = rulesSource.slice(
+    rulesSource.indexOf('match /notifications/{notificationId}'),
+    rulesSource.indexOf('match /testSettings/clock')
+  );
+  assert.match(notificationRules, /data\.status in \['pending', 'active', 'resolved', 'dismissed'\]/);
+  assert.match(notificationRules, /allow create, update: if isOwner\(uid\) && validNotification/);
+  assert.match(notificationRules, /allow delete: if false/);
   assert.match(journeyCloudSource, /eligibleEvidenceCount/);
   assert.match(journeyCloudSource, /unlockedByGateId/);
   assert.match(appSource, /function todayStr\(\) \{ return localDateKey\(new Date\(\)\); \}/);

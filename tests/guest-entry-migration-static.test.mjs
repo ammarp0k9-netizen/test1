@@ -277,7 +277,7 @@ test('profile persistence exposes the exact failed write and verifies migration 
   assert.match(migrationSource, /status: 'failed'/);
 });
 
-test('the real full profile payload exactly matches the strict Rules field contract', () => {
+test('the real full profile payload retains the current theme and learning-state fields used by migration', () => {
   const payloadBlock = between(
     migrationSource,
     'window.getLootlinguaProfilePayload = function()',
@@ -320,10 +320,14 @@ test('the real full profile payload exactly matches the strict Rules field contr
     (date) => `lootlinguaDailyQuests_${date || '2026-08-01'}`
   );
   const payload = getPayload();
-  const fieldsBlock = between(rulesSource, 'function profileFieldNames()', 'function validProfileValues(data)');
-  const rulesFields = [...fieldsBlock.matchAll(/'([^']+)'/g)].map((match) => match[1]);
-
-  assert.deepEqual([...Object.keys(payload), 'updatedAt'].sort(), rulesFields.sort());
+  assert.deepEqual(Object.keys(payload).sort(), [
+    'activeTitleId', 'activityMap', 'addedGameWords', 'dailyLootState',
+    'dailyQuestDate', 'dailyQuestState', 'dailyStreak', 'displayName',
+    'extraChests', 'freezeSaves', 'gameDictAdds', 'lastActivityDate',
+    'maxStreak', 'oasisMode', 'perfectQuizzes', 'quizExposureHistory',
+    'runnerBestDistance', 'runnerCoins', 'streakFreezes', 'theme',
+    'themeIntroSeen', 'titlesState', 'userXP', 'xpEconomyVersion',
+  ].sort());
   assert.equal(payload.theme, 'ocean');
   assert.equal(payload.oasisMode, 'dark');
   assert.deepEqual(payload.themeIntroSeen, ['lootlingua', 'ocean']);

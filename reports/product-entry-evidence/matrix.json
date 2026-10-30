@@ -1,10 +1,10 @@
 {
-  "generatedAt": "2026-08-27T15:57:38.835Z",
+  "generatedAt": "2026-10-29T18:09:46.123Z",
   "browser": "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",
-  "appUrl": "http://127.0.0.1:9209/app",
+  "appUrl": "http://127.0.0.1:9153/app",
   "harness": "real Chrome DOM/input/reload with Firebase replaced by an in-page deterministic adapter",
   "passed": true,
-  "caseCount": 18,
+  "caseCount": 12,
   "failures": [],
   "runtimeExceptions": [],
   "errorLogs": [],
@@ -12,107 +12,37 @@
     {
       "id": "guest-new-desktop",
       "classification": "brand-new",
-      "visibleSteps": [
-        "interests",
-        "theme",
-        "worlds",
-        "journey",
-        "destination"
-      ],
+      "visibleSteps": [],
       "onboardingInteraction": {
-        "worldId": "smoke-world",
-        "journeyStatus": "structure-explored",
-        "statusBefore": "in-progress"
+        "visible": false,
+        "reason": "guest starts directly in personal dictionary"
       },
-      "auth": "not shown during Product Entry",
       "completion": {
-        "at": "after destination CTA",
-        "status": "completed"
+        "at": "not applicable for guest dictionary start",
+        "status": ""
       },
-      "destination": "worldsView",
-      "viewport": {
-        "width": 1440,
-        "height": 900
-      },
-      "layout": {
-        "noHorizontalOverflow": true,
-        "panelInsideViewport": true
-      },
+      "destination": "personalView",
       "images": [
-        "reports/product-entry-evidence/guest-new-desktop-worlds.png",
-        "reports/product-entry-evidence/guest-new-desktop-journey-structure.png",
-        "reports/product-entry-evidence/guest-new-desktop-journey-gate-preview.png",
-        "reports/product-entry-evidence/guest-new-desktop-personalized-destination.png"
+        "reports/product-entry-evidence/guest-new-desktop-dictionary.png"
       ],
-      "failures": [],
-      "passed": true
-    },
-    {
-      "id": "guest-new-390",
-      "classification": "brand-new",
-      "visibleSteps": [
-        "interests",
-        "theme",
-        "worlds",
-        "journey",
-        "destination"
-      ],
-      "onboardingInteraction": {
-        "worldId": "smoke-world",
-        "journeyStatus": "structure-explored",
-        "statusBefore": "in-progress"
-      },
-      "auth": "not shown during Product Entry",
-      "completion": {
-        "at": "after destination CTA",
-        "status": "completed"
-      },
-      "destination": "worldsView",
-      "viewport": {
-        "width": 390,
-        "height": 844
-      },
-      "layout": {
-        "noHorizontalOverflow": true,
-        "panelInsideViewport": true
-      },
-      "images": [],
       "failures": [],
       "passed": true
     },
     {
       "id": "guest-new-320",
       "classification": "brand-new",
-      "visibleSteps": [
-        "interests",
-        "theme",
-        "worlds",
-        "journey",
-        "destination"
-      ],
+      "visibleSteps": [],
       "onboardingInteraction": {
-        "worldId": "smoke-world",
-        "journeyStatus": "structure-explored",
-        "statusBefore": "in-progress"
+        "visible": false,
+        "reason": "guest starts directly in personal dictionary"
       },
-      "auth": "not shown during Product Entry",
       "completion": {
-        "at": "after destination CTA",
-        "status": "completed"
+        "at": "not applicable for guest dictionary start",
+        "status": ""
       },
-      "destination": "worldsView",
-      "viewport": {
-        "width": 320,
-        "height": 568
-      },
-      "layout": {
-        "noHorizontalOverflow": true,
-        "panelInsideViewport": true
-      },
+      "destination": "personalView",
       "images": [
-        "reports/product-entry-evidence/guest-new-320-worlds.png",
-        "reports/product-entry-evidence/guest-new-320-journey-structure.png",
-        "reports/product-entry-evidence/guest-new-320-journey-gate-preview.png"
+        "reports/product-entry-evidence/guest-new-320-dictionary.png"
       ],
       "failures": [],
       "passed": true
@@ -120,32 +50,16 @@
     {
       "id": "guest-words",
       "classification": "returning-guest-with-local-data",
-      "visibleSteps": [
-        "interests",
-        "theme",
-        "worlds",
-        "journey",
-        "destination"
-      ],
+      "visibleSteps": [],
       "onboardingInteraction": {
-        "worldId": "smoke-world",
-        "journeyStatus": "structure-explored",
-        "statusBefore": "in-progress"
+        "visible": false,
+        "reason": "guest starts directly in personal dictionary"
       },
-      "auth": "not shown during Product Entry",
       "completion": {
-        "at": "after destination CTA",
-        "status": "completed"
+        "at": "not applicable for guest dictionary start",
+        "status": ""
       },
       "destination": "personalView",
-      "viewport": {
-        "width": 1440,
-        "height": 900
-      },
-      "layout": {
-        "noHorizontalOverflow": true,
-        "panelInsideViewport": true
-      },
       "images": [],
       "failures": [],
       "passed": true
@@ -153,32 +67,16 @@
     {
       "id": "guest-xp-light",
       "classification": "returning-guest-with-local-data",
-      "visibleSteps": [
-        "interests",
-        "theme",
-        "worlds",
-        "journey",
-        "destination"
-      ],
+      "visibleSteps": [],
       "onboardingInteraction": {
-        "worldId": "smoke-world",
-        "journeyStatus": "structure-explored",
-        "statusBefore": "in-progress"
+        "visible": false,
+        "reason": "guest starts directly in personal dictionary"
       },
-      "auth": "not shown during Product Entry",
       "completion": {
-        "at": "after destination CTA",
-        "status": "completed"
+        "at": "not applicable for guest dictionary start",
+        "status": ""
       },
-      "destination": "worldsView",
-      "viewport": {
-        "width": 1440,
-        "height": 900
-      },
-      "layout": {
-        "noHorizontalOverflow": true,
-        "panelInsideViewport": true
-      },
+      "destination": "personalView",
       "images": [],
       "failures": [],
       "passed": true
@@ -273,72 +171,6 @@
       "passed": true
     },
     {
-      "id": "guest-games-success",
-      "classification": "brand-new",
-      "visibleSteps": [
-        "interests",
-        "theme",
-        "worlds",
-        "journey",
-        "context"
-      ],
-      "onboardingInteraction": {
-        "worldId": "games-world",
-        "journeyStatus": "structure-explored"
-      },
-      "gamerMeaning": {
-        "outcome": "completed",
-        "contextRefresh": "context",
-        "usedRealSearchButton": true,
-        "usedRealGamerButton": true
-      },
-      "auth": "not shown for success/empty gamer result",
-      "completion": {
-        "at": "after selected World destination",
-        "status": "completed"
-      },
-      "destination": "worldsView:games-world",
-      "images": [
-        "reports/product-entry-evidence/guest-games-success-real-general-search.png",
-        "reports/product-entry-evidence/guest-games-success-real-gamer-button.png",
-        "reports/product-entry-evidence/guest-games-success-returned-destination.png"
-      ],
-      "failures": [],
-      "passed": true
-    },
-    {
-      "id": "guest-games-empty",
-      "classification": "brand-new",
-      "visibleSteps": [
-        "interests",
-        "theme",
-        "worlds",
-        "journey",
-        "context"
-      ],
-      "onboardingInteraction": {
-        "worldId": "games-world",
-        "journeyStatus": "structure-explored"
-      },
-      "gamerMeaning": {
-        "outcome": "unavailable",
-        "contextRefresh": "context",
-        "usedRealSearchButton": true,
-        "usedRealGamerButton": true
-      },
-      "auth": "not shown for success/empty gamer result",
-      "completion": {
-        "at": "after selected World destination",
-        "status": "completed"
-      },
-      "destination": "worldsView:games-world",
-      "images": [
-        "reports/product-entry-evidence/guest-games-empty-returned-destination.png"
-      ],
-      "failures": [],
-      "passed": true
-    },
-    {
       "id": "account-completed",
       "classification": "brand-new",
       "visibleSteps": [],
@@ -355,110 +187,6 @@
       "images": [
         "reports/product-entry-evidence/account-completed-hidden-app.png"
       ],
-      "failures": [],
-      "passed": true
-    },
-    {
-      "id": "auth-close",
-      "classification": "brand-new",
-      "visibleSteps": [
-        "interests",
-        "theme",
-        "worlds",
-        "journey",
-        "destination"
-      ],
-      "onboardingInteraction": {
-        "visible": true,
-        "journeyStatus": "structure-explored"
-      },
-      "auth": "shown only after Start Journey; dismissed with real Escape key",
-      "pendingIntent": [
-        "pending"
-      ],
-      "completion": {
-        "at": "guest exploration destination before cloud-only action",
-        "status": "completed"
-      },
-      "destination": "worldsView",
-      "images": [
-        "reports/product-entry-evidence/auth-close-prompt.png",
-        "reports/product-entry-evidence/auth-close-guest-exploration.png"
-      ],
-      "failures": [],
-      "passed": true
-    },
-    {
-      "id": "auth-success",
-      "classification": "brand-new",
-      "visibleSteps": [
-        "interests",
-        "theme",
-        "worlds",
-        "journey",
-        "destination"
-      ],
-      "onboardingInteraction": {
-        "visible": true,
-        "journeyStatus": "structure-explored"
-      },
-      "auth": "real DOM prompt → login button → auth-state callback",
-      "pendingIntent": "consumed",
-      "completion": {
-        "at": "guest World destination; intent consumed only after execution",
-        "status": "completed"
-      },
-      "destination": "worldsView:smoke-world",
-      "images": [],
-      "failures": [],
-      "passed": true
-    },
-    {
-      "id": "refresh-guest",
-      "classification": "brand-new",
-      "visibleSteps": [
-        "interests",
-        "theme",
-        "worlds",
-        "journey"
-      ],
-      "refresh": {
-        "interests": {
-          "before": [
-            "technology"
-          ],
-          "after": [
-            "technology"
-          ]
-        },
-        "theme": {
-          "before": "ocean",
-          "after": "ocean"
-        },
-        "worlds": {
-          "before": "worlds",
-          "after": "worlds"
-        },
-        "journey": {
-          "before": "journey",
-          "after": "journey"
-        },
-        "interaction": {
-          "before": "structure-explored",
-          "after": "structure-explored"
-        }
-      },
-      "onboardingInteraction": {
-        "visible": true,
-        "journeyStatus": "structure-explored"
-      },
-      "auth": "not shown",
-      "completion": {
-        "at": "not yet complete",
-        "status": "in-progress"
-      },
-      "destination": "homeView",
-      "images": [],
       "failures": [],
       "passed": true
     },

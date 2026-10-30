@@ -149,7 +149,7 @@ test('the app wires one Entry shell and loads its versioned contract before clou
   assert.ok(entryCloudIndex > firebaseIndex);
 });
 
-test('v2 cloud persistence is owner-scoped while v1 is read only for preference seeding', () => {
+test('Entry cloud adapter scopes every version by owner and writes only its current contract version', () => {
   assert.match(
     cloudSource,
     /function entryRef\(uid, version = contract\(\)\.EXPERIENCE_VERSION\)[\s\S]*?`v\$\{version\}`/
@@ -160,9 +160,8 @@ test('v2 cloud persistence is owner-scoped while v1 is read only for preference 
   assert.doesNotMatch(cloudSource, /onboarding\.completed|hasCompletedOnboarding/);
 
   assert.match(rulesSource, /match \/entryExperiences\/\{versionId\}/);
-  assert.match(rulesSource, /versionId == 'v1'/);
-  assert.match(rulesSource, /versionId == 'v2'/);
-  assert.match(rulesSource, /allow read: if isOwner\(uid\)/);
+  assert.match(rulesSource, /versionId\.matches\('v\[0-9\]\+'\)/);
+  assert.match(rulesSource, /allow read, create, update: if isOwner\(uid\)/);
   assert.match(rulesSource, /allow delete: if false/);
 });
 
