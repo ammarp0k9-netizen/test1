@@ -665,6 +665,10 @@ async function createHarness(options = {}) {
   }
 
   async function chooseInterestsAndTheme() {
+    if (controller.getState()?.currentStep === 'welcome') {
+      assert.ok(panel.querySelector('[data-entry-action="continue-welcome"]'));
+      await click('[data-entry-action="continue-welcome"]');
+    }
     assert.equal(controller.getState()?.currentStep, 'interests');
     assert.ok(panel.querySelector('[data-entry-interest="study"]'));
     await click('[data-entry-interest="study"]');
@@ -936,18 +940,19 @@ test('a guest terminal state observed with account A cannot silently complete fr
   );
 });
 
-test('matrix: a fresh guest starts in the personal dictionary without account onboarding', async () => {
+test('matrix: a fresh guest receives the original welcome and public-World onboarding', async () => {
   const harness = await createHarness();
 
   assert.equal(harness.controller.getPresentation().classification, 'brand-new');
-  assert.equal(harness.controller.getState(), null);
-  assert.equal(harness.calls.dictionary, 1);
-  assert.equal(harness.document.activeElement.id, 'wordInput');
-  assert.equal(harness.controller.isActive(), false);
+  assert.equal(harness.controller.getState().currentStep, 'welcome');
+  assert.equal(harness.calls.dictionary, 0);
+  assert.equal(harness.controller.isActive(), true);
+  assert.ok(harness.panel.querySelector('[data-entry-action="continue-welcome"]'));
 });
 
 test('games interest does not insert a retired search demo before the selected World destination', async () => {
   const harness = await createHarness({ user: freshUser('games-interest') });
+  await harness.click('[data-entry-action="continue-welcome"]');
   await harness.click('[data-entry-interest="games"]');
   await harness.click('[data-entry-action="continue-interests"]');
   await harness.click('[data-entry-theme="lootlingua"]');
@@ -1012,6 +1017,8 @@ test('matrix: a fresh account with an existing empty profile is still brand-new 
   });
 
   assert.equal(harness.controller.getPresentation().classification, 'brand-new');
+  assert.equal(harness.controller.getState().currentStep, 'welcome');
+  await harness.click('[data-entry-action="continue-welcome"]');
   assert.equal(harness.controller.getState().currentStep, 'interests');
   await harness.reachRevealedAction();
   assert.ok(harness.panel.querySelector('[data-entry-cta="open-selected-world"]'));
@@ -1268,6 +1275,7 @@ test('matrix: refresh restores interests, theme, Worlds, and Journey stages with
   const storage = new MemoryStorage();
   const user = freshUser('refresh-entry-draft');
   const interests = await createHarness({ storage, user });
+  await interests.click('[data-entry-action="continue-welcome"]');
   await interests.click('[data-entry-interest="games"]');
   assert.equal(interests.controller.getState().currentStep, 'interests');
 

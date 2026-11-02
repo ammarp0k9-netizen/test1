@@ -1,7 +1,7 @@
 {
-  "generatedAt": "2026-10-29T18:09:46.123Z",
+  "generatedAt": "2026-11-02T18:46:28.196Z",
   "browser": "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",
-  "appUrl": "http://127.0.0.1:9153/app",
+  "appUrl": "http://127.0.0.1:9117/app",
   "harness": "real Chrome DOM/input/reload with Firebase replaced by an in-page deterministic adapter",
   "passed": true,
   "caseCount": 12,
@@ -12,18 +12,35 @@
     {
       "id": "guest-new-desktop",
       "classification": "brand-new",
-      "visibleSteps": [],
+      "visibleSteps": [
+        "welcome",
+        "interests",
+        "theme",
+        "worlds",
+        "journey",
+        "destination"
+      ],
       "onboardingInteraction": {
-        "visible": false,
-        "reason": "guest starts directly in personal dictionary"
+        "worldId": "smoke-world",
+        "journeyStatus": "structure-explored",
+        "statusBefore": "in-progress"
       },
+      "auth": "not shown during Product Entry",
       "completion": {
-        "at": "not applicable for guest dictionary start",
-        "status": ""
+        "at": "after destination CTA",
+        "status": "completed"
       },
-      "destination": "personalView",
+      "destination": "worldsView",
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "layout": {
+        "noHorizontalOverflow": true,
+        "panelInsideViewport": true
+      },
       "images": [
-        "reports/product-entry-evidence/guest-new-desktop-dictionary.png"
+        "reports/product-entry-evidence/guest-new-desktop-welcome.png"
       ],
       "failures": [],
       "passed": true
@@ -31,18 +48,35 @@
     {
       "id": "guest-new-320",
       "classification": "brand-new",
-      "visibleSteps": [],
+      "visibleSteps": [
+        "welcome",
+        "interests",
+        "theme",
+        "worlds",
+        "journey",
+        "destination"
+      ],
       "onboardingInteraction": {
-        "visible": false,
-        "reason": "guest starts directly in personal dictionary"
+        "worldId": "smoke-world",
+        "journeyStatus": "structure-explored",
+        "statusBefore": "in-progress"
       },
+      "auth": "not shown during Product Entry",
       "completion": {
-        "at": "not applicable for guest dictionary start",
-        "status": ""
+        "at": "after destination CTA",
+        "status": "completed"
       },
-      "destination": "personalView",
+      "destination": "worldsView",
+      "viewport": {
+        "width": 320,
+        "height": 568
+      },
+      "layout": {
+        "noHorizontalOverflow": true,
+        "panelInsideViewport": true
+      },
       "images": [
-        "reports/product-entry-evidence/guest-new-320-dictionary.png"
+        "reports/product-entry-evidence/guest-new-320-welcome.png"
       ],
       "failures": [],
       "passed": true
@@ -85,6 +119,7 @@
       "id": "account-new",
       "classification": "brand-new",
       "visibleSteps": [
+        "welcome",
         "interests",
         "theme",
         "worlds",
@@ -194,6 +229,7 @@
       "id": "refresh-account-theme",
       "classification": "brand-new",
       "visibleSteps": [
+        "welcome",
         "interests",
         "theme"
       ],
@@ -222,6 +258,7 @@
       "id": "entry-cloud-failure",
       "classification": "brand-new",
       "visibleSteps": [
+        "welcome",
         "interests",
         "theme",
         "worlds",
@@ -237,6 +274,11 @@
         "kind": "entry",
         "statusText": "وصلنا إلى وجهتك، لكن تعذّر تأكيد اكتمال التجربة في حسابك. أبقيناها مفتوحة للمحاولة مرة أخرى.",
         "saveCalls": [
+          {
+            "uid": "account-entry-failure",
+            "status": "in-progress",
+            "step": "interests"
+          },
           {
             "uid": "account-entry-failure",
             "status": "in-progress",
@@ -299,6 +341,7 @@
       "id": "profile-cloud-failure",
       "classification": "brand-new",
       "visibleSteps": [
+        "welcome",
         "interests",
         "theme",
         "worlds",
@@ -314,6 +357,11 @@
         "kind": "profile",
         "statusText": "تعذّر حفظ المظهر في حسابك. لم نغلق التجربة ولم نعتبرها مكتملة.",
         "saveCalls": [
+          {
+            "uid": "account-profile-failure",
+            "status": "in-progress",
+            "step": "interests"
+          },
           {
             "uid": "account-profile-failure",
             "status": "in-progress",
@@ -373,6 +421,7 @@
       },
       "visibleSteps": {
         "accountA": [
+          "welcome",
           "interests",
           "theme",
           "worlds",
@@ -380,6 +429,7 @@
           "destination"
         ],
         "accountB": [
+          "welcome",
           "interests",
           "theme",
           "worlds",

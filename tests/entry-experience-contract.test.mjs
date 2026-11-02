@@ -82,7 +82,7 @@ test('the versioned Entry Experience contract exposes frozen central enums and A
   assert.equal(entry.CONTRACT_VERSION, 2);
   assert.deepEqual(Array.from(entry.STATUSES), ['in-progress', 'completed']);
   assert.deepEqual(Array.from(entry.AUDIENCES), ['new', 'returning', 'returning-guest']);
-  assert.deepEqual(Array.from(entry.STEPS), ['interests', 'theme', 'worlds', 'journey', 'destination', 'return']);
+  assert.deepEqual(Array.from(entry.STEPS), ['welcome', 'interests', 'theme', 'worlds', 'journey', 'destination', 'return']);
   assert.deepEqual(Array.from(entry.JOURNEY_STATUSES), ['pending', 'world-selected', 'structure-explored', 'return-reviewed']);
   assert.ok(Object.isFrozen(entry));
   assert.ok(Object.isFrozen(entry.INTERESTS));
@@ -552,6 +552,26 @@ test('the full v2 route requires a real World choice and a Journey-structure int
     () => entry.transitionState(initial, { type: 'select-theme', themeId: 'golden' }, FIXED_NOW),
     RangeError
   );
+});
+
+test('a truly new learner starts with the restored welcome and resumes it safely', () => {
+  const classified = entry.classifyUser({
+    isAuthenticated: false,
+    uid: '',
+    words: [],
+    guestWords: [],
+    profile: {},
+    hasPublishedWorld: true,
+  });
+  const initial = entry.createEntryDraft(classified, {});
+  assert.equal(initial.currentStep, 'welcome');
+  assert.equal(initial.status, 'in-progress');
+  assert.throws(() => entry.transitionState(initial, { type: 'continue-interests' }, FIXED_NOW), /interest/i);
+
+  const interests = entry.transitionState(initial, { type: 'continue-welcome' }, FIXED_NOW);
+  assert.equal(interests.currentStep, 'interests');
+  const returned = entry.transitionState(interests, { type: 'back' }, FIXED_NOW + 1);
+  assert.equal(returned.currentStep, 'welcome');
 });
 
 test('skipping interests reaches theme, while Back restores the interests step', () => {

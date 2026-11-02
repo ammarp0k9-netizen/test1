@@ -167,6 +167,8 @@ body.journey-auth-active {
   line-height: 1.18;
   letter-spacing: -.02em;
 }
+.entry-copy h1:focus,
+.entry-action-screen h1:focus { outline: none; }
 
 .entry-copy p,
 .entry-action-screen p {
@@ -174,6 +176,49 @@ body.journey-auth-active {
   color: var(--entry-muted);
   font-size: clamp(.95rem, 2.4vw, 1.08rem);
   line-height: 1.75;
+}
+
+/* Restored first-screen orientation: it describes the published World path
+   before choices begin and stays compact on narrow viewports. */
+.entry-welcome { display: grid; justify-items: center; text-align: center; gap: clamp(18px, 3vw, 28px); }
+.entry-welcome .entry-copy { margin: 0; }
+.entry-welcome-icon {
+  display: grid;
+  place-items: center;
+  width: 72px;
+  height: 72px;
+  border-radius: 24px;
+  color: var(--accent);
+  background: var(--accent-soft);
+  font-size: 2rem;
+}
+.entry-welcome-route {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr) auto minmax(0, 1fr);
+  align-items: center;
+  width: min(680px, 100%);
+  gap: clamp(8px, 2vw, 18px);
+}
+.entry-welcome-route > span {
+  display: grid;
+  justify-items: center;
+  gap: 5px;
+  min-height: 116px;
+  padding: 16px 10px;
+  border: 1px solid var(--border);
+  border-radius: 18px;
+  background: color-mix(in srgb, var(--surface-bg) 82%, transparent);
+}
+.entry-welcome-route > span > i { color: var(--accent); font-size: 1.45rem; }
+.entry-welcome-route strong { font-size: .95rem; }
+.entry-welcome-route small { color: var(--entry-muted); font-size: .78rem; }
+.entry-welcome-route > i { color: var(--entry-muted); }
+
+@media (max-width: 520px) {
+  .entry-welcome-route { grid-template-columns: 1fr; gap: 6px; }
+  .entry-welcome-route > span { min-height: 0; grid-template-columns: auto 1fr; justify-items: start; text-align: start; padding: 12px 14px; }
+  .entry-welcome-route > span > i { grid-row: span 2; align-self: center; }
+  .entry-welcome-route > i { transform: rotate(-90deg); justify-self: center; }
 }
 
 .entry-interest-grid,
@@ -838,6 +883,15 @@ body.journey-auth-active {
     margin-inline: -10px;
     padding-inline: 10px;
   }
+  .entry-welcome { gap: 10px; }
+  .entry-welcome-icon { width: 56px; height: 56px; border-radius: 19px; font-size: 1.55rem; }
+  .entry-welcome .entry-copy h1 { font-size: 1.35rem; }
+  .entry-welcome .entry-copy p { font-size: .87rem; line-height: 1.55; }
+  .entry-welcome-route > span { padding: 8px 12px; gap: 2px; }
+  .entry-welcome-route > span > i { font-size: 1.05rem; }
+  .entry-welcome-route small { font-size: .72rem; }
+  .entry-welcome > .entry-helper { margin: 0; font-size: .76rem; line-height: 1.45; }
+  .entry-welcome ~ .entry-footer { margin-top: 12px; }
 }
 
 @media (max-height: 620px) and (orientation: landscape) {

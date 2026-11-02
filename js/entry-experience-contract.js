@@ -8,7 +8,10 @@
 
   const STATUSES = Object.freeze(['in-progress', 'completed']);
   const TERMINAL_STATUSES = Object.freeze(['completed']);
-  const STEPS = Object.freeze(['interests', 'theme', 'worlds', 'journey', 'destination', 'return']);
+  // Keep the original welcome as a real, resumable Entry step.  The rest of
+  // the route is deliberately the current public-World flow (interests,
+  // Worlds, levels, and gates), not the retired game-dictionary tour.
+  const STEPS = Object.freeze(['welcome', 'interests', 'theme', 'worlds', 'journey', 'destination', 'return']);
   const JOURNEY_STATUSES = Object.freeze(['pending', 'world-selected', 'structure-explored', 'return-reviewed']);
   const GAMER_STATUSES = Object.freeze(['not-applicable', 'offered', 'running', 'completed', 'unavailable', 'skipped']);
   const AUDIENCES = Object.freeze(['new', 'returning', 'returning-guest']);
@@ -231,7 +234,9 @@
       status: 'in-progress',
       audience: context.audience,
       classification: context.classification,
-      currentStep: context.classification === 'returning-with-progress' ? 'return' : 'interests',
+      currentStep: context.classification === 'returning-with-progress'
+        ? 'return'
+        : (context.classification === 'brand-new' ? 'welcome' : 'interests'),
       interestsStatus: Array.isArray(saved.interestIds) && saved.interestIds.length ? 'selected' : 'pending',
       interestIds: saved.interestIds,
       themeStatus: existingTheme ? 'preserved' : 'pending',
@@ -269,7 +274,7 @@
     return normalizeEntryState({
       ...normalized,
       status: 'in-progress',
-      currentStep: hasProgress ? 'return' : 'interests',
+      currentStep: hasProgress ? 'return' : (classification === 'brand-new' ? 'welcome' : 'interests'),
       journeyStatus: 'pending',
       selectedWorldId: '',
       gamerStatus: 'not-applicable',
@@ -780,7 +785,12 @@
     let next = { ...state, interestIds: [...state.interestIds], updatedAt: now };
     if (!next.startedAt) next.startedAt = now;
 
-    if (type === 'select-interests') {
+    if (type === 'continue-welcome') {
+      if (next.currentStep !== 'welcome') {
+        throw new RangeError('The welcome step must be active before starting Entry.');
+      }
+      next.currentStep = 'interests';
+    } else if (type === 'select-interests') {
       const ids = uniqueStrings(action.interestIds, INTEREST_IDS, INTEREST_IDS.length);
       next.interestIds = ids;
       next.interestsStatus = ids.length ? 'selected' : 'pending';
@@ -858,7 +868,8 @@
       next.skippedAt = 0;
       if (next.themeStatus === 'pending') next.themeStatus = next.themeId ? 'preserved' : 'preserved';
     } else if (type === 'back') {
-      if (next.currentStep === 'theme') next.currentStep = 'interests';
+      if (next.currentStep === 'interests' && next.classification === 'brand-new') next.currentStep = 'welcome';
+      else if (next.currentStep === 'theme') next.currentStep = 'interests';
       else if (next.currentStep === 'worlds') next.currentStep = 'theme';
       else if (next.currentStep === 'journey') next.currentStep = 'worlds';
       else if (next.currentStep === 'destination') next.currentStep = 'journey';

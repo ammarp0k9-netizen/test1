@@ -586,22 +586,24 @@
       persistLocalState(entryState, user);
     }
 
-    // Anonymous learners start in the product, rather than receiving the
-    // account-focused setup flow. Their existing quiz/Journey destination is
-    // still honoured; a completely empty dictionary goes directly to the
-    // existing new-user-start action and focuses the word field.
+    // Preserve a returning guest's actual destination, but give a truly new
+    // guest the same original welcome → interests → public-World journey as a
+    // new account.  This replaces neither saved learning data nor the
+    // separate Guided First Journey that begins only after World selection.
     if (!user && !entryState && !runtime.guestFirstRouteHandled) {
       runtime.guestFirstRouteHandled = true;
-      const hasWords = Number(signals.wordCount || 0) > 0 || Number(signals.srsCount || 0) > 0;
-      const guestAction = hasWords || signals.activeJourney || signals.resumableQuiz
-        ? runtime.action
-        : { id: 'new-user-start' };
-      runtime.state = null;
-      announceEntryState();
-      close({ silent: true });
-      completeStartup();
-      await routeGuestDirectlyToLearning(guestAction);
-      return;
+      if (runtime.presentation.classification !== 'brand-new') {
+        const hasWords = Number(signals.wordCount || 0) > 0 || Number(signals.srsCount || 0) > 0;
+        const guestAction = hasWords || signals.activeJourney || signals.resumableQuiz
+          ? runtime.action
+          : { id: 'new-user-start' };
+        runtime.state = null;
+        announceEntryState();
+        close({ silent: true });
+        completeStartup();
+        await routeGuestDirectlyToLearning(guestAction);
+        return;
+      }
     }
 
     if (entryState && !api().shouldPresent(entryState)) {
@@ -666,7 +668,7 @@
   }
 
   function stepIndicator(step) {
-    const order = ['interests', 'theme', 'worlds', 'journey', 'destination'];
+    const order = ['welcome', 'interests', 'theme', 'worlds', 'journey', 'destination'];
     const index = Math.max(0, order.indexOf(step)) + 1;
     return `الخطوة ${index} من ${order.length}`;
   }
@@ -707,6 +709,32 @@
         </div>
       </footer>
     `;
+    bindPanelActions();
+  }
+
+  function renderWelcome() {
+    const panel = panelElement();
+    if (!panel || !runtime.state) return;
+    panel.innerHTML = `
+      <header class="entry-header entry-welcome-header">
+        <div><span class="entry-eyebrow">مرحبًا بك في LootLingua</span><span class="entry-step-label">${stepIndicator('welcome')}</span></div>
+      </header>
+      <section class="entry-welcome" aria-labelledby="entryExperienceTitle">
+        <span class="entry-welcome-icon"><i class="fa-solid fa-hand-sparkles" aria-hidden="true"></i></span>
+        <div class="entry-copy">
+          <h1 id="entryExperienceTitle">تعلّم الكلمات داخل رحلة واضحة</h1>
+          <p>ابدأ باهتماماتك، ثم اختر عالمًا عامًا منشورًا. كل عالم يحتوي مستويات وبوابات وكلمات جاهزة، وتبقى كلماتك وتقدّمك تحت سيطرتك.</p>
+        </div>
+        <div class="entry-welcome-route" aria-label="كيف تعمل الرحلة">
+          <span><i class="fa-solid fa-earth-americas" aria-hidden="true"></i><strong>عالم</strong><small>اختر موضوعًا</small></span>
+          <i class="fa-solid fa-angle-left" aria-hidden="true"></i>
+          <span><i class="fa-solid fa-signal" aria-hidden="true"></i><strong>مستوى</strong><small>بحسب التدرّج</small></span>
+          <i class="fa-solid fa-angle-left" aria-hidden="true"></i>
+          <span><i class="fa-solid fa-dungeon" aria-hidden="true"></i><strong>بوابة</strong><small>كلمات وخطوة تالية</small></span>
+        </div>
+        <p class="entry-helper">سنشرح لك البوابة الأولى داخل العالم نفسه عبر الإرشاد التفاعلي، ويمكنك متابعة الرحلة على الهاتف أو الكمبيوتر.</p>
+      </section>
+      <footer class="entry-footer"><div class="entry-actions entry-actions-single"><button type="button" class="entry-primary" data-entry-action="continue-welcome">ابدأ الرحلة <i class="fa-solid fa-arrow-left" aria-hidden="true"></i></button></div></footer>`;
     bindPanelActions();
   }
 
@@ -1185,6 +1213,7 @@
     else if (runtime.state.currentStep === 'journey') renderJourneyStructure();
     else if (runtime.state.currentStep === 'worlds') renderWorldsOnboarding();
     else if (runtime.state.currentStep === 'theme') renderTheme();
+    else if (runtime.state.currentStep === 'welcome') renderWelcome();
     else renderInterests();
   }
 
@@ -1504,7 +1533,8 @@
       return;
     }
     try {
-      if (action === 'continue-interests') {
+      if (action === 'continue-welcome') transition({ type: 'continue-welcome' });
+      else if (action === 'continue-interests') {
         transition({ type: 'continue-interests' });
         if (runtime.settingsMode === 'interests') {
           const draft = runtime.state;

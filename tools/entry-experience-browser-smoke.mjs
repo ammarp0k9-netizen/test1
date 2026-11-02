@@ -7,8 +7,8 @@ import WebSocketClient from 'ws';
 const root = path.resolve(import.meta.dirname, '..');
 const evidenceDir = path.join(root, 'reports', 'product-entry-evidence');
 const evidenceScreenshotNames = new Set([
-  'guest-new-desktop-dictionary',
-  'guest-new-320-dictionary',
+  'guest-new-desktop-welcome',
+  'guest-new-320-welcome',
   'account-journey-short-return',
   'account-completed-hidden-app',
   'entry-cloud-failure-kept-open',
@@ -742,6 +742,12 @@ async function reachAction(options = {}) {
     if (current.stage === 'destination') {
       return { observed, state: await snapshot() };
     }
+    if (current.stage === 'welcome') {
+      if (options.captureStages) options.captureStages.push(await screenshot(`${options.screenshotPrefix || activeCase}-welcome`));
+      await click('[data-entry-action="continue-welcome"]');
+      await waitFor(`document.querySelector('[data-entry-interest]') !== null`, 'interests step');
+      continue;
+    }
     if (current.stage === 'interests') {
       if (!current.interestIds.length) await click(`[data-entry-interest="${options.interestId || 'study'}"]`);
       await click('[data-entry-action="continue-interests"]');
@@ -1089,6 +1095,7 @@ async function runRefreshAccountTheme() {
   const id = 'refresh-account-theme';
   const failures = [];
   await navigateScenario(id);
+  await click('[data-entry-action="continue-welcome"]');
   await click('[data-entry-interest="study"]');
   await click('[data-entry-action="continue-interests"]');
   await waitFor(`document.querySelector('[data-entry-theme]') !== null`, 'account theme');
@@ -1100,7 +1107,7 @@ async function runRefreshAccountTheme() {
   return {
     id,
     classification: after.classification,
-    visibleSteps: ['interests', 'theme'],
+    visibleSteps: ['welcome', 'interests', 'theme'],
     refresh: { theme: { before: before.themeId, after: after.themeId, explicit: after.themeExplicit } },
     onboardingInteraction: { visible: false, reason: 'refresh probe stopped at theme' },
     auth: 'account already authenticated',
@@ -1169,7 +1176,7 @@ async function runAccountSwitch() {
   await waitFor(`document.getElementById('entryExperienceRoot')?.hidden === false`, 'account B Entry');
   const initialB = await snapshot();
   images.push(await screenshot(`${id}-account-b-entry`));
-  assertion(initialB.classification === 'brand-new' && initialB.stage === 'interests', `account B inherited A state (${initialB.classification}/${initialB.stage})`, failures);
+  assertion(initialB.classification === 'brand-new' && initialB.stage === 'welcome', `account B inherited A state (${initialB.classification}/${initialB.stage})`, failures);
   const completedB = await completeCurrentAccount();
   assertion(completedB.final.status === 'completed', 'account B did not complete independently', failures);
   await click('[data-switch-account="account-a"]');
@@ -1296,8 +1303,8 @@ try {
     patterns: [{ urlPattern: `${origin}/app*`, resourceType: 'Document', requestStage: 'Request' }],
   });
 
-  await record(() => runGuestDictionary('guest-new-desktop'));
-  await record(() => runGuestDictionary('guest-new-320'));
+  await record(() => runHappy('guest-new-desktop', { classification: 'brand-new', actionId: 'open-selected-world', destination: 'worldsView' }));
+  await record(() => runHappy('guest-new-320', { classification: 'brand-new', actionId: 'open-selected-world', destination: 'worldsView' }));
   await record(() => runGuestDictionary('guest-words'));
   await record(() => runGuestDictionary('guest-xp-light'));
   await record(() => runHappy('account-new', { classification: 'brand-new', actionId: 'open-selected-world', destination: 'worldsView' }));
