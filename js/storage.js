@@ -26,6 +26,8 @@ const GUEST_PROFILE_DIRTY_KEYS = new Set([
   'lootlinguaGameDictAdds',
   'lootlinguaPerfectQuizzes',
   'lootlinguaExtraChests',
+  'lootlingua.runner.coins.v1',
+  'lootlingua.runner.best-distance.v1',
 ]);
 const GUEST_PROFILE_DIRTY_PREFIXES = ['lootlinguaDailyQuests_'];
 
@@ -187,6 +189,8 @@ function guestMigrationSnapshotFingerprint(snapshot) {
       gameDictAdds: profile.gameDictAdds || 0,
       perfectQuizzes: profile.perfectQuizzes || 0,
       extraChests: profile.extraChests || [],
+      runnerCoins: profile.runnerCoins || 0,
+      runnerBestDistance: profile.runnerBestDistance || 0,
     },
   });
   const serialized = JSON.stringify(stableSnapshot);
@@ -316,6 +320,8 @@ function hasMeaningfulGuestLoot(snapshot) {
   if ((Number(p.freezeSaves) || 0) > 0) return true;
   if ((Number(p.gameDictAdds) || 0) > 0) return true;
   if ((Number(p.perfectQuizzes) || 0) > 0) return true;
+  if ((Number(p.runnerCoins) || 0) > 0) return true;
+  if ((Number(p.runnerBestDistance) || 0) > 0) return true;
   const titles = p.titlesState?.unlocked;
   if (Array.isArray(titles) && titles.length > 0) return true;
   const lootState = p.dailyLootState;

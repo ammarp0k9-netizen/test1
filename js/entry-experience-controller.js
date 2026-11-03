@@ -1960,6 +1960,12 @@
         root.LootLinguaGuidedFirstJourneyContract?.shouldStartForPresentation(runtime.presentation);
       const destination = await openEntryDestination(id, expected);
       if (startsGuidedFirstJourney && destination?.type === 'world') {
+        // Dictionary guidance is its own tiny, resumable hand-off.  It is
+        // planned before the public gate journey but cannot surface until that
+        // journey completes, so the two overlays never compete.
+        root.LootLinguaPersonalDictionaryOnboarding?.planForFirstJourney?.({
+          requiresFirstWord: !runtime.user,
+        });
         // Kept separate from Entry v2: this is temporary in-product guidance,
         // not a new Product Entry state or learning/progression mutation.
         await root.LootLinguaGuidedFirstJourney?.beginFromEntry({

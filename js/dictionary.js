@@ -434,6 +434,7 @@ window.addWord = async function() {
   if (!w || !m) { showToast("عبّي الكلمة ومعناها يا بطل!"); return; }
 
   const btn = document.getElementById('addBtn');
+  let savedWord = null;
   btn.disabled = true;
 
   if (editId) {
@@ -472,8 +473,19 @@ window.addWord = async function() {
     const newWord = applyKnownSharedMastery({ id:Date.now().toString(), word:w, meaning:m, example:ex, category:c, starred:false, forgetCount:0, xpValue:0, order:0, createdAt:new Date().toISOString() });
     window.words.unshift(newWord);
     reindexWordOrder(window.words);
-    const realId = await saveActiveWordToCloud(newWord);
+    let realId = null;
+    try {
+      realId = await saveActiveWordToCloud(newWord);
+    } catch (error) {
+      // Do not claim the guest's mandatory first-word step when its actual
+      // persistence failed. Keep the form values so a retry is possible.
+      window.words = window.words.filter((word) => word !== newWord);
+      btn.disabled = false;
+      showToast('تعذّر حفظ الكلمة الآن. جرّب مرة ثانية.', 'danger');
+      return;
+    }
     if (realId) newWord.id = realId;
+    savedWord = newWord;
     renderLimit = 20;
   }
 
@@ -481,6 +493,13 @@ window.addWord = async function() {
   setAddFormExpanded(false);
   btn.disabled = false;
   saveAndRender();
+  // This event is emitted only after the active dictionary was persisted, not
+  // on opening the form or typing.  The guest first-word step consumes it.
+  if (savedWord && window.words?.some((word) => word === savedWord || String(word?.id) === String(savedWord?.id))) {
+    window.dispatchEvent(new CustomEvent('lootlingua:dictionary-word-saved', {
+      detail: { id: savedWord.id, owner: window.auth?.currentUser?.uid || 'guest' },
+    }));
+  }
 };
 
 // ═══════════════════════════════════════════════════════

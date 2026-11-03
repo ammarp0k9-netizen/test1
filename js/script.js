@@ -1831,7 +1831,7 @@ window.resetLootlinguaProfileState = function(options = {}) {
   if (typeof renderTreasureRoom === 'function' && currentView === 'treasure') renderTreasureRoom();
 };
 
-window.mergeLootlinguaProfileFromCloud = function(d) {
+window.mergeLootlinguaProfileFromCloud = function(d, options = {}) {
   // Track if we loaded from cloud to avoid double checkAndUpdateStreak
   window._profileLoaded = true;
   if (!d) return;
@@ -1926,7 +1926,15 @@ window.mergeLootlinguaProfileFromCloud = function(d) {
   if (d.freezeSaves !== undefined) saveInt('lootlinguaFreezeSaves', Math.max(loadInt('lootlinguaFreezeSaves', 0), Number(d.freezeSaves) || 0));
   if (d.gameDictAdds !== undefined) saveInt('lootlinguaGameDictAdds', Math.max(loadInt('lootlinguaGameDictAdds', 0), Number(d.gameDictAdds) || 0));
   if (d.perfectQuizzes !== undefined) saveInt('lootlinguaPerfectQuizzes', Math.max(loadInt('lootlinguaPerfectQuizzes', 0), Number(d.perfectQuizzes) || 0));
-  if (d.runnerCoins !== undefined) saveInt('lootlingua.runner.coins.v1', Math.max(loadInt('lootlingua.runner.coins.v1', 0), Number(d.runnerCoins) || 0));
+  if (d.runnerCoins !== undefined) {
+    const guestCoins = Math.max(0, Number(d.runnerCoins) || 0);
+    const existingCoins = loadInt('lootlingua.runner.coins.v1', 0);
+    // A guest balance is distinct from the account balance. It is added only
+    // during the durable guest migration; normal cloud hydration keeps max.
+    saveInt('lootlingua.runner.coins.v1', options.guestMigration === true
+      ? existingCoins + guestCoins
+      : Math.max(existingCoins, guestCoins));
+  }
   if (d.runnerBestDistance !== undefined) saveInt('lootlingua.runner.best-distance.v1', Math.max(loadInt('lootlingua.runner.best-distance.v1', 0), Number(d.runnerBestDistance) || 0));
   if (Array.isArray(d.extraChests)) {
     const localExtra = loadJSON('lootlinguaExtraChests', []);
@@ -2019,6 +2027,7 @@ function getGuestProgressSummary(profile) {
   if (titles > 0) stats.push({ label: `${titles} ألقاب`, hint: 'إنجازات مفتوحة' });
   if (chests > 0) stats.push({ label: `${chests} صناديق`, hint: 'لوت يومي' });
   if ((Number(profile?.streakFreezes) || 0) > 0) stats.push({ label: `${profile.streakFreezes} تجميد`, hint: 'حماية الستريك' });
+  if ((Number(profile?.runnerCoins) || 0) > 0) stats.push({ label: `${profile.runnerCoins} عملة`, hint: 'رصيد لعبة الجري' });
   return stats;
 }
 
@@ -2291,6 +2300,7 @@ window.confirmGuestMigration = async function() {
         : [...uniquePreviousProfiles, currentGuestProfile],
       createdAt: Number(previousProfileMigration?.createdAt) || Date.now(),
       updatedAt: Date.now(),
+      profileCommittedAt: Number(previousProfileMigration?.profileCommittedAt) || 0,
     };
     // The learning uploads above and this account-scoped recovery record must
     // both exist before the guest namespace is purged. profile-cloud removes
@@ -2313,6 +2323,9 @@ window.confirmGuestMigration = async function() {
       notificationError.code = 'notification/migration-failed';
       throw notificationError;
     }
+    // Keep the verified profile marker until all later migration stages have
+    // succeeded. This prevents a retry from crediting the same guest balance.
+    window.finalizePendingGuestProfileMigration?.(user);
     markGuestMigrationCompleteFlag(user, 'accepted', summary.guestSnapshotId);
     purgeStaleGuestLocalData();
     saveAndRender();

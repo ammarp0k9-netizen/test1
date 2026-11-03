@@ -462,7 +462,7 @@ test('explicit guest appearance is allowlisted and its marker survives failed cl
   assert.match(profileSource, /await setDoc\([\s\S]*?return true;[\s\S]*?return false;/);
 });
 
-test('failed guest profile persistence survives refresh and clears only after a successful retry', () => {
+test('a verified guest profile stays tombstoned until the whole migration is finalized', () => {
   const helperBlock = between(
     profileSource,
     'function pendingGuestProfileMigrationKey(user)',
@@ -497,7 +497,7 @@ test('failed guest profile persistence survives refresh and clears only after a 
     'window',
     'localStorage',
     'sessionStorage',
-    `${helperBlock}\nreturn { readPendingGuestProfileMigration, completePendingGuestProfileMigration };`
+    `${helperBlock}\nreturn { readPendingGuestProfileMigration, completePendingGuestProfileMigration, finalizePendingGuestProfileMigration: window.finalizePendingGuestProfileMigration };`
   );
   const firstRoot = {
     LootLinguaEntryExperience: entry,
@@ -516,7 +516,11 @@ test('failed guest profile persistence survives refresh and clears only after a 
   const refreshedLoad = buildHelpers(refreshedRoot, storage, session);
   assert.deepEqual(refreshedLoad.readPendingGuestProfileMigration(user), normalizedPayload);
   assert.equal(refreshedLoad.completePendingGuestProfileMigration(user, true, true), true);
+  const committed = refreshedLoad.readPendingGuestProfileMigration(user);
+  assert.ok(Number(committed.profileCommittedAt) > 0);
+  assert.equal(refreshedRoot.__acceptedGuestProfileMigration.profileCommittedAt, committed.profileCommittedAt);
+  assert.equal(session.getItem('lootlingua:guest-theme-explicit:v1'), null);
+  assert.equal(refreshedLoad.finalizePendingGuestProfileMigration(user), true);
   assert.equal(storage.getItem(key), null);
   assert.equal(refreshedRoot.__acceptedGuestProfileMigration, null);
-  assert.equal(session.getItem('lootlingua:guest-theme-explicit:v1'), null);
 });

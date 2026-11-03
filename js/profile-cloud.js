@@ -41,13 +41,26 @@ function readPendingGuestProfileMigration(user) {
 
 function completePendingGuestProfileMigration(user, saved, hasExplicitTheme) {
   if (saved !== true) return false;
-  localStorage.removeItem(pendingGuestProfileMigrationKey(user));
-  window.__acceptedGuestProfileMigration = null;
+  const pending = readPendingGuestProfileMigration(user);
+  if (!pending) return false;
+  // Do not consume this recovery record yet: notification migration can still
+  // fail after the profile write.  Retaining a verified marker lets retries
+  // skip the already-applied guest balance without deleting guest data early.
+  const committed = { ...pending, profileCommittedAt: Number(pending.profileCommittedAt) || Date.now(), updatedAt: Date.now() };
+  localStorage.setItem(pendingGuestProfileMigrationKey(user), JSON.stringify(committed));
+  window.__acceptedGuestProfileMigration = committed;
   if (hasExplicitTheme) {
     sessionStorage.removeItem('lootlingua:guest-theme-explicit:v1');
   }
   return true;
 }
+
+window.finalizePendingGuestProfileMigration = function(user) {
+  if (!user?.uid) return false;
+  localStorage.removeItem(pendingGuestProfileMigrationKey(user));
+  window.__acceptedGuestProfileMigration = null;
+  return true;
+};
 
 function diagnosticProfileValue(value, seen = new WeakSet()) {
   if (value instanceof Date) return value.toISOString();
@@ -204,7 +217,8 @@ window.loadProfileFromCloud = async function(user, options = {}) {
     accepted = inMemoryMigration?.uid === user.uid
       ? inMemoryMigration
       : persistedMigration;
-    const guestProfiles = accepted?.uid === user.uid
+    const profileAlreadyCommitted = Number(accepted?.profileCommittedAt) > 0;
+    const guestProfiles = accepted?.uid === user.uid && !profileAlreadyCommitted
       ? (
         Array.isArray(accepted.profiles) && accepted.profiles.length
           ? accepted.profiles
@@ -243,7 +257,7 @@ window.loadProfileFromCloud = async function(user, options = {}) {
         // Only the current explicit Entry session below may do so.
         delete guestProfileForMerge.theme;
         delete guestProfileForMerge.oasisMode;
-        window.mergeLootlinguaProfileFromCloud(guestProfileForMerge);
+        window.mergeLootlinguaProfileFromCloud(guestProfileForMerge, { guestMigration: true });
       });
       if (hasCurrentExplicitTheme) {
         window.mergeLootlinguaProfileFromCloud({
@@ -254,7 +268,9 @@ window.loadProfileFromCloud = async function(user, options = {}) {
     }
     // Do not create/backfill a profile merely because it was read. A write is
     // warranted only after an explicit guest-data merge or a later user action.
-    if (shouldMergeGuestState && window._saveProfileToCloudNow) {
+    if (profileAlreadyCommitted) {
+      outcome.pendingProfileCommitted = true;
+    } else if (shouldMergeGuestState && window._saveProfileToCloudNow) {
       const saved = await window._saveProfileToCloudNow({
         verify: Boolean(persistedMigration || options.requirePendingProfileCommit),
       });
@@ -298,7 +314,9 @@ window.loadProfileFromCloud = async function(user, options = {}) {
 };
 
 window.commitPendingGuestProfileMigration = async function(user) {
-  if (!readPendingGuestProfileMigration(user)) return false;
+  const pending = readPendingGuestProfileMigration(user);
+  if (!pending) return false;
+  if (Number(pending.profileCommittedAt) > 0) return true;
   const outcome = await window.loadProfileFromCloud(user, { requirePendingProfileCommit: true });
   return outcome.pendingProfileCommitted === true;
 };
