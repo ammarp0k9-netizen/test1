@@ -187,6 +187,29 @@ test('trusted quiz completion requires the exact onboarding gate hierarchy', asy
   assert.equal(controller.getState().phase, 'completed');
 });
 
+test('guest dictionary hand-off closes the public coach and never resurrects its stale route', async () => {
+  const { controller, root } = createControllerHarness();
+  let opened = 0;
+  let closed = 0;
+  root.LootLinguaPopover = { getActiveId: () => '', open(options) { opened++; assert.equal(options.persistent, true); }, closeIf() { closed++; } };
+  await controller.beginFromEntry({ presentation: { classification: 'brand-new', audience: 'new' }, worldId: 'world-alpha' });
+  const target = { textContent: 'ابدأ رحلة التعلم', classList: { add() {}, remove() {} } };
+  const routeRoot = { isConnected: true, querySelectorAll: () => [], querySelector: () => target };
+  const route = { type: 'gate', worldId: 'world-alpha', root: routeRoot };
+  controller.applyRoute(route);
+  assert.equal(opened, 1);
+  controller.clearCoach();
+  root.dispatchEvent({ type: 'lootlingua:popover-closed', detail: { id: 'personalDictionaryOnboardingCoach' } });
+  assert.equal(opened, 1);
+  root.auth.currentUser = null;
+  await controller.enableGuestDictionary();
+  root.LootLinguaPersonalDictionaryOnboarding = { getState: () => ({ phase: 'completed' }) };
+  controller.applyRoute(route);
+  assert.equal(opened, 1, 'completed dictionary guidance must not restart the guest gate coach');
+  assert.ok(closed > 0);
+  assert.equal(controller.getState().phase, 'awaiting-first-gate', 'learning progress is preserved');
+});
+
 test('verified completion recovers if the journey cloud phase lags behind its completed gate quiz', async () => {
   const { controller, root } = createControllerHarness();
   await controller.beginFromEntry({

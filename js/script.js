@@ -2374,6 +2374,7 @@ window.declineGuestMigration = function() {
 };
 
 function beginViewSwitch() {
+  window.LootLinguaGuidedFirstJourney?.clearCoach?.();
   document.body.classList.add('view-transitioning');
   requestAnimationFrame(() => {
     requestAnimationFrame(() => {

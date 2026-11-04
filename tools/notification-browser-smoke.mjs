@@ -327,6 +327,7 @@ try {
     await delay(250);
     await evaluate(`document.body.dispatchEvent(new PointerEvent('pointerdown',{bubbles:true}))`);
     results.assertions['persistent-core-'+width] = await evaluate(`!!document.getElementById('personalDictionaryOnboardingCoach')`);
+    results.assertions['core-target-highlight-'+width] = await evaluate(`document.querySelector('#legendDock [data-dock-view="personal"]').classList.contains('coach-highlight-target')`);
     for (let i = 0; i < 28; i++) {
       const state = await evaluate(`LootLinguaPersonalDictionaryOnboarding.getState()`);
       if (state.phase === 'completed') break;
@@ -347,6 +348,7 @@ try {
       if ([4,8,13,16].includes(state.step)) results.screenshots.push(await screenshot('core-'+width+'-'+state.step+'.png'));
     }
     results.assertions['core-completed-'+width] = await evaluate(`LootLinguaPersonalDictionaryOnboarding.getState()?.phase === 'completed'`);
+    results.assertions['core-highlight-cleared-'+width] = await evaluate(`document.querySelectorAll('.coach-highlight-target').length === 0`);
     if (!results.assertions['core-completed-'+width]) results['core-diagnostic-'+width] = await evaluate(`({state:LootLinguaPersonalDictionaryOnboarding.getState(),coach:document.querySelector('#personalDictionaryOnboardingCoach')?.textContent})`);
   }
   results.passed = Object.values(results.assertions).every(Boolean);

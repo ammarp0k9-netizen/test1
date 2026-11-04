@@ -5353,9 +5353,11 @@ body.test-clock-active .toast-host {
 .treasure-dock-btn.feature-discovery-ready .feature-discovery-callout {
   display: grid;
   position: absolute;
-  left: 50%;
-  inset-block-end: calc(100% + 5px);
-  transform: translateX(-50%);
+  left: auto;
+  right: 3px;
+  top: 1px;
+  bottom: auto;
+  transform: none;
   justify-items: center;
   gap: 1px;
   z-index: 8;
@@ -5369,6 +5371,10 @@ body.test-clock-active .toast-host {
   box-shadow: 0 2px 8px rgba(127, 29, 29, .52);
 }
 .feature-discovery-callout em {
+  position: absolute;
+  bottom: calc(100% + 2px);
+  left: 50%;
+  transform: translateX(-50%);
   font-style: normal;
   white-space: nowrap;
   color: #dc2626;
@@ -5388,6 +5394,12 @@ body.test-clock-active .toast-host {
   border: 1px solid var(--border); box-shadow: 0 10px 32px #0005;
   max-height: calc(100dvh - 24px); overflow-y: auto;
 }
+.coach-highlight-target {
+  outline: 3px solid var(--accent) !important;
+  outline-offset: 4px;
+  box-shadow: 0 0 0 7px color-mix(in srgb, var(--accent) 22%, transparent) !important;
+}
+:where(div, section, ul).coach-highlight-target { border-radius: 14px; }
 .feature-mini-onboarding-coach {
   z-index: 12000; width: min(304px, calc(100vw - 24px));
   box-sizing: border-box; padding: 16px; border-radius: 16px;

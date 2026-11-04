@@ -5,6 +5,10 @@
 
   function position(element, anchor) {
     if (!element || !anchor?.getBoundingClientRect) return;
+    if (anchor.isConnected === false || (anchor.getClientRects && !anchor.getClientRects().length)) {
+      close({ silent: true });
+      return;
+    }
     const rect = anchor.getBoundingClientRect();
     const margin = 12;
     element.style.position = 'fixed';
@@ -26,6 +30,7 @@
     const current = active;
     active = null;
     current.element.remove();
+    if (current.highlighted) current.anchor?.classList?.remove('coach-highlight-target');
     current.anchor?.setAttribute?.('aria-expanded', 'false');
     window.removeEventListener('resize', current.reposition);
     window.removeEventListener('scroll', current.reposition, true);
@@ -61,6 +66,8 @@
     if (content instanceof Node) element.append(content);
     else element.textContent = String(content || '');
     document.body.append(element);
+    const highlighted = persistent && !anchor.classList?.contains('coach-highlight-target');
+    if (highlighted) anchor.classList?.add('coach-highlight-target');
     const reposition = () => position(element, anchor);
     const onPointerDown = (event) => {
       if (!persistent && !element.contains(event.target) && !anchor.contains(event.target)) close();
@@ -68,7 +75,7 @@
     const onKeydown = (event) => {
       if (event.key === 'Escape' && !persistent) { event.preventDefault(); close(); }
     };
-    active = { id: id || '', element, anchor, reposition, onPointerDown, onKeydown, onClose, persistent };
+    active = { id: id || '', element, anchor, reposition, onPointerDown, onKeydown, onClose, persistent, highlighted };
     anchor.setAttribute('aria-expanded', 'true');
     reposition();
     window.addEventListener('resize', reposition);

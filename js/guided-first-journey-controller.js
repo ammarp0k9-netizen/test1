@@ -164,6 +164,7 @@
     const next = api().transition(runtime.state, { type: 'enable-guest-dictionary' }, Date.now());
     if (next === runtime.state) return next;
     runtime.state = next;
+    clearCoach();
     announce();
     await persist(next);
     // The explicit Continue as guest action owns the dictionary hand-off.
@@ -189,7 +190,8 @@
 
   function applyRoute(payload) {
     const dictionary = root.LootLinguaPersonalDictionaryOnboarding?.getState?.();
-    if (dictionary && dictionary.phase !== 'awaiting-journey' && dictionary.phase !== 'completed') return;
+    if (dictionary && dictionary.phase !== 'awaiting-journey' && dictionary.phase !== 'completed') { clearCoach(); return; }
+    if (!user() && runtime.state?.guestDictionaryAvailable) { clearCoach(); return; }
     if (!active() || !payload?.root) return;
     runtime.lastRoute = payload;
     const state = runtime.state;
@@ -252,8 +254,19 @@
       anchor,
       content,
       labelledBy: title.id,
+      persistent: true,
     });
   }
+
+  function clearCoach() {
+    runtime.lastRoute = null;
+    document.querySelectorAll('.guided-first-journey-target').forEach((node) => node.classList.remove('guided-first-journey-target'));
+    root.LootLinguaPopover?.closeIf?.(COACH_ID, { silent: true });
+  }
+  root.addEventListener('lootlingua:personal-dictionary-onboarding-change', () => {
+    const dictionary = root.LootLinguaPersonalDictionaryOnboarding?.getState?.();
+    if (dictionary?.phase !== 'awaiting-journey') clearCoach();
+  });
 
   root.addEventListener('lootlingua:journey-auth-requested', (event) => {
     const intent = event.detail?.intent;
@@ -316,7 +329,7 @@
   queueMicrotask(boot);
 
   Object.defineProperty(root, 'LootLinguaGuidedFirstJourney', {
-    value: Object.freeze({ boot, beginFromEntry, gateOpened, gateWordsLoaded, completeFromQuizCta, enableGuestDictionary, shouldAllowSurface, applyRoute, getState: () => runtime.state }),
+    value: Object.freeze({ boot, beginFromEntry, gateOpened, gateWordsLoaded, completeFromQuizCta, enableGuestDictionary, shouldAllowSurface, applyRoute, clearCoach, getState: () => runtime.state }),
     configurable: false, writable: false,
   });
 })(typeof window !== 'undefined' ? window : globalThis);

@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-11-04T19:20:21.533Z",
+  "generatedAt": "2026-11-04T19:36:07.644Z",
   "browser": "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",
   "screenshots": [
     "reports/notification-system-evidence/notification-center-cta-desktop.png",
@@ -60,9 +60,13 @@
     "discovery-start-custom-worlds": true,
     "discovery-complete-custom-worlds": true,
     "persistent-core-1280": true,
+    "core-target-highlight-1280": true,
     "core-completed-1280": true,
+    "core-highlight-cleared-1280": true,
     "persistent-core-320": true,
-    "core-completed-320": true
+    "core-target-highlight-320": true,
+    "core-completed-320": true,
+    "core-highlight-cleared-320": true
   },
   "passed": false
 }
