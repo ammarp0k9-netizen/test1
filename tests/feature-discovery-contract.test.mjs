@@ -12,6 +12,18 @@ const root = {};
 new Function('window', 'globalThis', `${source}\nreturn window.LootLinguaFeatureDiscoveryContract;`)(root, root);
 const discovery = root.LootLinguaFeatureDiscoveryContract;
 
+test('mini onboarding checkpoints and explicit skipping survive normalization and guest merge', () => {
+  let state = discovery.transition(discovery.create(), 'quiz', 'start', 10);
+  state = discovery.transition(state, 'quiz', { type: 'step', step: 1 }, 20);
+  assert.equal(discovery.normalize(JSON.parse(JSON.stringify(state))).features.quiz.step, 1);
+  const account = discovery.merge(discovery.create(), state);
+  assert.equal(account.features.quiz.step, 1);
+  const skipped = discovery.transition(account, 'quiz', 'skip', 30);
+  assert.equal(skipped.features.quiz.status, 'skipped');
+  assert.equal(discovery.transition(skipped, 'quiz', 'start', 40).features.quiz.status, 'skipped');
+  assert.equal(discovery.stateFor(skipped, 'quiz', false).status, 'locked');
+});
+
 test('feature discovery has independent, owner-scoped records without changing unlock eligibility', () => {
   assert.deepEqual(discovery.FEATURES, ['treasure', 'quiz', 'starred', 'custom-worlds']);
   assert.notEqual(discovery.storageKey({}), discovery.storageKey({ uid: 'account-a' }));
@@ -135,7 +147,10 @@ test('coordinator offers eligible discovery through existing notifications witho
 
   assert.equal(controller.open('treasure'), true);
   assert.equal(calls.treasure, 1);
-  assert.equal(controller.getStatus('treasure', true), 'completed');
+  assert.equal(controller.getStatus('treasure', true), 'in-progress');
+  assert.equal(records.has('feature-discovery:treasure'), true);
+  controller.complete('treasure');
+  controller.evaluate();
   assert.equal(records.has('feature-discovery:treasure'), false);
 
   owner.words = Array.from({ length: 5 }, (_, index) => ({ id: `word-${index}`, word: `word-${index}` }));

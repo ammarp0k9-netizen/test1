@@ -1004,7 +1004,7 @@ function syncDockLockUi() {
   document.querySelectorAll('.treasure-dock-btn[data-feature]').forEach((btn) => {
     const id = btn.getAttribute('data-feature');
     if (!id) return;
-    const locked = !isFeatureUnlocked(id);
+    const locked = id !== 'custom-worlds' && !isFeatureUnlocked(id);
     btn.classList.toggle('dock-feature-locked', locked);
     btn.setAttribute('aria-disabled', locked ? 'true' : 'false');
     const overlay = btn.querySelector('.dock-lock-overlay');

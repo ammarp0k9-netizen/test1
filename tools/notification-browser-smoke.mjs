@@ -260,6 +260,44 @@ try {
   results.assertions.toastDifferentQueuePreserved = toastProbe.queued.join('|') === 'Queued different one|Queued different two';
   results.assertions.toastCenteredFromStart = toastProbe.visible === true && toastProbe.centeredDelta <= 1;
   results.assertions.toastExitsUpward = toastProbe.exitedShowState === true && toastProbe.exitMovedUp === true;
+  // Exercise the real discovery controllers and real page DOM in this
+  // isolated browser profile; no cloud/user records are written.
+  for (const width of [1280, 320, 390]) {
+    await send('Emulation.setDeviceMetricsOverride', { width, height: 900, deviceScaleFactor: 1, mobile: width < 500 });
+    for (const theme of ['lootlingua', 'ocean', 'glass']) {
+      await evaluate(`(() => {
+        document.documentElement.setAttribute('data-theme', ${JSON.stringify(theme)});
+        window.__entryExperienceActive = false;
+        window.words = Array.from({length:5}, (_,i)=>({id:'discovery-'+i,word:'word'+i,meaning:'معنى',starred:false}));
+        writeWordsToStorage(window.words, 'normal', 'guest');
+        localStorage.removeItem(LootLinguaFeatureDiscoveryContract.storageKey({}));
+        window.dispatchEvent(new CustomEvent('lootlingua:auth-state'));
+        LootLinguaFeatureDiscovery.evaluate();
+      })()`);
+      await delay(160);
+      const probe = await evaluate(`(() => {
+        const buttons = [...document.querySelectorAll('#legendDock [data-feature]')];
+        return buttons.length === 4 && buttons.every(button => {
+          const badge=button.querySelector('.feature-discovery-callout');
+          const rect=badge.getBoundingClientRect();
+          return button.classList.contains('feature-discovery-ready') && getComputedStyle(badge).display !== 'none' && rect.left >= 0 && rect.right <= innerWidth;
+        });
+      })()`);
+      results.assertions['discovery-markers-'+width+'-'+theme] = probe;
+      results.screenshots.push(await screenshot('discovery-'+width+'-'+theme+'.png'));
+    }
+  }
+  for (const feature of ['treasure', 'quiz', 'starred', 'custom-worlds']) {
+    await evaluate(`LootLinguaFeatureDiscovery.open(${JSON.stringify(feature)})`);
+    await delay(450);
+    const started = await evaluate(`LootLinguaFeatureDiscovery.getStatus(${JSON.stringify(feature)},true) === 'in-progress' && !!document.querySelector('#featureMiniOnboardingCoach')`);
+    results.assertions['discovery-start-'+feature] = started;
+    results.screenshots.push(await screenshot('discovery-mini-'+feature+'.png'));
+    await evaluate(`document.querySelector('.feature-mini-onboarding-next')?.click()`);
+    await delay(200);
+    await evaluate(`document.querySelector('.feature-mini-onboarding-next')?.click()`);
+    results.assertions['discovery-complete-'+feature] = await evaluate(`LootLinguaFeatureDiscovery.getStatus(${JSON.stringify(feature)},true) === 'completed'`);
+  }
   results.passed = Object.values(results.assertions).every(Boolean);
   fs.writeFileSync(path.join(evidenceDir, 'matrix.json'), `${JSON.stringify(results, null, 2)}\n`, 'utf8');
   console.log(JSON.stringify(results, null, 2));

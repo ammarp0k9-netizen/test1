@@ -777,7 +777,7 @@ function setTreasureEntryVisible(visible) {
 }
 
 function setTreasureDockActive(viewKey) {
-  const dockKey = viewKey === 'starred' ? 'worlds' : viewKey;
+  const dockKey = viewKey;
   const buttons = document.querySelectorAll('#legendDock .treasure-dock-btn, #treasureDock .treasure-dock-btn');
   buttons.forEach(btn => {
     btn.classList.remove('active', 'dock-tip-show');
@@ -5972,6 +5972,7 @@ window.showCustomWorldsTab = function() {
   publishedContentState.gates = [];
   clearPublishedJourneyViewState();
   setPublishedTabState('custom');
+  setTreasureDockActive('custom-worlds');
   setPublishedTabsVisible(true);
   renderCustomWorldCards();
   setAppViewRoute('worlds');
@@ -6551,7 +6552,7 @@ window.loadCustomWorld = function(worldId) {
   restoreActiveAddFormDraft();
   setViewBackBar(true, 'رجوع لعوالم الأساطير');
   setTreasureEntryVisible(true);
-  setTreasureDockActive('worlds');
+  setTreasureDockActive('custom-worlds');
   updateCustomWorldHeader();
   setActiveNavLink(null);
   clearInterval(window.__lootCountdownTimer);
@@ -7129,7 +7130,7 @@ window.loadStarredView = function() {
   hideAllViewElements();
   setViewBackBar(true, 'رجوع لعوالم الأساطير');
   setTreasureEntryVisible(true);
-  setTreasureDockActive('worlds');
+  setTreasureDockActive('starred');
   document.getElementById('starredSearchBar').style.display = 'block';
   document.getElementById('starredSearchInput').value = '';
   document.getElementById('bulkDeleteBar').style.display = '';

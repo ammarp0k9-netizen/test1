@@ -5,8 +5,8 @@
   // by the existing feature-gate functions in script.js.
   const VERSION = 1;
   const FEATURES = Object.freeze(['treasure', 'quiz', 'starred', 'custom-worlds']);
-  const STATUSES = Object.freeze(['available', 'in-progress', 'completed']);
-  const STATUS_PRIORITY = Object.freeze({ available: 1, 'in-progress': 2, completed: 3 });
+  const STATUSES = Object.freeze(['available', 'in-progress', 'skipped', 'completed']);
+  const STATUS_PRIORITY = Object.freeze({ available: 1, 'in-progress': 2, skipped: 3, completed: 4 });
 
   function clean(value, maxLength) {
     return String(value || '').trim().slice(0, maxLength || 160);
@@ -33,8 +33,9 @@
     const updatedAt = timestamp(raw.updatedAt);
     return Object.freeze({
       status,
+      step: Math.max(0, Math.min(10, Math.floor(Number(raw.step) || 0))),
       startedAt: status === 'available' ? 0 : timestamp(raw.startedAt),
-      completedAt: status === 'completed' ? timestamp(raw.completedAt) : 0,
+      completedAt: ['completed', 'skipped'].includes(status) ? timestamp(raw.completedAt) : 0,
       updatedAt,
     });
   }
@@ -67,8 +68,12 @@
     let next = before;
     if (event === 'start' && before.status === 'available') {
       next = { status: 'in-progress', startedAt: now, completedAt: 0, updatedAt: now };
+    } else if (event?.type === 'step' && before.status === 'in-progress') {
+      next = { ...before, step: event.step, updatedAt: now };
     } else if (event === 'complete' && before.status !== 'completed') {
       next = { status: 'completed', startedAt: before.startedAt || now, completedAt: now, updatedAt: now };
+    } else if (event === 'skip' && !['completed', 'skipped'].includes(before.status)) {
+      next = { status: 'skipped', startedAt: before.startedAt || now, completedAt: now, updatedAt: now };
     }
     if (next === before) return current;
     return normalize({ version: VERSION, features: { ...current.features, [feature]: next } });

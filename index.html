@@ -87,7 +87,7 @@
     content="#090c0f"
   >
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
-  <link rel="stylesheet" href="style.css?v=20261029-entry-title-1">
+  <link rel="stylesheet" href="style.css?v=20261104-discovery-1">
   <link rel="stylesheet" href="entry-experience.css?v=20261029-entry-simplify-1">
   <link rel="stylesheet" href="gradesquiz.css?v=20260811-2">
 </head>
@@ -639,6 +639,7 @@
       <i class="fa-solid fa-gem" aria-hidden="true"></i>
       <span class="dock-lock-overlay" aria-hidden="true"><i class="fa-solid fa-lock"></i></span>
     </span>
+    <span class="feature-discovery-callout" aria-hidden="true"><b></b><em>استكشفني</em></span>
   </button>
   <button class="legend-dock-btn treasure-dock-btn active" type="button" data-dock-view="personal" data-label="قاموسك" aria-label="قاموسك الشخصي" onclick="loadPersonalDictionary()">
     <i class="fa-solid fa-book-open" aria-hidden="true"></i>
@@ -646,7 +647,16 @@
   <button class="legend-dock-btn treasure-dock-btn" type="button" data-dock-view="worlds" data-label="العوالم" aria-label="العوالم" onclick="loadWorldsView()">
     <i class="fa-solid fa-earth-americas" aria-hidden="true"></i>
   </button>
+  <button class="legend-dock-btn treasure-dock-btn" type="button" data-feature="starred" data-dock-view="starred" data-label="الصعبة" aria-label="الكلمات الصعبة" onclick="return onDockFeatureClick(event, 'starred', function () { loadStarredView(); });">
+    <span class="dock-btn-icon-wrap"><i class="fa-solid fa-star" aria-hidden="true"></i><span class="dock-lock-overlay" aria-hidden="true"><i class="fa-solid fa-lock"></i></span></span>
+    <span class="feature-discovery-callout" aria-hidden="true"><b></b><em>استكشفني</em></span>
+  </button>
+  <button class="legend-dock-btn treasure-dock-btn" type="button" data-feature="custom-worlds" data-dock-view="custom-worlds" data-label="عوالمي" aria-label="عوالمك الخاصة" onclick="loadWorldsView(); setTimeout(showCustomWorldsTab, 0); return false;">
+    <span class="dock-btn-icon-wrap"><i class="fa-solid fa-folder-plus" aria-hidden="true"></i></span>
+    <span class="feature-discovery-callout" aria-hidden="true"><b></b><em>استكشفني</em></span>
+  </button>
   <button class="legend-dock-btn treasure-dock-btn" type="button" data-feature="quiz" data-dock-view="quiz" data-label="الاختبار" aria-label="الاختبار" onclick="return onDockFeatureClick(event, 'quiz', function () { loadQuizView(); });">
+    <span class="feature-discovery-callout" aria-hidden="true"><b></b><em>استكشفني</em></span>
     <span class="dock-btn-icon-wrap">
       <i class="fa-solid fa-gamepad" aria-hidden="true"></i>
       <span class="dock-lock-overlay" aria-hidden="true"><i class="fa-solid fa-lock"></i></span>
@@ -1117,11 +1127,12 @@
 <!-- ══ FIREBASE ══ -->
 <script src="js/entry-experience-contract.js?v=20261029-entry-simplify-1"></script>
   <script src="js/guided-first-journey-contract.js?v=20260827-1"></script>
-  <script src="js/feature-discovery-contract.js?v=20261028-1"></script>
+  <script src="js/feature-discovery-contract.js?v=20261104-discovery-1"></script>
 <script src="js/entry-experience-controller.js?v=20261103-phase2-1"></script>
 <script src="js/guided-first-journey-controller.js?v=20260827-1"></script>
 <script src="js/personal-dictionary-onboarding.js?v=20261103-phase2-1"></script>
-  <script src="js/feature-discovery-controller.js?v=20261029-coordinator-1"></script>
+  <script src="js/feature-discovery-controller.js?v=20261104-discovery-1"></script>
+<script src="js/feature-mini-onboarding.js?v=20261103-phase3-1"></script>
 <script type="module" src="js/cloud.js?v=20260828-1"></script>
 <script type="module" src="js/entry-experience-cloud.js?v=20260808-1"></script>
 <script type="module" src="js/guided-first-journey-cloud.js?v=20260827-1"></script>
@@ -1180,13 +1191,13 @@
 <script src="js/placement.js?v=20260720-1"></script>
 <script src="js/level-placement.js?v=20260728-1"></script>
 <script src="js/word-list-data.js?v=20260719-3"></script>
-<script src="js/script.js?v=20261103-phase2-1"></script>
+<script src="js/script.js?v=20261104-discovery-1"></script>
 <script src="js/xp.js"></script>
 <script src="js/xp-batch.js?v=20260722-1"></script>
 <script src="js/dictionary.js?v=20261103-phase2-1"></script>
 <script src="js/gate-game-migration.js?v=20261007-1"></script>
 <script src="js/gate-runner.js?v=20261007-2"></script>
-<script src="js/worlds.js?v=20261028-legacy-game-removal-fix-1"></script>
+<script src="js/worlds.js?v=20261104-discovery-1"></script>
 <script src="js/dictionary-render.js?v=20260720-1"></script>
 <script src="js/srs.js?v=20260811-3"></script>
 <script src="js/popover-overrides.js?v=20260817-1"></script>

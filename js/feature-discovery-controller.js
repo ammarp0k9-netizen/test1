@@ -48,6 +48,8 @@
   }
   function start(feature) { return save(api().transition(load(), feature, 'start', Date.now())); }
   function complete(feature) { return save(api().transition(load(), feature, 'complete', Date.now())); }
+  function skip(feature) { return save(api().transition(load(), feature, 'skip', Date.now())); }
+  function checkpoint(feature, step) { return save(api().transition(load(), feature, { type: 'step', step }, Date.now())); }
 
   const FEATURE_COPY = Object.freeze({
     treasure: {
@@ -86,6 +88,7 @@
   }
 
   function eligible(feature) {
+    // Discovery keeps its existing five-word timing; access remains open.
     if (feature === 'custom-worlds') return wordCount() >= 5;
     return typeof root.isFeatureUnlocked === 'function'
       ? root.isFeatureUnlocked(feature)
@@ -97,6 +100,7 @@
     const journeyState = journey?.getState?.();
     return Boolean(
       root.__entryExperienceActive ||
+      ['intro', 'awaiting-first-word'].includes(root.LootLinguaPersonalDictionaryOnboarding?.getState?.()?.phase) ||
       root.LootLinguaGuidedFirstJourneyContract?.isActive?.(journeyState)
     );
   }
@@ -107,10 +111,9 @@
     if (typeof document === 'undefined') return;
     const defer = isInteractiveJourneyActive();
     api().FEATURES.forEach((feature) => {
-      const pending = !defer && eligible(feature) && getStatus(feature, true) !== 'completed';
-      const selectors = feature === 'custom-worlds'
-        ? ['#customWorldsTab']
-        : [`[data-feature="${feature}"]`];
+      const status = getStatus(feature, eligible(feature));
+      const pending = !defer && eligible(feature) && !['completed', 'skipped'].includes(status);
+      const selectors = [`[data-feature="${feature}"]`];
       document.querySelectorAll(selectors.join(',')).forEach((element) => {
         element.classList.toggle('feature-discovery-ready', pending);
         if (pending) element.setAttribute('data-discovery-feature', feature);
@@ -126,8 +129,8 @@
     api().FEATURES.forEach((feature) => {
       const current = getStatus(feature, eligible(feature));
       const key = notificationKey(feature);
-      if (current === 'completed' || current === 'locked') {
-        store.resolve(key, current === 'completed' ? 'feature-discovery-completed' : 'feature-discovery-ineligible');
+      if (['completed', 'skipped', 'locked'].includes(current)) {
+        store.resolve(key, current === 'locked' ? 'feature-discovery-ineligible' : `feature-discovery-${current}`);
         return;
       }
       // NotificationStore keeps terminal dismissals as records. Do not revive
@@ -140,11 +143,11 @@
         occurrenceKey: key,
         actionGroup: 'feature-discovery',
         priority: 24,
-        severity: 'normal',
-        visualType: 'info',
-        title: copy.title,
-        message: copy.message,
-        cta: { id: 'open-feature-discovery', label: copy.label, args: { feature } },
+        severity: 'danger',
+        visualType: 'danger',
+        title: `ميزة جديدة! ${copy.title}`,
+        message: `${copy.message} اضغط «استكشفني» لرؤية شرح قصير.`,
+        cta: { id: 'open-feature-discovery', label: 'استكشفني', args: { feature } },
         context: { feature },
         status: 'active',
         createdAt: Date.now(),
@@ -167,6 +170,9 @@
 
   function open(feature) {
     if (!api().FEATURES.includes(feature) || !eligible(feature) || isInteractiveJourneyActive()) return false;
+    const active = root.LootLinguaFeatureMiniOnboarding?.getActiveFeature?.();
+    if (active && active !== feature) return false;
+    if (['completed', 'skipped'].includes(getStatus(feature, true))) return false;
     start(feature);
     if (feature === 'treasure') root.loadTreasureView?.();
     else if (feature === 'quiz') root.loadQuizView?.();
@@ -175,31 +181,28 @@
       root.loadWorldsView?.();
       setTimeout(() => root.showCustomWorldsTab?.(), 0);
     }
-    complete(feature);
+    // Opening a feature is not completion. The mini onboarding owns the
+    // terminal transition, so a refresh can safely resume this invitation.
+    setTimeout(() => root.LootLinguaFeatureMiniOnboarding?.start?.(feature), 0);
     evaluate();
     return true;
   }
 
-  function markManualUse(feature) {
-    if (!api().FEATURES.includes(feature) || !eligible(feature) || isInteractiveJourneyActive()) return;
-    if (getStatus(feature, true) === 'completed') return;
-    start(feature);
-    complete(feature);
-    evaluate();
-  }
-
   root.addEventListener('lootlingua:auth-state', () => { loadedOwner = ''; load(); requestEvaluation(); });
-  ['lootlingua:initial-data-ready', 'lootlingua:learning-data-changed', 'lootlingua:entry-state-ready', 'lootlingua:guided-first-journey-change']
+  ['lootlingua:initial-data-ready', 'lootlingua:learning-data-changed', 'lootlingua:entry-state-ready', 'lootlingua:guided-first-journey-change', 'lootlingua:personal-dictionary-onboarding-change']
     .forEach((eventName) => root.addEventListener(eventName, requestEvaluation));
   if (typeof document !== 'undefined') {
     document.addEventListener('click', (event) => {
       const target = event.target?.closest?.('[data-feature], #customWorldsTab');
       if (!target) return;
       const feature = target.id === 'customWorldsTab' ? 'custom-worlds' : target.dataset.feature;
-      setTimeout(() => markManualUse(feature), 0);
+      if (!target.classList.contains('feature-discovery-ready')) return;
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      void open(feature);
     }, true);
   }
-  const CONTROLLER = Object.freeze({ load, getState: () => load(), getStatus, start, complete, evaluate, requestEvaluation, open });
+  const CONTROLLER = Object.freeze({ load, getState: () => load(), getStatus, start, complete, skip, checkpoint, evaluate, requestEvaluation, open });
   Object.defineProperty(root, 'LootLinguaFeatureDiscovery', { value: CONTROLLER, configurable: false, writable: false });
   if (typeof document !== 'undefined') {
     if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', requestEvaluation, { once: true });
