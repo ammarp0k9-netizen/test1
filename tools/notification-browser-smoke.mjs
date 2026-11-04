@@ -81,6 +81,14 @@ async function screenshot(name, clipExpression) {
 }
 
 const fixture = `(() => {
+  // Isolate notification/page scenarios from the concurrent first-run boot.
+  // Entry has its own browser suite; a late Firebase readiness event must not
+  // navigate this seeded fixture back to the dictionary mid-assertion.
+  window.__lootlinguaAuthResolved = false;
+  handleInitialRouting();
+  const smokeStyle = document.createElement('style');
+  smokeStyle.textContent = '#smartLoadingOverlay, #entryExperienceRoot { display:none !important; }';
+  document.head.append(smokeStyle);
   window.SmartLoadingOverlay?.forceHide?.();
   document.getElementById('smartLoadingOverlay')?.remove();
   document.getElementById('entryExperienceRoot')?.setAttribute('hidden', '');
@@ -158,7 +166,7 @@ try {
   await send('Page.enable');
   await send('Emulation.setDeviceMetricsOverride', { width: 1440, height: 900, deviceScaleFactor: 1, mobile: false });
   await send('Page.navigate', { url: appUrl });
-  await waitFor(`document.readyState === 'complete' && Boolean(window.LootLinguaNotificationStore) && typeof toggleNotificationsPanel === 'function'`, 'notification app');
+  await waitFor(`Boolean(window.LootLinguaNotificationStore) && typeof toggleNotificationsPanel === 'function'`, 'notification app', 40000);
   const seeded = await evaluate(fixture);
   results.assertions.initialBadge = seeded.badge === 3;
   results.assertions.initialCount = seeded.count === 3;
@@ -277,7 +285,7 @@ try {
       await delay(160);
       const probe = await evaluate(`(() => {
         const buttons = [...document.querySelectorAll('#legendDock [data-feature]')];
-        return buttons.length === 4 && buttons.every(button => {
+        return document.querySelectorAll('#legendDock > button').length === 4 && buttons.length === 2 && buttons.every(button => {
           const badge=button.querySelector('.feature-discovery-callout');
           const rect=badge.getBoundingClientRect();
           return button.classList.contains('feature-discovery-ready') && getComputedStyle(badge).display !== 'none' && rect.left >= 0 && rect.right <= innerWidth;
@@ -293,10 +301,53 @@ try {
     const started = await evaluate(`LootLinguaFeatureDiscovery.getStatus(${JSON.stringify(feature)},true) === 'in-progress' && !!document.querySelector('#featureMiniOnboardingCoach')`);
     results.assertions['discovery-start-'+feature] = started;
     results.screenshots.push(await screenshot('discovery-mini-'+feature+'.png'));
-    await evaluate(`document.querySelector('.feature-mini-onboarding-next')?.click()`);
-    await delay(200);
-    await evaluate(`document.querySelector('.feature-mini-onboarding-next')?.click()`);
+    for (let step = 0; step < 12; step++) {
+      if (await evaluate(`LootLinguaFeatureDiscovery.getStatus(${JSON.stringify(feature)},true) === 'completed'`)) break;
+      await evaluate(`(() => {
+        const next = document.querySelector('.feature-mini-onboarding-next');
+        if (next && !next.hidden) next.click();
+        else if (document.querySelector('#featureMiniOnboardingCoach')) {
+          if (${JSON.stringify(feature)} === 'quiz') document.querySelector('.quiz-mode-card.quiz-mode-time')?.click();
+          if (${JSON.stringify(feature)} === 'custom-worlds') document.querySelector('#worldsGrid .world-card-add')?.click();
+        }
+      })()`);
+      await delay(220);
+    }
     results.assertions['discovery-complete-'+feature] = await evaluate(`LootLinguaFeatureDiscovery.getStatus(${JSON.stringify(feature)},true) === 'completed'`);
+    if (!results.assertions['discovery-complete-'+feature]) results['diagnostic-'+feature] = await evaluate(`({state:LootLinguaFeatureDiscovery.getState(),active:LootLinguaFeatureMiniOnboarding.getActiveFeature(),coach:document.querySelector('#featureMiniOnboardingCoach')?.textContent, settings:document.getElementById('quizSettingsPanel')?.style.display, counts:document.querySelector('#quizSharedSettings [aria-label="عدد الأسئلة"]')?.outerHTML})`);
+  }
+  for (const width of [1280, 320]) {
+    await send('Emulation.setDeviceMetricsOverride', { width, height: 900, deviceScaleFactor: 1, mobile: width < 500 });
+    await evaluate(`(() => {
+      closeRouteOverlays();
+      localStorage.removeItem('lootlingua:personal-dictionary-onboarding:v1:guest');
+      LootLinguaPersonalDictionaryOnboarding.planForFirstJourney({requiresFirstWord:true});
+      LootLinguaPersonalDictionaryOnboarding.beginGuestDictionary();
+    })()`);
+    await delay(250);
+    await evaluate(`document.body.dispatchEvent(new PointerEvent('pointerdown',{bubbles:true}))`);
+    results.assertions['persistent-core-'+width] = await evaluate(`!!document.getElementById('personalDictionaryOnboardingCoach')`);
+    for (let i = 0; i < 28; i++) {
+      const state = await evaluate(`LootLinguaPersonalDictionaryOnboarding.getState()`);
+      if (state.phase === 'completed') break;
+      await evaluate(`(async () => {
+        const step = LootLinguaPersonalDictionaryOnboarding.getState().step || 0;
+        if (step===0) document.querySelector('#legendDock [data-dock-view="personal"]').click();
+        else if (step===1) window.dispatchEvent(new CustomEvent('lootlingua:dictionary-search-result',{detail:{status:'success'}}));
+        else if (step===2) selectSuggestion('رحلة','اسم','A journey begins.');
+        else if (step===3) {
+          document.getElementById('wordInput').value = 'journey-'+${width};
+          await addWord();
+        }
+        else if (step===7) document.getElementById('heroAvatarBtn').click();
+        else if (step===9) document.getElementById('xpRanksGuideToggle').click();
+        else document.querySelector('#personalDictionaryOnboardingCoach button')?.click();
+      })()`);
+      await delay(250);
+      if ([4,8,13,16].includes(state.step)) results.screenshots.push(await screenshot('core-'+width+'-'+state.step+'.png'));
+    }
+    results.assertions['core-completed-'+width] = await evaluate(`LootLinguaPersonalDictionaryOnboarding.getState()?.phase === 'completed'`);
+    if (!results.assertions['core-completed-'+width]) results['core-diagnostic-'+width] = await evaluate(`({state:LootLinguaPersonalDictionaryOnboarding.getState(),coach:document.querySelector('#personalDictionaryOnboardingCoach')?.textContent})`);
   }
   results.passed = Object.values(results.assertions).every(Boolean);
   fs.writeFileSync(path.join(evidenceDir, 'matrix.json'), `${JSON.stringify(results, null, 2)}\n`, 'utf8');

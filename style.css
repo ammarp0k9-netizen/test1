@@ -5306,15 +5306,26 @@ body.test-clock-active .toast-host {
 .header-top h1 { flex: 1; min-width: 0; margin: 0; }
 /* Shared route title: only the app header, never modal/card headings. */
 #pageTitle {
-  color: var(--accent);
-  -webkit-text-fill-color: currentColor;
-  background: none;
-  font-size: clamp(20px, 4vw, 22px);
-  font-weight: 800;
+  color: var(--text-white);
+  -webkit-text-fill-color: transparent;
+  background: linear-gradient(135deg, var(--text-white), var(--header-grad));
+  -webkit-background-clip: text;
+  background-clip: text;
+  font-size: 22px;
+  font-weight: 700;
   line-height: 1.3;
   letter-spacing: 0;
 }
 #pageTitle > i { color: currentColor; }
+.personal-dictionary-onboarding-coach {
+  z-index: 15000; width: min(310px, calc(100vw - 24px));
+  box-sizing: border-box; padding: 16px; border-radius: 16px;
+  color: var(--text-white); background: var(--card-bg);
+  border: 1px solid var(--accent); box-shadow: 0 12px 36px #0005;
+  max-height: calc(100dvh - 24px); overflow-y: auto;
+}
+.personal-dictionary-onboarding-content { display: grid; gap: 10px; }
+.personal-dictionary-onboarding-content p { margin: 0; line-height: 1.7; font-size: 14px; }
 @media (max-width: 480px) {
   #pageTitle { font-size: 20px; }
 }
@@ -5391,10 +5402,7 @@ body.test-clock-active .toast-host {
 .feature-mini-onboarding-next { color: #fff; background: var(--accent); border: 1px solid var(--accent); }
 .feature-mini-onboarding-skip { color: var(--text-gray); background: transparent; border: 1px solid var(--border); }
 @media (max-width: 480px) {
-  .legend-dock.treasure-dock { gap: 1px; padding-inline: 5px; }
-  .treasure-dock-btn { width: 37px; font-size: 15px; }
-  .treasure-dock-btn.active { width: 42px; }
-  .feature-discovery-callout em { font-size: 7px; padding: 2px 3px; }
+  .feature-discovery-callout em { font-size: 10px; padding: 2px 4px; }
   .feature-discovery-callout b { width: 9px; height: 9px; }
 }
 

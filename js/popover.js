@@ -48,8 +48,9 @@
     return active?.id || '';
   }
 
-  function open({ id, className, anchor, content, labelledBy, onClose }) {
+  function open({ id, className, anchor, content, labelledBy, onClose, persistent = false }) {
     if (!anchor) return null;
+    if (active?.persistent && active.id !== id) return null;
     close({ silent: true });
     const element = document.createElement('section');
     if (id) element.id = id;
@@ -62,12 +63,12 @@
     document.body.append(element);
     const reposition = () => position(element, anchor);
     const onPointerDown = (event) => {
-      if (!element.contains(event.target) && !anchor.contains(event.target)) close();
+      if (!persistent && !element.contains(event.target) && !anchor.contains(event.target)) close();
     };
     const onKeydown = (event) => {
-      if (event.key === 'Escape') { event.preventDefault(); close(); }
+      if (event.key === 'Escape' && !persistent) { event.preventDefault(); close(); }
     };
-    active = { id: id || '', element, anchor, reposition, onPointerDown, onKeydown, onClose };
+    active = { id: id || '', element, anchor, reposition, onPointerDown, onKeydown, onClose, persistent };
     anchor.setAttribute('aria-expanded', 'true');
     reposition();
     window.addEventListener('resize', reposition);

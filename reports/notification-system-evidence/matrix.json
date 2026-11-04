@@ -1,9 +1,30 @@
 {
-  "generatedAt": "2026-08-11T07:32:28.149Z",
+  "generatedAt": "2026-11-04T19:20:21.533Z",
   "browser": "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",
   "screenshots": [
     "reports/notification-system-evidence/notification-center-cta-desktop.png",
-    "reports/notification-system-evidence/notification-center-cta-mobile.png"
+    "reports/notification-system-evidence/notification-center-cta-mobile.png",
+    "reports/notification-system-evidence/discovery-1280-lootlingua.png",
+    "reports/notification-system-evidence/discovery-1280-ocean.png",
+    "reports/notification-system-evidence/discovery-1280-glass.png",
+    "reports/notification-system-evidence/discovery-320-lootlingua.png",
+    "reports/notification-system-evidence/discovery-320-ocean.png",
+    "reports/notification-system-evidence/discovery-320-glass.png",
+    "reports/notification-system-evidence/discovery-390-lootlingua.png",
+    "reports/notification-system-evidence/discovery-390-ocean.png",
+    "reports/notification-system-evidence/discovery-390-glass.png",
+    "reports/notification-system-evidence/discovery-mini-treasure.png",
+    "reports/notification-system-evidence/discovery-mini-quiz.png",
+    "reports/notification-system-evidence/discovery-mini-starred.png",
+    "reports/notification-system-evidence/discovery-mini-custom-worlds.png",
+    "reports/notification-system-evidence/core-1280-4.png",
+    "reports/notification-system-evidence/core-1280-8.png",
+    "reports/notification-system-evidence/core-1280-13.png",
+    "reports/notification-system-evidence/core-1280-16.png",
+    "reports/notification-system-evidence/core-320-4.png",
+    "reports/notification-system-evidence/core-320-8.png",
+    "reports/notification-system-evidence/core-320-13.png",
+    "reports/notification-system-evidence/core-320-16.png"
   ],
   "assertions": {
     "initialBadge": true,
@@ -20,7 +41,28 @@
     "toastDuplicateSuppressed": true,
     "toastDifferentQueuePreserved": true,
     "toastCenteredFromStart": true,
-    "toastExitsUpward": true
+    "toastExitsUpward": false,
+    "discovery-markers-1280-lootlingua": true,
+    "discovery-markers-1280-ocean": true,
+    "discovery-markers-1280-glass": true,
+    "discovery-markers-320-lootlingua": true,
+    "discovery-markers-320-ocean": true,
+    "discovery-markers-320-glass": true,
+    "discovery-markers-390-lootlingua": true,
+    "discovery-markers-390-ocean": true,
+    "discovery-markers-390-glass": true,
+    "discovery-start-treasure": true,
+    "discovery-complete-treasure": true,
+    "discovery-start-quiz": true,
+    "discovery-complete-quiz": true,
+    "discovery-start-starred": true,
+    "discovery-complete-starred": true,
+    "discovery-start-custom-worlds": true,
+    "discovery-complete-custom-worlds": true,
+    "persistent-core-1280": true,
+    "core-completed-1280": true,
+    "persistent-core-320": true,
+    "core-completed-320": true
   },
-  "passed": true
+  "passed": false
 }

@@ -1727,7 +1727,7 @@
       ? 'سجّل دخولك لتتابع رحلتك'
       : 'سجّل دخولك لبدء الرحلة';
     const body = isGuidedGuestFallback
-      ? 'يمكنك المتابعة كضيف واستكشاف الموقع كاملاً، بما فيه إضافة الكلمات يدويًا من قاموسك الشخصي، أو تسجيل الدخول لحفظ تقدمك والعودة إلى العالم نفسه.'
+      ? 'سجّل دخولك لمتابعة رحلة العالم، أو تابع كضيف لنتعرف على قاموسك الشخصي ونضيف أول كلمة.'
       : 'سنحفظ بيانات الضيف أولًا، ثم نعيدك إلى العالم نفسه ونكمل طلبك مرة واحدة.';
     const prompt = document.createElement('div');
     prompt.id = 'journeyAuthPrompt';
@@ -1741,14 +1741,17 @@
         <p class="journey-auth-status" id="journeyAuthStatus" role="status" aria-live="polite"></p>
         <div class="journey-auth-actions">
           <button type="button" class="entry-primary" data-journey-auth="login">اختيار طريقة تسجيل الدخول</button>
-          <button type="button" class="entry-secondary" data-journey-auth="guest">استكشف كضيف الآن</button>
+          <button type="button" class="entry-secondary" data-journey-auth="guest">متابعة كضيف</button>
         </div>
       </section>`;
     document.body.appendChild(prompt);
     document.documentElement.classList.add('journey-auth-active');
     document.body.classList.add('journey-auth-active');
     setBackgroundInert(true);
-    prompt.querySelector('[data-journey-auth="guest"]')?.addEventListener('click', dismissJourneyAuthPrompt);
+    prompt.querySelector('[data-journey-auth="guest"]')?.addEventListener('click', () => {
+      dismissJourneyAuthPrompt();
+      root.LootLinguaPersonalDictionaryOnboarding?.beginGuestDictionary?.();
+    });
     prompt.querySelector('[data-journey-auth="login"]')?.addEventListener('click', async (event) => {
       const button = event.currentTarget;
       const status = prompt.querySelector('#journeyAuthStatus');
@@ -1798,6 +1801,20 @@
   }
 
   async function consumePendingJourneyIntent(options) {
+    const dictionaryGuide = root.LootLinguaPersonalDictionaryOnboarding?.getState?.();
+    if (dictionaryGuide?.requiresFirstWord && dictionaryGuide.phase !== 'awaiting-journey' && !options?.explicitDiscovery) {
+      const store = root.LootLinguaNotificationStore;
+      const key = 'onboarding:resume-public-world';
+      if (!store?.find?.(key)) store?.upsert?.({
+        kind: 'smart', notificationType: 'feature.discovery', occurrenceKey: key,
+        actionGroup: 'feature-discovery', status: 'active', priority: 24,
+        visualType: 'danger', title: 'تابع رحلتك في العوالم العامة',
+        message: 'تقدمك في القاموس محفوظ. اختر استكشفني عندما تريد متابعة العالم والبوابة اللذين بدأت بهما.',
+        cta: { id: 'resume-public-world-onboarding', label: 'استكشفني', args: {} },
+        createdAt: Date.now(), updatedAt: Date.now(),
+      });
+      return false;
+    }
     const user = runtime.user || root.auth?.currentUser;
     if (!user || runtime.intentConsuming || (runtime.opened && !options?.allowWhileOpen)) return false;
     const candidates = pendingIntentCandidates(user);

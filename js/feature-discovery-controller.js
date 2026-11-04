@@ -100,8 +100,9 @@
     const journeyState = journey?.getState?.();
     return Boolean(
       root.__entryExperienceActive ||
+      (typeof document !== 'undefined' && document.documentElement.classList.contains('journey-auth-active')) ||
       ['intro', 'awaiting-first-word'].includes(root.LootLinguaPersonalDictionaryOnboarding?.getState?.()?.phase) ||
-      root.LootLinguaGuidedFirstJourneyContract?.isActive?.(journeyState)
+      (root.LootLinguaGuidedFirstJourneyContract?.isActive?.(journeyState) && !(journeyState?.guestDictionaryAvailable && !user()))
     );
   }
 
@@ -113,13 +114,17 @@
     api().FEATURES.forEach((feature) => {
       const status = getStatus(feature, eligible(feature));
       const pending = !defer && eligible(feature) && !['completed', 'skipped'].includes(status);
-      const selectors = [`[data-feature="${feature}"]`];
+      const selectors = feature === 'custom-worlds' ? ['#customWorldsTab', '#worldsGrid .world-card-add'] : [`[data-feature="${feature}"]`];
       document.querySelectorAll(selectors.join(',')).forEach((element) => {
         element.classList.toggle('feature-discovery-ready', pending);
         if (pending) element.setAttribute('data-discovery-feature', feature);
         else element.removeAttribute('data-discovery-feature');
       });
     });
+    const worldsPending = !defer && ['starred', 'custom-worlds'].some((feature) => eligible(feature) && !['completed', 'skipped'].includes(getStatus(feature, true)));
+    document.querySelector('#legendDock [data-dock-view="worlds"]')?.classList.toggle('feature-discovery-ready', worldsPending);
+    const tabPending = !defer && ['starred', 'custom-worlds'].some((feature) => eligible(feature) && !['completed', 'skipped'].includes(getStatus(feature, true)));
+    document.querySelector('#customWorldsTab')?.classList.toggle('feature-discovery-ready', tabPending);
   }
 
   function syncNotifications() {
@@ -193,9 +198,9 @@
     .forEach((eventName) => root.addEventListener(eventName, requestEvaluation));
   if (typeof document !== 'undefined') {
     document.addEventListener('click', (event) => {
-      const target = event.target?.closest?.('[data-feature], #customWorldsTab');
+      const target = event.target?.closest?.('[data-feature], #worldsGrid .world-card-add');
       if (!target) return;
-      const feature = target.id === 'customWorldsTab' ? 'custom-worlds' : target.dataset.feature;
+      const feature = target.classList.contains('world-card-add') ? 'custom-worlds' : target.dataset.feature;
       if (!target.classList.contains('feature-discovery-ready')) return;
       event.preventDefault();
       event.stopImmediatePropagation();

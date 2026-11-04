@@ -166,7 +166,7 @@
     runtime.state = next;
     announce();
     await persist(next);
-    root.showToast?.('يمكنك الآن استكشاف الموقع كاملاً كضيف، بما فيه إضافة كلماتك يدويًا من قاموسك الشخصي. سجّل دخولك لاحقًا لحفظ الرحلة ومتابعة التعلّم من العوالم.', 'info', 6200);
+    // The explicit Continue as guest action owns the dictionary hand-off.
     return next;
   }
 
@@ -188,6 +188,8 @@
   }
 
   function applyRoute(payload) {
+    const dictionary = root.LootLinguaPersonalDictionaryOnboarding?.getState?.();
+    if (dictionary && dictionary.phase !== 'awaiting-journey' && dictionary.phase !== 'completed') return;
     if (!active() || !payload?.root) return;
     runtime.lastRoute = payload;
     const state = runtime.state;

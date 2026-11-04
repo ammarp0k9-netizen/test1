@@ -489,15 +489,22 @@ window.addWord = async function() {
     renderLimit = 20;
   }
 
+  try {
+    saveAndRender();
+  } catch (error) {
+    if (savedWord) window.words = window.words.filter((word) => word !== savedWord);
+    btn.disabled = false;
+    showToast('تعذّر حفظ الكلمة على الجهاز. بيانات الحقول بقيت للمحاولة مجددًا.', 'danger');
+    return;
+  }
   clearInputs();
   setAddFormExpanded(false);
   btn.disabled = false;
-  saveAndRender();
   // This event is emitted only after the active dictionary was persisted, not
   // on opening the form or typing.  The guest first-word step consumes it.
   if (savedWord && window.words?.some((word) => word === savedWord || String(word?.id) === String(savedWord?.id))) {
     window.dispatchEvent(new CustomEvent('lootlingua:dictionary-word-saved', {
-      detail: { id: savedWord.id, owner: window.auth?.currentUser?.uid || 'guest' },
+      detail: { id: savedWord.id, owner: window.auth?.currentUser?.uid || 'guest', scope: isCustomWorldView() ? 'custom-world' : 'personal' },
     }));
   }
 };
@@ -1522,6 +1529,7 @@ function selectSuggestion(ar, pos, ex) {
   const box = document.getElementById('suggestionsBox');
   if (box) box.style.display = 'none';
   clearGamerSuggestionsUI();
+  window.dispatchEvent(new CustomEvent('lootlingua:dictionary-meaning-selected'));
 }
 
 const WORD_HUNTER_MIN_CONFIDENCE = 45;

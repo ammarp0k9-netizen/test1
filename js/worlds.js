@@ -777,7 +777,7 @@ function setTreasureEntryVisible(visible) {
 }
 
 function setTreasureDockActive(viewKey) {
-  const dockKey = viewKey;
+  const dockKey = ['starred', 'custom-worlds'].includes(viewKey) ? 'worlds' : viewKey;
   const buttons = document.querySelectorAll('#legendDock .treasure-dock-btn, #treasureDock .treasure-dock-btn');
   buttons.forEach(btn => {
     btn.classList.remove('active', 'dock-tip-show');

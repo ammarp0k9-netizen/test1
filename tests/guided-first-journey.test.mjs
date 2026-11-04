@@ -261,7 +261,7 @@ test('the public-world journey stays separate from feature eligibility', () => {
   assert.doesNotMatch(controllerSource, /minecraft|pubg/);
   assert.match(controllerSource, /must not become a global feature lock/);
   assert.match(controllerSource, /enableGuestDictionary/);
-  assert.match(controllerSource, /استكشاف الموقع كاملاً كضيف/);
+  assert.doesNotMatch(controllerSource, /يمكنك الآن استكشاف الموقع كاملاً كضيف/);
   assert.match(worldsSource, /completeFromQuizCta/);
   assert.match(worldsSource, /\bloadQuizView\(\)/);
   assert.match(quizSource, /journeyWorldId: input\.worldId/);

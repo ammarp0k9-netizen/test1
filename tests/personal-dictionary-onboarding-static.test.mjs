@@ -19,8 +19,8 @@ test('personal dictionary hand-off is independent and waits for the public gate 
 test('guest first-word completion listens only for a persisted dictionary save', () => {
   assert.match(dictionary, /saveAndRender\(\);[\s\S]*?lootlingua:dictionary-word-saved/);
   assert.match(dictionary, /savedWord && window\.words\?\.some/);
-  assert.match(controller, /state\?\.phase === 'awaiting-first-word'/);
-  assert.match(controller, /finish\(state\)/);
+  assert.match(controller, /firstWordSavedAt: Date\.now\(\), step: 4/);
+  assert.match(controller, /persistent: true/);
 });
 
 test('guest-to-account hand-off moves only the separate dictionary step', () => {
