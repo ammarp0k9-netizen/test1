@@ -1,7 +1,7 @@
 {
-  "generatedAt": "2026-11-04T19:16:32.109Z",
+  "generatedAt": "2026-11-04T19:59:32.900Z",
   "browser": "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",
-  "appUrl": "http://127.0.0.1:9177/app",
+  "appUrl": "http://127.0.0.1:9365/app",
   "harness": "real Chrome DOM/input/reload with Firebase replaced by an in-page deterministic adapter",
   "passed": true,
   "caseCount": 12,
@@ -40,7 +40,9 @@
         "panelInsideViewport": true
       },
       "images": [
-        "reports/product-entry-evidence/guest-new-desktop-welcome.png"
+        "reports/product-entry-evidence/guest-new-desktop-welcome.png",
+        "reports/product-entry-evidence/guest-new-desktop-journey-gate-preview.png",
+        "reports/product-entry-evidence/guest-new-desktop-journey-learning-explainer.png"
       ],
       "failures": [],
       "passed": true
@@ -76,7 +78,9 @@
         "panelInsideViewport": true
       },
       "images": [
-        "reports/product-entry-evidence/guest-new-320-welcome.png"
+        "reports/product-entry-evidence/guest-new-320-welcome.png",
+        "reports/product-entry-evidence/guest-new-320-journey-gate-preview.png",
+        "reports/product-entry-evidence/guest-new-320-journey-learning-explainer.png"
       ],
       "failures": [],
       "passed": true

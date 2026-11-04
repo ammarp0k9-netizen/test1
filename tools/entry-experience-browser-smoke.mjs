@@ -12,6 +12,10 @@ const evidenceScreenshotNames = new Set([
   'account-journey-short-return',
   'account-completed-hidden-app',
   'entry-cloud-failure-kept-open',
+  'guest-new-desktop-journey-gate-preview',
+  'guest-new-320-journey-gate-preview',
+  'guest-new-desktop-journey-learning-explainer',
+  'guest-new-320-journey-learning-explainer',
 ]);
 const browserPath = [
   'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
@@ -771,7 +775,21 @@ async function reachAction(options = {}) {
     if (current.stage === 'journey') {
       if (options.captureStages) options.captureStages.push(await screenshot(`${options.screenshotPrefix || activeCase}-journey-structure`));
       if (current.journeyStatus !== 'structure-explored') await click('[data-entry-route-node]');
+      await waitFor(`document.querySelector('.entry-gate-preview.is-selected') !== null`, 'published gate word preview');
+      const previewReadable = await evaluate(`(() => {
+        const cards=[...document.querySelectorAll('.entry-gate-preview-words > span')];
+        return cards.length > 0 && cards.every(card => {
+          const word=card.querySelector('strong').getBoundingClientRect();
+          const meaning=card.querySelector('small').getBoundingClientRect();
+          return word.bottom <= meaning.top && card.getBoundingClientRect().right <= innerWidth;
+        });
+      })()`);
+      if (!previewReadable) throw new Error('Gate preview word/meaning layout overlaps or has no published sample');
       if (options.captureStages) options.captureStages.push(await screenshot(`${options.screenshotPrefix || activeCase}-journey-gate-preview`));
+      if (options.captureStages) {
+        await evaluate(`document.querySelector('.entry-learning-explainer').scrollIntoView({block:'center'})`);
+        options.captureStages.push(await screenshot(`${options.screenshotPrefix || activeCase}-journey-learning-explainer`));
+      }
       await click('[data-entry-action="continue-journey"]');
       await waitFor(`window.LootLinguaEntryExperienceController?.getState?.()?.currentStep !== 'journey'`, 'post-Journey step');
       continue;

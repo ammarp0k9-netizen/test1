@@ -1056,9 +1056,11 @@
     }
     return orderedLevels.map((level) => {
       const gatesInLevel = levels.get(level) || [];
+      const levelLabel = level === 'unclassified' ? 'بوابات العالم' : `بوابات مستوى ${level}`;
+      const levelBadge = level === 'unclassified' ? '<i class="fa-solid fa-layer-group" aria-hidden="true"></i>' : escapeHtml(level);
       return `<div class="entry-preview-stage">
-        <div class="entry-preview-stage-heading"><span>${escapeHtml(level)}</span><div><small>المستوى</small><strong>بوابات مستوى ${escapeHtml(level)}</strong></div></div>
-        <div class="entry-route-gates" role="listbox" aria-label="بوابات مستوى ${escapeHtml(level)}">
+        <div class="entry-preview-stage-heading"><span>${levelBadge}</span><div><small>المستوى</small><strong>${escapeHtml(levelLabel)}</strong></div></div>
+        <div class="entry-route-gates" role="listbox" aria-label="${escapeHtml(levelLabel)}">
           ${gatesInLevel.map((gate, index) => {
             const selected = String(gate.gateId || '') === String(state.selectedGateId || '');
             return `<button type="button" role="option" aria-selected="${selected}" class="entry-route-node entry-route-gate${selected ? ' selected' : ''}" data-entry-route-node="gate:${escapeHtml(gate.gateId)}" data-entry-preview-gate="${escapeHtml(gate.gateId)}">
@@ -1097,7 +1099,7 @@
     }
     const words = Array.isArray(state.gatePreview?.words) ? state.gatePreview.words : [];
     const wordList = words.length
-      ? `<div class="entry-gate-preview-words">${words.map((word) => `<span><strong lang="en" dir="ltr">${escapeHtml(word.word || word.text || '')}</strong><small>${escapeHtml(word.translation || word.meaning || '')}</small></span>`).join('')}</div>`
+      ? `<p class="entry-gate-preview-note">عينة من كلمات هذه البوابة — للمعاينة فقط، لم تُضف إلى قاموسك بعد.</p><div class="entry-gate-preview-words" aria-label="عينة كلمات البوابة">${words.map((word) => `<span><strong lang="en" dir="ltr">${escapeHtml(word.word || word.text || '')}</strong><small dir="rtl">${escapeHtml(word.translation || word.meaning || '')}</small></span>`).join('')}</div>`
       : '<p class="entry-gate-preview-note">لا توجد عينة كلمات منشورة لهذه البوابة الآن، لكن مكانها في الرحلة واضح.</p>';
     return `<section class="entry-gate-preview is-selected" aria-live="polite">
       <div class="entry-gate-preview-title"><span><i class="fa-solid fa-dungeon" aria-hidden="true"></i></span><div><small>معاينة البوابة المحددة</small><strong>${escapeHtml(gate.title || 'البوابة')}</strong><em>${Number(gate.wordCount) || words.length || 0} كلمة في البوابة</em></div><i class="fa-solid fa-circle-check" aria-hidden="true"></i></div>
@@ -1130,7 +1132,7 @@
       </section>
       ${loading ? '' : gatePreviewMarkup(structure)}
       <section class="entry-learning-explainer" aria-label="كيف يعمل التعلم في LootLingua">
-        <div><small>كيف تتعلم هنا؟</small><strong>الكلمات لا تظهر مرة واحدة ثم تختفي</strong></div>
+        <div class="entry-learning-heading"><small>ماذا يحدث بعد بدء الرحلة؟</small><strong>تعلّم كلمات البوابة، ثم راجعها وتقدّم</strong><p>هذه معاينة للتعرّف على المحتوى. في الخطوة التالية تختار وجهتك وتبدأ التعلّم الفعلي.</p></div>
         <div class="entry-learning-loop">
         <span><i class="fa-solid fa-book-open" aria-hidden="true"></i><strong>تتعلّم</strong><small>كلمات البوابة</small></span>
         <i class="fa-solid fa-arrow-left" aria-hidden="true"></i>

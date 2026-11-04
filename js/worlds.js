@@ -6379,6 +6379,7 @@ function renderCustomWorldCards() {
   addCard.innerHTML = '<span class="world-add-plus" aria-hidden="true">+</span>';
   frag.appendChild(addCard);
   grid.appendChild(frag);
+  window.LootLinguaFeatureDiscovery?.requestEvaluation?.();
 }
 
 function setEmojiPickerValue(emoji) {
@@ -6493,6 +6494,7 @@ window.saveCustomWorldFromModal = async function() {
   renderCustomWorldCards();
   if (saveBtn) saveBtn.disabled = false;
   hideModal('customWorldModal');
+  window.dispatchEvent(new CustomEvent('lootlingua:custom-world-saved', { detail: { worldId: next.id } }));
   if (pendingWorldManageCreateAction) {
     const action = pendingWorldManageCreateAction;
     pendingWorldManageCreateAction = null;

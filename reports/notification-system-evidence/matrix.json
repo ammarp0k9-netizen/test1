@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-11-04T19:36:07.644Z",
+  "generatedAt": "2026-11-04T19:59:04.189Z",
   "browser": "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",
   "screenshots": [
     "reports/notification-system-evidence/notification-center-cta-desktop.png",
@@ -52,12 +52,14 @@
     "discovery-markers-390-ocean": true,
     "discovery-markers-390-glass": true,
     "discovery-start-treasure": true,
+    "skipOnlyOneStep": true,
     "discovery-complete-treasure": true,
     "discovery-start-quiz": true,
     "discovery-complete-quiz": true,
     "discovery-start-starred": true,
     "discovery-complete-starred": true,
     "discovery-start-custom-worlds": true,
+    "customWorldCreateBadge": true,
     "discovery-complete-custom-worlds": true,
     "persistent-core-1280": true,
     "core-target-highlight-1280": true,

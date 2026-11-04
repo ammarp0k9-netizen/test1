@@ -300,6 +300,14 @@ try {
     await delay(450);
     const started = await evaluate(`LootLinguaFeatureDiscovery.getStatus(${JSON.stringify(feature)},true) === 'in-progress' && !!document.querySelector('#featureMiniOnboardingCoach')`);
     results.assertions['discovery-start-'+feature] = started;
+    if (feature === 'treasure' && started) {
+      await evaluate(`document.querySelector('.feature-mini-onboarding-skip')?.click()`);
+      await delay(180);
+      results.assertions.skipOnlyOneStep = await evaluate(`LootLinguaFeatureDiscovery.getStatus('treasure',true) === 'in-progress' && LootLinguaFeatureDiscovery.getState().features.treasure.step === 1 && !!document.getElementById('featureMiniOnboardingCoach')`);
+    }
+    if (feature === 'custom-worlds') {
+      results.assertions.customWorldCreateBadge = await evaluate(`getComputedStyle(document.querySelector('#worldsGrid .world-card-add'),'::after').content.includes('استكشفني')`);
+    }
     results.screenshots.push(await screenshot('discovery-mini-'+feature+'.png'));
     for (let step = 0; step < 12; step++) {
       if (await evaluate(`LootLinguaFeatureDiscovery.getStatus(${JSON.stringify(feature)},true) === 'completed'`)) break;
@@ -308,7 +316,12 @@ try {
         if (next && !next.hidden) next.click();
         else if (document.querySelector('#featureMiniOnboardingCoach')) {
           if (${JSON.stringify(feature)} === 'quiz') document.querySelector('.quiz-mode-card.quiz-mode-time')?.click();
-          if (${JSON.stringify(feature)} === 'custom-worlds') document.querySelector('#worldsGrid .world-card-add')?.click();
+          if (${JSON.stringify(feature)} === 'custom-worlds') {
+            if (document.querySelector('#featureMiniOnboardingCoach strong')?.textContent === 'احفظ عالمك') {
+              document.getElementById('customWorldNameInput').value='عالم اختبار الإرشاد';
+              document.getElementById('customWorldSaveBtn').click();
+            } else document.querySelector('#worldsGrid .world-card-add')?.click();
+          }
         }
       })()`);
       await delay(220);

@@ -202,6 +202,9 @@
       if (!target) return;
       const feature = target.classList.contains('world-card-add') ? 'custom-worlds' : target.dataset.feature;
       if (!target.classList.contains('feature-discovery-ready')) return;
+      // A tour may ask the user to operate this very control. Let that real
+      // action run instead of reopening discovery and rebuilding its anchor.
+      if (root.LootLinguaFeatureMiniOnboarding?.getActiveFeature?.() === feature) return;
       event.preventDefault();
       event.stopImmediatePropagation();
       void open(feature);

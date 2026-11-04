@@ -4,6 +4,7 @@
   let activeFeature = '';
   let stepIndex = 0;
   let internalClose = false;
+  let worldSaveHandled = false;
 
   const STEPS = Object.freeze({
     treasure: [
@@ -30,7 +31,8 @@
       { selector: '#worldsGrid .world-card-add', title: 'أنشئ عالمًا', text: 'أنشئ عالمًا خاصًا لتنظيم الكلمات التي تريد جمعها معًا.' },
       { selector: '#worldsGrid .world-card-add', title: 'الاسم والرمز', text: 'اضغط + لترى نموذج إنشاء عالمك. لن نحفظ عالمًا نيابة عنك.', click: '.world-card-add' },
       { selector: '#customWorldNameInput', title: 'مجموعة تعبر عنك', text: 'اختر اسمًا ورمزًا ووصفًا اختياريًا، ثم احفظ عندما تريد. يمكنك أيضًا إغلاق النموذج والإنشاء لاحقًا.' },
-      { selector: '#customWorldSaveBtn', title: 'تنظيم كلماتك', text: 'بعد الإنشاء افتح العالم وأضف كلماتك من أدوات إدارة الكلمات. النسخ يبقي الكلمة في القاموس ويضيفها للعالم؛ النقل يخرجها من القاموس إلى العالم. التعديل والحذف من عنوان عالمك.' },
+      { selector: '#customWorldSaveBtn', title: 'احفظ عالمك', text: 'بعد كتابة الاسم اضغط إنشاء عالم. ننتظر نجاح حفظه؛ أو اختر تخطي لتتعرف على تنظيم الكلمات دون إنشاء عالم الآن.', event: 'saved-world' },
+      { selector: '#worldsGrid', title: 'نظّم كلماتك داخل العالم', text: 'افتح عالمك لإضافة كلماتك من أدوات إدارة الكلمات. النسخ يبقي الكلمة في القاموس ويضيفها للعالم؛ النقل يخرجها من القاموس إلى العالم. التعديل والحذف من عنوان عالمك.' },
     ],
   });
 
@@ -40,12 +42,30 @@
     root.LootLinguaPopover?.closeIf?.(COACH_ID, { silent: true });
     internalClose = false;
   }
-  function finish(skipped) {
+  function finish() {
     const feature = activeFeature;
     activeFeature = '';
     close();
-    if (feature) (skipped ? controller()?.skip : controller()?.complete)?.(feature);
+    if (feature) controller()?.complete?.(feature);
     controller()?.evaluate?.();
+  }
+  function prepareStep() {
+    if (activeFeature === 'custom-worlds' && stepIndex >= 3 && stepIndex <= 4) {
+      const modal = document.getElementById('customWorldModal');
+      if (!modal?.getClientRects().length) root.openCustomWorldModal?.();
+    }
+    if (activeFeature === 'custom-worlds' && stepIndex === 5 && !worldSaveHandled) root.hideModal?.('customWorldModal');
+    if (activeFeature === 'quiz' && stepIndex >= 2) {
+      const panel = document.getElementById('quizSettingsPanel');
+      if (!panel?.getClientRects().length) root.openQuizModeSettings?.('flashcards');
+    }
+  }
+  function advance() {
+    if (!activeFeature) return;
+    if (stepIndex + 1 >= STEPS[activeFeature].length) { finish(); return; }
+    stepIndex += 1;
+    controller()?.checkpoint?.(activeFeature, stepIndex);
+    close(); prepareStep(); setTimeout(show, 100);
   }
   function targetForCurrentStep() {
     const step = STEPS[activeFeature]?.[stepIndex];
@@ -66,23 +86,22 @@
     const actions = document.createElement('div');
     actions.className = 'feature-mini-onboarding-actions';
     const skip = document.createElement('button');
-    skip.type = 'button'; skip.className = 'feature-mini-onboarding-skip'; skip.textContent = 'تخطي الشرح';
-    skip.addEventListener('click', () => finish(true));
+    skip.type = 'button'; skip.className = 'feature-mini-onboarding-skip'; skip.textContent = 'تخطي';
+    skip.addEventListener('click', advance);
     const next = document.createElement('button');
     next.type = 'button'; next.className = 'feature-mini-onboarding-next';
     next.textContent = stepIndex + 1 >= STEPS[activeFeature].length ? 'إنهاء' : 'التالي';
-    if (step.click) next.hidden = true;
-    next.addEventListener('click', () => {
-      if (stepIndex + 1 >= STEPS[activeFeature].length) finish(false);
-      else { stepIndex += 1; controller()?.checkpoint?.(activeFeature, stepIndex); close(); setTimeout(show, 80); }
-    });
+    if (step.click || step.event) next.hidden = true;
+    next.addEventListener('click', advance);
     actions.append(skip, next); content.append(title, copy, actions);
     root.LootLinguaPopover.open({ id: COACH_ID, className: 'lootlingua-popover feature-mini-onboarding-coach', anchor: target, content, labelledBy: title.id, persistent: true });
   }
   function start(feature) {
     if (!STEPS[feature] || (activeFeature && activeFeature !== feature)) return false;
     activeFeature = feature;
+    worldSaveHandled = false;
     stepIndex = Math.min(controller()?.getState?.()?.features?.[feature]?.step || 0, STEPS[feature].length - 1);
+    prepareStep();
     let attempts = 0;
     const wait = () => {
       if (!activeFeature) return;
@@ -98,12 +117,16 @@
     if (!internalClose && event.detail?.id === COACH_ID) activeFeature = '';
   });
   root.addEventListener('lootlingua:auth-state', () => { activeFeature = ''; close(); });
+  root.addEventListener('lootlingua:custom-world-saved', () => {
+    if (activeFeature === 'custom-worlds' && stepIndex >= 3 && stepIndex <= 4) {
+      worldSaveHandled = true;
+      stepIndex = 4; advance();
+    }
+  });
   document.addEventListener('click', (event) => {
     const step = STEPS[activeFeature]?.[stepIndex];
     if (!step?.click || !event.target.closest?.(step.click)) return;
-    stepIndex += 1;
-    controller()?.checkpoint?.(activeFeature, stepIndex);
-    close(); setTimeout(show, 100);
+    advance();
   });
   setInterval(() => {
     if (!activeFeature || !document.getElementById(COACH_ID)) return;

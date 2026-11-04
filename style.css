@@ -10883,6 +10883,25 @@ body.published-placement-mode .main-content {
 .world-card-add:hover {
   background: color-mix(in srgb, var(--accent) 13%, var(--card-bg));
 }
+.world-card-add.feature-discovery-ready::after {
+  content: 'استكشفني';
+  position: absolute;
+  inset-block-start: 10px;
+  inset-inline-end: 10px;
+  width: auto; height: auto;
+  padding: 4px 9px;
+  border-radius: 999px;
+  border: 1px solid #ef4444;
+  background: var(--card-bg);
+  color: #dc2626;
+  font-family: inherit;
+  font-size: 12px;
+  line-height: 1.5;
+  font-weight: 800;
+  box-shadow: 0 0 0 3px color-mix(in srgb, #ef4444 15%, transparent);
+  z-index: 3;
+  pointer-events: none;
+}
 .world-add-plus {
   width: 64px;
   height: 64px;
