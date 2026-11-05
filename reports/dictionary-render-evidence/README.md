@@ -12,7 +12,7 @@ The dictionary uses measured variable card heights, keyed DOM reuse and a bounde
 
 | Measurement | Before | After |
 | --- | ---: | ---: |
-| Initial dictionary render, one recorded sample | 272.8 ms | 29.9 ms |
+| Initial dictionary render, one recorded sample | 272.8 ms | 50.0 ms |
 | JSON parses during initial render | 104 | 1 |
 | Initial card nodes | 48 | 22 |
 | Scroll snapshots with visible cards | 18/27 | 27/27 |

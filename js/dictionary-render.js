@@ -298,6 +298,7 @@ function renderDictionaryWindow(options = {}) {
   const searchType = document.getElementById('searchFilter')?.value || 'all';
   const snapshot = getDictionaryListSnapshot(query, searchType);
   const listWasCleared = !list.querySelector('.word-card, .virtual-list-spacer');
+  if (listWasCleared) dictionaryResizeObserver?.disconnect();
   list.classList.add('dictionary-windowed');
   const width = list.getBoundingClientRect().width;
   if (dictionaryRenderWidth && Math.abs(width - dictionaryRenderWidth) > 1) {

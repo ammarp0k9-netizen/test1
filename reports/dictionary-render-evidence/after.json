@@ -10,7 +10,7 @@
           "cards": 32,
           "visible": 8,
           "retained": 20,
-          "parses": 5,
+          "parses": 1,
           "first": "audit-11",
           "overflow": false
         },
@@ -138,17 +138,17 @@
         },
         {
           "scrollY": 20666,
-          "cards": 30,
+          "cards": 31,
           "visible": 5,
           "retained": 0,
           "parses": 2,
-          "first": "audit-151",
+          "first": "audit-150",
           "overflow": false
         },
         {
           "scrollY": 65666,
           "cards": 30,
-          "visible": 6,
+          "visible": 5,
           "retained": 0,
           "parses": 2,
           "first": "audit-580",
@@ -156,11 +156,11 @@
         },
         {
           "scrollY": 120666,
-          "cards": 31,
-          "visible": 5,
+          "cards": 30,
+          "visible": 6,
           "retained": 0,
           "parses": 2,
-          "first": "audit-1110",
+          "first": "audit-1108",
           "overflow": false
         },
         {
@@ -262,7 +262,7 @@
     }
   ],
   "initial": {
-    "renderMs": 29.899999976158142,
+    "renderMs": 50,
     "parses": 1,
     "cards": 22
   },
