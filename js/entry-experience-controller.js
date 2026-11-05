@@ -1480,12 +1480,19 @@
       if (options?.applyAppearance) {
         applyExplicitAppearance(normalized);
         if (runtime.user && normalized.themeExplicit) {
-          if (typeof root._saveProfileToCloudNow !== 'function') {
+          if (typeof root.saveProfilePreferencesToCloud !== 'function') {
             throw Object.assign(new Error('Profile persistence is unavailable.'), {
               code: 'entry/profile-write-failed',
             });
           }
-          const profileSaved = await root._saveProfileToCloudNow({ verify: true });
+          const appearance = {
+            theme: document.documentElement.getAttribute('data-theme') || normalized.themeId,
+            oasisMode: document.documentElement.getAttribute('data-oasis-mode') || normalized.oasisMode || 'light',
+          };
+          if (typeof root.getThemeIntroSeenList === 'function') {
+            appearance.themeIntroSeen = root.getThemeIntroSeenList();
+          }
+          const profileSaved = await root.saveProfilePreferencesToCloud(appearance, { verify: true });
           if (profileSaved !== true) {
             throw Object.assign(new Error('The selected appearance was not saved to the account.'), {
               code: 'entry/profile-write-failed',

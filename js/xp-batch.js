@@ -1,4 +1,5 @@
 async function awardXPBatch(entries = []) {
+  const owner = captureXPAwardOwner();
   const requests = (Array.isArray(entries) ? entries : []).map((entry) => ({
     amount: Math.max(0, Math.floor(Number(entry?.amount) || 0)),
     reason: String(entry?.reason || ''),
@@ -6,6 +7,7 @@ async function awardXPBatch(entries = []) {
   }));
   const awards = new Array(requests.length).fill(0);
   const claimable = [];
+  let pendingCount = 0;
 
   requests.forEach((request, index) => {
     const eventId = String(request.metadata.eventId || '');
@@ -18,16 +20,26 @@ async function awardXPBatch(entries = []) {
       (fixedAmount && request.amount !== fixedAmount) ||
       request.reason === 'daily_chest_unlock'
     ) return;
-    if (hasLocalXPEvent(eventId) || xpAwardsInFlight.has(eventId)) {
+    if (hasLocalXPEvent(eventId)) {
       request.metadata.awardStatus = 'duplicate';
       return;
     }
-    xpAwardsInFlight.add(eventId);
-    claimable.push({ ...request, index, eventId });
+    const inFlightKey = xpAwardInFlightKey(owner, eventId);
+    if (xpAwardsInFlight.has(inFlightKey)) {
+      request.metadata.awardStatus = 'unavailable';
+      pendingCount += 1;
+      queuePendingXPEvent(request.amount, request.reason, request.metadata);
+      return;
+    }
+    xpAwardsInFlight.add(inFlightKey);
+    claimable.push({ ...request, index, eventId, inFlightKey });
   });
 
-  if (!claimable.length) return { awards, total: 0, pendingCount: 0 };
-  let pendingCount = 0;
+  if (!claimable.length) return { awards, total: 0, pendingCount };
+  const abandoned = () => {
+    claimable.forEach((request) => { request.metadata.awardStatus = 'unavailable'; });
+    return { awards: new Array(requests.length).fill(0), total: 0, pendingCount: pendingCount + claimable.length };
+  };
   try {
     if (hasSignedInUser()) {
       if (typeof window.claimXPEventsInCloud !== 'function') {
@@ -35,7 +47,7 @@ async function awardXPBatch(entries = []) {
           request.metadata.awardStatus = 'unavailable';
           queuePendingXPEvent(request.amount, request.reason, request.metadata);
         });
-        return { awards, total: 0, pendingCount: claimable.length };
+        return { awards, total: 0, pendingCount: pendingCount + claimable.length };
       }
       const result = await window.claimXPEventsInCloud(claimable.map((request) => ({
         eventId: request.eventId,
@@ -44,6 +56,7 @@ async function awardXPBatch(entries = []) {
         baselineXP: userXP,
         xpEconomyVersion: XP_ECONOMY_VERSION,
       })));
+      if (!isXPAwardOwnerCurrent(owner)) return abandoned();
       claimable.forEach((request, resultIndex) => {
         const item = result?.results?.[resultIndex] || {};
         if (item.awarded) {
@@ -73,6 +86,7 @@ async function awardXPBatch(entries = []) {
       const total = awards.reduce((sum, amount) => sum + amount, 0);
       if (total > 0) applyXPDelta(total);
     }
+    if (!isXPAwardOwnerCurrent(owner)) return abandoned();
     saveInt('xpEconomyVersion', XP_ECONOMY_VERSION);
     return {
       awards,
@@ -80,14 +94,15 @@ async function awardXPBatch(entries = []) {
       pendingCount,
     };
   } catch (error) {
+    if (!isXPAwardOwnerCurrent(owner)) return abandoned();
     claimable.forEach((request) => {
       request.metadata.awardStatus = 'unavailable';
       queuePendingXPEvent(request.amount, request.reason, request.metadata);
     });
     console.warn('[LootLingua XP] batch award failed', error?.message || error);
-    return { awards, total: 0, pendingCount: claimable.length };
+    return { awards, total: 0, pendingCount: pendingCount + claimable.length };
   } finally {
-    claimable.forEach((request) => xpAwardsInFlight.delete(request.eventId));
+    claimable.forEach((request) => xpAwardsInFlight.delete(request.inFlightKey));
   }
 }
 

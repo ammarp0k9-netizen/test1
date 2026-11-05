@@ -142,6 +142,10 @@ function refreshThemeLockUI() {
       }
     }
   }
+  const selectedTheme = document.documentElement.getAttribute('data-theme') || 'lootlingua';
+  document.querySelectorAll('.theme-option').forEach(opt => {
+    opt.setAttribute('aria-pressed', String(!isThemeComingSoon(opt.dataset.theme) && opt.dataset.theme === selectedTheme));
+  });
 }
 
 const XP_ECONOMY_VERSION = 2;
@@ -154,6 +158,21 @@ const XP_REWARDS = Object.freeze({
 const XP_EVENT_LOG_KEY = 'lootlinguaXpEventLog';
 const PENDING_XP_EVENTS_KEY = 'lootlinguaPendingXpEvents';
 const xpAwardsInFlight = new Set();
+function captureXPAwardOwner() {
+  return {
+    uid: window.auth?.currentUser?.uid || '',
+    generation: Number(window.__lootlinguaAuthGeneration) || 0,
+  };
+}
+
+function isXPAwardOwnerCurrent(owner) {
+  return owner.uid === (window.auth?.currentUser?.uid || '') &&
+    owner.generation === (Number(window.__lootlinguaAuthGeneration) || 0);
+}
+
+function xpAwardInFlightKey(owner, eventId) {
+  return JSON.stringify([owner.uid, owner.generation, eventId]);
+}
 const XP_ALLOWED_REASONS = new Set([
   'word_transition_new_learning',
   'word_transition_learning_reviewing',
@@ -191,17 +210,21 @@ function queuePendingXPEvent(amount, reason, metadata) {
 }
 
 async function retryPendingXPEvents() {
+  const owner = captureXPAwardOwner();
   const key = getPendingXPEventsStorageKey();
   const pending = loadJSON(key, []);
   if (!Array.isArray(pending) || !pending.length) return;
   const remaining = [];
   for (const event of pending) {
+    if (!isXPAwardOwnerCurrent(owner)) return;
     const metadata = { ...event, queueOnFailure: false };
     await awardXP(event.amount, event.reason, metadata);
+    if (!isXPAwardOwnerCurrent(owner)) return;
     if (metadata.awardStatus !== 'awarded' && metadata.awardStatus !== 'duplicate') {
       remaining.push(event);
     }
   }
+  if (!isXPAwardOwnerCurrent(owner)) return;
   saveJSON(key, remaining);
 }
 window.retryPendingXPEvents = retryPendingXPEvents;
@@ -249,6 +272,7 @@ function applyXPDelta(amount) {
 }
 
 async function awardXP(amount, reason, metadata = {}) {
+  const owner = captureXPAwardOwner();
   const value = Math.max(0, Math.floor(Number(amount) || 0));
   const eventId = String(metadata.eventId || '');
   metadata.awardStatus = 'invalid';
@@ -259,12 +283,14 @@ async function awardXP(amount, reason, metadata = {}) {
     metadata.awardStatus = 'duplicate';
     return 0;
   }
-  if (xpAwardsInFlight.has(eventId)) {
-    metadata.awardStatus = 'duplicate';
+  const inFlightKey = xpAwardInFlightKey(owner, eventId);
+  if (xpAwardsInFlight.has(inFlightKey)) {
+    metadata.awardStatus = 'unavailable';
+    queuePendingXPEvent(value, reason, metadata);
     return 0;
   }
 
-  xpAwardsInFlight.add(eventId);
+  xpAwardsInFlight.add(inFlightKey);
   try {
     if (hasSignedInUser()) {
       if (typeof window.claimXPEventInCloud !== 'function') {
@@ -279,6 +305,10 @@ async function awardXP(amount, reason, metadata = {}) {
         baselineXP: userXP,
         xpEconomyVersion: XP_ECONOMY_VERSION,
       });
+      if (!isXPAwardOwnerCurrent(owner)) {
+        metadata.awardStatus = 'unavailable';
+        return 0;
+      }
       if (!result?.awarded) {
         metadata.awardStatus = result?.duplicate ? 'duplicate' : result?.invalid ? 'invalid' : 'unavailable';
         if (metadata.awardStatus === 'duplicate') {
@@ -296,17 +326,22 @@ async function awardXP(amount, reason, metadata = {}) {
     } else {
       applyXPDelta(value);
     }
+    if (!isXPAwardOwnerCurrent(owner)) {
+      metadata.awardStatus = 'unavailable';
+      return 0;
+    }
     saveInt('xpEconomyVersion', XP_ECONOMY_VERSION);
     recordXPEvent(reason, value, { ...metadata, eventId });
     metadata.awardStatus = 'awarded';
     return value;
   } catch (error) {
     metadata.awardStatus = 'unavailable';
+    if (!isXPAwardOwnerCurrent(owner)) return 0;
     queuePendingXPEvent(value, reason, metadata);
     console.warn('[LootLingua XP] award failed', { eventId, reason, error: error?.message || error });
     return 0;
   } finally {
-    xpAwardsInFlight.delete(eventId);
+    xpAwardsInFlight.delete(inFlightKey);
   }
 }
 
@@ -427,7 +462,11 @@ function checkAndUpdateStreak(options = {}) {
     if (!isJsonImportBatchActive()) setTimeout(()=>showToast('Streak '+dailyStreak+' يوم!'), 1000);
   } else if (lastActivity !== '') {
     const freezes = typeof getStreakFreezeCount === 'function' ? getStreakFreezeCount() : loadInt('lootlinguaStreakFreezes', 0);
-    if (freezes > 0) {
+    // One freeze covers exactly one missed calendar day. Anchor at local noon
+    // so daylight-saving changes do not turn the gap into an elapsed-hour test.
+    const protectedActivityDate = new Date(`${today}T12:00:00`);
+    protectedActivityDate.setDate(protectedActivityDate.getDate() - 2);
+    if (freezes > 0 && lastActivity === localDateKey(protectedActivityDate)) {
       if (typeof saveStreakFreezeCount === 'function') saveStreakFreezeCount(freezes - 1);
       else saveInt('lootlinguaStreakFreezes', freezes - 1);
       saveInt('lootlinguaFreezeSaves', loadInt('lootlinguaFreezeSaves', 0) + 1);

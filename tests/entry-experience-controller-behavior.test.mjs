@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import test from 'node:test';
+import { createProfileHarness } from './profile-cloud-harness.mjs';
 
 const [contractSource, controllerSource] = await Promise.all([
   readFile(new URL('../js/entry-experience-contract.js', import.meta.url), 'utf8'),
@@ -473,6 +474,8 @@ async function createHarness(options = {}) {
     entryLoads: [],
     entrySaves: [],
     profileSaves: 0,
+    profilePatches: [],
+    fullProfileSaves: 0,
     resumeIntents: [],
     worlds: 0,
     dictionary: 0,
@@ -587,8 +590,14 @@ async function createHarness(options = {}) {
       },
     },
     _saveProfileToCloudNow: async () => {
+      calls.fullProfileSaves += 1;
+      throw new Error('Entry appearance must not save a full profile');
+    },
+    getThemeIntroSeenList: () => clone(options.themeIntroSeen || []),
+    saveProfilePreferencesToCloud: async (patch, settings) => {
       calls.profileSaves += 1;
-      return options.profileSave ? options.profileSave(calls.profileSaves) : true;
+      calls.profilePatches.push({ patch: clone(patch), settings: clone(settings) });
+      return options.profileSave ? options.profileSave(calls.profileSaves, patch, settings) : true;
     },
     setTheme(theme) {
       document.documentElement.setAttribute('data-theme', theme);
@@ -832,6 +841,43 @@ test('a Profile cloud failure cannot close Entry or leave a terminal local recei
   assert.equal(harness.controller.isActive(), true);
   assert.notEqual(local?.status, 'completed');
   assert.notEqual(local?.status, 'skipped');
+  assert.equal(harness.calls.fullProfileSaves, 0);
+  assert.equal(harness.calls.profilePatches[0].settings.verify, true);
+});
+
+test('Entry completion verifies only appearance through the real profile adapter and preserves newer progress', async () => {
+  const user = freshUser('appearance-patch');
+  const h = await createHarness({ user, themeIntroSeen: ['lootlingua', 'ocean'] });
+  const cloud = createProfileHarness({ localProfile: { userXP: 0, perfectQuizzes: 0 } });
+  cloud.auth.currentUser = user;
+  cloud.docs.set(cloud.path(user.uid), { userXP: 500, perfectQuizzes: 9, runnerCoins: 44 });
+  cloud.seedSnapshot(user.uid);
+  h.root.saveProfilePreferencesToCloud = cloud.root.saveProfilePreferencesToCloud;
+  await h.reachRevealedAction();
+  await h.click('[data-entry-cta="open-selected-world"]');
+  assert.equal(h.controller.getState().status, 'completed');
+  assert.equal(h.controller.isActive(), false);
+  const saved = cloud.docs.get(cloud.path(user.uid));
+  assert.equal(saved.userXP, 500);
+  assert.equal(saved.perfectQuizzes, 9);
+  assert.equal(saved.runnerCoins, 44);
+  assert.deepEqual(Object.keys(cloud.writes[0].data).sort(), ['oasisMode', 'theme', 'themeIntroSeen', 'updatedAt']);
+  assert.deepEqual(cloud.writes[0].data.themeIntroSeen, ['lootlingua', 'ocean']);
+  assert.equal(cloud.reads.length, 1, 'the preference write must be verified');
+  assert.equal(cloud.payloadReads, 0);
+  assert.equal(h.calls.fullProfileSaves, 0);
+});
+
+test('an unavailable preference API leaves Entry resumable without falling back to full profile writes', async () => {
+  const user = freshUser('appearance-api-unavailable');
+  const h = await createHarness({ user });
+  delete h.root.saveProfilePreferencesToCloud;
+  await h.reachRevealedAction();
+  await h.click('[data-entry-cta="open-selected-world"]');
+  assert.equal(h.controller.getState().status, 'in-progress');
+  assert.equal(h.controller.isActive(), true);
+  assert.equal(h.calls.fullProfileSaves, 0);
+  assert.notEqual(persistedState(h.storage, contract.entryStorageKey({ uid: user.uid }))?.status, 'completed');
 });
 
 test('closing contextual auth keeps the pending Journey intent available', async () => {

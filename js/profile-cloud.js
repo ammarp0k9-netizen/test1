@@ -58,7 +58,9 @@ function completePendingGuestProfileMigration(user, saved, hasExplicitTheme) {
 window.finalizePendingGuestProfileMigration = function(user) {
   if (!user?.uid) return false;
   localStorage.removeItem(pendingGuestProfileMigrationKey(user));
-  window.__acceptedGuestProfileMigration = null;
+  if (window.__acceptedGuestProfileMigration?.uid === user.uid) {
+    window.__acceptedGuestProfileMigration = null;
+  }
   return true;
 };
 
@@ -109,20 +111,43 @@ function reportProfileSaveFailure(error, referencePath, operation, payload) {
 }
 
 let _saveProfileDebounce = null;
-async function performProfileSave(force = false, options = {}) {
-  const user = profileAuth.currentUser;
-  if (!user) return false;
-  if (!force && (window.__applyingCloudProfile || window.isInitialLoad || window.__suppressUnlockNotices)) return false;
-  const get = window.getLootlinguaProfilePayload;
-  if (typeof get !== "function") return false;
-  const base = get();
-  const data = { ...base, updatedAt: new Date() };
+let _profileAuthEpoch = 0;
+let _profileLoadSequence = 0;
+let _activeProfileLoad = null;
+const _profilePreferenceSaves = new Map();
+
+function captureProfileOwner(user = profileAuth.currentUser) {
+  if (!user?.uid || profileAuth.currentUser?.uid !== user.uid) return null;
+  return {
+    uid: user.uid,
+    generation: Number(window.__lootlinguaAuthGeneration) || 0,
+    epoch: _profileAuthEpoch,
+    loadSequence: _profileLoadSequence,
+  };
+}
+
+function isProfileOwnerCurrent(owner) {
+  return Boolean(owner && profileAuth.currentUser?.uid === owner.uid &&
+    owner.generation === (Number(window.__lootlinguaAuthGeneration) || 0) &&
+    owner.epoch === _profileAuthEpoch);
+}
+
+function isProfileOperationCurrent(owner, loadOwner = null) {
+  return isProfileOwnerCurrent(owner) && owner.loadSequence === _profileLoadSequence &&
+    (!loadOwner || _activeProfileLoad === loadOwner);
+}
+
+async function writeProfileData(data, options, owner) {
+  const user = { uid: owner?.uid };
+  const isCurrent = () => isProfileOperationCurrent(owner, options.profileLoadOwner);
+  if (!isCurrent()) return false;
   const referencePath = `users/${user.uid}/meta/profile`;
   const reference = doc(profileDb, 'users', user.uid, 'meta', 'profile');
   let knownSnapshot = window.__lootlinguaProfileSnapshot;
   try {
     if (knownSnapshot?.uid !== user.uid || knownSnapshot.readFailed) {
       const preflight = await getDoc(reference);
+      if (!isCurrent()) return false;
       knownSnapshot = {
         uid: user.uid,
         exists: preflight.exists(),
@@ -131,15 +156,15 @@ async function performProfileSave(force = false, options = {}) {
       };
       window.__lootlinguaProfileSnapshot = knownSnapshot;
     }
-    if (profileAuth.currentUser?.uid !== user.uid) {
-      const identityError = new Error('Authenticated user changed before profile write');
-      identityError.code = 'auth/identity-changed';
-      throw identityError;
-    }
+    if (!isCurrent()) return false;
     await setDoc(reference, data, { merge: true });
+    // A submitted write stays bound to its original account. Its continuation
+    // must not publish that account's snapshot into a newer session or load.
+    if (!isCurrent()) return false;
     let persistedData = knownSnapshot.data ? { ...knownSnapshot.data, ...data } : data;
     if (options.verify === true) {
       const verification = await getDoc(reference);
+      if (!isCurrent()) return false;
       persistedData = verification.exists() ? verification.data() : null;
       if (!verification.exists() || !persistedProfileValueMatches(persistedData, data)) {
         const verificationError = new Error('Profile write could not be verified');
@@ -156,6 +181,7 @@ async function performProfileSave(force = false, options = {}) {
     window.__lootlinguaLastProfileSaveFailure = null;
     return true;
   } catch (e) {
+    if (!isCurrent()) return false;
     const operation = knownSnapshot?.uid === user.uid
       ? (knownSnapshot.exists ? 'merge-update' : 'create-with-merge')
       : 'preflight-read';
@@ -164,28 +190,93 @@ async function performProfileSave(force = false, options = {}) {
   }
 }
 
+async function performProfileSave(force = false, options = {}, owner = captureProfileOwner()) {
+  if (!isProfileOperationCurrent(owner, options.profileLoadOwner)) return false;
+  if (!force && (window.__applyingCloudProfile || window.isInitialLoad || window.__suppressUnlockNotices)) return false;
+  const get = window.getLootlinguaProfilePayload;
+  if (typeof get !== "function") return false;
+  const base = get();
+  const data = { ...base, updatedAt: new Date() };
+  return writeProfileData(data, options, owner);
+}
+
+// Explicit appearance changes write only these fields, even when the local
+// learning state is older than another device's progress.
+const PROFILE_PREFERENCE_FIELDS = Object.freeze(['theme', 'oasisMode', 'themeIntroSeen']);
+const PROFILE_THEME_IDS = Object.freeze(['lootlingua', 'golden', 'scroll', 'ocean', 'glass']);
+window.saveProfilePreferencesToCloud = async function(patch, options = {}) {
+  const owner = captureProfileOwner();
+  if (!owner || !patch || typeof patch !== 'object' || Array.isArray(patch)) return false;
+  if (Object.keys(patch).some((field) => !PROFILE_PREFERENCE_FIELDS.includes(field))) return false;
+  const data = {};
+  for (const field of PROFILE_PREFERENCE_FIELDS) {
+    if (!Object.prototype.hasOwnProperty.call(patch, field)) continue;
+    const value = patch[field];
+    if (field === 'theme') {
+      if (!PROFILE_THEME_IDS.includes(value)) return false;
+      data.theme = value;
+    }
+    if (field === 'oasisMode') {
+      if (!['light', 'dark'].includes(value)) return false;
+      data.oasisMode = value;
+    }
+    if (field === 'themeIntroSeen') {
+      if (!Array.isArray(value) || value.length > 12 ||
+          !value.every((theme) => PROFILE_THEME_IDS.includes(theme))) return false;
+      data.themeIntroSeen = [...new Set(value)];
+    }
+  }
+  if (!Object.keys(data).length) return false;
+  data.updatedAt = new Date();
+  // Preserve the order of explicit appearance changes through delayed preflight
+  // reads. A different auth session has its own queue and never waits for this one.
+  const queueKey = JSON.stringify([owner.uid, owner.generation, owner.epoch, owner.loadSequence]);
+  const previous = _profilePreferenceSaves.get(queueKey) || Promise.resolve();
+  const writeOptions = { verify: options.verify === true };
+  const saving = previous.then(() => writeProfileData(data, writeOptions, owner));
+  _profilePreferenceSaves.set(queueKey, saving);
+  try {
+    return await saving;
+  } finally {
+    if (_profilePreferenceSaves.get(queueKey) === saving) _profilePreferenceSaves.delete(queueKey);
+  }
+};
+
 // حفظ مؤجل — يتجنب استدعاءات كثيرة ويأخذ القيم من script.js
 window.saveProfileToCloud = function() {
   if (window.__applyingCloudProfile || window.isInitialLoad || window.__suppressUnlockNotices) return;
   clearTimeout(_saveProfileDebounce);
-  _saveProfileDebounce = setTimeout(performProfileSave, 450);
+  const owner = captureProfileOwner();
+  if (!owner) return;
+  _saveProfileDebounce = setTimeout(() => performProfileSave(false, {}, owner), 450);
 };
 
 window._saveProfileToCloudNow = function(options = {}) {
   clearTimeout(_saveProfileDebounce);
-  return performProfileSave(true, options);
+  return performProfileSave(true, options, options.profileOwner || captureProfileOwner());
 };
 
 // ── loadProfileFromCloud ────────────────────────────
 window.loadProfileFromCloud = async function(user, options = {}) {
   const outcome = { loaded: false, pendingProfileCommitted: false };
+  const owner = options.profileOwner || captureProfileOwner(user);
+  if (!isProfileOperationCurrent(owner) || owner.uid !== user?.uid) return outcome;
+  const loadOwner = { sequence: ++_profileLoadSequence };
+  owner.loadSequence = _profileLoadSequence;
+  _activeProfileLoad = loadOwner;
+  const isCurrent = () => isProfileOperationCurrent(owner, loadOwner);
+  const abandoned = () => ({ loaded: false, pendingProfileCommitted: false });
   let profileReadCompleted = false;
   let accepted = null;
   window.__applyingCloudProfile = true;
   try {
-    for (let w = 0; w < 30 && typeof window.getLootlinguaProfilePayload !== "function"; w++)
+    for (let w = 0; w < 30 && typeof window.getLootlinguaProfilePayload !== "function"; w++) {
       await new Promise((r) => setTimeout(r, 40));
+      if (!isCurrent()) return abandoned();
+    }
+    if (!isCurrent()) return abandoned();
     const snap = await getDoc(doc(profileDb, "users", user.uid, "meta", "profile"));
+    if (!isCurrent()) return abandoned();
     profileReadCompleted = true;
     outcome.loaded = true;
     const cloudData = snap.exists() ? snap.data() : null;
@@ -198,6 +289,7 @@ window.loadProfileFromCloud = async function(user, options = {}) {
     window.dispatchEvent(new CustomEvent('lootlingua:profile-snapshot', {
       detail: window.__lootlinguaProfileSnapshot,
     }));
+    if (!isCurrent()) return abandoned();
     if (typeof window.resetLootlinguaProfileState === "function") {
       // Keep the early cached appearance until a confirmed cloud theme replaces
       // it below. Profiles without a theme retain the established default reset.
@@ -206,12 +298,15 @@ window.loadProfileFromCloud = async function(user, options = {}) {
         resetTheme: !cloudData?.theme,
       });
     }
+    if (!isCurrent()) return abandoned();
     if (user.displayName && typeof window.setLootlinguaDisplayName === "function") {
       window.setLootlinguaDisplayName(user.displayName);
     }
+    if (!isCurrent()) return abandoned();
     if (cloudData && typeof window.mergeLootlinguaProfileFromCloud === "function") {
       window.mergeLootlinguaProfileFromCloud(cloudData);
     }
+    if (!isCurrent()) return abandoned();
     const inMemoryMigration = window.__acceptedGuestProfileMigration;
     const persistedMigration = readPendingGuestProfileMigration(user);
     accepted = inMemoryMigration?.uid === user.uid
@@ -251,14 +346,16 @@ window.loadProfileFromCloud = async function(user, options = {}) {
       accepted || shouldMergeGuestProfile || hasCurrentExplicitTheme
     );
     if (shouldMergeGuestState && typeof window.mergeLootlinguaProfileFromCloud === "function") {
-      mergeableGuestProfiles.forEach((guestProfile) => {
+      for (const guestProfile of mergeableGuestProfiles) {
+        if (!isCurrent()) return abandoned();
         const guestProfileForMerge = { ...guestProfile };
         // A stale guest appearance must never override an account preference.
         // Only the current explicit Entry session below may do so.
         delete guestProfileForMerge.theme;
         delete guestProfileForMerge.oasisMode;
         window.mergeLootlinguaProfileFromCloud(guestProfileForMerge, { guestMigration: true });
-      });
+      }
+      if (!isCurrent()) return abandoned();
       if (hasCurrentExplicitTheme) {
         window.mergeLootlinguaProfileFromCloud({
           theme: explicitThemeId,
@@ -266,6 +363,7 @@ window.loadProfileFromCloud = async function(user, options = {}) {
         });
       }
     }
+    if (!isCurrent()) return abandoned();
     // Do not create/backfill a profile merely because it was read. A write is
     // warranted only after an explicit guest-data merge or a later user action.
     if (profileAlreadyCommitted) {
@@ -273,7 +371,10 @@ window.loadProfileFromCloud = async function(user, options = {}) {
     } else if (shouldMergeGuestState && window._saveProfileToCloudNow) {
       const saved = await window._saveProfileToCloudNow({
         verify: Boolean(persistedMigration || options.requirePendingProfileCommit),
+        profileOwner: owner,
+        profileLoadOwner: loadOwner,
       });
+      if (!isCurrent()) return abandoned();
       outcome.pendingProfileCommitted = completePendingGuestProfileMigration(
         user,
         saved,
@@ -282,12 +383,13 @@ window.loadProfileFromCloud = async function(user, options = {}) {
       if (options.requirePendingProfileCommit && !outcome.pendingProfileCommitted) {
         if (accepted?.profile && typeof window.resetLootlinguaProfileState === 'function') {
           window.resetLootlinguaProfileState({ clearDisplayName: true, resetTheme: true });
-          window.mergeLootlinguaProfileFromCloud?.(accepted.profile);
+          if (isCurrent()) window.mergeLootlinguaProfileFromCloud?.(accepted.profile);
         }
         return outcome;
       }
     }
   } catch (e) {
+    if (!isCurrent()) return abandoned();
     if (!profileReadCompleted) {
       window.__lootlinguaProfileSnapshot = {
         uid: user?.uid || '',
@@ -302,34 +404,57 @@ window.loadProfileFromCloud = async function(user, options = {}) {
     if (accepted?.profile && options.requirePendingProfileCommit &&
         typeof window.resetLootlinguaProfileState === 'function') {
       window.resetLootlinguaProfileState({ clearDisplayName: true, resetTheme: true });
-      window.mergeLootlinguaProfileFromCloud?.(accepted.profile);
+      if (isCurrent()) window.mergeLootlinguaProfileFromCloud?.(accepted.profile);
     }
     console.error("loadProfile:", { code: e?.code, message: e?.message }, e);
   }
   finally {
-    window.__applyingCloudProfile = false;
-    if (typeof window.markInitialFeatureLoadPartDone === "function") window.markInitialFeatureLoadPartDone("profile");
+    if (isCurrent()) {
+      window.__applyingCloudProfile = false;
+      if (typeof window.markInitialFeatureLoadPartDone === "function") window.markInitialFeatureLoadPartDone("profile");
+    }
   }
   return outcome;
 };
 
 window.commitPendingGuestProfileMigration = async function(user) {
+  const owner = captureProfileOwner(user);
+  if (!isProfileOwnerCurrent(owner)) return false;
   const pending = readPendingGuestProfileMigration(user);
   if (!pending) return false;
   if (Number(pending.profileCommittedAt) > 0) return true;
-  const outcome = await window.loadProfileFromCloud(user, { requirePendingProfileCommit: true });
-  return outcome.pendingProfileCommitted === true;
+  const outcome = await window.loadProfileFromCloud(user, { requirePendingProfileCommit: true, profileOwner: owner });
+  return isProfileOperationCurrent(owner) && outcome.pendingProfileCommitted === true;
 };
 
 // ── شوف إذا المستخدم مسجل دخول وحمّل الـ profile ──
 onAuthStateChanged(profileAuth, (user) => {
+  _profileAuthEpoch++;
+  clearTimeout(_saveProfileDebounce);
+  _saveProfileDebounce = null;
+  _activeProfileLoad = null;
+  window.__applyingCloudProfile = false;
+  window._profileLoaded = false;
+  const authOwner = captureProfileOwner(user);
   if (user && window.loadProfileFromCloud) {
-    const waitForGuestDecision = typeof window.prepareGuestMigrationForUser === "function"
-      ? window.prepareGuestMigrationForUser(user)
-      : Promise.resolve();
-    waitForGuestDecision.then(() => window.loadProfileFromCloud(user)).then(() => {
+    Promise.resolve().then(() => {
+      if (!isProfileOwnerCurrent(authOwner)) return;
+      return typeof window.prepareGuestMigrationForUser === "function"
+        ? window.prepareGuestMigrationForUser(user)
+        : undefined;
+    }).then(async () => {
+      if (!isProfileOwnerCurrent(authOwner)) return;
+      // Guest migration may have loaded and committed a profile while this
+      // decision was pending. Begin a fresh load within the same auth session.
+      const owner = captureProfileOwner(user);
+      const loading = window.loadProfileFromCloud(user, { profileOwner: owner });
+      const loadOwner = _activeProfileLoad;
+      const outcome = await loading;
+      if (!isProfileOperationCurrent(owner, loadOwner) || !outcome.loaded) return;
       window._profileLoaded = true;
       if (window.checkAndUpdateStreak) window.checkAndUpdateStreak();
+    }).catch((error) => {
+      if (isProfileOwnerCurrent(authOwner)) console.error('loadProfile: guest preparation failed', error);
     });
   }
 });
