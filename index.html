@@ -87,9 +87,8 @@
     content="#090c0f"
   >
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
-  <link rel="stylesheet" href="style.css?v=20261105-pages-1">
+  <link rel="stylesheet" href="style.css?v=20261105-integrity-1">
   <link rel="stylesheet" href="entry-experience.css?v=20261104-world-guide-4">
-  <link rel="stylesheet" href="gradesquiz.css?v=20260811-2">
 </head>
 <body class="legend-dock-visible">
 
@@ -715,17 +714,17 @@
       <section class="profile-section" id="profileAppearanceSection">
         <h3><i class="fa-solid fa-palette"></i> الثيمات</h3>
         <div class="theme-selector profile-theme-selector">
-          <div class="theme-option active" data-theme="lootlingua" data-unlock-level="1" onclick="setTheme('lootlingua')">
-            <div class="theme-preview preview-lootlingua"></div>
+          <button type="button" class="theme-option active" data-theme="lootlingua" data-unlock-level="1" aria-pressed="true" onclick="setTheme('lootlingua')">
+            <span class="theme-preview preview-lootlingua" aria-hidden="true"></span>
             <span class="theme-display-name">LootLingua</span>
             <span class="theme-status-label" aria-hidden="true"></span>
-            </div>
+            </button>
             
-            <div class="theme-option" data-theme="ocean" data-unlock-level="4" onclick="setTheme('ocean')">
-            <div class="theme-preview preview-ocean"></div>
+            <button type="button" class="theme-option" data-theme="ocean" data-unlock-level="4" aria-pressed="false" onclick="setTheme('ocean')">
+            <span class="theme-preview preview-ocean" aria-hidden="true"></span>
             <span class="theme-display-name">واحة الهدوء</span>
             <span class="theme-status-label" aria-hidden="true"></span>
-           </div>
+           </button>
 
            <!--الثيم الجديد "الصقيع الهادئ" تم التعليق عليه مؤقتاً لأنه لم يتم الانتهاء من تصميمه بعد. يمكن إلغاء التعليق عند الانتهاء من التصميم.
            <div class="theme-option"
@@ -740,32 +739,33 @@
              <span class="theme-status-label" aria-hidden="true"></span>
               </div>-->
           
-          <div class="theme-option" data-theme="golden" data-unlock-level="2" onclick="setTheme('golden')">
-            <div class="theme-preview preview-golden"></div>
+          <button type="button" class="theme-option" data-theme="golden" data-unlock-level="2" aria-pressed="false" onclick="setTheme('golden')">
+            <span class="theme-preview preview-golden" aria-hidden="true"></span>
             <span class="theme-display-name">الكنز الذهبي</span>
             <span class="theme-status-label" aria-hidden="true"></span>
-          </div>
-          <div class="theme-option" data-theme="scroll" data-unlock-level="3" onclick="setTheme('scroll')">
-            <div class="theme-preview preview-scroll"></div>
+          </button>
+          <button type="button" class="theme-option" data-theme="scroll" data-unlock-level="3" aria-pressed="false" onclick="setTheme('scroll')">
+            <span class="theme-preview preview-scroll" aria-hidden="true"></span>
             <span class="theme-display-name">المخطوطة القديمة</span>
             <span class="theme-status-label" aria-hidden="true"></span>
-          </div>
+          </button>
           
-          <div class="theme-option theme-coming-soon"
+          <button type="button" class="theme-option theme-coming-soon"
             data-theme="glass"
             data-unlock-level="5"
             data-coming-soon="1"
+            aria-pressed="false"
             onclick="setTheme('glass')"
             aria-disabled="true">
 
-            <div class="theme-preview preview-glass"></div>
+            <span class="theme-preview preview-glass" aria-hidden="true"></span>
 
             <span class="theme-display-name">الثيم الزجاجي</span>
 
             <span class="theme-status-label theme-status-label--soon">
              قريباً
            </span>
-           </div>
+           </button>
            </div>
             <div id="profileOasisModeSetting" class="profile-oasis-mode-setting" hidden>
           <div>
@@ -1121,12 +1121,12 @@
 <script src="js/entry-experience-contract.js?v=20261029-entry-simplify-1"></script>
   <script src="js/guided-first-journey-contract.js?v=20260827-1"></script>
   <script src="js/feature-discovery-contract.js?v=20261104-discovery-1"></script>
-<script src="js/entry-experience-controller.js?v=20261104-world-guide-4"></script>
+<script src="js/entry-experience-controller.js?v=20261105-integrity-1"></script>
 <script src="js/guided-first-journey-controller.js?v=20261104-coach-polish-3"></script>
 <script src="js/personal-dictionary-onboarding.js?v=20261104-guidance-2"></script>
   <script src="js/feature-discovery-controller.js?v=20261104-world-guide-4"></script>
 <script src="js/feature-mini-onboarding.js?v=20261104-world-guide-4"></script>
-<script type="module" src="js/cloud.js?v=20261105-pages-1"></script>
+<script type="module" src="js/cloud.js?v=20261105-integrity-1"></script>
 <script type="module" src="js/entry-experience-cloud.js?v=20260808-1"></script>
 <script type="module" src="js/guided-first-journey-cloud.js?v=20260827-1"></script>
 
@@ -1162,7 +1162,7 @@
 </div>
 
 <!-- ══ FIREBASE PROFILE SYNC ══ -->
-  <script type="module" src="js/profile-cloud.js?v=20261103-phase2-1"></script>
+  <script type="module" src="js/profile-cloud.js?v=20261105-integrity-1"></script>
 <script type="module" src="js/published-content.js?v=20260722-1"></script>
 <script type="module" src="js/journey-cloud.js?v=20261105-pages-1"></script>
 <script type="module" src="js/notification-cloud.js?v=20260811-1"></script>
@@ -1185,13 +1185,13 @@
 <script src="js/placement.js?v=20260720-1"></script>
 <script src="js/level-placement.js?v=20260728-1"></script>
 <script src="js/word-list-data.js?v=20260719-3"></script>
-<script src="js/script.js?v=20261105-pages-1"></script>
-<script src="js/xp.js"></script>
-<script src="js/xp-batch.js?v=20260722-1"></script>
-<script src="js/dictionary.js?v=20261105-pages-1"></script>
+<script src="js/script.js?v=20261105-integrity-1"></script>
+<script src="js/xp.js?v=20261105-integrity-1"></script>
+<script src="js/xp-batch.js?v=20261105-integrity-1"></script>
+<script src="js/dictionary.js?v=20261105-integrity-1"></script>
 <script src="js/gate-game-migration.js?v=20261007-1"></script>
 <script src="js/gate-runner.js?v=20261007-2"></script>
-<script src="js/worlds.js?v=20261105-pages-1"></script>
+<script src="js/worlds.js?v=20261105-integrity-1"></script>
 <script src="js/dictionary-window.js?v=20261105-render-1"></script>
 <script src="js/dictionary-render.js?v=20261105-pages-1"></script>
 <script src="js/srs.js?v=20261105-render-1"></script>

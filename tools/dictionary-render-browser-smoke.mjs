@@ -8,8 +8,9 @@ import WebSocket from 'ws';
 const root=path.resolve(import.meta.dirname,'..');
 const baseline=process.argv.includes('--baseline'),mode=baseline?'before':'after';
 const paged=process.argv.includes('--paged');
+const integrity=process.argv.includes('--integrity');
 const baselineRef=process.argv.find(argument=>argument.startsWith('--baseline-ref='))?.slice('--baseline-ref='.length)||'b27ecf5a';
-const evidenceDir=path.join(root,'reports',paged?'dictionary-pages-evidence':'dictionary-render-evidence');
+const evidenceDir=path.join(root,'reports',integrity?'integrity-evidence':paged?'dictionary-pages-evidence':'dictionary-render-evidence');
 const browserPath=['C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe','C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe'].find(fs.existsSync);
 if(!browserPath)throw Error('Chrome/Edge not found');
 const sources=new Map();
@@ -21,6 +22,7 @@ const server=http.createServer((request,response)=>{
   let html=read('index.html').replace(/<script\b[^>]*type="module"[^>]*>[\s\S]*?<\/script>/g,'').replace(/<script\b[^>]*src="https?:[^"]+"[^>]*>[\s\S]*?<\/script>/g,'');
   const seed='<script>localStorage.setItem("lootlinguaPerformanceMode","turbo");localStorage.setItem("lootlinguaPerformanceModeNoticeSeen","1");window.__feedbackFirestore={writes:[],reject:false,db:{},auth:{currentUser:null},collection:()=>({}),doc:()=>({id:"abcdefghijklmnopqrst"}),setDoc:async function(ref,data){if(this.reject)throw Object.assign(new Error("denied"),{code:"permission-denied"});this.writes.push(data)},serverTimestamp:()=>new Date()};</script>';
   html=html.replace('<head>','<head>'+seed);
+  if(integrity)html=html.replace('<head>','<head><script>window.updateDictionaryWordInCloud=async()=>true;window.updateCustomWorldDictionaryWordInCloud=async()=>true;</script>');
   if(!baseline)html=html.replace('</body>','<script type="module" src="/feedback-test.js"></script></body>');
   response.writeHead(200,{'Content-Type':'text/html; charset=utf-8'}).end(html);return;
  }
@@ -82,12 +84,18 @@ try{
     const down=[];
     for(let round=0;round<30&&!pages.state().complete;round++){
       const before=pages.state().loaded,list=document.getElementById('list');
-      scrollTo(0,Math.max(0,list.getBoundingClientRect().top+scrollY+list.getBoundingClientRect().height-innerHeight-1000));
-      for(let wait=0;wait<80&&(pages.state().loaded===before||pages.state().loading)&&!pages.state().complete;wait++)await new Promise(r=>setTimeout(r,30));
+      const scrollNearEnd=()=>scrollTo({top:Math.max(0,list.getBoundingClientRect().top+scrollY+list.getBoundingClientRect().height-innerHeight-1000),behavior:'instant'});
+      scrollNearEnd();
+      for(let wait=0;wait<80&&(pages.state().loaded===before||pages.state().loading)&&!pages.state().complete;wait++){
+        await new Promise(r=>setTimeout(r,30));
+        // Measured variable-height rows may extend the list after the first
+        // scroll. Continue the simulated downward gesture using fresh geometry.
+        if(pages.state().loaded===before&&!pages.state().loading&&list.getBoundingClientRect().bottom>innerHeight+1800)scrollNearEnd();
+      }
       await new Promise(r=>setTimeout(r,80));
       const cards=[...document.querySelectorAll('#list .word-card')],visible=cards.filter(card=>{const r=card.getBoundingClientRect();return r.bottom>120&&r.top<innerHeight-70});
       down.push({loaded:pages.state().loaded,cards:cards.length,visible:visible.length,first:cards[0]?.dataset.id});
-      if(pages.state().loaded===before&&!pages.state().complete)throw Error('Scroll did not load its next page');
+      if(pages.state().loaded===before&&!pages.state().complete)throw Error('Scroll did not load its next page: '+JSON.stringify({state:pages.state(),view:currentView,scrollY,bottom:list.getBoundingClientRect().bottom,viewport:innerHeight}));
     }
     const bottomIds=new Set([...document.querySelectorAll('#list .word-card')].map(card=>card.dataset.id));scrollTo(0,0);await new Promise(r=>setTimeout(r,250));
     const topCards=[...document.querySelectorAll('#list .word-card')];const up={cards:topCards.length,first:topCards[0]?.dataset.id,removedDistantCards:topCards.every(card=>!bottomIds.has(card.dataset.id))};
@@ -131,6 +139,37 @@ try{
     return{changed,retained,expandedAfterSnapshot:window.words[0].expanded};
   })()`);
   assert.equal(report.updates.changed,true);assert.equal(report.updates.retained,true);assert.equal(report.updates.expandedAfterSnapshot,true);
+  if(integrity){
+    report.suggestions=await evaluate(String.raw`(async()=>{
+      window.__integrityInjected=false;const text='تفاحة " onclick="window.__integrityInjected=true" data-x=" &apos; <img src=x onerror=window.__integrityInjected=true> 😀';
+      const list=document.getElementById('suggestionsList');setAddFormExpanded(true);document.getElementById('suggestionsBox').style.display='block';
+      list.innerHTML=renderSuggestionHtml(Array.from({length:6},(_,i)=>({ar:i?'معنى '+i:text,pos:'اسم',ex:"O'Reilly says hello",stars:2})), 'meaning-option', {allowSelect:true,listSelector:'#suggestionsList',sourceWord:'Apple'});
+      await new Promise(r=>setTimeout(r,100));const toggle=list.querySelector('[data-action="toggle-ai-meanings"]');toggle.click();
+      const moreVisible=[...list.querySelectorAll('.extra-meaning')].every(item=>getComputedStyle(item).display!=='none');
+      const width=toggle.getBoundingClientRect().width,containerWidth=list.getBoundingClientRect().width;
+      list.querySelector('[data-action="select-ai-meaning"]').dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',bubbles:true,cancelable:true}));
+      const selected=document.getElementById('meaningInput').value===text,focused=document.activeElement===document.getElementById('meaningInput');
+      const result={selected,focused,moreVisible,width,containerWidth,executableNodes:list.querySelectorAll('img,script,[onclick],[onerror]').length,injected:window.__integrityInjected};list.innerHTML='';return result;
+    })()`);
+    assert.equal(report.suggestions.selected,true);assert.equal(report.suggestions.focused,true);assert.equal(report.suggestions.moreVisible,true);assert.equal(report.suggestions.executableNodes,0);assert.equal(report.suggestions.injected,false);assert.ok(report.suggestions.width>=report.suggestions.containerWidth-5);
+    report.dictionaryWrites=await evaluate(String.raw`(async()=>{
+      const name=document.getElementById('wordInput'),meaning=document.getElementById('meaningInput'),before=window.words.length;let savedEvents=0;
+      const onSaved=()=>savedEvents++;window.addEventListener('lootlingua:dictionary-word-saved',onSaved);
+      name.value='integrityword';meaning.value='معنى الاختبار';window.saveWordToCloud=async()=>null;
+      const nullResult=await addWord(),rejected={result:nullResult,unchanged:window.words.length===before,keptInputs:name.value==='integrityword',savedEvents};
+      window.saveWordToCloud=async()=> 'integrity-ui-word';const accepted=await addWord();
+      editWord('integrity-ui-word');meaning.value='المعنى المعدّل';window.updateDictionaryWordInCloud=async()=>{throw Error('simulated denial')};
+      const failedEdit=await addWord(),editKept=meaning.value==='المعنى المعدّل'&&window.words.find(w=>w.id==='integrity-ui-word').meaning==='معنى الاختبار';
+      window.updateDictionaryWordInCloud=async()=>true;const edited=await addWord();
+      window.updateDictionaryWordInCloud=async()=>{throw Error('simulated denial')};const failedStar=await toggleStar('integrity-ui-word');
+      const unstarred=!window.words.find(w=>w.id==='integrity-ui-word').starred;window.updateDictionaryWordInCloud=async()=>true;const starred=await toggleStar('integrity-ui-word');
+      const starButton=document.querySelector('[data-action="star"][data-id="integrity-ui-word"]');
+      const result={rejected,accepted,failedEdit,editKept,edited,failedStar,unstarred,starred,ariaPressed:starButton?.getAttribute('aria-pressed'),savedEvents};
+      window.removeEventListener('lootlingua:dictionary-word-saved',onSaved);window.words=window.words.filter(w=>w.id!=='integrity-ui-word');writeWordsToStorage(window.words,'normal','browser-pages');window.invalidateDictionaryRender();scrollTo(0,0);render();return result;
+    })()`);
+    assert.equal(report.dictionaryWrites.rejected.result,false);assert.equal(report.dictionaryWrites.rejected.unchanged,true);assert.equal(report.dictionaryWrites.rejected.keptInputs,true);assert.equal(report.dictionaryWrites.rejected.savedEvents,0);
+    assert.equal(report.dictionaryWrites.accepted,true);assert.equal(report.dictionaryWrites.failedEdit,false);assert.equal(report.dictionaryWrites.editKept,true);assert.equal(report.dictionaryWrites.edited,true);assert.equal(report.dictionaryWrites.failedStar,false);assert.equal(report.dictionaryWrites.unstarred,true);assert.equal(report.dictionaryWrites.starred,true);assert.equal(report.dictionaryWrites.ariaPressed,'true');assert.equal(report.dictionaryWrites.savedEvents,1);
+  }
   await waitFor('Boolean(window.LootLinguaFeedback)');
   report.feedback=await evaluate(String.raw`(async()=>{const listeners=new Set(),add=document.addEventListener,remove=document.removeEventListener;document.addEventListener=function(type,handler,...args){if(type==='keydown')listeners.add(handler);return add.call(this,type,handler,...args)};document.removeEventListener=function(type,handler,...args){if(type==='keydown')listeners.delete(handler);return remove.call(this,type,handler,...args)};window.LootLinguaFeedback.open();document.querySelector('[data-rating="5"]').click();const form=document.querySelector('#feedbackDialogShell form');form.elements.message.value='Browser test feedback';form.dispatchEvent(new Event('submit',{bubbles:true,cancelable:true}));form.dispatchEvent(new Event('submit',{bubbles:true,cancelable:true}));await new Promise(r=>setTimeout(r,100));const success={writes:window.__feedbackFirestore.writes.length,closed:!document.getElementById('feedbackDialogShell'),schema:window.__feedbackFirestore.writes[0]?.schemaVersion};window.__feedbackFirestore.reject=true;window.LootLinguaFeedback.open();document.querySelector('[data-rating="4"]').click();document.querySelector('#feedbackDialogShell form').dispatchEvent(new Event('submit',{bubbles:true,cancelable:true}));await new Promise(r=>setTimeout(r,100));const failure={open:!!document.getElementById('feedbackDialogShell'),retry:!document.querySelector('.feedback-submit').disabled,message:document.querySelector('.feedback-status').textContent};document.querySelector('.feedback-dialog-close').click();return{success,failure,remainingKeyListeners:listeners.size}})()`);
   assert.equal(report.feedback.success.writes,1);assert.equal(report.feedback.success.closed,true);assert.equal(report.feedback.success.schema,2);assert.equal(report.feedback.failure.retry,true);assert.equal(report.feedback.remainingKeyListeners,0);

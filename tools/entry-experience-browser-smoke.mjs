@@ -5,7 +5,9 @@ import { spawn } from 'node:child_process';
 import WebSocketClient from 'ws';
 
 const root = path.resolve(import.meta.dirname, '..');
-const evidenceDir = path.join(root, 'reports', 'product-entry-evidence');
+const evidenceDir = process.argv.includes('--integrity')
+  ? path.join(root, 'reports', 'integrity-evidence', 'entry')
+  : path.join(root, 'reports', 'product-entry-evidence');
 const evidenceScreenshotNames = new Set([
   'guest-new-desktop-welcome',
   'guest-new-320-welcome',
@@ -416,8 +418,12 @@ function browserHarness() {
     localStorage.setItem('lootlinguaOasisMode', mode);
     return true;
   };
-  window._saveProfileToCloudNow = async (options = {}) => {
-    window.__entrySmoke.profileSaveCalls.push({ uid: window.auth.currentUser?.uid || '', verify: options.verify === true });
+  window._saveProfileToCloudNow = async () => {
+    throw new Error('Entry appearance must not save a full profile');
+  };
+  window.getThemeIntroSeenList = () => ['lootlingua'];
+  window.saveProfilePreferencesToCloud = async (patch, options = {}) => {
+    window.__entrySmoke.profileSaveCalls.push({ uid: window.auth.currentUser?.uid || '', patch, verify: options.verify === true });
     pushEvent('profile-save', { uid: window.auth.currentUser?.uid || '', success: !scenario.failProfile });
     return !scenario.failProfile;
   };

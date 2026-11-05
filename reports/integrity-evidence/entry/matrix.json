@@ -1,0 +1,477 @@
+{
+  "generatedAt": "2026-11-05T17:31:56.454Z",
+  "browser": "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",
+  "appUrl": "http://127.0.0.1:9421/app",
+  "harness": "real Chrome DOM/input/reload with Firebase replaced by an in-page deterministic adapter",
+  "passed": true,
+  "caseCount": 12,
+  "failures": [],
+  "runtimeExceptions": [],
+  "errorLogs": [],
+  "cases": [
+    {
+      "id": "guest-new-desktop",
+      "classification": "brand-new",
+      "visibleSteps": [
+        "welcome",
+        "interests",
+        "theme",
+        "worlds",
+        "journey",
+        "destination"
+      ],
+      "onboardingInteraction": {
+        "worldId": "smoke-world",
+        "journeyStatus": "structure-explored",
+        "statusBefore": "in-progress"
+      },
+      "auth": "not shown during Product Entry",
+      "completion": {
+        "at": "after destination CTA",
+        "status": "completed"
+      },
+      "destination": "worldsView",
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "layout": {
+        "noHorizontalOverflow": true,
+        "panelInsideViewport": true
+      },
+      "images": [
+        "reports/integrity-evidence/entry/guest-new-desktop-welcome.png",
+        "reports/integrity-evidence/entry/guest-new-desktop-journey-gate-preview.png",
+        "reports/integrity-evidence/entry/guest-new-desktop-journey-learning-explainer.png"
+      ],
+      "failures": [],
+      "passed": true
+    },
+    {
+      "id": "guest-new-320",
+      "classification": "brand-new",
+      "visibleSteps": [
+        "welcome",
+        "interests",
+        "theme",
+        "worlds",
+        "journey",
+        "destination"
+      ],
+      "onboardingInteraction": {
+        "worldId": "smoke-world",
+        "journeyStatus": "structure-explored",
+        "statusBefore": "in-progress"
+      },
+      "auth": "not shown during Product Entry",
+      "completion": {
+        "at": "after destination CTA",
+        "status": "completed"
+      },
+      "destination": "worldsView",
+      "viewport": {
+        "width": 320,
+        "height": 568
+      },
+      "layout": {
+        "noHorizontalOverflow": true,
+        "panelInsideViewport": true
+      },
+      "images": [
+        "reports/integrity-evidence/entry/guest-new-320-welcome.png",
+        "reports/integrity-evidence/entry/guest-new-320-journey-gate-preview.png",
+        "reports/integrity-evidence/entry/guest-new-320-journey-learning-explainer.png"
+      ],
+      "failures": [],
+      "passed": true
+    },
+    {
+      "id": "guest-words",
+      "classification": "returning-guest-with-local-data",
+      "visibleSteps": [],
+      "onboardingInteraction": {
+        "visible": false,
+        "reason": "guest starts directly in personal dictionary"
+      },
+      "completion": {
+        "at": "not applicable for guest dictionary start",
+        "status": ""
+      },
+      "destination": "personalView",
+      "images": [],
+      "failures": [],
+      "passed": true
+    },
+    {
+      "id": "guest-xp-light",
+      "classification": "returning-guest-with-local-data",
+      "visibleSteps": [],
+      "onboardingInteraction": {
+        "visible": false,
+        "reason": "guest starts directly in personal dictionary"
+      },
+      "completion": {
+        "at": "not applicable for guest dictionary start",
+        "status": ""
+      },
+      "destination": "personalView",
+      "images": [],
+      "failures": [],
+      "passed": true
+    },
+    {
+      "id": "account-new",
+      "classification": "brand-new",
+      "visibleSteps": [
+        "welcome",
+        "interests",
+        "theme",
+        "worlds",
+        "journey",
+        "destination"
+      ],
+      "onboardingInteraction": {
+        "worldId": "smoke-world",
+        "journeyStatus": "structure-explored",
+        "statusBefore": "in-progress"
+      },
+      "auth": "not shown during Product Entry",
+      "completion": {
+        "at": "after destination CTA",
+        "status": "completed"
+      },
+      "destination": "worldsView",
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "layout": {
+        "noHorizontalOverflow": true,
+        "panelInsideViewport": true
+      },
+      "images": [],
+      "failures": [],
+      "passed": true
+    },
+    {
+      "id": "account-words",
+      "classification": "returning-light",
+      "visibleSteps": [
+        "interests",
+        "theme",
+        "worlds",
+        "journey",
+        "destination"
+      ],
+      "onboardingInteraction": {
+        "worldId": "smoke-world",
+        "journeyStatus": "structure-explored",
+        "statusBefore": "in-progress"
+      },
+      "auth": "not shown during Product Entry",
+      "completion": {
+        "at": "after destination CTA",
+        "status": "completed"
+      },
+      "destination": "personalView",
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "layout": {
+        "noHorizontalOverflow": true,
+        "panelInsideViewport": true
+      },
+      "images": [],
+      "failures": [],
+      "passed": true
+    },
+    {
+      "id": "account-journey",
+      "classification": "returning-with-progress",
+      "visibleSteps": [
+        "return",
+        "destination"
+      ],
+      "onboardingInteraction": {
+        "kind": "shortened Journey reminder",
+        "journeyStatus": "return-reviewed"
+      },
+      "auth": "not required",
+      "completion": {
+        "at": "after Journey destination",
+        "status": "completed"
+      },
+      "destination": "worldsView:smoke-world",
+      "images": [
+        "reports/integrity-evidence/entry/account-journey-short-return.png"
+      ],
+      "failures": [],
+      "passed": true
+    },
+    {
+      "id": "account-completed",
+      "classification": "brand-new",
+      "visibleSteps": [],
+      "onboardingInteraction": {
+        "visible": false,
+        "reason": "v2 already completed"
+      },
+      "auth": "not shown",
+      "completion": {
+        "at": "pre-existing version document",
+        "status": "completed"
+      },
+      "destination": "homeView",
+      "images": [
+        "reports/integrity-evidence/entry/account-completed-hidden-app.png"
+      ],
+      "failures": [],
+      "passed": true
+    },
+    {
+      "id": "refresh-account-theme",
+      "classification": "brand-new",
+      "visibleSteps": [
+        "welcome",
+        "interests",
+        "theme"
+      ],
+      "refresh": {
+        "theme": {
+          "before": "ocean",
+          "after": "ocean",
+          "explicit": true
+        }
+      },
+      "onboardingInteraction": {
+        "visible": false,
+        "reason": "refresh probe stopped at theme"
+      },
+      "auth": "account already authenticated",
+      "completion": {
+        "at": "not complete",
+        "status": "in-progress"
+      },
+      "destination": "homeView",
+      "images": [],
+      "failures": [],
+      "passed": true
+    },
+    {
+      "id": "entry-cloud-failure",
+      "classification": "brand-new",
+      "visibleSteps": [
+        "welcome",
+        "interests",
+        "theme",
+        "worlds",
+        "journey",
+        "destination"
+      ],
+      "onboardingInteraction": {
+        "visible": true,
+        "journeyStatus": "structure-explored"
+      },
+      "auth": "account already authenticated",
+      "failure": {
+        "kind": "entry",
+        "statusText": "وصلنا إلى وجهتك، لكن تعذّر تأكيد اكتمال التجربة في حسابك. أبقيناها مفتوحة للمحاولة مرة أخرى.",
+        "saveCalls": [
+          {
+            "uid": "account-entry-failure",
+            "status": "in-progress",
+            "step": "interests"
+          },
+          {
+            "uid": "account-entry-failure",
+            "status": "in-progress",
+            "step": "theme"
+          },
+          {
+            "uid": "account-entry-failure",
+            "status": "in-progress",
+            "step": "worlds"
+          },
+          {
+            "uid": "account-entry-failure",
+            "status": "in-progress",
+            "step": "worlds"
+          },
+          {
+            "uid": "account-entry-failure",
+            "status": "in-progress",
+            "step": "journey"
+          },
+          {
+            "uid": "account-entry-failure",
+            "status": "in-progress",
+            "step": "journey"
+          },
+          {
+            "uid": "account-entry-failure",
+            "status": "in-progress",
+            "step": "destination"
+          },
+          {
+            "uid": "account-entry-failure",
+            "status": "completed",
+            "step": "destination"
+          }
+        ],
+        "profileCalls": [
+          {
+            "uid": "account-entry-failure",
+            "patch": {
+              "theme": "ocean",
+              "oasisMode": "light",
+              "themeIntroSeen": [
+                "lootlingua"
+              ]
+            },
+            "verify": true
+          }
+        ]
+      },
+      "completion": {
+        "at": "not complete because persistence failed",
+        "status": "in-progress"
+      },
+      "destination": "worldsView",
+      "refresh": {
+        "stage": "destination",
+        "status": "in-progress"
+      },
+      "images": [
+        "reports/integrity-evidence/entry/entry-cloud-failure-kept-open.png"
+      ],
+      "failures": [],
+      "passed": true
+    },
+    {
+      "id": "profile-cloud-failure",
+      "classification": "brand-new",
+      "visibleSteps": [
+        "welcome",
+        "interests",
+        "theme",
+        "worlds",
+        "journey",
+        "destination"
+      ],
+      "onboardingInteraction": {
+        "visible": true,
+        "journeyStatus": "structure-explored"
+      },
+      "auth": "account already authenticated",
+      "failure": {
+        "kind": "profile",
+        "statusText": "تعذّر حفظ المظهر في حسابك. لم نغلق التجربة ولم نعتبرها مكتملة.",
+        "saveCalls": [
+          {
+            "uid": "account-profile-failure",
+            "status": "in-progress",
+            "step": "interests"
+          },
+          {
+            "uid": "account-profile-failure",
+            "status": "in-progress",
+            "step": "theme"
+          },
+          {
+            "uid": "account-profile-failure",
+            "status": "in-progress",
+            "step": "worlds"
+          },
+          {
+            "uid": "account-profile-failure",
+            "status": "in-progress",
+            "step": "worlds"
+          },
+          {
+            "uid": "account-profile-failure",
+            "status": "in-progress",
+            "step": "journey"
+          },
+          {
+            "uid": "account-profile-failure",
+            "status": "in-progress",
+            "step": "journey"
+          },
+          {
+            "uid": "account-profile-failure",
+            "status": "in-progress",
+            "step": "destination"
+          }
+        ],
+        "profileCalls": [
+          {
+            "uid": "account-profile-failure",
+            "patch": {
+              "theme": "ocean",
+              "oasisMode": "light",
+              "themeIntroSeen": [
+                "lootlingua"
+              ]
+            },
+            "verify": true
+          }
+        ]
+      },
+      "completion": {
+        "at": "not complete because persistence failed",
+        "status": "in-progress"
+      },
+      "destination": "worldsView",
+      "refresh": {
+        "stage": "destination",
+        "status": "in-progress"
+      },
+      "images": [],
+      "failures": [],
+      "passed": true
+    },
+    {
+      "id": "account-switch",
+      "classification": {
+        "accountA": "brand-new",
+        "accountB": "brand-new"
+      },
+      "visibleSteps": {
+        "accountA": [
+          "welcome",
+          "interests",
+          "theme",
+          "worlds",
+          "journey",
+          "destination"
+        ],
+        "accountB": [
+          "welcome",
+          "interests",
+          "theme",
+          "worlds",
+          "journey",
+          "destination"
+        ]
+      },
+      "onboardingInteraction": {
+        "accountA": true,
+        "accountB": true
+      },
+      "auth": "two real auth-state callbacks on one browser profile",
+      "completion": {
+        "accountA": "completed",
+        "accountB": "completed"
+      },
+      "destination": {
+        "accountA": "worldsView",
+        "accountB": "worldsView"
+      },
+      "accountAReturnVisible": false,
+      "images": [],
+      "failures": [],
+      "passed": true
+    }
+  ]
+}

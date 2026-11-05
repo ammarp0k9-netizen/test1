@@ -1,0 +1,425 @@
+{
+  "isolation": "about:blank DOM fixture, all network blocked, in-memory preference storage; no auth/cloud modules",
+  "keyboard": [
+    {
+      "action": "Enter selects available ocean",
+      "theme": "ocean",
+      "selected": [
+        "ocean"
+      ],
+      "notices": 0
+    },
+    {
+      "action": "Space respects golden level lock",
+      "theme": "ocean",
+      "selected": [
+        "ocean"
+      ],
+      "notices": 1
+    },
+    {
+      "action": "Space selects unlocked golden",
+      "theme": "golden",
+      "selected": [
+        "golden"
+      ],
+      "notices": 1
+    },
+    {
+      "action": "Enter respects coming-soon glass",
+      "theme": "golden",
+      "selected": [
+        "golden"
+      ],
+      "notices": 2
+    },
+    {
+      "action": "Level relock synchronizes selected state",
+      "theme": "lootlingua",
+      "selected": [
+        "lootlingua"
+      ],
+      "notices": 2
+    }
+  ],
+  "colors": [
+    {
+      "theme": "lootlingua",
+      "mode": "light",
+      "selector": ".app-auth-submit",
+      "state": "normal",
+      "color": "rgb(7, 17, 31)",
+      "background": "rgb(59, 130, 246)",
+      "ratio": 5.148585018343611
+    },
+    {
+      "theme": "lootlingua",
+      "mode": "light",
+      "selector": ".app-auth-submit",
+      "state": "hover",
+      "color": "rgb(7, 17, 31)",
+      "background": "rgb(59, 130, 246)",
+      "ratio": 5.148585018343611
+    },
+    {
+      "theme": "lootlingua",
+      "mode": "light",
+      "selector": ".app-auth-submit",
+      "state": "active",
+      "color": "rgb(7, 17, 31)",
+      "background": "rgb(59, 130, 246)",
+      "ratio": 5.148585018343611
+    },
+    {
+      "theme": "lootlingua",
+      "mode": "light",
+      "selector": ".feature-mini-onboarding-next",
+      "state": "normal",
+      "color": "rgb(7, 17, 31)",
+      "background": "rgb(59, 130, 246)",
+      "ratio": 5.148585018343611
+    },
+    {
+      "theme": "lootlingua",
+      "mode": "light",
+      "selector": ".feature-mini-onboarding-next",
+      "state": "hover",
+      "color": "rgb(7, 17, 31)",
+      "background": "rgb(59, 130, 246)",
+      "ratio": 5.148585018343611
+    },
+    {
+      "theme": "lootlingua",
+      "mode": "light",
+      "selector": ".feature-mini-onboarding-next",
+      "state": "active",
+      "color": "rgb(7, 17, 31)",
+      "background": "rgb(59, 130, 246)",
+      "ratio": 5.148585018343611
+    },
+    {
+      "theme": "golden",
+      "mode": "light",
+      "selector": ".app-auth-submit",
+      "state": "normal",
+      "color": "rgb(26, 18, 11)",
+      "background": "rgb(201, 162, 39)",
+      "ratio": 7.646528472520318
+    },
+    {
+      "theme": "golden",
+      "mode": "light",
+      "selector": ".app-auth-submit",
+      "state": "hover",
+      "color": "rgb(26, 18, 11)",
+      "background": "rgb(201, 162, 39)",
+      "ratio": 7.646528472520318
+    },
+    {
+      "theme": "golden",
+      "mode": "light",
+      "selector": ".app-auth-submit",
+      "state": "active",
+      "color": "rgb(26, 18, 11)",
+      "background": "rgb(201, 162, 39)",
+      "ratio": 7.646528472520318
+    },
+    {
+      "theme": "golden",
+      "mode": "light",
+      "selector": ".feature-mini-onboarding-next",
+      "state": "normal",
+      "color": "rgb(26, 18, 11)",
+      "background": "rgb(201, 162, 39)",
+      "ratio": 7.646528472520318
+    },
+    {
+      "theme": "golden",
+      "mode": "light",
+      "selector": ".feature-mini-onboarding-next",
+      "state": "hover",
+      "color": "rgb(26, 18, 11)",
+      "background": "rgb(201, 162, 39)",
+      "ratio": 7.646528472520318
+    },
+    {
+      "theme": "golden",
+      "mode": "light",
+      "selector": ".feature-mini-onboarding-next",
+      "state": "active",
+      "color": "rgb(26, 18, 11)",
+      "background": "rgb(201, 162, 39)",
+      "ratio": 7.646528472520318
+    },
+    {
+      "theme": "scroll",
+      "mode": "light",
+      "selector": ".app-auth-submit",
+      "state": "normal",
+      "color": "rgb(255, 255, 255)",
+      "background": "rgb(45, 31, 22)",
+      "ratio": 15.91924832928852
+    },
+    {
+      "theme": "scroll",
+      "mode": "light",
+      "selector": ".app-auth-submit",
+      "state": "hover",
+      "color": "rgb(255, 255, 255)",
+      "background": "rgb(45, 31, 22)",
+      "ratio": 15.91924832928852
+    },
+    {
+      "theme": "scroll",
+      "mode": "light",
+      "selector": ".app-auth-submit",
+      "state": "active",
+      "color": "rgb(255, 255, 255)",
+      "background": "rgb(45, 31, 22)",
+      "ratio": 15.91924832928852
+    },
+    {
+      "theme": "scroll",
+      "mode": "light",
+      "selector": ".feature-mini-onboarding-next",
+      "state": "normal",
+      "color": "rgb(255, 255, 255)",
+      "background": "rgb(45, 31, 22)",
+      "ratio": 15.91924832928852
+    },
+    {
+      "theme": "scroll",
+      "mode": "light",
+      "selector": ".feature-mini-onboarding-next",
+      "state": "hover",
+      "color": "rgb(255, 255, 255)",
+      "background": "rgb(45, 31, 22)",
+      "ratio": 15.91924832928852
+    },
+    {
+      "theme": "scroll",
+      "mode": "light",
+      "selector": ".feature-mini-onboarding-next",
+      "state": "active",
+      "color": "rgb(255, 255, 255)",
+      "background": "rgb(45, 31, 22)",
+      "ratio": 15.91924832928852
+    },
+    {
+      "theme": "ocean",
+      "mode": "light",
+      "selector": ".app-auth-submit",
+      "state": "normal",
+      "color": "rgb(255, 255, 255)",
+      "background": "rgb(15, 118, 110)",
+      "ratio": 5.473250081210842
+    },
+    {
+      "theme": "ocean",
+      "mode": "light",
+      "selector": ".app-auth-submit",
+      "state": "hover",
+      "color": "rgb(255, 255, 255)",
+      "background": "rgb(15, 118, 110)",
+      "ratio": 5.473250081210842
+    },
+    {
+      "theme": "ocean",
+      "mode": "light",
+      "selector": ".app-auth-submit",
+      "state": "active",
+      "color": "rgb(255, 255, 255)",
+      "background": "rgb(15, 118, 110)",
+      "ratio": 5.473250081210842
+    },
+    {
+      "theme": "ocean",
+      "mode": "light",
+      "selector": ".feature-mini-onboarding-next",
+      "state": "normal",
+      "color": "rgb(255, 255, 255)",
+      "background": "rgb(15, 118, 110)",
+      "ratio": 5.473250081210842
+    },
+    {
+      "theme": "ocean",
+      "mode": "light",
+      "selector": ".feature-mini-onboarding-next",
+      "state": "hover",
+      "color": "rgb(255, 255, 255)",
+      "background": "rgb(15, 118, 110)",
+      "ratio": 5.473250081210842
+    },
+    {
+      "theme": "ocean",
+      "mode": "light",
+      "selector": ".feature-mini-onboarding-next",
+      "state": "active",
+      "color": "rgb(255, 255, 255)",
+      "background": "rgb(15, 118, 110)",
+      "ratio": 5.473250081210842
+    },
+    {
+      "theme": "ocean",
+      "mode": "dark",
+      "selector": ".app-auth-submit",
+      "state": "normal",
+      "color": "rgb(4, 32, 30)",
+      "background": "rgb(94, 234, 212)",
+      "ratio": 11.53643936308011
+    },
+    {
+      "theme": "ocean",
+      "mode": "dark",
+      "selector": ".app-auth-submit",
+      "state": "hover",
+      "color": "rgb(4, 32, 30)",
+      "background": "rgb(94, 234, 212)",
+      "ratio": 11.53643936308011
+    },
+    {
+      "theme": "ocean",
+      "mode": "dark",
+      "selector": ".app-auth-submit",
+      "state": "active",
+      "color": "rgb(4, 32, 30)",
+      "background": "rgb(94, 234, 212)",
+      "ratio": 11.53643936308011
+    },
+    {
+      "theme": "ocean",
+      "mode": "dark",
+      "selector": ".feature-mini-onboarding-next",
+      "state": "normal",
+      "color": "rgb(4, 32, 30)",
+      "background": "rgb(94, 234, 212)",
+      "ratio": 11.53643936308011
+    },
+    {
+      "theme": "ocean",
+      "mode": "dark",
+      "selector": ".feature-mini-onboarding-next",
+      "state": "hover",
+      "color": "rgb(4, 32, 30)",
+      "background": "rgb(94, 234, 212)",
+      "ratio": 11.53643936308011
+    },
+    {
+      "theme": "ocean",
+      "mode": "dark",
+      "selector": ".feature-mini-onboarding-next",
+      "state": "active",
+      "color": "rgb(4, 32, 30)",
+      "background": "rgb(94, 234, 212)",
+      "ratio": 11.53643936308011
+    },
+    {
+      "theme": "glass",
+      "mode": "light",
+      "selector": ".app-auth-submit",
+      "state": "normal",
+      "color": "rgb(245, 249, 255)",
+      "background": "oklab(0.855079 -0.124646 -0.00253127 / 0.921136)",
+      "ratio": 19.844107924310634
+    },
+    {
+      "theme": "glass",
+      "mode": "light",
+      "selector": ".app-auth-submit",
+      "state": "hover",
+      "color": "rgb(245, 249, 255)",
+      "background": "oklab(0.855665 -0.123599 -0.00312421 / 0.752339)",
+      "ratio": 19.844177849972272
+    },
+    {
+      "theme": "glass",
+      "mode": "light",
+      "selector": ".app-auth-submit",
+      "state": "active",
+      "color": "rgb(245, 249, 255)",
+      "background": "oklab(0.858553 -0.118448 -0.00604188 / 0.395613)",
+      "ratio": 19.844521742461176
+    },
+    {
+      "theme": "glass",
+      "mode": "light",
+      "selector": ".feature-mini-onboarding-next",
+      "state": "normal",
+      "color": "rgb(245, 249, 255)",
+      "background": "color(srgb 0.685658 0.908513 1 / 0.0519216)",
+      "ratio": 19.772613035351778
+    },
+    {
+      "theme": "glass",
+      "mode": "light",
+      "selector": ".feature-mini-onboarding-next",
+      "state": "hover",
+      "color": "rgb(245, 249, 255)",
+      "background": "color(srgb 0.685658 0.908513 1 / 0.0519216)",
+      "ratio": 19.772613035351778
+    },
+    {
+      "theme": "glass",
+      "mode": "light",
+      "selector": ".feature-mini-onboarding-next",
+      "state": "active",
+      "color": "rgb(245, 249, 255)",
+      "background": "color(srgb 0.685658 0.908513 1 / 0.0519216)",
+      "ratio": 19.772613035351778
+    },
+    {
+      "theme": "frost",
+      "mode": "light",
+      "selector": ".app-auth-submit",
+      "state": "normal",
+      "color": "rgb(7, 17, 31)",
+      "background": "rgb(109, 186, 251)",
+      "ratio": 9.077381111785405
+    },
+    {
+      "theme": "frost",
+      "mode": "light",
+      "selector": ".app-auth-submit",
+      "state": "hover",
+      "color": "rgb(7, 17, 31)",
+      "background": "rgb(109, 186, 251)",
+      "ratio": 9.077381111785405
+    },
+    {
+      "theme": "frost",
+      "mode": "light",
+      "selector": ".app-auth-submit",
+      "state": "active",
+      "color": "rgb(7, 17, 31)",
+      "background": "rgb(109, 186, 251)",
+      "ratio": 9.077381111785405
+    },
+    {
+      "theme": "frost",
+      "mode": "light",
+      "selector": ".feature-mini-onboarding-next",
+      "state": "normal",
+      "color": "rgb(7, 17, 31)",
+      "background": "rgb(109, 186, 251)",
+      "ratio": 9.077381111785405
+    },
+    {
+      "theme": "frost",
+      "mode": "light",
+      "selector": ".feature-mini-onboarding-next",
+      "state": "hover",
+      "color": "rgb(7, 17, 31)",
+      "background": "rgb(109, 186, 251)",
+      "ratio": 9.077381111785405
+    },
+    {
+      "theme": "frost",
+      "mode": "light",
+      "selector": ".feature-mini-onboarding-next",
+      "state": "active",
+      "color": "rgb(7, 17, 31)",
+      "background": "rgb(109, 186, 251)",
+      "ratio": 9.077381111785405
+    }
+  ]
+}
