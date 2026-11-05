@@ -377,6 +377,8 @@ function getWordsStorageKey(type = 'normal', uid) {
 }
 
 function readWordsFromStorage(type = 'normal', uid) {
+  const pages = type === 'normal' && window.LootLinguaDictionaryPages?.current(getStorageUserId(uid));
+  if (pages) return pages.words();
   const key = getWordsStorageKey(type, uid);
   const legacy = !uid && getStorageUserId(uid) === 'guest' ? localStorage.getItem(LEGACY_DICTIONARY_KEY) : null;
   try {
@@ -388,8 +390,31 @@ function readWordsFromStorage(type = 'normal', uid) {
   }
 }
 
+let personalBackupTimer = null;
+window.cacheCompletePersonalDictionary = function(words, uid) {
+  clearTimeout(personalBackupTimer);
+  personalBackupTimer = setTimeout(() => {
+    if (window.auth?.currentUser?.uid !== uid) return;
+    try { localStorage.setItem(getWordsStorageKey('normal', uid), JSON.stringify(words)); }
+    catch (error) { console.warn('[Dictionary] Offline backup unavailable:', error?.name); }
+  }, 500);
+};
+window.readPersonalDictionaryBackup = function(uid) {
+  try {
+    const value = JSON.parse(localStorage.getItem(getWordsStorageKey('normal', uid)) || 'null');
+    return Array.isArray(value) ? value : null;
+  } catch (_) { return null; }
+};
+
 function writeWordsToStorage(words = window.words, type = 'normal', uid) {
   const ownerId = getStorageUserId(uid);
+  const pages = type === 'normal' && window.LootLinguaDictionaryPages?.current(ownerId);
+  if (pages) {
+    pages.replaceLoaded(words);
+    if (pages.state().complete && !pages.state().offline) window.cacheCompletePersonalDictionary(words, ownerId);
+    dispatchQuizSourceDataChanged({ ownerId, scope: 'personal', source: 'page-cache-write' });
+    return true;
+  }
   const key = getWordsStorageKey(type, uid);
   const serialized = JSON.stringify(Array.isArray(words) ? words : []);
   if (ownerId === 'guest' && Array.isArray(words) && words.length > 0) {

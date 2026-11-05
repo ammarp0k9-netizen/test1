@@ -258,7 +258,8 @@
     };
     return {
       now,
-      wordCount: words.length,
+      dictionaryComplete: root.LootLinguaDictionaryPages?.current(ownerId)?.state().complete !== false,
+      wordCount: root.LootLinguaDictionaryPages?.current(ownerId)?.state().counts?.total ?? words.length,
       chest: chestFacts(now),
       streak: {
         count: Math.max(0, Number(localStorage.getItem('dailyStreak')) || 0),

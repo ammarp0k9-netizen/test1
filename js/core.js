@@ -943,7 +943,7 @@ document.addEventListener('keydown', (e) => {
 function renderProfileModalStats() {
   const wordsEl = document.getElementById('profileStatWords');
   const streakEl = document.getElementById('profileStatStreak');
-  if (wordsEl) wordsEl.textContent = getPersonalDictionaryWordsSnapshot().length;
+  if (wordsEl) wordsEl.textContent = getDictionaryWordCount();
   if (streakEl) streakEl.textContent = loadInt('lootlinguaMaxStreak', dailyStreak) + ' يوم';
 }
 
@@ -967,7 +967,21 @@ function getPersonalDictionaryWordsSnapshot() {
 }
 
 function getDictionaryWordCount() {
+  const pages = window.LootLinguaDictionaryPages?.current();
+  if (pages?.state().complete) return pages.words().length;
+  const count = pages?.state().counts?.total;
+  if (Number.isFinite(count)) return Math.max(count, pages.words().length);
   return getPersonalDictionaryWordsSnapshot().length;
+}
+
+function getDictionaryStarredCount() {
+  const pages = window.LootLinguaDictionaryPages?.current();
+  const loaded = getPersonalDictionaryWordsSnapshot().filter(word => word.starred).length;
+  return pages && !pages.state().complete ? Math.max(loaded, pages.state().counts?.starred || 0) : loaded;
+}
+
+function getDictionaryMasteredCount() {
+  return getPersonalDictionaryWordsSnapshot().filter(word => getWordMasteryState(word).mastery_status === 'Mastered').length;
 }
 
 function getDailyQuestState() {

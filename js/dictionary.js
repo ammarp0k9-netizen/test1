@@ -42,7 +42,8 @@ function safeClassToken(v) {
 }
 
 // ── Stats Panel ───────────────────────────────────────
-function openStatsPanel() {
+async function openStatsPanel() {
+  if (await window.LootLinguaDictionaryPages?.requireComplete() === false) return;
   const p=document.getElementById('statsPanel'); if(!p)return;
   lockBackgroundScroll('stats');
   p.style.display='flex'; setTimeout(()=>p.classList.add('show'),10);
@@ -95,7 +96,8 @@ function renderStatsNumbers() {
 // Save & Render helpers
 // ═══════════════════════════════════════════════════════
 function persistDictionary() {
-  if (dictionarySortMode === 'auto' && Array.isArray(window.words)) {
+  if (dictionarySortMode === 'auto' && Array.isArray(window.words) &&
+      (!window.LootLinguaDictionaryPages?.current() || window.LootLinguaDictionaryPages.current().state().complete)) {
     reindexWordOrder(window.words);
   }
   writeActiveWordsToStorage(window.words);
@@ -154,10 +156,11 @@ function syncWordMetaInDom() {
   });
 }
 
-window.applyCloudWordsFromSnapshot = function(cloudWords) {
+window.applyCloudWordsFromSnapshot = function(cloudWords, options = {}) {
   const prev = Array.isArray(window.words) ? window.words : [];
   const uid = window.auth?.currentUser?.uid;
-  let normalized = applyStoredWordOrder(cloudWords);
+  let normalized = options.paged ? [...cloudWords].sort((a, b) =>
+    (a.order ?? Number.MAX_SAFE_INTEGER) - (b.order ?? Number.MAX_SAFE_INTEGER)) : applyStoredWordOrder(cloudWords);
   if (!isCustomWorldView()) {
     const expanded = new Set(prev.filter(word => word.expanded).map(word => String(word.id)));
     normalized = normalized.map(word => ({ ...word, expanded: expanded.has(String(word.id)) }));
@@ -291,6 +294,7 @@ window.restoreDictionaryWordById = function(wordId, options = {}) {
   const scope = `dictionary-restore:${String(wordId || '')}`;
   const runner = window.LootLinguaOperations?.runExclusive || ((key, task) => task());
   return runner(scope, async () => {
+    if (await window.LootLinguaDictionaryPages?.requireComplete() === false) return null;
     const personalWords = readWordsFromStorage('normal', window.auth?.currentUser?.uid);
     const existing = personalWords.find((word) => String(word.id) === String(wordId));
     if (!existing) return null;
@@ -432,6 +436,7 @@ if (document.readyState === 'loading') {
 // Add / Edit Word
 // ═══════════════════════════════════════════════════════
 window.addWord = async function() {
+  if (await window.LootLinguaDictionaryPages?.requireComplete({ personal: !isCustomWorldView() }) === false) return;
   const w  = document.getElementById('wordInput').value.trim();
   const m  = document.getElementById('meaningInput').value.trim();
   const ex = document.getElementById('exampleInput').value.trim();
@@ -1173,6 +1178,7 @@ window.submitSuggestionFromUI = async function(wordEnc, arEnc, gameEnc, ev) {
 };
 
 async function addAiMeaningCore({ word, ar, pos, ex, game }, btn) {
+  if (await window.LootLinguaDictionaryPages?.requireComplete({ personal: !isCustomWorldView() }) === false) return;
   if (!word || !ar) {
     pushNotification('بيانات ناقصة للإضافة', 'warning');
     return;
@@ -1901,7 +1907,8 @@ function setFilter(f) {
 // ═══════════════════════════════════════════════════════
 // Reorder (Drag & Drop)
 // ═══════════════════════════════════════════════════════
-function toggleReorderMode() {
+async function toggleReorderMode() {
+  if (!isReorderMode && await window.LootLinguaDictionaryPages?.requireComplete({ personal: !isCustomWorldView() }) === false) return;
   if (!isEditableDictionaryView()) return;
   if (!isReorderMode && !isBulkDeleteMode) {
     window.enterSelectionMode();
@@ -2249,7 +2256,8 @@ function finalizeJsonImport(ctx, uploadResult) {
   }
 }
 
-window.exportData = function() {
+window.exportData = async function() {
+  if (await window.LootLinguaDictionaryPages?.requireComplete({ personal: !isCustomWorldView() }) === false) return;
   const activeWorld = getActiveCustomWorld();
   const payload = {
     format: 'lootlingua-dictionary',
@@ -2271,6 +2279,7 @@ window.exportData = function() {
 window.importData = async function(event) {
   const file = event.target.files?.[0];
   if (!file) return;
+  if (await window.LootLinguaDictionaryPages?.requireComplete({ personal: !isCustomWorldView() }) === false) return;
   event.target.value = '';
 
   if (!rateLimit('jsonImport', 5, 60000)) {

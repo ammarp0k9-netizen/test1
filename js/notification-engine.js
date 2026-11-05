@@ -383,7 +383,11 @@
       .filter((record) => record?.kind === 'smart' && ['pending', 'active'].includes(record.status))
       .map((record) => [String(record.notificationType || ''), String(record.occurrenceKey || '')]));
     const facts = normalizeFacts({ ...(inputFacts || {}), openOccurrences }, now);
-    const raw = rawRules(facts).map((rule) => {
+    // A partial page is not evidence that an existing reminder has cleared.
+    const deferredTypes = facts.dictionaryComplete === false ? new Set([
+      TYPE.REVIEW_DUE, TYPE.WORDS_NEW, TYPE.WORDS_WEAK, TYPE.QUIZ_INACTIVE, TYPE.INACTIVITY,
+    ]) : new Set();
+    const raw = rawRules(facts).filter(rule => !deferredTypes.has(rule.type)).map((rule) => {
       const open = currentRecord(existing, rule.key);
       return open?.eligibleSince ? { ...rule, since: numeric(open.eligibleSince) } : rule;
     });
@@ -407,7 +411,8 @@
     const rawAlive = new Set(raw.map((rule) => rule.key));
     const visibleAlive = new Set(rules.map((rule) => rule.key));
     const resolutions = existing.filter((record) => (
-      record?.kind === 'smart' && ['pending', 'active'].includes(record.status) && !visibleAlive.has(clean(record.occurrenceKey))
+      record?.kind === 'smart' && !deferredTypes.has(record.notificationType) &&
+      ['pending', 'active'].includes(record.status) && !visibleAlive.has(clean(record.occurrenceKey))
     )).map((record) => ({
       id: record.id,
       reason: rawAlive.has(clean(record.occurrenceKey)) ? 'conflict-suppressed' : 'source-cleared',

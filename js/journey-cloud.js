@@ -7,6 +7,9 @@ import {
   getDocs,
   getFirestore,
   limit,
+  orderBy,
+  documentId,
+  startAfter,
   onSnapshot,
   query,
   runTransaction,
@@ -728,16 +731,24 @@ function personalWordsCollection(uid) {
 }
 
 async function readPersonalWordIndex(uid) {
-  const snapshot = await getDocs(personalWordsCollection(uid));
   const schema = schemaApi();
   const index = new Map();
-  snapshot.docs.forEach((item) => {
-    const data = item.data() || {};
-    const identity = schema.normalizeWordIdentity(data.text || data.word || '');
-    if (identity.wordKey && !index.has(identity.wordKey)) {
-      index.set(identity.wordKey, { id: item.id, data });
-    }
-  });
+  let cursor = null;
+  for (;;) {
+    const constraints = [orderBy(documentId()), limit(80)];
+    if (cursor) constraints.push(startAfter(cursor));
+    const snapshot = await getDocs(query(personalWordsCollection(uid), ...constraints));
+    if (auth.currentUser?.uid !== uid) throw new Error('Word owner changed.');
+    if (snapshot.metadata?.fromCache) throw new Error('A complete online word index is required.');
+    snapshot.docs.forEach(item => {
+      const data = item.data() || {};
+      const identity = schema.normalizeWordIdentity(data.text || data.word || '');
+      if (identity.wordKey && !index.has(identity.wordKey)) index.set(identity.wordKey, { id: item.id, data });
+    });
+    if (snapshot.size < 80) break;
+    cursor = snapshot.docs.at(-1);
+    await new Promise(resolve => setTimeout(resolve, 0));
+  }
   return index;
 }
 

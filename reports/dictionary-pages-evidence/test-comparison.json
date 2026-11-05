@@ -1,0 +1,75 @@
+{
+  "baseline": {
+    "files": 72,
+    "exitCode": 1,
+    "counts": [
+      "# tests 615",
+      "# pass 591",
+      "# fail 24",
+      "# skipped 0"
+    ],
+    "failures": [
+      "tests\\\\admin-access-static.test.mjs",
+      "the admin route has one hidden host and one script entrypoint",
+      "the shared schema loads before the admin UI and auth facade",
+      "staging rules are admin-only and reject prepared-content fields",
+      "loads the import helper after the content schema and before the admin UI",
+      "two-hour and next-day waits receive bounded shard goals",
+      "the two wait phases rotate between the two games for one gate",
+      "an official review suppresses side-game play without touching SRS data",
+      "a waiting window is stable for the same official review deadline",
+      "client Firestore rules contain no direct masteryComplete update escape hatch",
+      "the gate card exposes one aggregate progress bar and the three user categories",
+      "ordinary quiz evidence success is not reported as result failure when readiness projection fails",
+      "Published UI labels and counts only the new ranks",
+      "Published UI reports new-ranks start failures precisely and preserves the visible journey",
+      "Rules structurally bind owner sessions and placement-cleared gates without XP fields",
+      "tests\\\\protected-contracts.test.mjs",
+      "deep published routes resolve local assets from the application root",
+      "published presentation has compact words, polished states, and responsive navigation",
+      "post-commit decoration failure cannot report a successful Gate Clear as failed",
+      "Rank reward is deliberately separate from completion and no new callable exists",
+      "Test Clock is claim-gated, account-scoped, event-driven, and visible only in admin UI",
+      "the clock module is loaded once and never changes server timestamps or reward modules",
+      "Gate Clear and Level Placement own the atomic World completion writes",
+      "the phase adds no Function export, callable, or trigger"
+    ]
+  },
+  "current": {
+    "files": 73,
+    "exitCode": 1,
+    "counts": [
+      "# tests 632",
+      "# pass 608",
+      "# fail 24",
+      "# skipped 0"
+    ],
+    "failures": [
+      "tests\\\\admin-access-static.test.mjs",
+      "the admin route has one hidden host and one script entrypoint",
+      "the shared schema loads before the admin UI and auth facade",
+      "staging rules are admin-only and reject prepared-content fields",
+      "loads the import helper after the content schema and before the admin UI",
+      "two-hour and next-day waits receive bounded shard goals",
+      "the two wait phases rotate between the two games for one gate",
+      "an official review suppresses side-game play without touching SRS data",
+      "a waiting window is stable for the same official review deadline",
+      "client Firestore rules contain no direct masteryComplete update escape hatch",
+      "the gate card exposes one aggregate progress bar and the three user categories",
+      "ordinary quiz evidence success is not reported as result failure when readiness projection fails",
+      "Published UI labels and counts only the new ranks",
+      "Published UI reports new-ranks start failures precisely and preserves the visible journey",
+      "Rules structurally bind owner sessions and placement-cleared gates without XP fields",
+      "tests\\\\protected-contracts.test.mjs",
+      "deep published routes resolve local assets from the application root",
+      "published presentation has compact words, polished states, and responsive navigation",
+      "post-commit decoration failure cannot report a successful Gate Clear as failed",
+      "Rank reward is deliberately separate from completion and no new callable exists",
+      "Test Clock is claim-gated, account-scoped, event-driven, and visible only in admin UI",
+      "the clock module is loaded once and never changes server timestamps or reward modules",
+      "Gate Clear and Level Placement own the atomic World completion writes",
+      "the phase adds no Function export, callable, or trigger"
+    ]
+  },
+  "newFailures": []
+}

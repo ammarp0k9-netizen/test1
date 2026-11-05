@@ -7,8 +7,9 @@ import { spawn, execFileSync } from 'node:child_process';
 import WebSocket from 'ws';
 const root=path.resolve(import.meta.dirname,'..');
 const baseline=process.argv.includes('--baseline'),mode=baseline?'before':'after';
+const paged=process.argv.includes('--paged');
 const baselineRef=process.argv.find(argument=>argument.startsWith('--baseline-ref='))?.slice('--baseline-ref='.length)||'b27ecf5a';
-const evidenceDir=path.join(root,'reports','dictionary-render-evidence');
+const evidenceDir=path.join(root,'reports',paged?'dictionary-pages-evidence':'dictionary-render-evidence');
 const browserPath=['C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe','C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe'].find(fs.existsSync);
 if(!browserPath)throw Error('Chrome/Edge not found');
 const sources=new Map();
@@ -60,6 +61,54 @@ try{
  const started=performance.now();renderLimit=20;render();return{renderMs:performance.now()-started,parses,cards:document.querySelectorAll('#list .word-card').length};
  })()`);
  await delay(400);
+ if(paged){
+  report.pages=await evaluate(String.raw`(async()=>{
+    const source=window.words;window.auth=window.__feedbackFirestore.auth;window.auth.currentUser={uid:'browser-pages'};window.__pageReads=[];let failNext=false;
+    const pages=window.LootLinguaDictionaryPages.activate({ownerId:'browser-pages',
+      fetchCounts:async()=>({total:source.length,starred:source.filter(w=>w.starred).length}),
+      fetchPage:async(cursor,size)=>{window.__pageReads.push({cursor,size});await new Promise(r=>setTimeout(r,120));if(failNext){failNext=false;throw Error('simulated offline')}const offset=cursor||0;return{words:source.slice(offset,offset+size),cursor:offset+size,done:offset+size>=source.length}},
+      onChange(rows,state){if(!state.loading)window.applyCloudWordsFromSnapshot(rows,{paged:true});window.dispatchEvent(new CustomEvent('lootlingua:dictionary-page-state',{detail:state}))}
+    });
+    window.words=[];scrollTo(0,0);await pages.refreshCounts();await pages.next();await new Promise(r=>setTimeout(r,450));
+    const initial={loaded:pages.state().loaded,reads:window.__pageReads.length,cards:document.querySelectorAll('#list .word-card').length,total:getDictionaryWordCount()};
+    failNext=true;try{await pages.next()}catch{}const failure={loaded:pages.state().loaded,retry:!!document.querySelector('#dictionaryLoadStatus button')};
+    document.querySelector('#dictionaryLoadStatus button').click();while(pages.state().loading)await new Promise(r=>setTimeout(r,30));
+    failure.afterRetry=pages.state().loaded;
+    const input=document.getElementById('searchInput'),beforeCancel=pages.state().loaded,readsBeforeCancel=window.__pageReads.length;
+    input.value='1999';render();await new Promise(r=>setTimeout(r,40));input.value='';render();await new Promise(r=>setTimeout(r,350));
+    const cancelledSearch={before:beforeCancel,after:pages.state().loaded,extraRequests:window.__pageReads.length-readsBeforeCancel,error:!!pages.state().error};
+    const beforeQuiz=pages.state().loaded,quizPromise=startActualQuiz('matching',{words:source.slice(0,10),skipAvailabilityCheck:true});
+    await new Promise(r=>setTimeout(r,40));beginViewSwitch();const cancelledQuiz={started:await quizPromise};await new Promise(r=>setTimeout(r,200));cancelledQuiz.loaded=pages.state().loaded;cancelledQuiz.before=beforeQuiz;
+    const down=[];
+    for(let round=0;round<30&&!pages.state().complete;round++){
+      const before=pages.state().loaded,list=document.getElementById('list');
+      scrollTo(0,Math.max(0,list.getBoundingClientRect().top+scrollY+list.getBoundingClientRect().height-innerHeight-1000));
+      for(let wait=0;wait<80&&(pages.state().loaded===before||pages.state().loading)&&!pages.state().complete;wait++)await new Promise(r=>setTimeout(r,30));
+      await new Promise(r=>setTimeout(r,80));
+      const cards=[...document.querySelectorAll('#list .word-card')],visible=cards.filter(card=>{const r=card.getBoundingClientRect();return r.bottom>120&&r.top<innerHeight-70});
+      down.push({loaded:pages.state().loaded,cards:cards.length,visible:visible.length,first:cards[0]?.dataset.id});
+      if(pages.state().loaded===before&&!pages.state().complete)throw Error('Scroll did not load its next page');
+    }
+    const bottomIds=new Set([...document.querySelectorAll('#list .word-card')].map(card=>card.dataset.id));scrollTo(0,0);await new Promise(r=>setTimeout(r,250));
+    const topCards=[...document.querySelectorAll('#list .word-card')];const up={cards:topCards.length,first:topCards[0]?.dataset.id,removedDistantCards:topCards.every(card=>!bottomIds.has(card.dataset.id))};
+    isReorderMode=true;render();const reorderCards=document.querySelectorAll('#list .word-card').length;
+    const dragged=document.querySelector('#list .word-card'),draggedId=dragged.dataset.id,transfer=new DataTransfer();
+    dragged.dispatchEvent(new DragEvent('dragstart',{bubbles:true,dataTransfer:transfer}));scrollTo(0,50000);await new Promise(r=>setTimeout(r,250));
+    const held=dragged.isConnected&&dragged.classList.contains('dictionary-drag-parked');
+    const target=document.querySelector('#list .word-card:not(.dictionary-drag-parked)'),targetIndex=Number(target.dataset.index);
+    target.dispatchEvent(new DragEvent('drop',{bubbles:true,cancelable:true,dataTransfer:transfer}));window.dispatchEvent(new DragEvent('dragend',{bubbles:true,dataTransfer:transfer}));
+    const drag={held, moved:window.words.findIndex(word=>word.id===draggedId)===targetIndex-1, released:!document.querySelector('.dictionary-drag-parked')};
+    window.words.sort((a,b)=>Number(a.id.slice(6))-Number(b.id.slice(6)));reindexWordOrder(window.words);writeWordsToStorage(window.words,'normal','browser-pages');window.invalidateDictionaryRender();isReorderMode=false;scrollTo(0,0);render();
+    return{initial,failure,cancelledSearch,cancelledQuiz,down,up,reorderCards,drag,requests:window.__pageReads.length,complete:pages.state().complete,largestRequest:Math.max(...window.__pageReads.map(r=>r.size))};
+  })()`);
+  assert.equal(report.pages.initial.loaded,80);assert.equal(report.pages.initial.reads,1);assert.equal(report.pages.initial.total,2000);
+  assert.equal(report.pages.failure.loaded,80);assert.equal(report.pages.failure.retry,true);assert.equal(report.pages.failure.afterRetry,160);
+  assert.ok(report.pages.cancelledSearch.after<=report.pages.cancelledSearch.before+80);assert.ok(report.pages.cancelledSearch.extraRequests<=1);assert.equal(report.pages.cancelledSearch.error,false);
+  assert.equal(report.pages.cancelledQuiz.started,false);assert.ok(report.pages.cancelledQuiz.loaded<=report.pages.cancelledQuiz.before+80);
+  assert.ok(report.pages.down.every(step=>step.cards<70&&step.visible>0));assert.equal(report.pages.up.removedDistantCards,true);assert.equal(report.pages.up.first,'audit-0');
+  assert.ok(report.pages.reorderCards<70);assert.equal(report.pages.complete,true);assert.equal(report.pages.largestRequest,80);
+  assert.equal(report.pages.drag.held,true);assert.equal(report.pages.drag.moved,true);assert.equal(report.pages.drag.released,true);
+ }
  for(const width of [1280,390,320]){
   await send('Emulation.setDeviceMetricsOverride',{width,height:900,deviceScaleFactor:1,mobile:width<600});await evaluate('window.scrollTo(0,0)');await delay(200);const steps=[];
   for(const y of [1500,2200,2800,3500,4100,20000,65000,120000,6000]){

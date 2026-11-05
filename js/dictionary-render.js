@@ -19,10 +19,22 @@ let dictionaryMeasurementScope = '';
 let dictionaryResizeObserver = null;
 let dictionaryMeasureFrame = null;
 let dictionaryRenderWidth = 0;
+let dictionaryFullDataRequest = null;
+let dictionaryDraggedCard = null;
+window.releaseDictionaryDraggedCard = function() {
+  if (dictionaryDraggedCard?.classList.contains('dictionary-drag-parked')) dictionaryDraggedCard.remove();
+  dictionaryDraggedCard = null;
+};
+window.cancelDictionaryFullDataRequest = function() {
+  dictionaryFullDataRequest?.controller.abort();
+  dictionaryFullDataRequest = null;
+};
 
 window.invalidateDictionaryRender = function() { dictionaryRenderRevision += 1; };
 window.addEventListener('lootlingua:learning-data-changed', window.invalidateDictionaryRender);
 window.addEventListener('lootlingua:auth-state', () => {
+  window.cancelDictionaryFullDataRequest();
+  window.releaseDictionaryDraggedCard();
   dictionaryListCache = null;
   dictionaryMeasurements.clear();
   dictionaryRenderRevision += 1;
@@ -49,7 +61,7 @@ function getDictionaryListSnapshot(query, searchType) {
   if (query) {
     filtered.sort((a, b) => Number(String(b.word).toLowerCase().startsWith(query)) -
       Number(String(a.word).toLowerCase().startsWith(query)) || String(a.word).localeCompare(String(b.word)));
-  } else if (!isReorderMode) filtered = sortDictionaryWords(filtered);
+  } else if (!isReorderMode && window.LootLinguaDictionaryPages?.current()?.state().complete !== false) filtered = sortDictionaryWords(filtered);
   if (scope !== dictionaryMeasurementScope) {
     dictionaryMeasurements.clear();
     dictionaryMeasurementScope = scope;
@@ -191,13 +203,13 @@ function updateDictionarySpacers(list, snapshot) {
 function measureDictionaryCards() {
   const list = document.getElementById('list');
   const snapshot = dictionaryListCache;
-  if (!snapshot || !list || !isEditableDictionaryView() || isReorderMode) return;
+  if (!snapshot || !list || !isEditableDictionaryView()) return;
   const listTop = list.getBoundingClientRect().top + window.scrollY;
   const viewportOffset = Math.max(0, window.scrollY - listTop);
   const anchorIndex = snapshot.heights.indexAt(viewportOffset);
   const beforeAnchor = snapshot.heights.offset(anchorIndex);
   // Read layout in one pass, then update spacer styles once.
-  const measurements = [...list.querySelectorAll('.word-card')].map(card => ({
+  const measurements = [...list.querySelectorAll('.word-card:not(.dictionary-drag-parked)')].map(card => ({
     card, height: card.getBoundingClientRect().height + parseFloat(getComputedStyle(card).marginBottom || 0),
   }));
   let changed = false;
@@ -264,12 +276,18 @@ function reconcileDictionaryCards(list, displayWords, snapshot, query, start, en
       card.__wordMarkup = markup;
     }
     card.setAttribute('aria-posinset', String(start + offset + 1));
+    card.classList.remove('dictionary-drag-parked');
     card.setAttribute('aria-setsize', String(snapshot.filtered.length));
     dictionaryResizeObserver?.observe(card);
     nodes.push(card);
     existing.delete(id);
   });
   spacer('bottom');
+  if (dictionaryDraggedCard && !nodes.includes(dictionaryDraggedCard)) {
+    dictionaryResizeObserver?.unobserve(dictionaryDraggedCard);
+    dictionaryDraggedCard.classList.add('dictionary-drag-parked');
+    nodes.push(dictionaryDraggedCard);
+  }
   const wanted = new Set(nodes);
   [...list.children].forEach(node => {
     if (!wanted.has(node)) {
@@ -295,6 +313,17 @@ function renderDictionaryWindow(options = {}) {
   const list = document.getElementById('list');
   if (!search || !list) return;
   const query = search.value.toLowerCase().trim();
+  const pages = !isCustomWorldView() && window.LootLinguaDictionaryPages?.current();
+  const fullDataKey = pages && (query || currentFilter !== 'all' || dictionarySortMode !== 'auto')
+    ? JSON.stringify([pages.ownerId, query, currentFilter, dictionarySortMode, dictionarySortCategory]) : '';
+  if (dictionaryFullDataRequest?.key !== fullDataKey) window.cancelDictionaryFullDataRequest();
+  if (fullDataKey && !dictionaryFullDataRequest && !pages.state().complete && !pages.state().error) {
+    const request = { key: fullDataKey, controller: new AbortController() };
+    dictionaryFullDataRequest = request;
+    pages.ensureComplete({ signal: request.controller.signal }).catch(() => {}).finally(() => {
+      if (dictionaryFullDataRequest === request) dictionaryFullDataRequest = null;
+    });
+  }
   const searchType = document.getElementById('searchFilter')?.value || 'all';
   const snapshot = getDictionaryListSnapshot(query, searchType);
   const listWasCleared = !list.querySelector('.word-card, .virtual-list-spacer');
@@ -310,7 +339,8 @@ function renderDictionaryWindow(options = {}) {
     dictionaryResizeObserver?.disconnect();
     if (list.dataset.emptyKey !== snapshot.key || listWasCleared) {
       list.innerHTML = '<li class="dictionary-empty"><i class="fa-solid fa-book-open" aria-hidden="true"></i><span>' +
-        (query ? 'ما في نتائج للبحث' : 'قاموسك فاضي، ابدأ بإضافة كلمة!') + '</span></li>';
+        (pages && !pages.state().complete ? (pages.state().error ? 'تعذّر تحميل الكلمات. أعد المحاولة أدناه.' : 'جارٍ تحميل كلماتك…') :
+          query ? 'ما في نتائج للبحث' : 'قاموسك فاضي، ابدأ بإضافة كلمة!') + '</span></li>';
       list.dataset.emptyKey = snapshot.key;
     }
     wordVirtualState.total = 0;
@@ -327,13 +357,20 @@ function renderDictionaryWindow(options = {}) {
     if (window.scrollY > scrollY) window.scrollTo({ top: scrollY, behavior: 'instant' });
     snapshot.queryChanged = false;
   }
-  const range = isReorderMode ? { start: 0, end: snapshot.filtered.length } :
-    snapshot.heights.range(Math.max(0, scrollY - listTop), window.innerHeight, 12);
-  reconcileDictionaryCards(list, snapshot.filtered.slice(range.start, range.end), snapshot, query, range.start, range.end);
+  const range = snapshot.heights.range(Math.max(0, scrollY - listTop), window.innerHeight, 12);
+  const displayWords = snapshot.filtered.slice(range.start, range.end);
+  reconcileDictionaryCards(list, displayWords, snapshot, query, range.start, range.end);
+  if (pages) {
+    const buckets = [...new Set(displayWords.map(word => Math.floor(snapshot.indexMap.get(String(word.id)) / 80)))];
+    const observed = query ? displayWords : buckets.slice(0, 2).flatMap(bucket => window.words.slice(bucket * 80, bucket * 80 + 80));
+    window.watchPersonalDictionaryRows?.(observed.map(word => word.id));
+  }
   scheduleDictionaryMeasurement();
+  scheduleDictionaryPageCheck();
 }
 
 function render(options = {}) {
+  updateDictionaryPageStatus();
   const run = () => renderDictionaryWindow(options);
   return typeof window.withWordMasterySnapshot === 'function' ? window.withWordMasterySnapshot(run) : run();
 }
@@ -380,6 +417,10 @@ document.addEventListener('DOMContentLoaded', () => {
 
   const list = document.getElementById('list');
   if (!list) return;
+
+  list.addEventListener('dragstart', event => {
+    if (isReorderMode) dictionaryDraggedCard = event.target.closest('.word-card');
+  }, { capture: true });
 
   list.addEventListener('keydown', (event) => {
     if ((event.key !== 'Enter' && event.key !== ' ') || !event.target.matches('.word-card')) return;
@@ -432,11 +473,59 @@ document.addEventListener('DOMContentLoaded', () => {
 
 // One render per animation frame; native wheel/touch scrolling stays in control.
 let wordRenderScrollRaf = null;
+let dictionaryPageCheckRaf = null;
+function scheduleDictionaryPageCheck() {
+  if (dictionaryPageCheckRaf !== null) return;
+  dictionaryPageCheckRaf = requestAnimationFrame(() => {
+    dictionaryPageCheckRaf = null;
+    const pages = window.LootLinguaDictionaryPages?.current();
+    if (!pages || currentView !== 'personal' || isReorderMode) return;
+    const state = pages.state();
+    if (state.complete || state.loading || state.error) return;
+    const list = document.getElementById('list');
+    if (list && list.getBoundingClientRect().bottom < window.innerHeight + 1800) pages.next().catch(() => {});
+  });
+}
+
+function updateDictionaryPageStatus() {
+  const list = document.getElementById('list');
+  if (!list) return;
+  let status = document.getElementById('dictionaryLoadStatus');
+  if (!status) {
+    status = document.createElement('div');
+    status.id = 'dictionaryLoadStatus';
+    status.className = 'dictionary-load-status';
+    status.setAttribute('role', 'status');
+    status.setAttribute('aria-live', 'polite');
+    list.after(status);
+    status.addEventListener('click', event => {
+      if (event.target.closest('button')) window.LootLinguaDictionaryPages?.current()?.next().catch(() => {});
+    });
+  }
+  const pages = currentView === 'personal' && window.LootLinguaDictionaryPages?.current();
+  const state = pages?.state();
+  status.hidden = !state || (state.complete && !state.offline);
+  if (status.hidden) return;
+  status.setAttribute('aria-busy', String(state.loading));
+  if (state.offline) status.textContent = 'تعرض نسخة محفوظة على هذا الجهاز لحين عودة الاتصال.';
+  else if (state.error) status.innerHTML = 'تعذّر تحميل بقية الكلمات. <button type="button">إعادة المحاولة</button>';
+  else status.textContent = state.loading ? (document.getElementById('searchInput')?.value.trim() ? 'جارٍ البحث في بقية القاموس…' : 'جارٍ تحميل كلمات إضافية…') : '';
+}
+window.addEventListener('lootlingua:dictionary-page-state', () => {
+  updateDictionaryPageStatus();
+  scheduleDictionaryPageCheck();
+  if (currentView === 'personal') {
+    const empty = document.querySelector('#list .dictionary-empty');
+    if (empty) { delete document.getElementById('list').dataset.emptyKey; render(); }
+  }
+  refreshFeatureUnlockUI();
+});
 function scheduleWordScrollWindowCheck() {
+  scheduleDictionaryPageCheck();
   if (wordRenderScrollRaf !== null) return;
   wordRenderScrollRaf = requestAnimationFrame(() => {
     wordRenderScrollRaf = null;
-    if (!isEditableDictionaryView() || isReorderMode || !dictionaryListCache?.filtered.length) return;
+    if (!isEditableDictionaryView() || !dictionaryListCache?.filtered.length) return;
     const list = document.getElementById('list');
     if (!list) return;
     const top = list.getBoundingClientRect().top + window.scrollY;
@@ -445,6 +534,10 @@ function scheduleWordScrollWindowCheck() {
   });
 }
 window.addEventListener('scroll', scheduleWordScrollWindowCheck, { passive: true });
+window.addEventListener('dragend', () => {
+  window.releaseDictionaryDraggedCard();
+  if (isEditableDictionaryView()) render();
+});
 window.addEventListener('resize', () => {
   // Mobile browser chrome changes height on scroll. Only a real list-width
   // change (checked by render) invalidates measured card heights.

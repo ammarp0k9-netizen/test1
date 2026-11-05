@@ -57,6 +57,8 @@ function applyStoredWordOrder(words) {
   if (!arr.length) return arr;
   if (arr.some((word) => Number.isFinite(word?.order))) {
     arr.sort((a, b) => (a.order ?? Number.MAX_SAFE_INTEGER) - (b.order ?? Number.MAX_SAFE_INTEGER));
+    if (window.LootLinguaDictionaryPages?.current()?.state().complete === false &&
+        words === window.LootLinguaDictionaryPages.current().words()) return arr;
     return reindexWordOrder(arr);
   }
   return reindexWordOrder(arr);
@@ -394,7 +396,8 @@ window.toggleDictionarySortMenu = function() {
   syncDictionarySortUI();
 };
 
-window.setDictionarySortMode = function(mode, category) {
+window.setDictionarySortMode = async function(mode, category) {
+  if (await window.LootLinguaDictionaryPages?.requireComplete({ personal: !isCustomWorldView() }) === false) return;
   const validModes = ['auto', 'newest', 'oldest', 'alpha', 'category'];
   dictionarySortMode = validModes.includes(mode) ? mode : 'auto';
   if (mode === 'category') {
@@ -725,8 +728,8 @@ function setActiveNavLink(key) {
 function getUnlockProgressSnapshot() {
   const words = getPersonalDictionaryWordsSnapshot();
   return {
-    wordCount: words.length,
-    starredCount: words.filter(w => w.starred).length,
+    wordCount: getDictionaryWordCount(),
+    starredCount: window.LootLinguaDictionaryPages?.current()?.state().counts?.starred ?? words.filter(w => w.starred).length,
     userXP: loadInt('userXP', 0),
     userLevel: getLevelFromXP(loadInt('userXP', 0)),
     dailyStreak: loadInt('dailyStreak', 0),
@@ -2374,6 +2377,13 @@ window.declineGuestMigration = function() {
 };
 
 function beginViewSwitch() {
+  window.releaseDictionaryDraggedCard?.();
+  window.cancelDictionaryFullDataRequest?.();
+  window.watchPersonalDictionaryRows?.([]);
+  window.__dictionaryNavigationGeneration = (window.__dictionaryNavigationGeneration || 0) + 1;
+  window.dispatchEvent(new CustomEvent('lootlingua:dictionary-navigation'));
+  const dictionaryStatus = document.getElementById('dictionaryLoadStatus');
+  if (dictionaryStatus) dictionaryStatus.hidden = true;
   window.LootLinguaGuidedFirstJourney?.clearCoach?.();
   document.body.classList.add('view-transitioning');
   requestAnimationFrame(() => {

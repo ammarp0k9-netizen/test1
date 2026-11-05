@@ -3716,11 +3716,33 @@ ul { list-style: none; padding: 0; margin: 0; }
 #list.dictionary-windowed {
   overflow-anchor: none;
 }
+
+.dictionary-load-status {
+  text-align: center;
+  color: var(--text-gray);
+  padding: 16px 8px;
+  min-height: 24px;
+}
+.dictionary-load-status[hidden] { display: none; }
+.dictionary-load-status button {
+  color: var(--text-white);
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px 12px;
+  cursor: pointer;
+}
 #list.dictionary-windowed .word-card {
   animation: none;
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   gap: 12px;
+}
+#list.dictionary-windowed .dictionary-drag-parked {
+  position: fixed;
+  left: -10000px;
+  top: 0;
+  pointer-events: none;
 }
 #list.dictionary-windowed .dictionary-word-copy {
   flex: 1;

@@ -495,6 +495,8 @@ function readQuizSourceRawWords(scope = currentQuizSource, ownerId = getQuizSour
 
 function getQuizSourceResolutionStatus(scope, ownerId) {
   const source = quizCore.parseSourceScope(scope);
+  const pageState = source.sourceType !== 'private-world' && window.LootLinguaDictionaryPages?.current(ownerId)?.state();
+  if (pageState && !pageState.complete) return pageState.error ? 'error' : 'loading';
   if (source.sourceType !== 'private-world' || ownerId === 'guest') return 'ready';
   return quizSourceLoadStates.get(getQuizSourceLoadKey(ownerId, source.scope))?.status || 'idle';
 }
@@ -531,6 +533,21 @@ function getQuizSourceWords(scope = currentQuizSource, options = {}) {
 async function ensureQuizSourceReady(scope = currentQuizSource, options = {}) {
   const source = quizCore.parseSourceScope(scope);
   const ownerId = getQuizSourceOwnerId(options.ownerId);
+  const pages = source.sourceType !== 'private-world' && window.LootLinguaDictionaryPages?.current(ownerId);
+  if (pages) {
+    if (options.token && !quizSourceRequestCoordinator.isCurrent(options.token)) return { stale: true, ownerId, scope: source.scope };
+    const token = options.token && quizSourceRequestCoordinator.isCurrent(options.token)
+      ? options.token : quizSourceRequestCoordinator.begin(ownerId, source.scope);
+    try {
+      if (await window.LootLinguaDictionaryPages.requireComplete() === false) return { error: pages.state().error, stale: !pages.state().error, ownerId, scope: source.scope };
+      if (!quizSourceRequestCoordinator.isCurrent(token) || getQuizSourceOwnerId() !== ownerId) return { stale: true, ownerId, scope: source.scope };
+      refreshQuizAvailableCount();
+      refreshQuizSettingsSummary();
+      return resolveQuizSourceSnapshot(source.scope, { ...options, ownerId, status: 'ready' });
+    } catch (error) {
+      return { error, ownerId, scope: source.scope, stale: getQuizSourceOwnerId() !== ownerId };
+    }
+  }
   if (source.sourceType !== 'private-world' || ownerId === 'guest') {
     return resolveQuizSourceSnapshot(source.scope, { ...options, ownerId, status: 'ready' });
   }
@@ -1066,6 +1083,11 @@ function getConfiguredQuizWords(options = {}) {
 function refreshQuizAvailableCount() {
   const quizCountEl = document.getElementById('quizAvailableCount');
   if (!quizCountEl) return;
+  const pageState = window.LootLinguaDictionaryPages?.current()?.state();
+  if (pageState && !pageState.complete) {
+    quizCountEl.textContent = pageState.error ? 'تعذّر تجهيز العدد الكامل. اختر المصدر لإعادة المحاولة.' : 'يُجهَّز عدد الكلمات المؤهلة كاملًا عند اختيار مصدر الاختبار.';
+    return;
+  }
   const total = getQuizSourceWords('personal', { mode: selectedQuizMode }).length;
   const starred = getQuizSourceWords('starred', { mode: selectedQuizMode }).length;
   const ownerId = getQuizSourceOwnerId();
@@ -1116,7 +1138,27 @@ function startConfiguredQuiz() {
   return startActualQuiz(selectedQuizMode, { configured: true });
 }
 
+let personalQuizPreparation = null;
 async function startActualQuiz(mode, options = {}) {
+  const pages = window.LootLinguaDictionaryPages?.current();
+  if (pages && !pages.state().complete) {
+    if (personalQuizPreparation) return personalQuizPreparation;
+    const scope = currentQuizSource, selection = selectedQuizMode;
+    const button = document.getElementById('quizStartButton');
+    const label = button?.textContent;
+    if (button) { button.disabled = true; button.textContent = 'جارٍ تجهيز الكلمات…'; button.setAttribute('aria-busy', 'true'); }
+    const request = Promise.resolve().then(async () => {
+      if (await window.LootLinguaDictionaryPages.requireComplete() === false) return false;
+      if (!options.words && (scope !== currentQuizSource || selection !== selectedQuizMode)) return false;
+      return startActualQuiz(mode, options);
+    }).finally(() => {
+      if (personalQuizPreparation === request) personalQuizPreparation = null;
+      if (button) { button.textContent = label; button.removeAttribute('aria-busy'); }
+      refreshQuizSettingsSummary();
+    });
+    personalQuizPreparation = request;
+    return request;
+  }
   stopTimeAttackTimer();
   const explicitWords = Array.isArray(options.words) ? options.words.filter(Boolean) : null;
   const sessionSource = String(options.source || currentQuizSource || 'personal');
@@ -1313,7 +1355,8 @@ function gateGapReviewWords(wordKeys) {
   return [...byWordKey.values()];
 }
 
-window.startGateGapReview = function(wordKeys, context = {}) {
+window.startGateGapReview = async function(wordKeys, context = {}) {
+  if (await window.LootLinguaDictionaryPages?.requireComplete() === false) return false;
   if (!isFeatureUnlocked('quiz')) {
     window.loadQuizView();
     return false;

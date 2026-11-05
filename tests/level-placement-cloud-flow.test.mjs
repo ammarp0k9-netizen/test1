@@ -89,10 +89,17 @@ function createHarness(options = {}) {
   };
   const getDocs = async (reference) => {
     const prefix = `${reference.path}/`;
-    const docs = [...values.entries()]
+    let docs = [...values.entries()]
       .filter(([path]) => path.startsWith(prefix) && !path.slice(prefix.length).includes('/'))
       .map(([path]) => snapshot({ path }));
-    return { docs };
+    if (reference.constraints) {
+      docs.sort((a, b) => a.id.localeCompare(b.id));
+      const after = reference.constraints.find(item => item.type === 'after');
+      if (after) docs = docs.filter(item => item.id > after.id);
+      const size = reference.constraints.find(item => item.type === 'limit')?.size;
+      if (size !== undefined) docs = docs.slice(0, size);
+    }
+    return { docs, size: docs.length, metadata: { fromCache: false } };
   };
   const trace = {
     count() { return this; },
@@ -119,6 +126,11 @@ function createHarness(options = {}) {
         return snapshot(reference);
       },
       getDocs,
+      query: (reference, ...constraints) => ({ ...reference, constraints }),
+      orderBy: field => ({ type: 'order', field }),
+      documentId: () => '__name__',
+      startAfter: item => ({ type: 'after', id: item.id }),
+      limit: size => ({ type: 'limit', size }),
       runTransaction,
       serverTimestamp: () => new Date(),
       setDoc: async (reference, data, writeOptions) => {
@@ -264,7 +276,7 @@ function createHarness(options = {}) {
   };
 
   const executableCloudSource = [
-    'const { collection, doc, getDoc, getDocs, getFirestore, runTransaction, serverTimestamp, setDoc, getApps, getAuth } = window.__firebase;',
+    'const { collection, doc, getDoc, getDocs, getFirestore, runTransaction, serverTimestamp, setDoc, getApps, getAuth, query, orderBy, documentId, startAfter, limit } = window.__firebase;',
     journeyCloudModule.slice(journeyCloudModule.indexOf('const app =')),
   ].join('\n');
   vm.runInContext(executableCloudSource, context);

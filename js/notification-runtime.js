@@ -120,6 +120,12 @@
     if (!record || record.status !== 'active') return false;
     store.markVisibleRead([record.id]);
     const action = String(record.cta?.id || '');
+    if (['review-due', 'practice-new-words', 'practice-weak-words', 'practice-gate-gap'].includes(action)) {
+      const ownerId = currentOwner();
+      if (await root.LootLinguaDictionaryPages?.requireComplete() === false) return false;
+      await sources.collect({ ownerId, now: Date.now(), reason: 'review-action' });
+      if (currentOwner() !== ownerId) return false;
+    }
     const args = record.cta?.args || record.context || {};
     let handled = true;
     if (action === 'open-treasure') root.loadTreasureView?.();
@@ -140,7 +146,7 @@
       } else handled = false;
     } else if (action === 'practice-gate-gap') {
       const context = sources.getActionContext();
-      handled = root.startGateGapReview?.(context.gateWordKeys, args) !== false;
+      handled = await root.startGateGapReview?.(context.gateWordKeys, args) !== false;
     } else if (action === 'start-quiz' || action === 'resume-learning') {
       root.loadQuizView?.({ skipResume: false });
     } else if (['open-ready-gate', 'open-unlocked-content'].includes(action)) {
@@ -176,6 +182,7 @@
     'lootlingua:journey-cloud-ready',
     'lootlingua:trusted-quiz-completed',
     'lootlingua:learning-data-changed',
+    'lootlingua:dictionary-page-state',
   ];
   events.forEach((name) => root.addEventListener(name, () => requestEvaluation(name)));
   root.addEventListener('lootlingua:auth-state', () => {

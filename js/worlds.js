@@ -55,7 +55,7 @@ const TITLE_DEFS = [
     color: '#fbbf24',
     name: 'صائد الصعب',
     how: 'علّم 10 كلمات ككلمات صعبة.',
-    unlocked: () => getPersonalDictionaryWordsSnapshot().filter(w => w.starred).length >= 10,
+    unlocked: () => getDictionaryStarredCount() >= 10,
   },
   {
     id: 'first_mastery',
@@ -63,7 +63,7 @@ const TITLE_DEFS = [
     color: '#22d3ee',
     name: 'صاقل الجوهرة',
     how: 'أتقن أول كلمة في قاموسك.',
-    unlocked: () => getPersonalDictionaryWordsSnapshot().filter(w => getWordMasteryState(w).mastery_status === 'Mastered').length >= 1,
+    unlocked: () => getDictionaryMasteredCount() >= 1,
   },
   {
     id: 'mastery_circle',
@@ -71,7 +71,7 @@ const TITLE_DEFS = [
     color: '#eab308',
     name: 'تاج الإتقان',
     how: 'أتقن 10 كلمات في قاموسك.',
-    unlocked: () => getPersonalDictionaryWordsSnapshot().filter(w => getWordMasteryState(w).mastery_status === 'Mastered').length >= 10,
+    unlocked: () => getDictionaryMasteredCount() >= 10,
   },
   {
     id: 'strategist',
@@ -523,13 +523,13 @@ function getTitleProgressMetrics() {
   const journeyTitles = getJourneyTitleProgress();
   return {
     loot,
-    wordCount: words.length,
-    starred: words.filter(w => w.starred).length,
+    wordCount: getDictionaryWordCount(),
+    starred: getDictionaryStarredCount(),
     perfect: loadInt('lootlinguaPerfectQuizzes', 0),
     freezeSaves: loadInt(FREEZE_SAVES_KEY, 0),
     level: getLevelFromXP(loadInt('userXP', 0)),
     streak: loadInt('dailyStreak', 0),
-    masteredWords: words.filter(w => getWordMasteryState(w).mastery_status === 'Mastered').length,
+    masteredWords: getDictionaryMasteredCount(),
     clearedGates: journeyTitles.clearedGateIds.length,
     completedWorlds: journeyTitles.completedWorldIds.length,
   };
@@ -6018,6 +6018,8 @@ async function loadPublishedRouteData(route, options) {
         : 'جارٍ تحميل كلمات البوابة...'
   );
   try {
+    if (level === 'words' && await window.LootLinguaDictionaryPages?.requireComplete() === false) throw new Error('Dictionary data is unavailable.');
+    if (generation !== publishedContentState.generation) return;
     const api = getPublishedContentApi();
     if (key === 'not-found') {
       const notFound = new Error('Published route was not found.');
@@ -6807,7 +6809,8 @@ function showSkippedDuplicateWordsNotice(skipped, targetId = 'personal', operati
 
 let worldManageOperationPromise = null;
 
-window.applyWorldManageToTarget = function(targetId, action = pendingWorldManageAction) {
+window.applyWorldManageToTarget = async function(targetId, action = pendingWorldManageAction) {
+  if (await window.LootLinguaDictionaryPages?.requireComplete() === false) return false;
   if (worldManageOperationPromise) return worldManageOperationPromise;
   const selected = getSelectedWordsForWorldManage();
   if (!selected.length) return Promise.resolve(false);
@@ -7111,7 +7114,8 @@ window.loadTreasureView = function() {
 };
 
 // ── Starred Words View ──
-window.loadStarredView = function() {
+window.loadStarredView = async function() {
+  if (await window.LootLinguaDictionaryPages?.requireComplete() === false) return;
   window.saveActiveAddFormDraft?.();
   cleanupQuizSessionIfActive();
   if (window.LootLinguaGuidedFirstJourney?.shouldAllowSurface?.('starred') === false) return;
