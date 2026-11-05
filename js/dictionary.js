@@ -145,10 +145,12 @@ function wordsSnapshotNeedsFullRender(prev, next) {
 
 function syncWordMetaInDom() {
   if (!Array.isArray(window.words)) return;
-  window.words.forEach((word) => {
-    const safeId = cssEscapeValue(String(word.id));
-    const starBtn = document.querySelector(`[data-action="star"][data-id="${safeId}"]`);
-    if (starBtn) starBtn.classList.toggle('active', !!word.starred);
+  const byId = new Map(window.words.map(word => [String(word.id), word]));
+  document.querySelectorAll('#list [data-action="star"]').forEach((starBtn) => {
+    const word = byId.get(starBtn.dataset.id);
+    if (!word) return;
+    starBtn.classList.toggle('active', !!word.starred);
+    starBtn.setAttribute('aria-pressed', String(Boolean(word.starred)));
   });
 }
 
@@ -156,6 +158,10 @@ window.applyCloudWordsFromSnapshot = function(cloudWords) {
   const prev = Array.isArray(window.words) ? window.words : [];
   const uid = window.auth?.currentUser?.uid;
   let normalized = applyStoredWordOrder(cloudWords);
+  if (!isCustomWorldView()) {
+    const expanded = new Set(prev.filter(word => word.expanded).map(word => String(word.id)));
+    normalized = normalized.map(word => ({ ...word, expanded: expanded.has(String(word.id)) }));
+  }
   if (!isCustomWorldView()) {
     loadDictionarySortPrefs();
   }
@@ -1987,6 +1993,7 @@ function handleLiClick(index, el) {
     const word = window.words[index];
     if (word) {
       word.expanded = !word.expanded;
+      if (word.expanded) window.ensureWordCardDetails?.(word, el);
       // Expansion is transient UI state; preserve the virtual window and scroll position.
       el.classList.toggle('show-example', word.expanded);
       el.setAttribute('aria-expanded', String(word.expanded));

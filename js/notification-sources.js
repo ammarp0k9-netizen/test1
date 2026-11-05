@@ -223,7 +223,9 @@
     const now = timestamp(options.now) || Date.now();
     const ownerId = String(options.ownerId || root.auth?.currentUser?.uid || 'guest');
     const words = visibleWords(ownerId);
-    const review = reviewFacts(words, now);
+    const review = typeof root.withWordMasterySnapshot === 'function'
+      ? root.withWordMasterySnapshot(() => reviewFacts(words, now))
+      : reviewFacts(words, now);
     const newWords = groupNewWords(review.all, now);
     const quiz = quizFacts(review.all, newWords, now);
     if (ownerId !== 'guest' && root.LootLinguaNotificationCloud?.latestTrustedQuizAt) {

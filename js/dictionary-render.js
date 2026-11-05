@@ -1,76 +1,76 @@
 function highlightText(text, query) {
-  if (!query || !text) return text || '';
-  try {
-    return text.replace(new RegExp(`(${query.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')})`, "gi"), '<span class="highlight">$1</span>');
-  } catch { return text; }
+  const value = String(text ?? '');
+  if (!query || !value) return escapeHtml(value);
+  const needle = String(query).toLowerCase();
+  const lower = value.toLowerCase();
+  let cursor = 0, match, html = '';
+  while ((match = lower.indexOf(needle, cursor)) !== -1) {
+    html += escapeHtml(value.slice(cursor, match)) + '<span class="highlight">' +
+      escapeHtml(value.slice(match, match + needle.length)) + '</span>';
+    cursor = match + needle.length;
+  }
+  return html + escapeHtml(value.slice(cursor));
 }
 
-function getWordRenderKey(query, searchType, filtered) {
-  return [
-    getActiveDictionaryStorageScope(),
-    query,
-    searchType,
-    currentFilter,
-    dictionarySortMode,
-    dictionarySortCategory,
-    isBulkDeleteMode ? 'bulk' : 'normal',
-    [...bulkSelectedWordIds].join(','),
-    window.words.length,
-    filtered.length,
-    filtered[0]?.id || '',
-    filtered[filtered.length - 1]?.id || ''
-  ].join('|');
-}
+let dictionaryRenderRevision = 0;
+let dictionaryListCache = null;
+let dictionaryMeasurements = new Map();
+let dictionaryMeasurementScope = '';
+let dictionaryResizeObserver = null;
+let dictionaryMeasureFrame = null;
+let dictionaryRenderWidth = 0;
 
-function getCenteredWordWindowStart(firstVisible, viewportRows, total) {
-  const maxStart = Math.max(0, total - WORD_DOM_WINDOW_SIZE);
-  const sideBuffer = Math.max(WORD_DOM_BUFFER, Math.floor((WORD_DOM_WINDOW_SIZE - viewportRows) / 2));
-  return Math.max(0, Math.min(maxStart, firstVisible - sideBuffer));
-}
+window.invalidateDictionaryRender = function() { dictionaryRenderRevision += 1; };
+window.addEventListener('lootlingua:learning-data-changed', window.invalidateDictionaryRender);
+window.addEventListener('lootlingua:auth-state', () => {
+  dictionaryListCache = null;
+  dictionaryMeasurements.clear();
+  dictionaryRenderRevision += 1;
+});
 
-function getWordWindowRange(total, listEl, resetWindow, scrollYOverride) {
-  if (resetWindow) {
-    wordVirtualState.start = 0;
-    wordVirtualState.end = 0;
-    wordVirtualState.listTop = 0;
-    wordVirtualState.lastHtmlKey = '';
-    wordVirtualState.total = total;
+function getDictionaryListSnapshot(query, searchType) {
+  const scope = getStorageUserId() + ':' + getActiveDictionaryStorageScope();
+  const key = JSON.stringify([scope, query, searchType, currentFilter, dictionarySortMode, dictionarySortCategory, isReorderMode]);
+  const source = window.words;
+  if (dictionaryListCache && dictionaryListCache.key === key &&
+      dictionaryListCache.source === source && dictionaryListCache.revision === dictionaryRenderRevision && renderLimit > 20) {
+    return dictionaryListCache;
   }
-  if (!WORD_RENDER_FAST_MODE || total <= WORD_DOM_WINDOW_SIZE || isReorderMode) {
-    wordVirtualState.total = total;
-    return { start: 0, end: total, topSpacer: 0, bottomSpacer: 0 };
+  let filtered = source.filter(word => {
+    if (!word.word || window.LootLinguaWordLifecycle?.isVisibleInDictionaryList(word) === false) return false;
+    if (currentFilter !== 'all' && !word.starred) return false;
+    if (!query) return true;
+    const matchesWord = String(word.word).toLowerCase().includes(query);
+    const matchesMeaning = String(word.meaning || '').toLowerCase().includes(query);
+    const matchesExample = String(word.example || '').toLowerCase().includes(query);
+    return searchType === 'word' ? matchesWord : searchType === 'meaning' ? matchesMeaning :
+      searchType === 'example' ? matchesExample : matchesWord || matchesMeaning || matchesExample;
+  });
+  if (query) {
+    filtered.sort((a, b) => Number(String(b.word).toLowerCase().startsWith(query)) -
+      Number(String(a.word).toLowerCase().startsWith(query)) || String(a.word).localeCompare(String(b.word)));
+  } else if (!isReorderMode) filtered = sortDictionaryWords(filtered);
+  if (scope !== dictionaryMeasurementScope) {
+    dictionaryMeasurements.clear();
+    dictionaryMeasurementScope = scope;
   }
-
-  const rect = listEl.getBoundingClientRect();
-  const listTop = wordVirtualState.listTop || (rect.top + window.scrollY);
-  wordVirtualState.listTop = listTop;
-
-  const rowH = Math.max(86, wordVirtualState.rowHeight || 126);
-  const scrollY = typeof scrollYOverride === 'number' ? scrollYOverride : window.scrollY;
-  const viewportStart = Math.max(0, scrollY - listTop);
-  const viewportRows = Math.ceil(window.innerHeight / rowH);
-  const firstVisible = Math.max(0, Math.floor(viewportStart / rowH));
-  const lastVisible = Math.min(total - 1, firstVisible + viewportRows);
-  let start = wordVirtualState.start || 0;
-  const canReuseWindow =
-    !resetWindow &&
-    wordVirtualState.total === total &&
-    wordVirtualState.end > wordVirtualState.start &&
-    firstVisible >= wordVirtualState.start + WORD_DOM_BUFFER &&
-    lastVisible <= wordVirtualState.end - WORD_DOM_EDGE_BUFFER;
-
-  if (!canReuseWindow) {
-    start = getCenteredWordWindowStart(firstVisible, viewportRows, total);
-  }
-  const end = Math.min(total, start + WORD_DOM_WINDOW_SIZE);
-  wordVirtualState.total = total;
-
-  return {
-    start,
-    end,
-    topSpacer: start * rowH,
-    bottomSpacer: Math.max(0, (total - end) * rowH)
+  const previous = dictionaryListCache;
+  const sameOrder = previous?.scope === scope && previous.filtered.length === filtered.length &&
+    previous.filtered.every((word, index) => String(word.id) === String(filtered[index].id));
+  const heights = sameOrder ? previous.heights : window.LootLinguaDictionaryWindow.createHeightIndex(filtered.length);
+  if (!sameOrder) filtered.forEach((word, index) => {
+    const measured = dictionaryMeasurements.get(String(word.id));
+    if (measured && measured.expanded === Boolean(word.expanded)) heights.measure(index, measured.height);
+  });
+  dictionaryListCache = {
+    key, scope, source, revision: dictionaryRenderRevision, filtered, heights,
+    indexMap: new Map(source.map((word, index) => [String(word.id), index])),
+    filteredIndex: new Map(filtered.map((word, index) => [String(word.id), index])),
+    queryChanged: Boolean(previous && previous.scope === scope && previous.key !== key),
   };
+  renderLimit = WORD_DOM_WINDOW_SIZE;
+  window.LootLinguaOperations?.diagnostic?.('dictionary-filter-pass', { wordCount: source.length });
+  return dictionaryListCache;
 }
 
 function wordDetailText(value) {
@@ -122,23 +122,23 @@ function renderWordCard(w, query, indexMap) {
                isBulkDeleteMode && bulkSelectedWordIds.has(String(w.id)) ? 'bulk-selected' : '',
                w.expanded ? 'show-example' : '']
     .filter(Boolean).join(' ');
-  const safeId = w.id.replace(/'/g, "\\'");
+  const safeId = escapeHtml(String(w.id));
   const returnToPersonalAction = isCustomWorldView() &&
     window.LootLinguaWordLifecycle?.isMovedToPrivateWorld?.(w)
     ? `<button class="icon-circle return-personal-btn" data-tip="إعادة للقاموس الشخصي" data-action="return-personal" data-id="${safeId}"><i class="fa-solid fa-arrow-rotate-left"></i></button>`
     : '';
 
   return `
-    <li ${drag} class="${cls}" data-action="toggle-expand" data-index="${ri}" data-id="${safeId}" aria-expanded="${Boolean(w.expanded)}">
+    <li ${drag} class="${cls}" tabindex="0" data-action="toggle-expand" data-index="${ri}" data-id="${safeId}" aria-expanded="${Boolean(w.expanded)}">
       <div class="word-body" style="flex:1;min-width:0;" data-action="toggle-expand" data-index="${ri}">
-        <div style="display:flex;align-items:flex-start;gap:8px;margin-bottom:4px;">
+        <div class="dictionary-word-heading" style="display:flex;align-items:flex-start;gap:8px;margin-bottom:4px;">
           <button class="star-btn ${w.starred ? 'active' : ''}" data-tip="صعبة"
-                  data-action="star" data-id="${safeId}">
+                  aria-label="كلمة صعبة" aria-pressed="${Boolean(w.starred)}" data-action="star" data-id="${safeId}">
             <i class="fas fa-star"></i>
           </button>
-          <div>
+          <div class="dictionary-word-copy">
             <div class="word-text">
-              ${highlightText(w.word, query)}
+              <span class="dictionary-word-label" dir="ltr" lang="en">${highlightText(w.word, query)}</span>
               ${w.category ? `<span class="cat-tag tag-${safeClassToken(w.category)}">${escapeHtml(w.category)}</span>` : ''}
               ${w.partOfSpeech ? `<span class="pos-tag">${escapeHtml(w.partOfSpeech)}</span>` : ''}
               ${renderMasteryIndicator(w)}
@@ -146,232 +146,195 @@ function renderWordCard(w, query, indexMap) {
             <div class="meaning-text">${highlightText(w.meaning, query)}</div>
           </div>
         </div>
-        ${renderWordCardDetails(w)}
+        ${w.expanded ? renderWordCardDetails(w) : ''}
       </div>
       ${isReorderMode
         ? '<span style="font-size:20px;color:var(--text-gray);padding:0 8px;flex-shrink:0;">☰</span>'
         : isBulkDeleteMode
           ? `<span class="selection-state">${bulkSelectedWordIds.has(String(w.id)) ? 'محدد' : 'تحديد'}</span>`
         : `<div class="actions">
-             <button class="icon-circle sound-btn" data-tip="نطق" data-action="sound" data-id="${safeId}"><i class="fas fa-volume-up"></i></button>
+             <button class="icon-circle sound-btn" aria-label="نطق الكلمة" data-tip="نطق" data-action="sound" data-id="${safeId}"><i class="fas fa-volume-up" aria-hidden="true"></i></button>
              ${returnToPersonalAction}
-             <button class="icon-circle edit-btn"  data-tip="تعديل" data-action="edit" data-id="${safeId}"><i class="fas fa-edit"></i></button>
-             <button class="icon-circle del-btn"   data-tip="حذف" data-action="delete" data-id="${safeId}"><i class="fas fa-trash-alt"></i></button>
+             <button class="icon-circle edit-btn" aria-label="تعديل الكلمة" data-tip="تعديل" data-action="edit" data-id="${safeId}"><i class="fas fa-edit" aria-hidden="true"></i></button>
+             <button class="icon-circle del-btn" aria-label="حذف الكلمة" data-tip="حذف" data-action="delete" data-id="${safeId}"><i class="fas fa-trash-alt" aria-hidden="true"></i></button>
            </div>`
       }
     </li>`;
 }
 
-function updateWordRowHeight(listEl) {
-  requestAnimationFrame(() => {
-    const card = listEl.querySelector('.word-card');
-    if (!card) return;
-    const rect = card.getBoundingClientRect();
-    if (rect.height > 40) {
-      wordVirtualState.rowHeight = Math.round(rect.height + 12);
-    }
-  });
+function ensureWordCardDetails(word, card) {
+  if (!card || card.querySelector('.word-card-details')) return;
+  card.querySelector('.word-body')?.insertAdjacentHTML('beforeend', renderWordCardDetails(word));
 }
-
-function getWordRenderMetrics(listEl) {
-  if (!listEl || !wordVirtualState.total) return null;
-  const rowH = Math.max(86, wordVirtualState.rowHeight || 126);
-  const listTop = wordVirtualState.listTop || (listEl.getBoundingClientRect().top + window.scrollY);
-  const visibleRows = Math.ceil(window.innerHeight / rowH);
-  return { rowH, listTop, visibleRows };
-}
-
-function getWordScrollWindowState(listEl, scrollY = window.scrollY) {
-  const metrics = getWordRenderMetrics(listEl);
-  if (!metrics) return null;
-  const firstVisible = Math.max(0, Math.floor(Math.max(0, scrollY - metrics.listTop) / metrics.rowH));
-  const lastVisible = firstVisible + metrics.visibleRows;
-  return { ...metrics, firstVisible, lastVisible };
-}
-
-function showWordRenderLoading(show) {
-  let loader = document.getElementById('wordRenderLoading');
-  if (!loader && show) {
-    loader = document.createElement('div');
-    loader.id = 'wordRenderLoading';
-    loader.className = 'word-render-loading';
-    loader.setAttribute('role', 'status');
-    loader.setAttribute('aria-live', 'polite');
-    loader.innerHTML = '<i class="fas fa-spinner fa-spin" aria-hidden="true"></i><span>جاري تجهيز الكلمات...</span>';
-    document.body.appendChild(loader);
-  }
-  if (loader) loader.classList.toggle('show', !!show);
-}
+window.ensureWordCardDetails = ensureWordCardDetails;
 
 function cancelWordWindowTransition() {
+  // Retained for view cleanup; scrolling no longer has a pinned/loading phase.
   clearTimeout(wordVirtualState.transitionTimer);
   clearTimeout(wordVirtualState.loadingTimer);
   wordVirtualState.isTransitioning = false;
-  wordVirtualState.transitionTargetY = null;
-  wordVirtualState.transitionPinnedY = null;
-  showWordRenderLoading(false);
-}
-
-function setWordProgrammaticScroll(top) {
-  wordVirtualState.programmaticScroll = true;
-  window.scrollTo({ top: Math.max(0, top), behavior: 'auto' });
-  requestAnimationFrame(() => {
-    wordVirtualState.programmaticScroll = false;
-  });
-}
-
-function finishWordWindowTransition(targetY) {
-  clearTimeout(wordVirtualState.transitionTimer);
-  wordVirtualState.transitionTimer = setTimeout(() => {
-    clearTimeout(wordVirtualState.loadingTimer);
-    setWordProgrammaticScroll(targetY);
-    wordVirtualState.isTransitioning = false;
-    wordVirtualState.transitionTargetY = null;
-    wordVirtualState.transitionPinnedY = null;
-    showWordRenderLoading(false);
-  }, WORD_RENDER_TRANSITION_MS);
-}
-
-function requestWordWindowTransition(targetY, pinnedY) {
-  if (wordVirtualState.isTransitioning) return true;
-  wordVirtualState.isTransitioning = true;
-  wordVirtualState.transitionTargetY = Math.max(0, targetY);
-  wordVirtualState.transitionPinnedY = Math.max(0, pinnedY);
-  clearTimeout(wordVirtualState.loadingTimer);
-  wordVirtualState.loadingTimer = setTimeout(() => showWordRenderLoading(true), 90);
-  setWordProgrammaticScroll(wordVirtualState.transitionPinnedY);
-  requestAnimationFrame(() => {
-    render({
-      scrollYOverride: wordVirtualState.transitionTargetY,
-      forceWindowRefresh: true
-    });
-    requestAnimationFrame(() => finishWordWindowTransition(wordVirtualState.transitionTargetY || 0));
-  });
-  return true;
+  document.getElementById('wordRenderLoading')?.remove();
 }
 
 function prepareWordWindowForTopJump() {
-  if (!isEditableDictionaryView() || isReorderMode) return;
-  const listEl = document.getElementById('list');
-  if (!listEl || !WORD_RENDER_FAST_MODE) return;
-  showWordRenderLoading(true);
-  render({ scrollYOverride: 0, forceWindowRefresh: true });
-  requestAnimationFrame(() => {
-    setWordProgrammaticScroll(0);
-    setTimeout(() => showWordRenderLoading(false), WORD_RENDER_TRANSITION_MS);
+  if (isEditableDictionaryView() && !isReorderMode) render({ scrollYOverride: 0 });
+}
+
+function updateDictionarySpacers(list, snapshot) {
+  const top = list.querySelector('[data-word-spacer="top"]');
+  const bottom = list.querySelector('[data-word-spacer="bottom"]');
+  if (top) top.style.height = snapshot.heights.offset(wordVirtualState.start) + 'px';
+  if (bottom) bottom.style.height = Math.max(0, snapshot.heights.offset(snapshot.filtered.length) -
+    snapshot.heights.offset(wordVirtualState.end)) + 'px';
+}
+
+function measureDictionaryCards() {
+  const list = document.getElementById('list');
+  const snapshot = dictionaryListCache;
+  if (!snapshot || !list || !isEditableDictionaryView() || isReorderMode) return;
+  const listTop = list.getBoundingClientRect().top + window.scrollY;
+  const viewportOffset = Math.max(0, window.scrollY - listTop);
+  const anchorIndex = snapshot.heights.indexAt(viewportOffset);
+  const beforeAnchor = snapshot.heights.offset(anchorIndex);
+  // Read layout in one pass, then update spacer styles once.
+  const measurements = [...list.querySelectorAll('.word-card')].map(card => ({
+    card, height: card.getBoundingClientRect().height + parseFloat(getComputedStyle(card).marginBottom || 0),
+  }));
+  let changed = false;
+  measurements.forEach(({ card, height }) => {
+    const index = snapshot.filteredIndex.get(card.dataset.id);
+    if (index === undefined) return;
+    const word = snapshot.filtered[index];
+    dictionaryMeasurements.set(card.dataset.id, { height, expanded: Boolean(word.expanded) });
+    changed = snapshot.heights.measure(index, height) || changed;
+  });
+  if (!changed) return;
+  updateDictionarySpacers(list, snapshot);
+  const anchorDelta = snapshot.heights.offset(anchorIndex) - beforeAnchor;
+  // Correct only measured geometry above the viewport, never pin wheel/touch input.
+  if (Math.abs(anchorDelta) > 0.5 && window.scrollY > listTop) {
+    window.scrollBy({ top: anchorDelta, behavior: 'instant' });
+  }
+  scheduleWordScrollWindowCheck();
+}
+
+function scheduleDictionaryMeasurement() {
+  if (dictionaryMeasureFrame !== null) return;
+  dictionaryMeasureFrame = requestAnimationFrame(() => {
+    dictionaryMeasureFrame = null;
+    measureDictionaryCards();
   });
 }
 
-function render(options = {}) {
-  // لو مش على قاموس قابل للتحرير ما نرندر
-  if (!isEditableDictionaryView()) {
-    refreshFeatureUnlockUI();
-    return;
+function reconcileDictionaryCards(list, displayWords, snapshot, query, start, end) {
+  dictionaryResizeObserver ||= typeof ResizeObserver === 'function'
+    ? new ResizeObserver(scheduleDictionaryMeasurement) : null;
+  const existing = new Map([...list.querySelectorAll('.word-card')].map(card => [card.dataset.id, card]));
+  const template = document.createElement('template');
+  const nodes = [];
+  function spacer(position) {
+    let element = list.querySelector('[data-word-spacer="' + position + '"]');
+    if (!element) {
+      element = document.createElement('li');
+      element.className = 'virtual-list-spacer';
+      element.dataset.wordSpacer = position;
+      element.setAttribute('aria-hidden', 'true');
+    }
+    nodes.push(element);
   }
-
-  const searchEl = document.getElementById('searchInput');
-  const filterEl = document.getElementById('searchFilter');
-  if (!searchEl) {
-    refreshFeatureUnlockUI();
-    return;
-  }
-
-  const query      = searchEl.value.toLowerCase().trim();
-  const searchType = filterEl ? filterEl.value : 'all';
-
-  let filtered = window.words.filter(w => {
-    if (!w.word) return false;
-    if (window.LootLinguaWordLifecycle?.isVisibleInDictionaryList(w) === false) return false;
-    const wm = w.word.toLowerCase().includes(query);
-    const mm = (w.meaning  || '').toLowerCase().includes(query);
-    const em = (w.example  || '').toLowerCase().includes(query);
-    const matches = searchType === 'word'    ? wm
-                  : searchType === 'meaning' ? mm
-                  : searchType === 'example' ? em
-                  : wm || mm || em;
-    return matches && (currentFilter === 'all' || w.starred);
+  spacer('top');
+  let created = 0, updated = 0;
+  displayWords.forEach((word, offset) => {
+    const id = String(word.id);
+    const markup = renderWordCard(word, query, snapshot.indexMap);
+    let card = existing.get(id);
+    if (!card || card.__wordMarkup !== markup) {
+      template.innerHTML = markup.trim();
+      const replacement = template.content.firstElementChild;
+      if (card) {
+        card.className = replacement.className;
+        card.innerHTML = replacement.innerHTML;
+        [...replacement.attributes].forEach(attribute => card.setAttribute(attribute.name, attribute.value));
+        if (!isReorderMode) card.removeAttribute('draggable');
+        updated += 1;
+      } else {
+        card = replacement;
+        created += 1;
+      }
+      card.__wordMarkup = markup;
+    }
+    card.setAttribute('aria-posinset', String(start + offset + 1));
+    card.setAttribute('aria-setsize', String(snapshot.filtered.length));
+    dictionaryResizeObserver?.observe(card);
+    nodes.push(card);
+    existing.delete(id);
   });
+  spacer('bottom');
+  const wanted = new Set(nodes);
+  [...list.children].forEach(node => {
+    if (!wanted.has(node)) {
+      dictionaryResizeObserver?.unobserve(node);
+      node.remove();
+    }
+  });
+  let cursor = list.firstElementChild;
+  nodes.forEach(node => {
+    if (node === cursor) cursor = cursor.nextElementSibling;
+    else list.insertBefore(node, cursor);
+  });
+  wordVirtualState.start = start;
+  wordVirtualState.end = end;
+  wordVirtualState.total = snapshot.filtered.length;
+  updateDictionarySpacers(list, snapshot);
+  window.LootLinguaOperations?.diagnostic?.('dictionary-window-render', { created, updated, retained: displayWords.length - created, visibleCards: displayWords.length });
+}
 
-  // ترتيب ذكي: الكلمات اللي تبدأ بالـ query تجي أول
-  if (query) {
-    filtered.sort((a, b) => {
-      const aStarts = a.word.toLowerCase().startsWith(query);
-      const bStarts = b.word.toLowerCase().startsWith(query);
-      if (aStarts && !bStarts) return -1;
-      if (!aStarts && bStarts) return 1;
-      return a.word.localeCompare(b.word);
-    });
-  } else if (!isReorderMode) {
-    filtered = sortDictionaryWords(filtered);
+function renderDictionaryWindow(options = {}) {
+  if (!isEditableDictionaryView()) return;
+  const search = document.getElementById('searchInput');
+  const list = document.getElementById('list');
+  if (!search || !list) return;
+  const query = search.value.toLowerCase().trim();
+  const searchType = document.getElementById('searchFilter')?.value || 'all';
+  const snapshot = getDictionaryListSnapshot(query, searchType);
+  const listWasCleared = !list.querySelector('.word-card, .virtual-list-spacer');
+  list.classList.add('dictionary-windowed');
+  const width = list.getBoundingClientRect().width;
+  if (dictionaryRenderWidth && Math.abs(width - dictionaryRenderWidth) > 1) {
+    dictionaryMeasurements.clear();
+    snapshot.heights = window.LootLinguaDictionaryWindow.createHeightIndex(snapshot.filtered.length);
   }
-
-  const listEl = document.getElementById('list');
-  if (!listEl) return;
-  const listWasCleared =
-    !listEl.querySelector('.word-card') &&
-    !listEl.querySelector('.virtual-list-spacer');
-
-  const renderKey = getWordRenderKey(query, searchType, filtered);
-  const resetWindow = renderKey !== wordVirtualState.key || renderLimit <= 20 || listWasCleared;
-  if (resetWindow) {
-    if (!options.forceWindowRefresh) cancelWordWindowTransition();
-    wordVirtualState.key = renderKey;
-    wordVirtualState.listTop = 0;
-    wordVirtualState.start = 0;
-    wordVirtualState.end = 0;
-    wordVirtualState.lastHtmlKey = '';
-    renderLimit = WORD_DOM_WINDOW_SIZE;
-  }
-
-  if (filtered.length === 0) {
-    cancelWordWindowTransition();
-    wordVirtualState.lastHtmlKey = '';
-    listEl.innerHTML = `
-      <li style="list-style:none;text-align:center;padding:40px 20px;color:var(--text-gray);">
-        <div style="font-size:32px;margin-bottom:10px;"><i class="fa-solid fa-book-open" aria-hidden="true"></i></div>
-        ${query ? 'ما في نتائج للبحث' : 'قاموسك فاضي، ابدأ بإضافة كلمة!'}
-      </li>`;
-    refreshFeatureUnlockUI();
+  dictionaryRenderWidth = width;
+  if (!snapshot.filtered.length) {
+    dictionaryResizeObserver?.disconnect();
+    if (list.dataset.emptyKey !== snapshot.key || listWasCleared) {
+      list.innerHTML = '<li class="dictionary-empty"><i class="fa-solid fa-book-open" aria-hidden="true"></i><span>' +
+        (query ? 'ما في نتائج للبحث' : 'قاموسك فاضي، ابدأ بإضافة كلمة!') + '</span></li>';
+      list.dataset.emptyKey = snapshot.key;
+    }
+    wordVirtualState.total = 0;
     return;
   }
-
-  const restoredPersonalScroll =
-    listWasCleared && viewScrollY && typeof viewScrollY[getActiveDictionaryStorageScope()] === 'number'
-      ? viewScrollY[getActiveDictionaryStorageScope()]
-      : undefined;
-  const scrollYOverride =
-    typeof options.scrollYOverride === 'number'
-      ? options.scrollYOverride
-      : restoredPersonalScroll;
-  const range = getWordWindowRange(filtered.length, listEl, resetWindow, scrollYOverride);
-  const displayWords = filtered.slice(range.start, range.end);
-  const wordIndexMap = new Map(window.words.map((item, index) => [String(item.id), index]));
-  const htmlKey = [
-    renderKey,
-    range.start,
-    range.end,
-    Math.round(range.topSpacer),
-    Math.round(range.bottomSpacer),
-    isReorderMode ? 'reorder' : 'normal',
-    selectedIndices.join(',')
-  ].join('|');
-
-  let didRenderWindow = false;
-  if (options.forceWindowRefresh || htmlKey !== wordVirtualState.lastHtmlKey || listWasCleared) {
-    const topSpacer = range.topSpacer
-      ? `<li class="virtual-list-spacer" aria-hidden="true" style="height:${Math.round(range.topSpacer)}px"></li>`
-      : '';
-    const bottomSpacer = range.bottomSpacer
-      ? `<li class="virtual-list-spacer" aria-hidden="true" style="height:${Math.round(range.bottomSpacer)}px"></li>`
-      : '';
-    listEl.innerHTML = topSpacer + displayWords.map(w => renderWordCard(w, query, wordIndexMap)).join('') + bottomSpacer;
-    wordVirtualState.start = range.start;
-    wordVirtualState.end = range.end;
-    wordVirtualState.lastHtmlKey = htmlKey;
-    updateWordRowHeight(listEl);
-    didRenderWindow = true;
+  delete list.dataset.emptyKey;
+  const listTop = list.getBoundingClientRect().top + window.scrollY;
+  let scrollY = typeof options.scrollYOverride === 'number' ? options.scrollYOverride : window.scrollY;
+  if (listWasCleared && typeof viewScrollY !== 'undefined' && typeof viewScrollY[getActiveDictionaryStorageScope()] === 'number') {
+    scrollY = options.scrollYOverride ?? viewScrollY[getActiveDictionaryStorageScope()];
   }
-  if (didRenderWindow || resetWindow) refreshFeatureUnlockUI();
+  if (snapshot.queryChanged) {
+    scrollY = Math.min(scrollY, Math.max(0, listTop - 100));
+    if (window.scrollY > scrollY) window.scrollTo({ top: scrollY, behavior: 'instant' });
+    snapshot.queryChanged = false;
+  }
+  const range = isReorderMode ? { start: 0, end: snapshot.filtered.length } :
+    snapshot.heights.range(Math.max(0, scrollY - listTop), window.innerHeight, 12);
+  reconcileDictionaryCards(list, snapshot.filtered.slice(range.start, range.end), snapshot, query, range.start, range.end);
+  scheduleDictionaryMeasurement();
+}
+
+function render(options = {}) {
+  const run = () => renderDictionaryWindow(options);
+  return typeof window.withWordMasterySnapshot === 'function' ? window.withWordMasterySnapshot(run) : run();
 }
 
 // ── تفويض أزرار نتائج AI (إضافة + اقتراح) ───────────────
@@ -417,6 +380,12 @@ document.addEventListener('DOMContentLoaded', () => {
   const list = document.getElementById('list');
   if (!list) return;
 
+  list.addEventListener('keydown', (event) => {
+    if ((event.key !== 'Enter' && event.key !== ' ') || !event.target.matches('.word-card')) return;
+    event.preventDefault();
+    handleLiClick(Number(event.target.dataset.index), event.target);
+  });
+
   list.addEventListener('click', (e) => {
     const target = e.target.closest('[data-action]');
     if (!target) return;
@@ -458,88 +427,27 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   });
 
-  // تصفير العداد عند كتابة أي شيء في البحث لتبدأ النتائج من الأعلى
-  document.getElementById('searchInput')?.addEventListener('input', () => {
-    renderLimit = 20;
-  });
 });
 
-// ── Virtualized Scroll Logic ─────────────────────────────
+// One render per animation frame; native wheel/touch scrolling stays in control.
 let wordRenderScrollRaf = null;
-let wordRenderScrollTimer = null;
-let wordRenderLastScrollCheck = 0;
-function shouldRenderWordWindowForScroll() {
-  const listEl = document.getElementById('list');
-  if (!listEl) return false;
-  if (!listEl.querySelector('.word-card')) return true;
-  if (!WORD_RENDER_FAST_MODE || !wordVirtualState.total || wordVirtualState.total <= WORD_DOM_WINDOW_SIZE) return false;
-
-  const state = getWordScrollWindowState(listEl);
-  if (!state) return false;
-  const { firstVisible, lastVisible } = state;
-
-  return (
-    (wordVirtualState.start > 0 && firstVisible < wordVirtualState.start + WORD_DOM_BUFFER) ||
-    (wordVirtualState.end < wordVirtualState.total && lastVisible > wordVirtualState.end - WORD_DOM_EDGE_BUFFER)
-  );
-}
-
-function getWordWindowBoundaryState(listEl) {
-  const state = getWordScrollWindowState(listEl);
-  if (!state || wordVirtualState.end <= wordVirtualState.start) return null;
-  const aboveWindow = wordVirtualState.start > 0 && state.firstVisible < wordVirtualState.start;
-  const belowWindow = wordVirtualState.end < wordVirtualState.total && state.lastVisible > wordVirtualState.end;
-  const nearTop = wordVirtualState.start > 0 && state.firstVisible < wordVirtualState.start + WORD_DOM_BUFFER;
-  const nearBottom = wordVirtualState.end < wordVirtualState.total && state.lastVisible > wordVirtualState.end - WORD_DOM_EDGE_BUFFER;
-  return { ...state, aboveWindow, belowWindow, nearTop, nearBottom };
-}
-
-function runWordScrollWindowCheck() {
-  wordRenderScrollRaf = null;
-  wordRenderScrollTimer = null;
-  wordRenderLastScrollCheck = performance.now();
-
-  if (!isEditableDictionaryView() || isReorderMode) return;
-  if (wordVirtualState.programmaticScroll || wordVirtualState.isTransitioning) return;
-  if (!shouldRenderWordWindowForScroll()) return;
-
-  const listEl = document.getElementById('list');
-  const state = getWordWindowBoundaryState(listEl);
-  if (state && (state.aboveWindow || state.belowWindow)) {
-    const goingUp = state.aboveWindow;
-    const safeFirst = goingUp
-      ? Math.max(0, wordVirtualState.start)
-      : Math.max(0, wordVirtualState.end - state.visibleRows);
-    const pinnedY = state.listTop + (safeFirst * state.rowH);
-    if (requestWordWindowTransition(window.scrollY, pinnedY)) return;
-  }
-  render();
-}
-
 function scheduleWordScrollWindowCheck() {
-  if (wordRenderScrollRaf || wordRenderScrollTimer) return;
-  const elapsed = performance.now() - wordRenderLastScrollCheck;
-  const delay = Math.max(0, WORD_RENDER_SCROLL_THROTTLE_MS - elapsed);
-  const scheduleFrame = () => {
-    wordRenderScrollTimer = null;
-    wordRenderScrollRaf = requestAnimationFrame(runWordScrollWindowCheck);
-  };
-  if (delay > 0) wordRenderScrollTimer = setTimeout(scheduleFrame, delay);
-  else scheduleFrame();
+  if (wordRenderScrollRaf !== null) return;
+  wordRenderScrollRaf = requestAnimationFrame(() => {
+    wordRenderScrollRaf = null;
+    if (!isEditableDictionaryView() || isReorderMode || !dictionaryListCache?.filtered.length) return;
+    const list = document.getElementById('list');
+    if (!list) return;
+    const top = list.getBoundingClientRect().top + window.scrollY;
+    const range = dictionaryListCache.heights.range(Math.max(0, window.scrollY - top), window.innerHeight, 12);
+    if (range.start !== wordVirtualState.start || range.end !== wordVirtualState.end) render();
+  });
 }
-
-window.addEventListener('scroll', () => {
-  if (!isEditableDictionaryView() || isReorderMode) return;
-  if (wordVirtualState.programmaticScroll) return;
-  if (wordVirtualState.isTransitioning) {
-    const pinnedY = wordVirtualState.transitionPinnedY ?? window.scrollY;
-    if (Math.abs(window.scrollY - pinnedY) > 4) {
-      wordVirtualState.transitionTargetY = window.scrollY;
-    }
-    setWordProgrammaticScroll(pinnedY);
-    return;
-  }
-  scheduleWordScrollWindowCheck();
+window.addEventListener('scroll', scheduleWordScrollWindowCheck, { passive: true });
+window.addEventListener('resize', () => {
+  // Mobile browser chrome changes height on scroll. Only a real list-width
+  // change (checked by render) invalidates measured card heights.
+  if (isEditableDictionaryView()) render();
 }, { passive: true });
 
 // ═══════════════════════════════════════════════════════

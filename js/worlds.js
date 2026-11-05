@@ -607,6 +607,11 @@ function showTitleUnlockMoment(definitions) {
 }
 
 function evaluateTitleUnlocks(celebrate = false) {
+  const run = () => evaluateTitleUnlocksFromData(celebrate);
+  return typeof window.withWordMasterySnapshot === 'function' ? window.withWordMasterySnapshot(run) : run();
+}
+
+function evaluateTitleUnlocksFromData(celebrate = false) {
   const state = getTitleState();
   const unlocked = new Set(state.unlocked || []);
   const newly = [];

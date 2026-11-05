@@ -160,12 +160,44 @@ function masteryProgressScore(state = {}) {
   return statusScore * 1e12 + (Number(state.mastery_streak) || 0) * 1e9 + (Number(state.last_quizzed_at || state.last_recalled_at) || 0);
 }
 
+let wordMasteryReadSnapshot = null;
+
+// A synchronous render/selection pass shares one read, without returning a
+// mutable cached store to the writers or changing any SRS/reward decisions.
+function withWordMasterySnapshot(task) {
+  const ownerId = getStorageUserId();
+  if (wordMasteryReadSnapshot?.ownerId === ownerId) return task();
+  const previous = wordMasteryReadSnapshot;
+  wordMasteryReadSnapshot = { ownerId, entries: readSharedWordMasteryStore(), copies: null };
+  try { return task(); }
+  finally { wordMasteryReadSnapshot = previous; }
+}
+window.withWordMasterySnapshot = withWordMasterySnapshot;
+
 function getBestKnownMasteryState(wordOrText) {
   const key = getWordMasteryKey(wordOrText);
   if (!key) return null;
-  const stored = readSharedWordMasteryStore()[key];
+  const snapshot = wordMasteryReadSnapshot?.ownerId === getStorageUserId() ? wordMasteryReadSnapshot : null;
+  const stored = (snapshot?.entries || readSharedWordMasteryStore())[key];
   if (stored) return getInlineWordMasteryState(stored);
   const uid = window.auth?.currentUser?.uid;
+  if (snapshot) {
+    if (!snapshot.copies) {
+      snapshot.copies = new Map();
+      const copies = [
+        ...readWordsFromStorage('normal', uid),
+        ...customWorlds.flatMap(world => readCustomWorldWordsFromStorage(world.id, uid)),
+      ];
+      copies.forEach(copy => {
+        const copyKey = getWordMasteryKey(copy);
+        const state = getInlineWordMasteryState(copy);
+        const existing = snapshot.copies.get(copyKey);
+        if (!existing || masteryProgressScore(state) > masteryProgressScore(existing)) snapshot.copies.set(copyKey, state);
+      });
+    }
+    const known = snapshot.copies.get(key);
+    return known ? getInlineWordMasteryState(known) : null;
+  }
   const allCopies = [
     ...readWordsFromStorage('normal', uid),
     ...customWorlds.flatMap(world => readCustomWorldWordsFromStorage(world.id, uid))

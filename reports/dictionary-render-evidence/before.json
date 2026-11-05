@@ -1,0 +1,261 @@
+{
+  "mode": "before",
+  "externalNetwork": "blocked; cloud modules removed; feedback uses in-memory adapter",
+  "cases": [
+    {
+      "width": 1280,
+      "steps": [
+        {
+          "scrollY": 1500,
+          "cards": 48,
+          "visible": 9,
+          "retained": 48,
+          "parses": 0,
+          "first": "audit-12",
+          "overflow": false
+        },
+        {
+          "scrollY": 2200,
+          "cards": 48,
+          "visible": 9,
+          "retained": 48,
+          "parses": 0,
+          "first": "audit-20",
+          "overflow": false
+        },
+        {
+          "scrollY": 2800,
+          "cards": 48,
+          "visible": 7,
+          "retained": 48,
+          "parses": 0,
+          "first": "audit-27",
+          "overflow": false
+        },
+        {
+          "scrollY": 3500,
+          "cards": 48,
+          "visible": 9,
+          "retained": 48,
+          "parses": 0,
+          "first": "audit-33",
+          "overflow": false
+        },
+        {
+          "scrollY": 4100,
+          "cards": 48,
+          "visible": 8,
+          "retained": 48,
+          "parses": 0,
+          "first": "audit-40",
+          "overflow": false
+        },
+        {
+          "scrollY": 11213,
+          "cards": 48,
+          "visible": 0,
+          "retained": 0,
+          "parses": 104,
+          "overflow": false
+        },
+        {
+          "scrollY": 20000,
+          "cards": 48,
+          "visible": 0,
+          "retained": 48,
+          "parses": 0,
+          "overflow": false
+        },
+        {
+          "scrollY": 8385,
+          "cards": 48,
+          "visible": 0,
+          "retained": 0,
+          "parses": 104,
+          "overflow": false
+        },
+        {
+          "scrollY": 120000,
+          "cards": 48,
+          "visible": 7,
+          "retained": 48,
+          "parses": 0,
+          "first": "audit-1392",
+          "overflow": false
+        }
+      ]
+    },
+    {
+      "width": 390,
+      "steps": [
+        {
+          "scrollY": 1500,
+          "cards": 48,
+          "visible": 5,
+          "retained": 48,
+          "parses": 0,
+          "first": "audit-8",
+          "overflow": false
+        },
+        {
+          "scrollY": 2200,
+          "cards": 48,
+          "visible": 7,
+          "retained": 48,
+          "parses": 0,
+          "first": "audit-12",
+          "overflow": false
+        },
+        {
+          "scrollY": 2800,
+          "cards": 48,
+          "visible": 6,
+          "retained": 48,
+          "parses": 0,
+          "first": "audit-17",
+          "overflow": false
+        },
+        {
+          "scrollY": 3500,
+          "cards": 48,
+          "visible": 7,
+          "retained": 48,
+          "parses": 0,
+          "first": "audit-22",
+          "overflow": false
+        },
+        {
+          "scrollY": 4100,
+          "cards": 48,
+          "visible": 5,
+          "retained": 48,
+          "parses": 0,
+          "first": "audit-27",
+          "overflow": false
+        },
+        {
+          "scrollY": 20000,
+          "cards": 48,
+          "visible": 0,
+          "retained": 0,
+          "parses": 104,
+          "overflow": false
+        },
+        {
+          "scrollY": 65000,
+          "cards": 48,
+          "visible": 6,
+          "retained": 0,
+          "parses": 104,
+          "first": "audit-290",
+          "overflow": false
+        },
+        {
+          "scrollY": 120000,
+          "cards": 48,
+          "visible": 0,
+          "retained": 48,
+          "parses": 0,
+          "overflow": false
+        },
+        {
+          "scrollY": 26301,
+          "cards": 48,
+          "visible": 0,
+          "retained": 0,
+          "parses": 104,
+          "overflow": false
+        }
+      ]
+    },
+    {
+      "width": 320,
+      "steps": [
+        {
+          "scrollY": 3941,
+          "cards": 48,
+          "visible": 5,
+          "retained": 0,
+          "parses": 104,
+          "first": "audit-14",
+          "overflow": false
+        },
+        {
+          "scrollY": 1500,
+          "cards": 48,
+          "visible": 4,
+          "retained": 48,
+          "parses": 0,
+          "first": "audit-1",
+          "overflow": false
+        },
+        {
+          "scrollY": 2800,
+          "cards": 48,
+          "visible": 5,
+          "retained": 48,
+          "parses": 0,
+          "first": "audit-8",
+          "overflow": false
+        },
+        {
+          "scrollY": 3500,
+          "cards": 48,
+          "visible": 5,
+          "retained": 48,
+          "parses": 0,
+          "first": "audit-12",
+          "overflow": false
+        },
+        {
+          "scrollY": 4100,
+          "cards": 48,
+          "visible": 4,
+          "retained": 48,
+          "parses": 0,
+          "first": "audit-16",
+          "overflow": false
+        },
+        {
+          "scrollY": 20000,
+          "cards": 48,
+          "visible": 0,
+          "retained": 48,
+          "parses": 0,
+          "overflow": false
+        },
+        {
+          "scrollY": 65000,
+          "cards": 48,
+          "visible": 0,
+          "retained": 0,
+          "parses": 104,
+          "overflow": false
+        },
+        {
+          "scrollY": 8491,
+          "cards": 48,
+          "visible": 0,
+          "retained": 0,
+          "parses": 104,
+          "overflow": false
+        },
+        {
+          "scrollY": 120000,
+          "cards": 48,
+          "visible": 5,
+          "retained": 48,
+          "parses": 0,
+          "first": "audit-939",
+          "overflow": false
+        }
+      ]
+    }
+  ],
+  "initial": {
+    "renderMs": 272.7999999523163,
+    "parses": 104,
+    "cards": 48
+  },
+  "exceptions": []
+}

@@ -1,0 +1,14 @@
+{
+  "projectId": "quizapp-ede17",
+  "sourceRuleset": "projects/quizapp-ede17/rulesets/68c35cf5-7065-4ed9-853f-8a7896f78c47",
+  "beforeSha256": "1c8e4995af611d139248353481cea172a236916fff79a644bb4cd7b932a17c5f",
+  "candidateSha256": "5c9833355c7f1328b26cf2b361c6c9b4840cec163656fd596b0de1bf13d7cfc5",
+  "scope": "Only feedback match is inserted/replaced; every other deployed rule is preserved.",
+  "compilation": {
+    "passed": true,
+    "issues": []
+  },
+  "published": true,
+  "deployedRuleset": "projects/quizapp-ede17/rulesets/b771611d-23c1-492c-bcf8-1776a86fbe38",
+  "verified": true
+}

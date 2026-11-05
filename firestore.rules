@@ -112,7 +112,28 @@ service cloud.firestore {
     }
 
     // These are server/Admin-SDK workflows. Client access remains denied.
-    match /feedback/{feedbackId} { allow read, write: if false; }
+    // Feedback v2 is an append-only client submission, not trusted learning metadata.
+    // Both guests and signed-in users may submit; only admins can read responses.
+    match /feedback/{feedbackId} {
+      function validClientFeedback(data) {
+        return data.keys().hasOnly([
+            'schemaVersion', 'rating', 'message', 'optionalName', 'ownerId', 'submittedAt'
+          ]) && data.keys().hasAll([
+            'schemaVersion', 'rating', 'message', 'optionalName', 'ownerId', 'submittedAt'
+          ]) && data.schemaVersion == 2 &&
+          data.rating is int && data.rating >= 1 && data.rating <= 5 &&
+          data.message is string && data.message.size() <= 1600 &&
+          data.optionalName is string && data.optionalName.size() <= 80 &&
+          data.ownerId is string &&
+          ((request.auth == null && data.ownerId == 'guest') ||
+            (request.auth != null && data.ownerId == request.auth.uid)) &&
+          data.submittedAt == request.time;
+      }
+      allow create: if feedbackId.matches('[A-Za-z0-9]{20}') &&
+        validClientFeedback(request.resource.data);
+      allow read: if isAdmin();
+      allow update, delete: if false;
+    }
     match /admin_audit_logs/{logId} { allow read: if isAdmin(); allow write: if false; }
     match /admins/{adminId} { allow read, write: if false; }
 

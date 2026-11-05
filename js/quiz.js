@@ -500,6 +500,11 @@ function getQuizSourceResolutionStatus(scope, ownerId) {
 }
 
 function resolveQuizSourceSnapshot(scope = currentQuizSource, options = {}) {
+  const run = () => resolveQuizSourceSnapshotFromData(scope, options);
+  return typeof window.withWordMasterySnapshot === 'function' ? window.withWordMasterySnapshot(run) : run();
+}
+
+function resolveQuizSourceSnapshotFromData(scope = currentQuizSource, options = {}) {
   const ownerId = getQuizSourceOwnerId(options.ownerId);
   const source = quizCore.parseSourceScope(scope);
   const rawWords = Array.isArray(options.rawWords)

@@ -1,0 +1,488 @@
+rules_version = '2';
+
+// Operational, low-complexity ruleset for isolating Rules compiler failures.
+// It intentionally keeps authority boundaries (public published content, owner
+// data, and claim-based admins) while omitting production's deep game-state
+// and cross-document invariant validators.  It is not a replacement for the
+// production ruleset.
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(uid) {
+      return signedIn() && request.auth.uid == uid;
+    }
+
+    function isAdmin() {
+      return signedIn() &&
+        'admin' in request.auth.token && request.auth.token.admin == true;
+    }
+
+    function nonEmptyString(value, maxLength) {
+      return value is string && value.size() > 0 && value.size() <= maxLength;
+    }
+
+    function publishedWorld(worldId) {
+      return exists(/databases/$(database)/documents/content_worlds/$(worldId)) &&
+        get(/databases/$(database)/documents/content_worlds/$(worldId)).data.status == 'published';
+    }
+
+    function publishedRank(worldId, rankId) {
+      return exists(/databases/$(database)/documents/content_worlds/$(worldId)/ranks/$(rankId)) &&
+        get(/databases/$(database)/documents/content_worlds/$(worldId)/ranks/$(rankId)).data.status == 'published';
+    }
+
+    function publishedGate(worldId, rankId, gateId) {
+      return exists(/databases/$(database)/documents/content_worlds/$(worldId)/ranks/$(rankId)/gates/$(gateId)) &&
+        get(/databases/$(database)/documents/content_worlds/$(worldId)/ranks/$(rankId)/gates/$(gateId)).data.status == 'published';
+    }
+
+    // Prepared learning content. Browser administration remains claim-gated;
+    // public reads retain the production requirement for published ancestry.
+    match /content_worlds/{worldId} {
+      function validContentStatus(status) {
+        return status == 'draft' || status == 'published' || status == 'archived';
+      }
+
+      function validWorldShape(data) {
+        return data.worldId == worldId && validContentStatus(data.status) &&
+          (!('title' in data) || nonEmptyString(data.title, 160)) &&
+          (!('schemaVersion' in data) || data.schemaVersion == 1) &&
+          (!('version' in data) || (data.version is int && data.version >= 0));
+      }
+
+      allow read: if isAdmin() || resource.data.status == 'published';
+      allow create, update: if isAdmin() && validWorldShape(request.resource.data);
+      allow delete: if isAdmin();
+
+      match /ranks/{rankId} {
+        function validRankShape(data) {
+          return data.worldId == worldId && data.rankId == rankId &&
+            validContentStatus(data.status) &&
+            (!('title' in data) || nonEmptyString(data.title, 160)) &&
+            (!('schemaVersion' in data) || data.schemaVersion == 1) &&
+            (!('version' in data) || (data.version is int && data.version >= 1));
+        }
+
+        allow read: if isAdmin() ||
+          (resource.data.status == 'published' && publishedWorld(worldId));
+        allow create, update: if isAdmin() && validRankShape(request.resource.data);
+        allow delete: if isAdmin();
+
+        match /gates/{gateId} {
+          function validGateShape(data) {
+            return data.worldId == worldId && data.rankId == rankId && data.gateId == gateId &&
+              validContentStatus(data.status) &&
+              (!('title' in data) || nonEmptyString(data.title, 160)) &&
+              (!('schemaVersion' in data) || data.schemaVersion == 1) &&
+              (!('version' in data) || (data.version is int && data.version >= 1));
+          }
+
+          allow read: if isAdmin() ||
+            (resource.data.status == 'published' && publishedWorld(worldId) &&
+              publishedRank(worldId, rankId));
+          allow create, update: if isAdmin() && validGateShape(request.resource.data);
+          allow delete: if isAdmin();
+
+          match /words/{contentWordId} {
+            function validContentWordShape(data) {
+              return data.worldId == worldId && data.rankId == rankId &&
+                data.gateId == gateId && data.contentWordId == contentWordId &&
+                validContentStatus(data.status) &&
+                nonEmptyString(data.word, 240) &&
+                nonEmptyString(data.translation, 1000) &&
+                (!('schemaVersion' in data) || data.schemaVersion == 1) &&
+                (!('version' in data) || (data.version is int && data.version >= 1));
+            }
+
+            allow read: if isAdmin() ||
+              (resource.data.status == 'published' && publishedWorld(worldId) &&
+                publishedRank(worldId, rankId) && publishedGate(worldId, rankId, gateId));
+            allow create, update: if isAdmin() && validContentWordShape(request.resource.data);
+            allow delete: if isAdmin();
+          }
+        }
+      }
+    }
+
+    match /content_word_import_staging/{stagingWordId} {
+      allow read, create, update, delete: if isAdmin();
+    }
+
+    // These are server/Admin-SDK workflows. Client access remains denied.
+    match /feedback/{feedbackId} { allow read, write: if false; }
+    match /admin_audit_logs/{logId} { allow read: if isAdmin(); allow write: if false; }
+    match /admins/{adminId} { allow read, write: if false; }
+
+    match /users/{uid} {
+      // No root-document list/write access; all application data is explicit.
+      allow get: if isOwner(uid);
+      allow list, create, update, delete: if false;
+
+      // Personal dictionary and custom worlds are owner-scoped. These docs do
+      // not confer admin authority or access to another account.
+      match /words/{wordId} {
+        function validPersonalWord(data) {
+          return data.userId == uid && data.meaning is string && data.meaning.size() <= 2000 &&
+            data.category is string && data.category.size() <= 120 &&
+            (('text' in data && nonEmptyString(data.text, 500)) ||
+              ('word' in data && nonEmptyString(data.word, 500))) &&
+            (!('forgetCount' in data) || (data.forgetCount is int && data.forgetCount >= 0)) &&
+            (!('starred' in data) || data.starred is bool);
+        }
+        allow read, delete: if isOwner(uid);
+        allow create, update: if isOwner(uid) && validPersonalWord(request.resource.data);
+      }
+      match /customWorlds/{worldId} {
+        function validCustomWorld(data) {
+          return data.userId == uid && nonEmptyString(data.name, 240) &&
+            (!('description' in data) || (data.description is string && data.description.size() <= 4000));
+        }
+        allow read, delete: if isOwner(uid);
+        allow create, update: if isOwner(uid) && validCustomWorld(request.resource.data);
+        match /words/{wordId} {
+          function validCustomWorldWord(data) {
+            return data.userId == uid && data.meaning is string && data.meaning.size() <= 2000 &&
+              data.category is string && data.category.size() <= 120 &&
+              (('text' in data && nonEmptyString(data.text, 500)) ||
+                ('word' in data && nonEmptyString(data.word, 500)));
+          }
+          allow read, delete: if isOwner(uid);
+          allow create, update: if isOwner(uid) && validCustomWorldWord(request.resource.data);
+        }
+      }
+
+      // User settings, onboarding, XP metadata, and local quiz state.
+      match /meta/profile {
+        function validProfile(data) {
+          return (!('userXP' in data) || (data.userXP is number && data.userXP >= 0)) &&
+            (!('xpEconomyVersion' in data) ||
+              (data.xpEconomyVersion is int && data.xpEconomyVersion >= 0)) &&
+            (!('dailyStreak' in data) || (data.dailyStreak is int && data.dailyStreak >= 0)) &&
+            (!('maxStreak' in data) || (data.maxStreak is int && data.maxStreak >= 0)) &&
+            (!('displayName' in data) || (data.displayName is string && data.displayName.size() <= 120));
+        }
+        allow read: if isOwner(uid);
+        allow create, update: if isOwner(uid) && validProfile(request.resource.data);
+        allow delete: if false;
+      }
+      match /meta/word_mastery { allow read, create, update: if isOwner(uid); allow delete: if false; }
+      match /meta/active_quiz_session { allow read, create, update, delete: if isOwner(uid); }
+      match /meta/active_content_journey { allow read, create, update: if isOwner(uid); allow delete: if false; }
+      match /meta/{metaId} {
+        allow read: if isOwner(uid) && metaId.matches('xp_event_.*');
+        allow create: if isOwner(uid) && metaId.matches('xp_event_.*');
+        allow update, delete: if false;
+      }
+
+      match /guidedFirstJourneys/{versionId} {
+        function validGuidedJourney(data) {
+          return data.version == 1 && data.audience == 'new' &&
+            data.phase in [
+              'awaiting-first-gate', 'first-gate-opened',
+              'awaiting-quiz-cta', 'completed'
+            ] && nonEmptyString(data.worldId, 128) &&
+            data.guestDictionaryAvailable is bool && data.startedAt is timestamp &&
+            data.updatedAt is timestamp &&
+            ((data.phase == 'completed' && data.completedAt is timestamp) ||
+              (data.phase != 'completed' && data.completedAt == null));
+        }
+        allow read: if isOwner(uid);
+        allow create: if isOwner(uid) && versionId == 'v1' &&
+          validGuidedJourney(request.resource.data);
+        allow update: if isOwner(uid) && versionId == 'v1' &&
+          validGuidedJourney(request.resource.data) &&
+          request.resource.data.version == resource.data.version &&
+          request.resource.data.audience == resource.data.audience &&
+          request.resource.data.worldId == resource.data.worldId &&
+          request.resource.data.startedAt == resource.data.startedAt &&
+          (resource.data.guestDictionaryAvailable == false ||
+            request.resource.data.guestDictionaryAvailable == true) &&
+          (
+            (resource.data.phase == 'awaiting-first-gate' &&
+              request.resource.data.phase in ['awaiting-first-gate', 'first-gate-opened']) ||
+            (resource.data.phase == 'first-gate-opened' &&
+              request.resource.data.phase in ['first-gate-opened', 'awaiting-quiz-cta']) ||
+            (resource.data.phase == 'awaiting-quiz-cta' &&
+              request.resource.data.phase in ['awaiting-quiz-cta', 'completed'])
+          );
+        allow delete: if false;
+      }
+      match /entryExperiences/{versionId} {
+        allow read, create, update: if isOwner(uid) && versionId.matches('v[0-9]+');
+        allow delete: if false;
+      }
+
+      match /notifications/{notificationId} {
+        function validNotification(data) {
+          return data.ownerId == uid && data.id == notificationId &&
+            data.status in ['pending', 'active', 'resolved', 'dismissed'] &&
+            data.message is string && data.message.size() <= 4000 &&
+            (!('priority' in data) || (data.priority is int && data.priority >= 0 && data.priority <= 100));
+        }
+        allow read: if isOwner(uid);
+        allow create, update: if isOwner(uid) && validNotification(request.resource.data);
+        allow delete: if false;
+      }
+
+      match /testSettings/clock {
+        allow read, create, update: if isOwner(uid) && isAdmin() &&
+          'testClock' in request.auth.token && request.auth.token.testClock == true;
+        allow delete: if false;
+      }
+
+      // Journey, placement, level-placement, and gate-clear documents are
+      // owner-scoped with stable path identities and basic state shapes. The
+      // production ruleset adds the remaining cross-document/batch invariants.
+      match /contentProgress/{worldId} {
+        function validJourney(data) {
+          return data.worldId == worldId && data.journeyVersion == 1 &&
+            data.status in ['active', 'paused'] &&
+            nonEmptyString(data.activeRankId, 128) && nonEmptyString(data.activeGateId, 128) &&
+            data.startedAt is timestamp && data.updatedAt is timestamp &&
+            data.placementStatus in ['not-started', 'active', 'completed', 'declined'] &&
+            (!('activePlacementAssessmentId' in data) ||
+              (data.activePlacementAssessmentId is string && data.activePlacementAssessmentId.size() <= 500)) &&
+            (!('activeLevelPlacementAssessmentId' in data) ||
+              (data.activeLevelPlacementAssessmentId is string && data.activeLevelPlacementAssessmentId.size() <= 500));
+        }
+        allow read: if isOwner(uid);
+        allow create, update: if isOwner(uid) && validJourney(request.resource.data);
+        allow delete: if false;
+        match /placementSessions/{assessmentId} {
+          function validPlacementSession(data) {
+            return data.assessmentId == assessmentId && data.worldId == worldId &&
+              data.status in ['active', 'submitting', 'completed', 'abandoned'] &&
+              nonEmptyString(data.rankId, 128) && nonEmptyString(data.currentGateId, 128) &&
+              (!('currentQuestionIndex' in data) ||
+                (data.currentQuestionIndex is int && data.currentQuestionIndex >= 0)) &&
+              data.startedAt is timestamp && data.updatedAt is timestamp;
+          }
+          allow read: if isOwner(uid);
+          allow create, update: if isOwner(uid) && validPlacementSession(request.resource.data);
+          allow delete: if false;
+        }
+        match /levelPlacementSessions/{assessmentId} {
+          function validLevelPlacementSession(data) {
+            return data.assessmentId == assessmentId && data.worldId == worldId &&
+              data.status in ['active', 'submitting', 'awaiting-decision', 'completed', 'paused', 'abandoned'] &&
+              data.cefrLevel in ['A1', 'A2', 'B1', 'B2', 'C1', 'C2'] &&
+              (!('currentQuestionIndex' in data) ||
+                (data.currentQuestionIndex is int && data.currentQuestionIndex >= 0)) &&
+              data.startedAt is timestamp && data.updatedAt is timestamp;
+          }
+          allow read: if isOwner(uid);
+          allow create, update: if isOwner(uid) && validLevelPlacementSession(request.resource.data);
+          allow delete: if false;
+        }
+        match /gateClearAttempts/{attemptId} {
+          function validGateClearAttempt(data) {
+            return data.attemptId == attemptId && data.worldId == worldId &&
+              nonEmptyString(data.rankId, 128) && nonEmptyString(data.gateId, 128) &&
+              data.status in ['active', 'submitting', 'passed', 'failed', 'abandoned'] &&
+              data.startedAt is timestamp && data.updatedAt is timestamp &&
+              (!('currentQuestionIndex' in data) ||
+                (data.currentQuestionIndex is int && data.currentQuestionIndex >= 0));
+          }
+
+          function validGateClearAnswer(answer, expectedContentWordId, questionOrder) {
+            return answer is map &&
+              answer.keys().hasOnly([
+                'contentWordId', 'selectedContentWordId', 'correct'
+              ]) &&
+              answer.keys().hasAll([
+                'contentWordId', 'selectedContentWordId', 'correct'
+              ]) &&
+              answer.contentWordId == expectedContentWordId &&
+              nonEmptyString(answer.contentWordId, 128) &&
+              nonEmptyString(answer.selectedContentWordId, 128) &&
+              answer.selectedContentWordId in questionOrder &&
+              answer.correct == (answer.selectedContentWordId == answer.contentWordId);
+          }
+
+          function validGateClearAttemptCreate(data) {
+            return validGateClearAttempt(data) &&
+              data.keys().hasOnly([
+                'attemptId', 'worldId', 'rankId', 'gateId', 'questionOrder',
+                'answers', 'currentQuestionIndex', 'correctCount', 'totalCount',
+                'passRatio', 'requiredCorrect', 'status', 'gateClearVersion',
+                'startedAt', 'updatedAt'
+              ]) &&
+              data.questionOrder is list && data.questionOrder.size() > 0 &&
+              data.questionOrder.size() <= 2000 &&
+              data.questionOrder.toSet().size() == data.questionOrder.size() &&
+              data.answers is list && data.answers.size() == 0 &&
+              data.currentQuestionIndex == 0 && data.correctCount == 0 &&
+              data.totalCount == data.questionOrder.size() &&
+              data.passRatio is number && data.passRatio > 0 && data.passRatio <= 1 &&
+              data.requiredCorrect is int &&
+              data.requiredCorrect >= data.totalCount * data.passRatio &&
+              data.requiredCorrect - 1 < data.totalCount * data.passRatio &&
+              data.status == 'active' && data.gateClearVersion == 1 &&
+              data.startedAt == request.time && data.updatedAt == request.time;
+          }
+
+          function validGateClearAnswerUpdate(before, after) {
+            return validGateClearAttempt(after) &&
+              before.status == 'active' &&
+              after.diff(before).affectedKeys().hasOnly([
+                'answers', 'currentQuestionIndex', 'correctCount', 'status', 'updatedAt'
+              ]) &&
+              after.answers.size() == before.answers.size() + 1 &&
+              after.currentQuestionIndex == before.currentQuestionIndex + 1 &&
+              after.currentQuestionIndex == after.answers.size() &&
+              after.currentQuestionIndex <= after.totalCount &&
+              validGateClearAnswer(
+                after.answers[before.answers.size()],
+                before.questionOrder[before.currentQuestionIndex],
+                before.questionOrder
+              ) &&
+              after.correctCount == before.correctCount +
+                (after.answers[before.answers.size()].correct ? 1 : 0) &&
+              after.updatedAt == request.time &&
+              (
+                (after.currentQuestionIndex < after.totalCount && after.status == 'active') ||
+                (after.currentQuestionIndex == after.totalCount && after.status == 'submitting')
+              );
+          }
+
+          function validGateClearAttemptFinish(before, after) {
+            return validGateClearAttempt(after) &&
+              before.status == 'submitting' &&
+              after.diff(before).affectedKeys().hasOnly([
+                'status', 'result', 'score', 'completedAt', 'updatedAt'
+              ]) &&
+              before.currentQuestionIndex == before.totalCount &&
+              before.answers.size() == before.totalCount &&
+              after.score == after.correctCount / after.totalCount &&
+              after.completedAt == request.time && after.updatedAt == request.time &&
+              (
+                (before.correctCount >= before.requiredCorrect &&
+                  after.status == 'passed' && after.result == 'passed') ||
+                (before.correctCount < before.requiredCorrect &&
+                  after.status == 'failed' && after.result == 'failed')
+              );
+          }
+
+          function validGateClearAttemptAbandon(before, after) {
+            return validGateClearAttempt(after) &&
+              before.status == 'active' &&
+              after.diff(before).affectedKeys().hasOnly([
+                'status', 'abandonedAt', 'updatedAt'
+              ]) &&
+              after.status == 'abandoned' && after.abandonedAt == request.time &&
+              after.updatedAt == request.time;
+          }
+          allow read: if isOwner(uid);
+          allow create: if isOwner(uid) && validGateClearAttemptCreate(request.resource.data);
+          allow update: if isOwner(uid) && (
+            validGateClearAnswerUpdate(resource.data, request.resource.data) ||
+            validGateClearAttemptFinish(resource.data, request.resource.data) ||
+            validGateClearAttemptAbandon(resource.data, request.resource.data)
+          );
+          allow delete: if false;
+        }
+        match /ranks/{rankId}/gates/{gateId} {
+          function validGateProgress(data) {
+            return data.worldId == worldId && data.rankId == rankId && data.gateId == gateId &&
+              data.journeyVersion == 1 &&
+              data.status in ['available', 'learning', 'ready', 'cleared'] &&
+              data.lastActivityAt is timestamp && data.readyEvidenceCount is int &&
+              data.readyEvidenceCount >= 0 && data.clearAttempts is int && data.clearAttempts >= 0 &&
+              (!('clearCorrect' in data) || (data.clearCorrect is int && data.clearCorrect >= 0)) &&
+              (!('clearTotal' in data) || (data.clearTotal is int && data.clearTotal >= 0));
+          }
+          allow read: if isOwner(uid);
+          allow create, update: if isOwner(uid) && validGateProgress(request.resource.data);
+          allow delete: if false;
+        }
+      }
+
+      match /quizEvidenceSessions/{sessionId} { allow read, create: if isOwner(uid); allow update, delete: if false; }
+      match /contentOperations/{operationId} { allow read: if isOwner(uid); allow write: if false; }
+
+      match /contentWords/{contentWordId} {
+        function validContentWord(data) {
+          return data.canonicalId == contentWordId && data.wordKey == contentWordId &&
+            data.normalizationVersion == 1 && data.schemaVersion == 1 &&
+            nonEmptyString(data.word, 240) && nonEmptyString(data.normalizedWord, 240) &&
+            nonEmptyString(data.masteryKey, 240) &&
+            (!('translation' in data) ||
+              (data.translation is string && data.translation.size() <= 1000)) &&
+            data.forgetCount is int && data.forgetCount >= 0 && data.forgetCount <= 100000 &&
+            (!('sourceCount' in data) || (data.sourceCount is int && data.sourceCount >= 0)) &&
+            (!('eligibleEvidenceCount' in data) ||
+              (data.eligibleEvidenceCount is int && data.eligibleEvidenceCount >= 0 &&
+                data.eligibleEvidenceCount <= 3));
+        }
+        allow read: if isOwner(uid);
+        allow create, update: if isOwner(uid) && validContentWord(request.resource.data);
+        allow delete: if false;
+        match /sources/{sourceId} {
+          function validSource(data) {
+            return data.addedFrom in [
+                'manual', 'dictionary-search', 'private-world', 'import',
+                'published-gate', 'level-placement'
+              ] && nonEmptyString(data.operationId, 180) &&
+              data.linkedAt is timestamp &&
+              (!('customWorldId' in data) || nonEmptyString(data.customWorldId, 500)) &&
+              (!('importId' in data) || nonEmptyString(data.importId, 500));
+          }
+          allow read, delete: if isOwner(uid);
+          allow create: if isOwner(uid) && validSource(request.resource.data);
+          allow update: if false;
+        }
+        match /evidence/{eventId} {
+          function validEvidence(data) {
+            return data.eventId == eventId && data.wordKey == contentWordId &&
+              nonEmptyString(data.sessionId, 500) && data.correct == true &&
+              data.completed == true && data.sequence is int &&
+              data.sequence >= 1 && data.sequence <= 3 &&
+              (data.evidenceVersion == 1 || data.evidenceVersion == 2) &&
+              data.occurredAt is timestamp;
+          }
+          allow read: if isOwner(uid);
+          allow create: if isOwner(uid) && validEvidence(request.resource.data);
+          allow update, delete: if false;
+        }
+      }
+    }
+
+    // Shared cache has intentionally public reads in production. Writes are
+    // authenticated; only claim-based admins may remove entries.
+    match /ai_global_cache/{cacheId} {
+      function validCacheDocument(data) {
+        return data.keys().hasOnly([
+            'word', 'caches', 'type', 'meanings', 'meaning', 'createdAt'
+          ]) &&
+          nonEmptyString(data.word, 500) &&
+          ('caches' in data || 'type' in data) &&
+          (!('caches' in data) || data.caches is map) &&
+          (!('type' in data) || data.type == 'normal' || data.type == 'gamer') &&
+          (!('meanings' in data) || data.meanings is list) &&
+          (!('meaning' in data) || data.meaning is string ||
+            data.meaning is list || data.meaning is map);
+      }
+
+      allow read: if true;
+      allow create: if signedIn() && validCacheDocument(request.resource.data);
+      allow update: if isAdmin() || (
+        signedIn() && validCacheDocument(request.resource.data) &&
+        request.resource.data.word == resource.data.word
+      );
+      allow delete: if isAdmin();
+    }
+
+    match /suggestions/{suggestionId} {
+      allow create: if signedIn() &&
+        nonEmptyString(request.resource.data.word, 500) &&
+        request.resource.data.userId == request.auth.uid;
+      allow read, delete: if isAdmin();
+      allow update: if false;
+    }
+
+    match /{document=**} { allow read, write: if false; }
+  }
+}
