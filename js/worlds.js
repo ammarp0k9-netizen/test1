@@ -334,34 +334,42 @@ function saveChestProgressState(state) {
   if (typeof renderLootSummary === 'function' && currentView === 'treasure') renderLootSummary();
 }
 
-let chestXPUnlockInFlight = null;
+const chestXPUnlockInFlight = new Map();
 
 async function unlockChestXP(reason = '') {
-  if (chestXPUnlockInFlight) return chestXPUnlockInFlight;
-  chestXPUnlockInFlight = (async () => {
+  const owner = getStorageUserId();
+  const generation = Number(window.__lootlinguaAuthGeneration) || 0;
+  const operationKey = JSON.stringify([owner, generation]);
+  const isCurrent = () => getStorageUserId() === owner && (Number(window.__lootlinguaAuthGeneration) || 0) === generation;
+  if (chestXPUnlockInFlight.has(operationKey)) return chestXPUnlockInFlight.get(operationKey);
+  const operation = (async () => {
   const state = getLootState();
   const amount = Number(state.lockedXP) || 0;
   if (amount <= 0) return false;
   const eventId = `daily_chest_unlock:${state.lockStartedAt || state.lastOpenAt || todayStr()}`;
   const metadata = { eventId };
   const awarded = await awardXP(amount, 'daily_chest_unlock', metadata);
-  if (metadata.awardStatus === 'unavailable') return false;
-  state.lockedXP = 0;
-  state.lockStartedAt = 0;
-  state.lockResolvedAt = Date.now();
-  state.lockMasteredWordIds = [];
-  state.lockHighAccuracyQuizIds = [];
-  saveChestProgressState(state);
+  if (!isCurrent() || !['awarded', 'duplicate'].includes(metadata.awardStatus)) return false;
+  const current = getLootState();
+  const currentEventId = `daily_chest_unlock:${current.lockStartedAt || current.lastOpenAt || todayStr()}`;
+  if (currentEventId !== eventId || Number(current.lockedXP) !== amount) return false;
+  current.lockedXP = 0;
+  current.lockStartedAt = 0;
+  current.lockResolvedAt = Date.now();
+  current.lockMasteredWordIds = [];
+  current.lockHighAccuracyQuizIds = [];
+  saveChestProgressState(current);
   if (awarded > 0) {
     showXPBadge(awarded, 'dailyLootChest', false);
     showToast(`انفتح الxp المقفل!+${awarded} XP${reason ? ` — ${reason}` : ''}`, 'success', 5200);
   }
   return true;
   })();
+  chestXPUnlockInFlight.set(operationKey, operation);
   try {
-    return await chestXPUnlockInFlight;
+    return await operation;
   } finally {
-    chestXPUnlockInFlight = null;
+    chestXPUnlockInFlight.delete(operationKey);
   }
 }
 
@@ -6735,6 +6743,9 @@ async function saveWordsToTarget(targetId, wordsToAdd, options = {}) {
         word.id = realId;
       }));
     }
+    const movedPrivateKeys = new Set(wordsToAdd
+      .filter((word) => word.removePrivateWorldId)
+      .map(getWorldManageWordKey));
     wordsToAdd.forEach((word) => {
       delete word.operationId;
       delete word.removePrivateWorldId;
@@ -6744,6 +6755,18 @@ async function saveWordsToTarget(targetId, wordsToAdd, options = {}) {
     const existingKeys = new Set(currentPersonal.map(getWorldManageWordKey));
     const next = currentPersonal.map((word) => {
       const incoming = incomingByKey.get(getWorldManageWordKey(word));
+      if (incoming && movedPrivateKeys.has(getWorldManageWordKey(word))) {
+        const dictionaryFields = {};
+        ['example', 'category', 'starred', 'order'].forEach((field) => {
+          if (Object.prototype.hasOwnProperty.call(incoming, field)) dictionaryFields[field] = incoming[field];
+        });
+        const text = incoming.word || incoming.text;
+        const meaning = incoming.meaning ?? incoming.translation ?? '';
+        return {
+          ...word, ...dictionaryFields, word: text, text, meaning, translation: meaning,
+          personalDictionaryState: 'active', hiddenFromDictionary: false, hiddenFromDictionaryAt: null,
+        };
+      }
       return incoming
         ? { ...incoming, ...word, personalDictionaryState: 'active' }
         : word;

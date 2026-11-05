@@ -730,6 +730,31 @@
         const legacy = legacySnapshot.exists() ? legacySnapshot.data() : null;
         const incomingLegacy = legacyWordPayload(user.uid, word, identity, input);
         const educationalPatch = legacy ? missingEducationalPatch(legacy, incomingLegacy) : {};
+        const movedDictionaryFields = {};
+        if (source.type === 'manual' && removePrivateWorldId && !removePrivateMembershipSnapshot?.exists()) {
+          throw wordLifecycleError(
+            'word-lifecycle/source-membership-missing',
+            'The source word is no longer in this private world. Reload before trying to move it again.'
+          );
+        }
+        if (source.type === 'manual' && removePrivateMembershipSnapshot?.exists()) {
+          const moved = removePrivateMembershipSnapshot.data() || {};
+          const movedIdentity = lifecycle.normalizeIdentity(moved);
+          if (movedIdentity.wordKey !== identity.wordKey ||
+              (moved.wordKey && moved.wordKey !== identity.wordKey)) {
+            throw wordLifecycleError('word-lifecycle/identity-mismatch', 'The moved word identity is inconsistent.');
+          }
+          // An explicit move must preserve the saved private dictionary edits
+          // before deleting their only membership. Learning and identity stay
+          // owned by the destination; canonical published content stays intact.
+          ['example', 'category', 'starred', 'order'].forEach((field) => {
+            if (Object.prototype.hasOwnProperty.call(moved, field)) movedDictionaryFields[field] = moved[field];
+          });
+          movedDictionaryFields.word = moved.word || moved.text;
+          movedDictionaryFields.text = movedDictionaryFields.word;
+          movedDictionaryFields.meaning = moved.meaning ?? moved.translation ?? '';
+          movedDictionaryFields.translation = movedDictionaryFields.meaning;
+        }
         const wasHidden = legacy?.hiddenFromDictionary === true;
         const restored = Boolean(input.restoreHidden === true && wasHidden);
         const sourceLinked = !sourceSnapshot.exists();
@@ -759,10 +784,10 @@
 
         const legacyProjectionPending = splitLegacyProjection && !legacySnapshot.exists();
         if (!legacySnapshot.exists() && !legacyProjectionPending) {
-          transaction.set(legacyRef, incomingLegacy);
+          transaction.set(legacyRef, { ...incomingLegacy, ...movedDictionaryFields });
           trace?.count('firestoreWrites');
         } else if (legacySnapshot.exists()) {
-          const patch = { ...educationalPatch };
+          const patch = { ...educationalPatch, ...movedDictionaryFields };
           const requestedPersonalState = input.personalDictionaryState === 'moved-to-private-world'
             ? 'moved-to-private-world'
             : (input.personalDictionaryState === 'active' ? 'active' : '');
@@ -885,6 +910,17 @@
         'A signed-in user is required to migrate guest words.'
       );
     }
+    const ownerId = user.uid;
+    const ownerGeneration = Number(window.__lootlinguaAuthGeneration) || 0;
+    const assertCurrentOwner = () => {
+      if (auth.currentUser?.uid !== ownerId ||
+          (Number(window.__lootlinguaAuthGeneration) || 0) !== ownerGeneration) {
+        throw guestMigrationError(
+          'guest-migration/identity-changed',
+          'The signed-in user changed during guest migration.'
+        );
+      }
+    };
     const lifecycle = wordLifecycleApi();
     const importId = String(options.importId || 'guest-migration').trim() || 'guest-migration';
     const operationId = String(options.operationId || 'guest-migration').trim() || 'guest-migration';
@@ -906,7 +942,6 @@
       unique.push({ word, identity, index });
     });
 
-    const ownerId = user.uid;
     const results = [];
     // Every item makes three writes and two existsAfter checks; six safely
     // remains below the Rules document-access limit for one atomic request.
@@ -918,12 +953,7 @@
 
     try {
       for (let offset = 0; offset < unique.length; offset += batchSize) {
-        if (auth.currentUser?.uid !== ownerId) {
-          throw guestMigrationError(
-            'guest-migration/identity-changed',
-            'The signed-in user changed during guest migration.'
-          );
-        }
+        assertCurrentOwner();
         const chunk = unique.slice(offset, offset + batchSize).map((item) => {
           const source = sourceIdentity({ type: 'import', importId }, item.identity);
           const canonicalRef = doc(db, 'users', ownerId, 'contentWords', item.identity.wordKey);
@@ -937,11 +967,13 @@
             legacyRef: doc(db, 'users', ownerId, 'words', legacyWordId),
           };
         });
+        assertCurrentOwner();
         const existence = await Promise.all(chunk.flatMap((item) => [
           getDoc(item.canonicalRef),
           getDoc(item.sourceRef),
           getDoc(item.legacyRef),
         ]));
+        assertCurrentOwner();
         trace?.count('firestoreReads', existence.length);
         const fresh = [];
         const existing = [];
@@ -969,7 +1001,9 @@
             batch.create(item.sourceRef, sourceDocumentPayload(item.source, operationId));
           });
           try {
+            assertCurrentOwner();
             await batch.commit();
+            assertCurrentOwner();
             trace?.count('firestoreWrites', fresh.length * 3);
             fresh.forEach((item) => results.push({
               status: 'created',
@@ -979,6 +1013,7 @@
               wordIndex: item.index,
             }));
           } catch (error) {
+            assertCurrentOwner();
             if (error?.code === 'permission-denied' || error?.code === 'unauthenticated') {
               throw guestMigrationError(
                 'guest-migration/firestore-write-denied',
@@ -992,15 +1027,19 @@
 
         for (const item of existing) {
           try {
+            assertCurrentOwner();
             const result = await upsertUserWordWithSource({
+              uid: ownerId,
               word: item.word,
               source: { type: 'import', importId },
               restoreHidden: true,
               personalDictionaryState: 'active',
               operationId,
             });
+            assertCurrentOwner();
             results.push({ ...result, wordIndex: item.index });
           } catch (error) {
+            assertCurrentOwner();
             throw guestMigrationError(
               'guest-migration/word-upsert-failed',
               'Firestore could not merge a guest word into the account.',
@@ -1014,10 +1053,13 @@
           }
         }
         onProgress?.({ completed: results.length, total: unique.length });
+        assertCurrentOwner();
       }
+      assertCurrentOwner();
       trace?.stage('complete').end({ migrated: results.length });
       return results;
     } catch (error) {
+      assertCurrentOwner();
       trace?.warn(error?.code || error?.message || 'guest-word-migration-failed').end({ failed: true });
       throw error;
     }
@@ -1805,6 +1847,102 @@
     const update = buildQuizLearningCloudUpdate(data, user.uid);
     try { await updateDoc(doc(db, "users", user.uid, "customWorlds", String(worldId), "words", docId), update); }
     catch (e) { console.error("updateCustomWorldWordInCloud:", e); }
+  };
+
+  function dictionaryWordWriteError(message, code = 'dictionary/invalid-update') {
+    const error = new Error(message);
+    error.code = code;
+    return error;
+  }
+
+  function dictionaryWordDocumentId(value) {
+    if (typeof value !== 'string' || !value.trim() || value.includes('/') ||
+        value === '.' || value === '..') {
+      throw dictionaryWordWriteError('A valid dictionary document ID is required.');
+    }
+    return value;
+  }
+
+  function buildDictionaryWordCloudUpdate(data) {
+    const allowed = ['word', 'meaning', 'example', 'category', 'starred', 'order'];
+    if (!data || typeof data !== 'object' || Array.isArray(data) ||
+        !Object.keys(data).length || Object.keys(data).some((key) => !allowed.includes(key))) {
+      throw dictionaryWordWriteError('A dictionary update must contain only dictionary fields.');
+    }
+    const update = {};
+    Object.keys(data).forEach((key) => {
+      const value = data[key];
+      if (key === 'starred') {
+        if (typeof value !== 'boolean') throw dictionaryWordWriteError('starred must be a boolean.');
+      } else if (key === 'order') {
+        if (!Number.isSafeInteger(value) || value < 0) {
+          throw dictionaryWordWriteError('order must be a non-negative integer.');
+        }
+      } else {
+        const maxLength = { word: 500, meaning: 1000, example: 4000, category: 120 }[key];
+        if (typeof value !== 'string' || value.length > maxLength ||
+            (key === 'word' && !value.trim())) {
+          throw dictionaryWordWriteError(`Invalid dictionary ${key}.`);
+        }
+      }
+      update[key] = value;
+      // Legacy readers prefer text; lifecycle readers also consume translation.
+      // Keep each alias in the same write so a later snapshot cannot revive it.
+      if (key === 'word') update.text = value;
+      if (key === 'meaning') update.translation = value;
+    });
+    return update;
+  }
+
+  async function updateDictionaryWordDocument(docId, data, worldId) {
+    const user = auth.currentUser;
+    if (!user) {
+      const error = new Error('Sign in before updating a dictionary word.');
+      error.code = 'dictionary/auth-required';
+      throw error;
+    }
+    const owner = { uid: user.uid, generation: Number(window.__lootlinguaAuthGeneration) || 0 };
+    const assertCurrentOwner = () => {
+      if (auth.currentUser?.uid !== owner.uid ||
+          (Number(window.__lootlinguaAuthGeneration) || 0) !== owner.generation) {
+        throw dictionaryWordWriteError('Dictionary owner changed.', 'dictionary/stale-owner');
+      }
+    };
+    const wordId = dictionaryWordDocumentId(docId);
+    const path = worldId === undefined
+      ? ['users', owner.uid, 'words', wordId]
+      : ['users', owner.uid, 'customWorlds', dictionaryWordDocumentId(worldId), 'words', wordId];
+    const update = buildDictionaryWordCloudUpdate(data);
+    const ref = doc(db, ...path);
+    if (Object.prototype.hasOwnProperty.call(update, 'word')) {
+      const snapshot = await getDoc(ref);
+      assertCurrentOwner();
+      if (!snapshot.exists()) {
+        throw dictionaryWordWriteError('Dictionary word no longer exists.', 'dictionary/missing-document');
+      }
+      const existing = snapshot.data() || {};
+      const lifecycle = wordLifecycleApi();
+      const existingKey = String(existing.wordKey || lifecycle.normalizeIdentity(existing).wordKey || '');
+      const nextKey = lifecycle.normalizeIdentity(update.word).wordKey;
+      // Renaming an identity also requires migrating sources and learning data.
+      // This API permits display corrections only; it never transfers progress.
+      if (!existingKey || !nextKey || existingKey !== nextKey) {
+        throw dictionaryWordWriteError('Add a different word as a new entry.', 'dictionary/identity-change');
+      }
+    }
+    assertCurrentOwner();
+    // Propagate failures: callers decide whether to keep or roll back local edits.
+    await updateDoc(ref, update);
+    return true;
+  }
+
+  window.updateDictionaryWordInCloud = async function(docId, data) {
+    return updateDictionaryWordDocument(docId, data);
+  };
+
+  window.updateCustomWorldDictionaryWordInCloud = async function(worldId, docId, data) {
+    // A missing custom-world ID must never fall back to the personal dictionary.
+    return updateDictionaryWordDocument(docId, data, dictionaryWordDocumentId(worldId));
   };
 
   window.deleteCustomWorldWordFromCloud = async function(worldId, id, word, options = {}) {
