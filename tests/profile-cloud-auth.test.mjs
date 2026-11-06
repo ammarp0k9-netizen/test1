@@ -146,7 +146,9 @@ test('auth readiness resumes after a words-only guest profile commit during the 
   await flushMicrotasks();
   h.seedMigration('A', {});
   assert.equal(await h.root.commitPendingGuestProfileMigration({ uid: 'A' }), true);
-  assert.equal(h.merges.length, 0, 'a missing account profile and empty guest progress require no merge');
+  assert.equal(Number(h.profile.userXP) || 0, 0, 'an empty guest snapshot must not invent XP');
+  assert.equal(Number(h.profile.runnerCoins) || 0, 0, 'an empty guest snapshot must not invent a wallet balance');
+  assert.deepEqual(h.profile.activityMap || {}, {});
   h.root.finalizePendingGuestProfileMigration({ uid: 'A' });
   decision.resolve('accepted');
   await flushMicrotasks();
@@ -155,7 +157,7 @@ test('auth readiness resumes after a words-only guest profile commit during the 
   assert.equal(h.root.__lootlinguaProfileSnapshot.exists, true);
   assert.deepEqual(h.streaks, ['A']);
   assert.equal(h.writes.length, 1);
-  assert.equal(h.reads.length, 3);
+  assert.equal(h.reads.length, 4);
 });
 
 test('auth reload after guest acceptance preserves the verified balance without another credit', async () => {
@@ -191,7 +193,8 @@ test('a pending generic debounce cannot collect or save a newer account payload'
 
 test('a save preflight cannot publish a stale snapshot or proceed to a write', async () => {
   const h = createProfileHarness({ manualReads: true });
-  const saving = h.root._saveProfileToCloudNow();
+  const saving = h.root.saveProfilePreferencesToCloud({ theme: 'ocean' });
+  await flushMicrotasks();
   h.setIdentity({ uid: 'B' });
   const bSnapshot = { uid: 'B', exists: true, data: { userXP: 200 } };
   h.root.__lootlinguaProfileSnapshot = bSnapshot;
@@ -205,7 +208,8 @@ test('a submitted old-account save cannot publish success or failure into the ne
   for (const fail of [false, true]) {
     const h = createProfileHarness({ manualWrites: true });
     h.seedSnapshot();
-    const saving = h.root._saveProfileToCloudNow({ verify: true });
+    const saving = h.root.saveProfilePreferencesToCloud({ theme: 'ocean' }, { verify: true });
+    await flushMicrotasks();
     assert.equal(h.writes[0].reference, h.path('A'));
     h.setIdentity({ uid: 'B' });
     const bSnapshot = { uid: 'B', data: { userXP: 200 } };
@@ -217,7 +221,7 @@ test('a submitted old-account save cannot publish success or failure into the ne
     assert.equal(await saving, false);
     assert.equal(h.root.__lootlinguaProfileSnapshot, bSnapshot);
     assert.equal(h.root.__lootlinguaLastProfileSaveFailure, bFailure);
-    assert.equal(h.reads.length, 0, 'stale verification must not run');
+    assert.equal(h.reads.length, 1, 'only the transaction read runs; stale verification must not run');
     assert.equal(h.errors.length, 0);
   }
 });
@@ -229,14 +233,16 @@ test('stale verification success or failure cannot commit migration or restore o
     const loading = h.root.commitPendingGuestProfileMigration({ uid: 'A' });
     h.resolveRead(0, { userXP: 100, runnerCoins: 10 });
     await flushMicrotasks();
+    h.resolveRead(1, { userXP: 100, runnerCoins: 10 });
+    await flushMicrotasks();
     assert.equal(h.writes.length, 1);
-    assert.equal(h.reads.length, 2);
+    assert.equal(h.reads.length, 3);
     h.setIdentity({ uid: 'B' });
     const b = h.root.loadProfileFromCloud({ uid: 'B' });
-    h.resolveRead(2, { userXP: 300, runnerCoins: 20 });
+    h.resolveRead(3, { userXP: 300, runnerCoins: 20 });
     await b;
-    if (fail) h.reads[1].reject(new Error('A verification failed'));
-    else h.resolveRead(1);
+    if (fail) h.reads[2].reject(new Error('A verification failed'));
+    else h.resolveRead(2);
     assert.equal(await loading, false);
     assert.equal(h.profile.userXP, 300);
     assert.equal(h.profile.runnerCoins, 20);
@@ -252,7 +258,7 @@ test('a verified guest migration retains its marker and retries without adding t
   assert.equal(await h.root.commitPendingGuestProfileMigration({ uid: 'A' }), true);
   assert.equal(h.docs.get(h.path('A')).runnerCoins, 15);
   assert.equal(h.docs.get(h.path('A')).userXP, 180);
-  assert.equal(h.reads.length, 2, 'migration includes a verification read');
+  assert.equal(h.reads.length, 3, 'migration reads the initial profile, transactional profile, then verifies');
   assert.ok(JSON.parse(h.localStorage.getItem(key)).profileCommittedAt > 0);
   assert.equal(await h.root.commitPendingGuestProfileMigration({ uid: 'A' }), true);
   assert.equal(h.writes.length, 1);
@@ -279,9 +285,24 @@ test('failed current migration verification retains recoverable guest data', asy
   const loading = h.root.commitPendingGuestProfileMigration({ uid: 'A' });
   h.resolveRead(0, { userXP: 100 });
   await flushMicrotasks();
-  h.resolveRead(1, undefined);
+  h.resolveRead(1, { userXP: 100 });
+  await flushMicrotasks();
+  h.resolveRead(2, undefined);
   assert.equal(await loading, false);
   assert.equal(JSON.parse(h.localStorage.getItem(key)).profileCommittedAt, undefined);
   assert.equal(h.profile.userXP, 180);
   assert.equal(h.root.__lootlinguaLastProfileSaveFailure.code, 'profile/write-verification-failed');
+});
+
+test('a verified legacy migration marker is sealed without granting its spent balance again', async () => {
+  const h = createProfileHarness({ profile: { userXP: 180, runnerCoins: 15 } });
+  const { key, pending } = h.seedMigration();
+  pending.guestSnapshotId = 'already-imported-legacy'; pending.profileCommittedAt = Date.now();
+  h.localStorage.setItem(key, JSON.stringify(pending));
+  await h.root.loadProfileFromCloud({ uid: 'A' });
+  assert.equal(h.docs.get(h.path('A')).runnerCoins, 15);
+  await h.root.commitProfileIntent({ type: 'wallet-delta', field: 'runnerCoins', amount: -7, eventId: 'later-spend' });
+  h.root.finalizePendingGuestProfileMigration({ uid: 'A' });
+  await h.root.commitProfileIntent({ type: 'guest-import', eventId: pending.guestSnapshotId, profile: pending.profile });
+  assert.equal(h.docs.get(h.path('A')).runnerCoins, 8);
 });

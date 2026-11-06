@@ -861,9 +861,9 @@ test('Entry completion verifies only appearance through the real profile adapter
   assert.equal(saved.userXP, 500);
   assert.equal(saved.perfectQuizzes, 9);
   assert.equal(saved.runnerCoins, 44);
-  assert.deepEqual(Object.keys(cloud.writes[0].data).sort(), ['oasisMode', 'theme', 'themeIntroSeen', 'updatedAt']);
+  assert.deepEqual(Object.keys(cloud.writes[0].data).sort(), ['_syncRevision', 'oasisMode', 'theme', 'themeIntroSeen', 'updatedAt']);
   assert.deepEqual(cloud.writes[0].data.themeIntroSeen, ['lootlingua', 'ocean']);
-  assert.equal(cloud.reads.length, 1, 'the preference write must be verified');
+  assert.equal(cloud.reads.length, 2, 'the appearance transaction reads current state, then verifies the committed patch');
   assert.equal(cloud.payloadReads, 0);
   assert.equal(h.calls.fullProfileSaves, 0);
 });

@@ -315,6 +315,7 @@ function getStreakFreezeCount() {
 
 function saveStreakFreezeCount(count) {
   saveInt(STREAK_FREEZE_KEY, Math.max(0, Number(count) || 0));
+  if (typeof renderStreakFreezeStatus === 'function') renderStreakFreezeStatus();
   if (!hasSignedInUser()) markGuestDataDirty();
   requestProfileCloudSave();
 }
@@ -343,6 +344,11 @@ async function unlockChestXP(reason = '') {
   const isCurrent = () => getStorageUserId() === owner && (Number(window.__lootlinguaAuthGeneration) || 0) === generation;
   if (chestXPUnlockInFlight.has(operationKey)) return chestXPUnlockInFlight.get(operationKey);
   const operation = (async () => {
+  if (window.auth?.currentUser) {
+    if (typeof window.flushProfileIntents !== 'function') return false;
+    const pending = await window.flushProfileIntents();
+    if (!isCurrent() || pending?.saved !== true) return false;
+  }
   const state = getLootState();
   const amount = Number(state.lockedXP) || 0;
   if (amount <= 0) return false;
@@ -401,7 +407,41 @@ function recordHighAccuracyVerifiedQuiz(sessionId) {
   evaluateChestXPUnlock(state);
 }
 
-function revealDailyLootReward(state, reward) {
+function captureLootOpening() {
+  return { owner: getStorageUserId(), generation: Number(window.__lootlinguaAuthGeneration) || 0,
+    eventId: window.crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(36).slice(2)}` };
+}
+
+function isLootOpeningCurrent(operation) {
+  return operation.owner === getStorageUserId() && operation.generation === (Number(window.__lootlinguaAuthGeneration) || 0);
+}
+
+async function revealDailyLootReward(state, reward, operation = captureLootOpening()) {
+  if (!isLootOpeningCurrent(operation)) return false;
+  if (operation.owner !== 'guest') {
+    try {
+      if (typeof window.commitProfileIntent !== 'function') throw new Error('Profile sync is not ready.');
+      const result = await window.commitProfileIntent({
+        type: 'loot-open', eventId: operation.eventId, reward, at: Date.now(), day: todayStr(),
+      });
+      if (!isLootOpeningCurrent(operation)) return false;
+      if (result?.saved !== true || result?.applied !== true) {
+        showToast(result?.saved === true ? 'لم يُفتح صندوق جديد. تم تحديث حالته من حسابك.' :
+          'تعذّر تأكيد فتح الصندوق. ستتحدث حالته عند عودة المزامنة.', 'warning', 5000);
+        renderTreasureRoom(); return false;
+      }
+    } catch (error) {
+      if (isLootOpeningCurrent(operation)) {
+        showToast('تعذّر تأكيد فتح الصندوق. ستتحدث حالته عند عودة المزامنة.', 'warning', 5000);
+        renderTreasureRoom();
+      }
+      return false;
+    }
+    launchConfetti();
+    showToast(`طلع لك: ${describeLootReward(reward)}. ${CHEST_XP_UNLOCK_TEXT}`, 'success', 6500);
+    evaluateTitleUnlocks(true); updateDailyQuestsBadge(); renderTreasureRoom();
+    return true;
+  }
   if ((Number(state.lockedXP) || 0) > 0) {
     showToast(`عندك ${Number(state.lockedXP) || 0} XP مقفولة. افتح المكافأة الحالية أولا قبل صندوق جديد.`, 'warning', 5200);
     renderTreasureRoom();
@@ -432,6 +472,7 @@ function revealDailyLootReward(state, reward) {
   updateDailyQuestsBadge();
   renderTreasureRoom();
   requestProfileCloudSave();
+  return true;
 }
 
 window.startLootChestCharge = function(event) {
@@ -450,15 +491,16 @@ window.startLootChestCharge = function(event) {
     window.openDailyLootBox();
     return;
   }
-  if (window.__lootOpening || window.__lootHoldTimer) {
+  if ((window.__lootOpening && isLootOpeningCurrent(window.__lootOpening)) || window.__lootHoldTimer) {
     window.__lootPointerStart = null;
     return;
   }
   chest?.classList.add('is-charging');
   if (preview) preview.textContent = 'ثبّت ضغطتك شوي... الصندوق بدأ يتشقق.';
+  const holdOwner = captureLootOpening();
   window.__lootHoldTimer = setTimeout(() => {
     window.__lootHoldTimer = null;
-    window.openDailyLootBox();
+    if (isLootOpeningCurrent(holdOwner)) window.openDailyLootBox();
   }, 820);
 };
 
@@ -499,8 +541,9 @@ window.openDailyLootBox = function() {
     renderTreasureRoom();
     return;
   }
-  if (window.__lootOpening) return;
-  window.__lootOpening = true;
+  if (window.__lootOpening && isLootOpeningCurrent(window.__lootOpening)) return;
+  const operation = captureLootOpening();
+  window.__lootOpening = operation;
   clearTimeout(window.__lootHoldTimer);
   window.__lootHoldTimer = null;
   const chest = document.getElementById('dailyLootChest');
@@ -514,14 +557,18 @@ window.openDailyLootBox = function() {
   if (preview) preview.textContent = 'الصندوق فتح... بنفرز اللوت الآن!';
   const state = availability.state;
   const reward = pickDailyLootReward();
-  setTimeout(() => {
-    revealDailyLootReward(state, reward);
-    chest?.classList.remove('is-opening');
-    if (chest) {
-      chest.disabled = false;
-      chest.setAttribute('aria-busy', 'false');
+  setTimeout(async () => {
+    try {
+      await revealDailyLootReward(state, reward, operation);
+    } finally {
+      if (window.__lootOpening === operation) {
+        if (isLootOpeningCurrent(operation)) {
+          chest?.classList.remove('is-opening');
+          if (chest) { chest.disabled = false; chest.setAttribute('aria-busy', 'false'); }
+        }
+        window.__lootOpening = false;
+      }
     }
-    window.__lootOpening = false;
   }, 900);
 };
 

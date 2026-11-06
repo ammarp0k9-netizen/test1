@@ -1216,6 +1216,7 @@ const APP_VIEW_ROUTES = {
   admin: 'admin',
 };
 const APP_MODAL_ROUTES = {
+  streakFreezeHelpModal: 'streak-freeze',
   deleteModal: 'delete-word',
   unlockExplainModal: 'locked-feature',
   logoutModal: 'logout',
@@ -1338,6 +1339,8 @@ function setPublishedContentRoute(key, params, options = {}) {
 }
 
 function closeRouteOverlays() {
+  window.cancelPendingStatsPanel?.();
+  window.LootLinguaModalFocus?.closeAll();
   document.querySelectorAll('.custom-modal').forEach(modal => {
     modal.style.display = 'none';
   });
@@ -1352,6 +1355,7 @@ function closeRouteOverlays() {
   if (stats) {
     stats.classList.remove('show');
     stats.style.display = 'none';
+    stats.setAttribute('aria-hidden', 'true');
     unlockBackgroundScroll('stats');
   }
   const wordHunterModal = document.getElementById('wordHunterModal');
@@ -1602,6 +1606,7 @@ function hideModal(id) {
     if (modal) {
       modal.style.display = 'none';
       modal.setAttribute('aria-hidden', 'true');
+      window.LootLinguaModalFocus?.close(modal);
     }
     if (activeModalFocusContext?.modal === modal) {
       modal?.removeEventListener('keydown', activeModalFocusContext.trap);
@@ -1737,12 +1742,16 @@ window.flushDeferredEntryToasts = function() {
 // ═══════════════════════════════════════════════════════
 function loadInt(k,d)  { const v=parseInt(localStorage.getItem(k)); return isNaN(v)?d:v; }
 function saveInt(k,v)  {
+  const before = localStorage.getItem(k);
   localStorage.setItem(k,String(v));
+  if (!window.__applyingCloudProfile && !window.__profileHydrating) window.recordProfileStorageMutation?.(k, before, String(v));
   markGuestProfileDataDirty(k);
 }
 function loadJSON(k,d) { try{const r=JSON.parse(localStorage.getItem(k));return r??d;}catch{return d;} }
 function saveJSON(k,v) {
-  localStorage.setItem(k,JSON.stringify(v));
+  const before = localStorage.getItem(k), after = JSON.stringify(v);
+  localStorage.setItem(k,after);
+  if (!window.__applyingCloudProfile && !window.__profileHydrating) window.recordProfileStorageMutation?.(k, before, after);
   markGuestProfileDataDirty(k);
 }
 function localDateKey(value = new Date()) {
@@ -1870,7 +1879,69 @@ window.resetLootlinguaProfileState = function(options = {}) {
   if (typeof renderTreasureRoom === 'function' && currentView === 'treasure') renderTreasureRoom();
 };
 
+// Transaction results already include this owner's pending intents. Apply the
+// canonical values directly; the older guest merge below has different semantics.
+window.applyCanonicalLootlinguaProfile = function(d) {
+  if (!d) return false;
+  const wasHydrating = window.__profileHydrating === true;
+  const wasApplying = window.__applyingCloudProfile === true;
+  window.__profileHydrating = true;
+  window.__applyingCloudProfile = true;
+  let changed = false;
+  const put = (key, value) => {
+    const serialized = String(value);
+    if (localStorage.getItem(key) === serialized) return;
+    localStorage.setItem(key, serialized);
+    changed = true;
+  };
+  try {
+    if (d.userXP !== undefined) {
+      const nextXP = Math.max(userXP, Number(d.userXP) || 0);
+      if (nextXP !== userXP) changed = true;
+      userXP = nextXP;
+      put('userXP', userXP);
+    }
+    if (d.dailyStreak !== undefined || d.lastActivityDate !== undefined) {
+      const nextStreak = Math.max(0, Number(d.dailyStreak) || 0);
+      const nextActivity = String(d.lastActivityDate || '');
+      if (dailyStreak !== nextStreak || lastActivity !== nextActivity) changed = true;
+      dailyStreak = nextStreak;
+      lastActivity = nextActivity;
+      put('dailyStreak', dailyStreak);
+      put('lastActivityDate', lastActivity);
+    }
+    const integers = {
+      streakFreezes: 'lootlinguaStreakFreezes', runnerCoins: 'lootlingua.runner.coins.v1',
+      freezeSaves: 'lootlinguaFreezeSaves', gameDictAdds: 'lootlinguaGameDictAdds',
+      perfectQuizzes: 'lootlinguaPerfectQuizzes', maxStreak: 'lootlinguaMaxStreak',
+      runnerBestDistance: 'lootlingua.runner.best-distance.v1', xpEconomyVersion: 'xpEconomyVersion',
+    };
+    for (const [field, key] of Object.entries(integers)) if (d[field] !== undefined) put(key, Math.max(0, Number(d[field]) || 0));
+    const objects = { activityMap: 'activityMap', addedGameWords: 'addedGameWords', dailyLootState: 'lootlinguaDailyLootState', titlesState: 'lootlinguaTitlesState', extraChests: 'lootlinguaExtraChests' };
+    for (const [field, key] of Object.entries(objects)) if (d[field] !== undefined) put(key, JSON.stringify(d[field]));
+    for (const [day, state] of Object.entries(d.dailyQuestsByDay || {})) put(getDailyQuestStorageKey(day), JSON.stringify(state));
+    if (d.dailyQuestDate && d.dailyQuestState) put(getDailyQuestStorageKey(d.dailyQuestDate), JSON.stringify(d.dailyQuestState));
+    if (d.displayName !== undefined) put('lootlinguaDisplayName', d.displayName);
+    if (d.activeTitleId !== undefined) put('lootlinguaActiveTitleId', d.activeTitleId);
+    if (Array.isArray(d.quizExposureHistory) && typeof writeQuizExposureHistory === 'function') writeQuizExposureHistory(d.quizExposureHistory);
+    for (const theme of d.themeIntroSeen || []) if (Object.prototype.hasOwnProperty.call(THEME_USE_MESSAGES, theme)) put(themeSeenKey('used', theme), '1');
+    if (d.theme && document.documentElement.getAttribute('data-theme') !== d.theme) { setTheme(d.theme, true); changed = true; }
+    if (d.oasisMode && document.documentElement.getAttribute('data-oasis-mode') !== d.oasisMode) { applyOasisMode(d.oasisMode, true); changed = true; }
+    window._profileLoaded = true;
+    if (changed) {
+      renderStreak(); renderDailyGoal(); renderXPBar(); syncHeroAvatar();
+      updateDailyQuestsBadge(); refreshFeatureUnlockUI();
+      if (typeof renderProfileModalStats === 'function') renderProfileModalStats();
+    }
+  } finally {
+    window.__profileHydrating = wasHydrating;
+    window.__applyingCloudProfile = wasApplying;
+  }
+  return changed;
+};
+
 window.mergeLootlinguaProfileFromCloud = function(d, options = {}) {
+  if (options.canonical === true) return window.applyCanonicalLootlinguaProfile(d);
   // Track if we loaded from cloud to avoid double checkAndUpdateStreak
   window._profileLoaded = true;
   if (!d) return;

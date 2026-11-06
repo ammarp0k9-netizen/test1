@@ -64,3 +64,12 @@ test('late acknowledgement cannot erase a different pending chest or newer unrel
   h.setAward(async metadata => { h.states.get('a').streak = 9; metadata.awardStatus = 'awarded'; return 20; });
   assert.equal(await h.claim(), true); assert.equal(h.states.get('a').streak, 9);
 });
+
+test('signed-in chest XP waits for pending profile work and does not claim after a failed or stale flush', async () => {
+  const h = harness(); h.root.auth = { currentUser: { uid: 'a' } };
+  h.root.flushProfileIntents = async () => ({ saved: false });
+  assert.equal(await h.claim(), false); assert.equal(h.calls.claims, 0);
+  const gate = deferred(); h.root.flushProfileIntents = () => gate.promise;
+  const first = h.claim(); h.switchOwner('b'); gate.resolve({ saved: true });
+  assert.equal(await first, false); assert.equal(h.calls.claims, 0);
+});

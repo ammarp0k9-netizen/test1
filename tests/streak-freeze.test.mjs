@@ -10,7 +10,7 @@ const script = await readFile(new URL('../js/script.js', import.meta.url), 'utf8
 const streak = xp.slice(xp.indexOf('function checkAndUpdateStreak(options = {})'), xp.indexOf('\nfunction renderStreak'));
 const dates = script.slice(script.indexOf('function localDateKey('), script.indexOf('function localDayBounds('));
 
-function run({ now = '2026-11-05T12:00:00', last = '2026-11-03', freezes = 3, helpers = true, learningEvent = true } = {}) {
+function run({ now = '2026-11-05T12:00:00', last = '2026-11-03', freezes = 3, helpers = true, learningEvent = true, repeats = 1 } = {}) {
   const instant = new Date(now).getTime();
   class FixedDate extends Date {
     constructor(...args) { super(...(args.length ? args : [instant])); }
@@ -29,6 +29,7 @@ function run({ now = '2026-11-05T12:00:00', last = '2026-11-03', freezes = 3, he
     loadJSON: (key, fallback) => JSON.parse(values.get(key) || JSON.stringify(fallback)),
     saveJSON: (key, value) => values.set(key, JSON.stringify(value)),
     requestProfileCloudSave: () => { saves++; },
+    hasSignedInUser: () => false,
     renderStreak() {}, renderProfileModalStats() {}, evaluateTitleUnlocks() {},
     isJsonImportBatchActive: () => true, setTimeout() {}, showToast() {},
     ...(helpers ? {
@@ -40,7 +41,7 @@ function run({ now = '2026-11-05T12:00:00', last = '2026-11-03', freezes = 3, he
     window.LootLinguaLocalTime = { previousLocalDateKey };
     let dailyStreak = 7; let lastActivity = ${JSON.stringify(last)}; let userXP = 321;
     ${streak}
-    checkAndUpdateStreak({ learningEvent: ${learningEvent} });`, context);
+    for (let activity = 0; activity < ${repeats}; activity++) checkAndUpdateStreak({ learningEvent: ${learningEvent} });`, context);
   return {
     ...JSON.parse(vm.runInContext('JSON.stringify({ dailyStreak, lastActivity, userXP })', context)),
     freezes: values.get('lootlinguaStreakFreezes'),
@@ -59,7 +60,7 @@ if (process.env.LOOTLINGUA_STREAK_DST_CASE === '1') {
     assert.equal((new Date(now) - new Date(`${last}T12:00:00`)) / 3_600_000, hours);
     const result = run({ now, last });
     assert.equal(result.freezes, 2);
-    assert.equal(result.dailyStreak, 7);
+    assert.equal(result.dailyStreak, 8);
     assert.equal(result.freezeSaves, 3);
   }
   for (const [now, last] of [
@@ -67,8 +68,11 @@ if (process.env.LOOTLINGUA_STREAK_DST_CASE === '1') {
     ['2026-11-03T12:00:00', '2026-10-31'],
   ]) {
     const result = run({ now, last });
-    assert.equal(result.freezes, 3);
-    assert.equal(result.dailyStreak, 1);
+    assert.equal(result.freezes, 1);
+    assert.equal(result.dailyStreak, 8);
+    const insufficient = run({ now, last, freezes: 1 });
+    assert.equal(insufficient.freezes, 1);
+    assert.equal(insufficient.dailyStreak, 1);
   }
 } else {
   test('today is idempotent and yesterday advances the streak without consuming a freeze', () => {
@@ -83,10 +87,10 @@ if (process.env.LOOTLINGUA_STREAK_DST_CASE === '1') {
     assert.equal(yesterday.storedDate, '2026-11-05');
   });
 
-  test('exactly one absent calendar day consumes one freeze and keeps the established streak', () => {
+  test('exactly one absent calendar day consumes one freeze and counts the return learning day', () => {
     for (const helpers of [false, true]) {
       const result = run({ helpers });
-      assert.equal(result.dailyStreak, 7);
+      assert.equal(result.dailyStreak, 8);
       assert.equal(result.freezes, 2);
       assert.equal(result.freezeSaves, 3);
       assert.equal(result.storedDate, '2026-11-05');
@@ -95,13 +99,24 @@ if (process.env.LOOTLINGUA_STREAK_DST_CASE === '1') {
     }
   });
 
-  test('multiple absent days, a month away, future or invalid dates do not spend protection', () => {
-    for (const last of ['2026-11-02', '2026-10-05', '2025-11-05', '2026-11-06', 'invalid']) {
+  test('uncovered absences, future or invalid dates do not waste protection', () => {
+    for (const last of ['2026-10-31', '2026-10-05', '2025-11-05', '2026-11-06', 'invalid']) {
       const result = run({ last });
       assert.equal(result.dailyStreak, 1);
       assert.equal(result.freezes, 3);
       assert.equal(result.freezeSaves, 2);
       assert.equal(result.storedDate, '2026-11-05');
+    }
+  });
+
+  test('each absent calendar day costs one freeze, and repeated learning today never spends twice', () => {
+    for (const helpers of [false, true]) {
+      const result = run({ last: '2026-11-02', freezes: 2, helpers, repeats: 3 });
+      assert.equal(result.freezes, 0); assert.equal(result.freezeSaves, 4);
+      assert.equal(result.dailyStreak, 8); assert.equal(result.storedDate, '2026-11-05');
+      const insufficient = run({ last: '2026-11-02', freezes: 1, helpers });
+      assert.equal(insufficient.freezes, 1); assert.equal(insufficient.freezeSaves, 2);
+      assert.equal(insufficient.dailyStreak, 1);
     }
   });
 
@@ -113,7 +128,7 @@ if (process.env.LOOTLINGUA_STREAK_DST_CASE === '1') {
     ]) {
       const result = run({ now, last });
       assert.equal(result.freezes, 2);
-      assert.equal(result.dailyStreak, 7);
+      assert.equal(result.dailyStreak, 8);
       assert.equal(result.storedDate, now.slice(0, 10));
     }
   });

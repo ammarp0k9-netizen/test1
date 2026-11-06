@@ -382,7 +382,7 @@ function createFinishHarness({ fail = false, pending = false, notificationPermis
   const statuses = [];
   const scheduled = [];
   let commits = 0;
-  const learningStats = { xpTransitions: 0, evidenceWrites: 0, notificationAttempts: 0 };
+  const learningStats = { xpTransitions: 0, evidenceWrites: 0, notificationAttempts: 0, activityIntents: [] };
   const trace = { stage() { return this; }, count() { return this; }, warn() { return this; }, end() { return this; } };
   const elements = new Map([
     ['quizView', { setAttribute() {}, removeAttribute() {} }],
@@ -395,6 +395,7 @@ function createFinishHarness({ fail = false, pending = false, notificationPermis
   const window = {
     auth: { currentUser: { uid: 'uid-a' } },
     __lootlinguaQuizFinishTimeoutMs: pending ? 5 : undefined,
+    queueProfileIntent(intent) { learningStats.activityIntents.push(structuredClone(intent)); return 'queued-activity'; },
     LootLinguaOperations: {
       diagnostic() {},
       startTrace() { return trace; },
@@ -450,6 +451,7 @@ function createFinishHarness({ fail = false, pending = false, notificationPermis
     stopTimeAttackTimer() {},
     recordQuizExposureSession() {},
     incrementDailyCountBy() {},
+    todayStr() { return '2026-11-05'; },
     checkAndUpdateStreak() {},
     recordHighAccuracyVerifiedQuiz() {},
     saveInt() {},
@@ -515,6 +517,7 @@ test('account Matching finish is single-flight and leaves loading on the complet
   assert.equal(result.total, 10);
   assert.equal(harness.commits, 1);
   assert.equal(harness.context.getFinishState(), 'completed');
+  assert.deepEqual(harness.learningStats.activityIntents, [{ type: 'quiz-activity', eventId: 'quiz:matching-session', day: '2026-11-05', answers: 10, perfect: true, advanceAfterFreeze: true }]);
   assert.ok(harness.statuses.includes('completed'));
   assert.equal(harness.scheduled.filter((timer) => !timer.cleared).length, 1);
 });

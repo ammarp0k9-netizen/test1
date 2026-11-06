@@ -439,12 +439,16 @@ function showRankUp(rank) {
 
 // ── Daily Streak ──────────────────────────────────────
 /**
- * يُستدعى مرة واحدة عند فتح الصفحة — يسجّل اليوم ويحدث الـ streak
+ * يحسب يوم التعلّم بعد جلسة موثّقة. الاستدعاء دون learningEvent يعرض الحالة فقط.
  */
 function checkAndUpdateStreak(options = {}) {
   if (options.learningEvent !== true) {
     renderStreak();
     return;
+  }
+  if (hasSignedInUser()) {
+    if (typeof window.queueProfileIntent !== 'function') return false;
+    return window.queueProfileIntent({ type: 'learning-day', day: todayStr(), advanceAfterFreeze: true });
   }
   const today     = todayStr();
   const yesterday = window.LootLinguaLocalTime?.previousLocalDateKey?.(new Date()) ||
@@ -462,17 +466,18 @@ function checkAndUpdateStreak(options = {}) {
     if (!isJsonImportBatchActive()) setTimeout(()=>showToast('Streak '+dailyStreak+' يوم!'), 1000);
   } else if (lastActivity !== '') {
     const freezes = typeof getStreakFreezeCount === 'function' ? getStreakFreezeCount() : loadInt('lootlinguaStreakFreezes', 0);
-    // One freeze covers exactly one missed calendar day. Anchor at local noon
-    // so daylight-saving changes do not turn the gap into an elapsed-hour test.
-    const protectedActivityDate = new Date(`${today}T12:00:00`);
-    protectedActivityDate.setDate(protectedActivityDate.getDate() - 2);
-    if (freezes > 0 && lastActivity === localDateKey(protectedActivityDate)) {
-      if (typeof saveStreakFreezeCount === 'function') saveStreakFreezeCount(freezes - 1);
-      else saveInt('lootlinguaStreakFreezes', freezes - 1);
-      saveInt('lootlinguaFreezeSaves', loadInt('lootlinguaFreezeSaves', 0) + 1);
-      dailyStreak = Math.max(1, dailyStreak);
+    // Calendar keys describe local days; UTC noon measures their ordinal gap
+    // without depending on the 23/25-hour duration of a daylight-saving day.
+    const previous = new Date(`${lastActivity}T12:00:00Z`);
+    const gap = (new Date(`${today}T12:00:00Z`) - previous) / 86400000;
+    const missedDays = Number.isInteger(gap) && gap > 1 ? gap - 1 : 0;
+    if (missedDays > 0 && freezes >= missedDays && previous.toISOString().slice(0, 10) === lastActivity) {
+      if (typeof saveStreakFreezeCount === 'function') saveStreakFreezeCount(freezes - missedDays);
+      else saveInt('lootlinguaStreakFreezes', freezes - missedDays);
+      saveInt('lootlinguaFreezeSaves', loadInt('lootlinguaFreezeSaves', 0) + missedDays);
+      dailyStreak = Math.max(1, dailyStreak) + 1;
       if (!isJsonImportBatchActive()) {
-        setTimeout(() => showToast('Streak Freeze اشتغل وأنقذ السلسلة. رجعت قبل ما تنكسر!', 'success', 5600), 900);
+        setTimeout(() => showToast(`استخدمنا ${missedDays} Freeze لحماية أيام الغياب، وزادت سلسلتك بيوم تعلّمك اليوم.`, 'success', 5600), 900);
       }
       if (typeof evaluateTitleUnlocks === 'function') evaluateTitleUnlocks(!isJsonImportBatchActive());
     } else {
@@ -492,7 +497,27 @@ function checkAndUpdateStreak(options = {}) {
   renderProfileModalStats();
 }
 
+function renderStreakFreezeStatus() {
+  const count = Math.max(0, Math.floor(typeof getStreakFreezeCount === 'function' ? getStreakFreezeCount() : loadInt('lootlinguaStreakFreezes', 0)));
+  document.querySelectorAll('[data-streak-freeze-count]').forEach(node => { node.textContent = count > 0 ? `${count} فريز` : 'بدون فريز'; });
+  document.querySelectorAll('[data-streak-freeze-status]').forEach(node => { node.classList.toggle('has-freezes', count > 0); });
+  document.querySelectorAll('.streak-freeze-help').forEach(node => { node.setAttribute('aria-label', `شرح حماية الستريك بالفريز. رصيدك ${count} فريز`); });
+  const balance = document.getElementById('streakFreezeHelpBalance');
+  if (balance) balance.textContent = `رصيدك الحالي: ${count} فريز`;
+}
+
+window.showStreakFreezeHelp = function(event) {
+  event?.preventDefault(); event?.stopPropagation();
+  renderStreakFreezeStatus(); showModal('streakFreezeHelpModal');
+  const modal = document.getElementById('streakFreezeHelpModal');
+  if (modal) window.LootLinguaModalFocus?.open(modal, {
+    dialog: modal.querySelector('.modal-content') || modal,
+    onEscape: () => hideModal('streakFreezeHelpModal'),
+  });
+};
+
 function renderStreak() {
+  renderStreakFreezeStatus();
   const el   = document.getElementById('streakCount');
   const ico  = document.getElementById('streakIcon');
   const wrap = document.getElementById('streakWrap');

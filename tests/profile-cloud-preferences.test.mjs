@@ -20,14 +20,14 @@ test('appearance saves preserve newer XP, counters and rewards and never build a
   assert.deepEqual(saved.dailyLootState, remote.dailyLootState);
   assert.equal(saved.theme, 'ocean');
   assert.equal(saved.oasisMode, 'dark');
-  assert.deepEqual(Object.keys(h.writes[0].data).sort(), ['oasisMode', 'theme', 'themeIntroSeen', 'updatedAt']);
+  assert.deepEqual(Object.keys(h.writes[0].data).sort(), ['_syncRevision', 'oasisMode', 'theme', 'themeIntroSeen', 'updatedAt']);
   assert.equal(h.payloadReads, 0);
 });
 
 test('a preference patch can create a missing profile without inventing progress fields', async () => {
   const h = createProfileHarness({ profile: null });
   assert.equal(await h.root.saveProfilePreferencesToCloud({ theme: 'golden' }, { verify: true }), true);
-  assert.deepEqual(Object.keys(h.docs.get(h.path('A'))).sort(), ['theme', 'updatedAt']);
+  assert.deepEqual(Object.keys(h.docs.get(h.path('A'))).sort(), ['_syncRevision', 'theme', 'updatedAt']);
   assert.equal(h.root.__lootlinguaProfileSnapshot.exists, true);
   assert.equal(h.reads.length, 2);
   assert.equal(h.payloadReads, 0);
@@ -77,11 +77,13 @@ test('preference verification detects missing persistence and reports the actual
   h.seedSnapshot();
   const saving = h.root.saveProfilePreferencesToCloud({ theme: 'ocean' }, { verify: true });
   await flushMicrotasks();
-  h.resolveRead(0, { theme: 'lootlingua' });
+  h.resolveRead(0);
+  await flushMicrotasks();
+  h.resolveRead(1, { theme: 'lootlingua' });
   assert.equal(await saving, false);
   const failure = h.root.__lootlinguaLastProfileSaveFailure;
   assert.equal(failure.code, 'profile/write-verification-failed');
-  assert.deepEqual(Object.keys(failure.payload).sort(), ['theme', 'updatedAt']);
+  assert.deepEqual(Object.keys(failure.payload).sort(), ['_syncRevision', 'theme', 'updatedAt']);
   assert.equal(failure.operation, 'merge-update');
 });
 
@@ -90,7 +92,9 @@ test('successful preference verification retains the actual newer progress in it
   h.seedSnapshot();
   const saving = h.root.saveProfilePreferencesToCloud({ oasisMode: 'dark' }, { verify: true });
   await flushMicrotasks();
-  h.resolveRead(0, { ...h.writes[0].data, userXP: 500, perfectQuizzes: 9 });
+  h.resolveRead(0);
+  await flushMicrotasks();
+  h.resolveRead(1, { ...h.writes[0].data, userXP: 500, perfectQuizzes: 9 });
   assert.equal(await saving, true);
   assert.equal(h.root.__lootlinguaProfileSnapshot.data.userXP, 500);
   assert.equal(h.root.__lootlinguaProfileSnapshot.data.perfectQuizzes, 9);
@@ -101,10 +105,12 @@ test('stale preference verification cannot replace the active profile or diagnos
   h.seedSnapshot();
   const saving = h.root.saveProfilePreferencesToCloud({ theme: 'ocean' }, { verify: true });
   await flushMicrotasks();
+  h.resolveRead(0);
+  await flushMicrotasks();
   h.setIdentity({ uid: 'B' });
   const current = { uid: 'B', data: { userXP: 200 } };
   h.root.__lootlinguaProfileSnapshot = current;
-  h.resolveRead(0, undefined);
+  h.resolveRead(1, undefined);
   assert.equal(await saving, false);
   assert.equal(h.root.__lootlinguaProfileSnapshot, current);
   assert.equal(h.root.__lootlinguaLastProfileSaveFailure, undefined);
@@ -124,6 +130,8 @@ test('successive preference requests preserve call order through a delayed first
   assert.equal(h.writes[0].data.theme, 'ocean');
   h.resolveWrite(0);
   assert.equal(await first, true);
+  await flushMicrotasks();
+  h.resolveRead(1);
   await flushMicrotasks();
   assert.equal(h.writes.length, 2);
   assert.equal(h.writes[1].data.theme, 'golden');
@@ -147,4 +155,30 @@ test('B preferences proceed independently while an A request remains pending', a
   h.resolveRead(0);
   assert.equal(await a, false);
   assert.equal(h.root.__lootlinguaProfileSnapshot.uid, 'B');
+});
+
+test('appearance verification permits newer unrelated wallet and XP revisions', async () => {
+  const h = createProfileHarness({ manualReads: true });
+  const saving = h.root.saveProfilePreferencesToCloud({ theme: 'ocean' }, { verify: true });
+  await flushMicrotasks(); h.resolveRead(0); await flushMicrotasks();
+  const newer = { ...h.docs.get(h.path('A')), userXP: 500, runnerCoins: 2, _syncRevision: 4, updatedAt: new Date(Date.now() + 1000) };
+  h.resolveRead(1, newer);
+  assert.equal(await saving, true);
+  assert.equal(h.root.__lootlinguaProfileSnapshot.data.userXP, 500);
+  assert.equal(h.root.__lootlinguaProfileSnapshot.data.runnerCoins, 2);
+  assert.equal(h.root.__lootlinguaProfileSnapshot.data._syncRevision, 4);
+});
+
+test('a late preference verification cannot merge its old patch over a newer cached appearance', async () => {
+  const h = createProfileHarness({ manualReads: true });
+  const saving = h.root.saveProfilePreferencesToCloud({ theme: 'ocean' }, { verify: true });
+  await flushMicrotasks(); h.resolveRead(0); await flushMicrotasks();
+  const committed = structuredClone(h.docs.get(h.path('A')));
+  const newest = { ...committed, theme: 'golden', runnerCoins: 2, _syncRevision: 5 };
+  h.root.__lootlinguaProfileSnapshot = { uid: 'A', exists: true, data: newest, readFailed: false };
+  h.resolveRead(1, committed);
+  assert.equal(await saving, true);
+  assert.equal(h.root.__lootlinguaProfileSnapshot.data.theme, 'golden');
+  assert.equal(h.root.__lootlinguaProfileSnapshot.data._syncRevision, 5);
+  assert.equal(h.root.__lootlinguaProfileSnapshot.data.runnerCoins, 2);
 });

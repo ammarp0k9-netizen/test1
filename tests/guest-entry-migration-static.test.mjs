@@ -264,15 +264,20 @@ test('versioned guest migration receipts bind one decision to one account and sn
 });
 
 test('profile persistence exposes the exact failed write and verifies migration writes before cleanup', () => {
-  assert.match(profileSource, /const referencePath = `users\/\$\{user\.uid\}\/meta\/profile`/);
-  assert.match(profileSource, /await setDoc\(reference, data, \{ merge: true \}\)/);
+  assert.match(profileSource, /const referencePath = `users\/\$\{owner\.uid\}\/meta\/profile`/);
+  const synchronization = between(profileSource, 'async function transactProfileOutbox', 'window.flushProfileIntents =');
+  assert.match(synchronization, /await runTransaction\(profileDb/);
+  assert.match(synchronization, /transaction\.set\(receiptRefs\[index\]/);
+  assert.match(synchronization, /transaction\.set\(reference, profile, \{ merge: true \}\)/);
+  assert.match(synchronization, /receipts\.some\(\(snap\) => !snap\.exists\(\)\)/);
+  assert.ok(synchronization.indexOf('if (options.verify === true)') < synchronization.indexOf('localStorage.removeItem(operation.key)'), 'outbox recovery is retained until the transactional receipt is verified');
   assert.match(profileSource, /knownSnapshot\.exists \? 'merge-update' : 'create-with-merge'/);
   assert.match(profileSource, /code: String\(error\?\.code/);
   assert.match(profileSource, /message: String\(error\?\.message/);
   assert.match(profileSource, /payload: diagnosticProfileValue\(payload\)/);
   assert.match(profileSource, /console\.error\('saveProfile:', diagnostic, error\)/);
   assert.match(profileSource, /const verification = await getDoc\(reference\)/);
-  assert.match(profileSource, /persistedProfileValueMatches\(persistedData, data\)/);
+  assert.match(profileSource, /persistedProfileValueMatches\(persistedData, appearance\)/);
   assert.match(profileSource, /window\.commitPendingGuestProfileMigration = async function\(user\)/);
   assert.match(migrationSource, /status: 'failed'/);
 });
@@ -459,7 +464,7 @@ test('explicit guest appearance is allowlisted and its marker survives failed cl
   assert.match(profileSource, /const saved = await window\._saveProfileToCloudNow\(\{[\s\S]*?verify:/);
   assert.match(profileSource, /completePendingGuestProfileMigration\([\s\S]*?user,[\s\S]*?saved,[\s\S]*?hasCurrentExplicitTheme[\s\S]*?\)/);
   assert.match(profileSource, /function completePendingGuestProfileMigration\(user, saved, hasExplicitTheme\)[\s\S]*?if \(saved !== true\) return false;[\s\S]*?if \(hasExplicitTheme\)[\s\S]*?sessionStorage\.removeItem\('lootlingua:guest-theme-explicit:v1'\)/);
-  assert.match(profileSource, /await setDoc\([\s\S]*?return true;[\s\S]*?return false;/);
+  assert.match(profileSource, /await runTransaction\([\s\S]*?return true;[\s\S]*?return false;/);
 });
 
 test('a verified guest profile stays tombstoned until the whole migration is finalized', () => {

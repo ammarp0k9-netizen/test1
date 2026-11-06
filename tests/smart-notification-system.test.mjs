@@ -144,6 +144,7 @@ function completeTrustedStreakDay({ today, yesterday, streakCount, answeredCount
     loadInt: (key, fallback) => ints.has(key) ? ints.get(key) : fallback,
     saveInt: (key, value) => ints.set(key, value),
     getStreakFreezeCount: () => 0,
+    hasSignedInUser: () => false,
     isJsonImportBatchActive: () => true,
     renderStreak() {},
     renderProfileModalStats() {},

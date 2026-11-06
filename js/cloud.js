@@ -1623,6 +1623,7 @@
           transaction.set(profileRef, {
             userXP: nextXP,
             xpEconomyVersion: Math.max(...items.map((item) => item.xpEconomyVersion)),
+            _syncRevision: (Number(profileSnapshot.data()?._syncRevision) || 0) + 1,
             updatedAt: new Date(),
           }, { merge: true });
           trace?.count('firestoreWrites');
@@ -1652,7 +1653,22 @@
         Number(profileSnap.data()?.userXP) || 0,
         Number(payload.baselineXP) || 0
       );
+      const savedLoot = profileSnap.data()?.dailyLootState || {};
+      const savedLockId = Number(savedLoot.lockStartedAt) || Number(savedLoot.lastOpenAt) || 0;
+      const resolvesCurrentChest = reason === 'daily_chest_unlock' &&
+        eventId === `daily_chest_unlock:${savedLockId}` && amount === (Number(savedLoot.lockedXP) || 0);
+      const resolvedLoot = () => ({ ...savedLoot, lockedXP: 0, lockStartedAt: 0,
+        lockResolvedAt: Date.now(), lockMasteredWordIds: [], lockHighAccuracyQuizIds: [] });
       if (eventSnap.exists()) {
+        // Repair a legacy acknowledged claim only while its original lock is
+        // still current; a different/newer chest must never be cleared.
+        const claim = eventSnap.data() || {};
+        if (resolvesCurrentChest && claim.reason === reason && Number(claim.amount) === amount) {
+          transaction.set(profileRef, {
+            dailyLootState: resolvedLoot(), updatedAt: new Date(),
+            _syncRevision: (Number(profileSnap.data()?._syncRevision) || 0) + 1,
+          }, { merge: true });
+        }
         return { awarded: false, duplicate: true, userXP: currentXP };
       }
       const fixedAmounts = {
@@ -1671,10 +1687,7 @@
       let valid = Boolean(expectedAmount && amount === expectedAmount &&
         eventId.startsWith('word_transition:') && eventId.endsWith(transitionSuffixes[reason]));
       if (reason === 'daily_chest_unlock') {
-        const loot = profileSnap.data()?.dailyLootState || {};
-        const lockId = Number(loot.lockStartedAt) || Number(loot.lastOpenAt) || 0;
-        valid = amount > 0 && amount <= 50 && amount === (Number(loot.lockedXP) || 0) &&
-          eventId === `daily_chest_unlock:${lockId}`;
+        valid = amount > 0 && amount <= 50 && resolvesCurrentChest;
       }
       if (!valid) return { awarded: false, duplicate: false, invalid: true, userXP: currentXP };
       const nextXP = currentXP + amount;
@@ -1687,6 +1700,8 @@
       transaction.set(profileRef, {
         userXP: nextXP,
         xpEconomyVersion: Number(payload.xpEconomyVersion) || 2,
+        _syncRevision: (Number(profileSnap.data()?._syncRevision) || 0) + 1,
+        ...(reason === 'daily_chest_unlock' ? { dailyLootState: resolvedLoot() } : {}),
         updatedAt: new Date(),
       }, { merge: true });
       return { awarded: true, duplicate: false, userXP: nextXP };

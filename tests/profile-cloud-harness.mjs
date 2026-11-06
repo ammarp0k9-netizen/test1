@@ -1,5 +1,6 @@
 import { readFile } from 'node:fs/promises';
 import vm from 'node:vm';
+import { applyProfileIntent, profileOperationId, profileStorageIntents } from '../js/profile-sync-policy.mjs';
 
 const source = (await readFile(new URL('../js/profile-cloud.js', import.meta.url), 'utf8'))
   .replace(/^import .*;\r?\n/gm, '');
@@ -19,6 +20,8 @@ function storage() {
   const values = new Map();
   return {
     values,
+    get length() { return values.size; },
+    key: (index) => [...values.keys()][index] ?? null,
     getItem: (key) => values.get(key) ?? null,
     setItem: (key, value) => values.set(key, String(value)),
     removeItem: (key) => values.delete(key),
@@ -30,6 +33,7 @@ export function createProfileHarness(options = {}) {
   const docs = new Map();
   const reads = [];
   const writes = [];
+  const transactionReads = [], receiptReads = [];
   const events = [];
   const errors = [];
   const resets = [];
@@ -65,6 +69,7 @@ export function createProfileHarness(options = {}) {
   };
   if (options.prepare) root.prepareGuestMigrationForUser = options.prepare;
   const getDoc = (reference) => {
+    if (reference.includes('/meta/xp_event_')) { receiptReads.push(reference); return Promise.resolve(snapshot(docs.get(reference))); }
     const pending = deferred();
     const entry = { reference, ...pending };
     reads.push(entry);
@@ -81,6 +86,18 @@ export function createProfileHarness(options = {}) {
     }
     return pending.promise;
   };
+  const runTransaction = async (_db, callback) => {
+    const staged = [];
+    const result = await callback({
+      get: async (reference) => { transactionReads.push(reference); return reference.endsWith('/meta/profile') ? getDoc(reference) : snapshot(docs.get(reference)); },
+      set: (reference, data, settings) => staged.push({ reference, data: structuredClone(data), settings }),
+    });
+    // Keep old tests' manually controlled profile-write boundary while all
+    // receipt writes remain atomic with the successful profile operation.
+    for (const write of staged.filter(item => item.reference.endsWith('/meta/profile'))) await setDoc(write.reference, write.data, write.settings);
+    for (const write of staged.filter(item => !item.reference.endsWith('/meta/profile'))) docs.set(write.reference, write.data);
+    return result;
+  };
   vm.runInNewContext(source, {
     window: root,
     Date,
@@ -90,12 +107,14 @@ export function createProfileHarness(options = {}) {
     CustomEvent: class { constructor(type, init) { this.type = type; this.detail = init.detail; } },
     getApps: () => [{}], getFirestore: () => ({}), getAuth: () => auth,
     onAuthStateChanged: (_auth, callback) => { authObserver = callback; },
-    doc: (_db, ...parts) => parts.join('/'), getDoc, setDoc,
+    doc: (_db, ...parts) => parts.join('/'), getDoc, setDoc, runTransaction,
+    applyProfileIntent, profileOperationId, profileStorageIntents,
+    onSnapshot: () => () => {},
     setTimeout: (callback) => { const id = ++timerSequence; timers.set(id, callback); return id; },
     clearTimeout: (id) => timers.delete(id),
   });
   return {
-    root, auth, docs, reads, writes, events, errors, resets, merges, ready, streaks,
+    root, auth, docs, reads, writes, transactionReads, receiptReads, events, errors, resets, merges, ready, streaks,
     localStorage, sessionStorage, timers, path,
     get profile() { return profile; },
     get payloadReads() { return payloadReads; },

@@ -291,8 +291,21 @@ function finishQuizRun() {
     });
   }
   if (fullyCompleted && commit.total > 0) {
-    incrementDailyCountBy(commit.total);
-    checkAndUpdateStreak({ learningEvent: true });
+    if (hasSignedInUser()) {
+      try {
+        if (typeof window.queueProfileIntent !== 'function') throw new Error('Profile sync is not ready.');
+        window.queueProfileIntent({
+          type: 'quiz-activity', eventId: `quiz:${activeQuizSession.id}`, day: todayStr(),
+          answers: commit.total, perfect: currentQuizMistakes === 0, advanceAfterFreeze: true,
+        });
+      } catch (error) {
+        console.warn('[QuizFinish] Activity sync deferred after learning commit.', error?.message || error);
+        showToast('حُفظ تعلّم الكلمات، لكن تعذّر تجهيز مزامنة نشاط اليوم. أبقِ الصفحة مفتوحة وحاول مجددًا.', 'warning', 5500);
+      }
+    } else {
+      incrementDailyCountBy(commit.total);
+      checkAndUpdateStreak({ learningEvent: true });
+    }
     // Capture gate context from the session BEFORE activeQuizSession is cleared
     // below. The guided-first-journey controller needs worldId and gateId to
     // validate that the finished quiz actually belongs to the onboarding gate.
@@ -331,7 +344,7 @@ function finishQuizRun() {
     });
   }
   if (fullyCompleted && accuracy >= 0.9) recordHighAccuracyVerifiedQuiz(activeQuizSession.id);
-  if (currentQuizMistakes === 0 && currentQuizWords.length > 0 && verified) {
+  if (fullyCompleted && currentQuizMistakes === 0 && currentQuizWords.length > 0 && !hasSignedInUser()) {
     saveInt('lootlinguaPerfectQuizzes', loadInt('lootlinguaPerfectQuizzes', 0) + 1);
     if (!hasSignedInUser()) markGuestDataDirty();
     markDailyQuestFlag('perfectQuiz');

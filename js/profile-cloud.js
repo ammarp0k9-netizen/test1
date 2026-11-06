@@ -1,8 +1,9 @@
 
 // نستورد setDoc و getDoc بشكل منفصل عشان ما يكسر الـ module الأول
 import { getApps }  from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
-import { getFirestore, doc, setDoc, getDoc } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
+import { getFirestore, doc, getDoc, runTransaction, onSnapshot } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
 import { getAuth, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js";
+import { applyProfileIntent, profileOperationId, profileStorageIntents } from './profile-sync-policy.mjs?v=20261106-stage2-1';
 
 // استخدم التطبيق الموجود فقط بدون إعادة تعريف إذا كان معرف مسبقًا
 let profileApp  = getApps()[0];
@@ -98,7 +99,7 @@ function reportProfileSaveFailure(error, referencePath, operation, payload) {
   const diagnostic = {
     path: referencePath,
     operation,
-    writeMethod: 'setDoc-merge',
+    writeMethod: 'transaction-sync',
     code: String(error?.code || 'profile/save-failed'),
     message: String(error?.message || error || 'Unknown profile save failure'),
     name: String(error?.name || 'Error'),
@@ -115,6 +116,207 @@ let _profileAuthEpoch = 0;
 let _profileLoadSequence = 0;
 let _activeProfileLoad = null;
 const _profilePreferenceSaves = new Map();
+const _profileTaskQueues = new Map();
+let _profileSnapshotUnsubscribe = null;
+let _profileRetryTimer = null;
+let _profileOperationSequence = 0;
+let _profileOperationClock = 0;
+const _profileLocalBaselines = new Map();
+
+function profileOutboxPrefix(uid) { return `lootlingua:profile-outbox:v1:${uid}:`; }
+function profileReceiptId(id) {
+  const encoded = encodeURIComponent(id);
+  if (encoded.length > 1200) throw new Error('Profile operation identifier is too long');
+  return `xp_event_profile_sync_v1_${encoded}`;
+}
+function readProfileOutbox(uid) {
+  const prefix = profileOutboxPrefix(uid);
+  const operations = [];
+  for (let index = 0; index < localStorage.length; index++) {
+    const key = localStorage.key(index);
+    if (!key?.startsWith(prefix)) continue;
+    try {
+      const operation = JSON.parse(localStorage.getItem(key));
+      if (operation?.version === 1 && operation.uid === uid && operation.id && Array.isArray(operation.commands)) operations.push({ ...operation, key });
+    } catch (_) {}
+  }
+  return operations.sort((a, b) => a.createdAt - b.createdAt || a.id.localeCompare(b.id));
+}
+function enqueueProfileTask(owner, task) {
+  const key = JSON.stringify([owner?.uid, owner?.generation, owner?.epoch]);
+  const previous = _profileTaskQueues.get(key) || Promise.resolve();
+  const running = previous.catch(() => {}).then(() => {
+    if (!isProfileOwnerCurrent(owner)) return { saved: false, reason: 'auth/identity-changed' };
+    return task();
+  });
+  _profileTaskQueues.set(key, running);
+  running.finally(() => { if (_profileTaskQueues.get(key) === running) _profileTaskQueues.delete(key); }).catch(() => {});
+  return running;
+}
+function applyCanonicalProfile(data, owner) {
+  if (!isProfileOwnerCurrent(owner)) return;
+  const known = window.__lootlinguaProfileSnapshot;
+  if (known?.uid === owner.uid && Number(known.data?._syncRevision || 0) > Number(data?._syncRevision || 0)) data = known.data;
+  let projected = data || {};
+  for (const operation of readProfileOutbox(owner.uid)) {
+    // Only idempotent presentation/set projections are safe before a receipt.
+    // A lost acknowledgement may already be present in this snapshot; replaying
+    // an additive counter or wallet locally would display it twice.
+    for (const command of operation.commands) {
+      if (['max', 'titles', 'union', 'appearance', 'quest', 'exposure', 'loot-progress'].includes(command.type)) {
+        projected = applyProfileIntent(projected, command).profile;
+      }
+    }
+  }
+  const wasHydrating = window.__profileHydrating === true;
+  window.__profileHydrating = true;
+  try {
+    if (typeof window.applyCanonicalLootlinguaProfile === 'function') window.applyCanonicalLootlinguaProfile(projected);
+    else window.mergeLootlinguaProfileFromCloud?.(projected, { canonical: true });
+    _profileLocalBaselines.set(owner.uid, window.getLootlinguaProfilePayload?.() || projected);
+  } finally { window.__profileHydrating = wasHydrating; }
+}
+function scheduleProfileFlush() {
+  clearTimeout(_profileRetryTimer);
+  _profileRetryTimer = setTimeout(() => { window.flushProfileIntents?.(); }, 450);
+}
+function queueProfileCommands(commands, options = {}) {
+  const owner = captureProfileOwner();
+  if (!owner || window.__profileHydrating || !commands.length) return null;
+  const id = options.id || (commands.length === 1 ? profileOperationId(commands[0]) : null) ||
+    window.crypto?.randomUUID?.() || `${Date.now()}-${++_profileOperationSequence}-${Math.random().toString(36).slice(2)}`;
+  profileReceiptId(id);
+  const key = `${profileOutboxPrefix(owner.uid)}${encodeURIComponent(id)}`;
+  if (!localStorage.getItem(key)) {
+    _profileOperationClock = Math.max(Date.now(), _profileOperationClock + 1);
+    localStorage.setItem(key, JSON.stringify({ version: 1, uid: owner.uid, id, commands, createdAt: _profileOperationClock }));
+  }
+  if (options.project !== false && window.__lootlinguaProfileSnapshot?.uid === owner.uid) {
+    applyCanonicalProfile(window.__lootlinguaProfileSnapshot.data, owner);
+  }
+  scheduleProfileFlush();
+  return id;
+}
+window.queueProfileIntent = function(intent) {
+  if (!intent || typeof intent !== 'object' || !intent.type) return null;
+  return queueProfileCommands([JSON.parse(JSON.stringify(intent))]);
+};
+window.recordProfileStorageMutation = function(key, before, after) {
+  if (window.__profileHydrating || !profileAuth.currentUser || !_profileLocalBaselines.has(profileAuth.currentUser.uid)) return;
+  const commands = profileStorageIntents(key, before, after);
+  if (commands.length) queueProfileCommands(commands, { project: false });
+};
+
+async function transactProfileOutbox(owner, options = {}) {
+  const current = () => isProfileOwnerCurrent(owner) &&
+    (!options.profileLoadOwner || isProfileOperationCurrent(owner, options.profileLoadOwner));
+  const reference = doc(profileDb, 'users', owner.uid, 'meta', 'profile');
+  const results = {};
+  let persistedData = null;
+  while (current()) {
+    const operations = readProfileOutbox(owner.uid).slice(0, 20);
+    if (!operations.length) break;
+    const receiptRefs = operations.map((operation) => doc(profileDb, 'users', owner.uid, 'meta', profileReceiptId(operation.id)));
+    const consumedIds = [...new Set(operations.flatMap((operation) => operation.commands.flatMap((command) =>
+      command.type === 'extra-add' ? (command.chests || []).map((chest) => String(chest.id)) :
+        command.type === 'extra-remove' ? [String(command.chestId)] : [])))];
+    const consumedRefs = consumedIds.map((id) => doc(profileDb, 'users', owner.uid, 'meta', profileReceiptId(`extra-consumed:${id}`)));
+    const unlockIds = [...new Set(operations.flatMap((operation) => operation.commands
+      .filter((command) => command.type === 'loot-progress' && command.resolved)
+      .map((command) => String(command.lockId))))];
+    const unlockRefs = unlockIds.map((id) => doc(profileDb, 'users', owner.uid, 'meta', `xp_event_daily_chest_unlock:${id}`));
+    const result = await runTransaction(profileDb, async (transaction) => {
+      const snapshots = await Promise.all([transaction.get(reference), ...receiptRefs.map((ref) => transaction.get(ref)), ...consumedRefs.map((ref) => transaction.get(ref)), ...unlockRefs.map((ref) => transaction.get(ref))]);
+      if (!current()) throw Object.assign(new Error('Authenticated user changed during profile synchronization'), { code: 'auth/identity-changed' });
+      const original = snapshots[0].exists() ? snapshots[0].data() : {};
+      let profile = original;
+      const outcomes = {};
+      const consumed = new Set(consumedIds.filter((_id, index) => snapshots[1 + operations.length + index].exists()));
+      const confirmed = new Set(unlockIds.filter((_id, index) => snapshots[1 + operations.length + consumedIds.length + index].exists()));
+      const newConsumed = new Set();
+      operations.forEach((operation, index) => {
+        if (snapshots[index + 1].exists()) {
+          outcomes[operation.id] = snapshots[index + 1].data().result || { applied: false, reason: '' };
+          return;
+        }
+        const before = profile;
+        let applied = false, reason = '';
+        for (const command of operation.commands) {
+          const next = applyProfileIntent(profile, command, { consumedExtraIds: consumed, confirmedXP: confirmed.has(String(command.lockId)) });
+          if (next.reason) { reason = next.reason; profile = before; break; }
+          profile = next.profile;
+          applied ||= next.applied;
+          if (next.effects.consumedExtraId) { consumed.add(next.effects.consumedExtraId); newConsumed.add(next.effects.consumedExtraId); }
+        }
+        outcomes[operation.id] = { applied: !reason && applied, reason };
+        // This receipt is a synchronization acknowledgement, never an XP grant.
+        transaction.set(receiptRefs[index], { type: 'profile-sync-v1', operationId: operation.id, result: outcomes[operation.id], createdAt: new Date() });
+      });
+      // A monotonic revision lets hydration discard an older transaction's
+      // acknowledgement after a newer snapshot has already been observed.
+      if (JSON.stringify(profile) !== JSON.stringify(original) || !snapshots[0].exists()) {
+        profile = { ...profile, updatedAt: new Date(), _syncRevision: (Number(original._syncRevision) || 0) + 1 };
+        transaction.set(reference, profile, { merge: true });
+      }
+      for (const id of newConsumed) transaction.set(doc(profileDb, 'users', owner.uid, 'meta', profileReceiptId(`extra-consumed:${id}`)), { type: 'profile-extra-consumed-v1', createdAt: new Date() });
+      return { profile, outcomes };
+    });
+    if (!current()) return { saved: false, reason: 'auth/identity-changed' };
+    if (options.verify === true) {
+      const verification = await getDoc(reference);
+      const receipts = await Promise.all(receiptRefs.map((ref) => getDoc(ref)));
+      if (!current()) return { saved: false, reason: 'auth/identity-changed' };
+      if (!verification.exists() || receipts.some((snap) => !snap.exists())) throw Object.assign(new Error('Profile synchronization could not be verified'), { code: 'profile/write-verification-failed' });
+      result.profile = verification.data();
+    }
+    persistedData = result.profile;
+    Object.assign(results, result.outcomes);
+    for (const operation of operations) localStorage.removeItem(operation.key);
+    const known = window.__lootlinguaProfileSnapshot;
+    if (known?.uid !== owner.uid || Number(known.data?._syncRevision || 0) <= Number(persistedData?._syncRevision || 0)) {
+      window.__lootlinguaProfileSnapshot = { uid: owner.uid, exists: true, data: persistedData, readFailed: false };
+    }
+  }
+  return { saved: current(), profile: persistedData, results };
+}
+window.flushProfileIntents = function(options = {}) {
+  const owner = options.profileOwner || captureProfileOwner();
+  if (!isProfileOwnerCurrent(owner)) return Promise.resolve({ saved: false, reason: 'auth/identity-changed' });
+  const work = async () => {
+    try {
+      const outcome = await transactProfileOutbox(owner, options);
+      if (outcome.saved && outcome.profile) applyCanonicalProfile(outcome.profile, owner);
+      if (outcome.saved) window.__lootlinguaLastProfileSaveFailure = null;
+      return outcome;
+    } catch (error) {
+      if (isProfileOwnerCurrent(owner)) {
+        reportProfileSaveFailure(error, `users/${owner.uid}/meta/profile`, 'transaction-sync', {});
+        clearTimeout(_profileRetryTimer);
+        _profileRetryTimer = setTimeout(() => window.flushProfileIntents?.(), 5000);
+      }
+      return { saved: false, reason: error?.code || 'profile/sync-failed' };
+    }
+  };
+  return options.insideProfileTask ? work() : enqueueProfileTask(owner, work);
+};
+window.commitProfileIntent = async function(intent) {
+  const owner = captureProfileOwner();
+  const id = queueProfileCommands([JSON.parse(JSON.stringify(intent))], { project: false });
+  if (!id || !isProfileOwnerCurrent(owner)) return { saved: false, applied: false, reason: 'auth/identity-changed' };
+  const outcome = await window.flushProfileIntents({ profileOwner: owner, verify: true });
+  if (!outcome.saved || !isProfileOwnerCurrent(owner)) return { ...outcome, applied: false, operationId: id };
+  let result = outcome.results?.[id];
+  if (!result) {
+    const receipt = await getDoc(doc(profileDb, 'users', owner.uid, 'meta', profileReceiptId(id)));
+    if (!isProfileOwnerCurrent(owner)) return { saved: false, applied: false, reason: 'auth/identity-changed' };
+    result = receipt.exists() ? receipt.data().result : { applied: false, reason: 'profile/receipt-missing' };
+  }
+  return { ...outcome, ...result, operationId: id };
+};
+window.addEventListener?.('online', () => window.flushProfileIntents?.());
+window.addEventListener?.('storage', (event) => {
+  if (event.key?.startsWith(profileOutboxPrefix(profileAuth.currentUser?.uid || ''))) scheduleProfileFlush();
+});
 
 function captureProfileOwner(user = profileAuth.currentUser) {
   if (!user?.uid || profileAuth.currentUser?.uid !== user.uid) return null;
@@ -138,66 +340,79 @@ function isProfileOperationCurrent(owner, loadOwner = null) {
 }
 
 async function writeProfileData(data, options, owner) {
-  const user = { uid: owner?.uid };
+  // Preferences share the profile revision but never write progress fields.
+  const fields = ['theme', 'oasisMode', 'themeIntroSeen'];
+  if (!data || Object.keys(data).some(key => !fields.includes(key))) return false;
   const isCurrent = () => isProfileOperationCurrent(owner, options.profileLoadOwner);
   if (!isCurrent()) return false;
-  const referencePath = `users/${user.uid}/meta/profile`;
-  const reference = doc(profileDb, 'users', user.uid, 'meta', 'profile');
+  const referencePath = `users/${owner.uid}/meta/profile`;
+  const reference = doc(profileDb, 'users', owner.uid, 'meta', 'profile');
+  const appearance = {};
+  for (const key of fields) if (Object.hasOwn(data, key)) appearance[key] = data[key];
+  let patch;
   let knownSnapshot = window.__lootlinguaProfileSnapshot;
   try {
-    if (knownSnapshot?.uid !== user.uid || knownSnapshot.readFailed) {
-      const preflight = await getDoc(reference);
-      if (!isCurrent()) return false;
-      knownSnapshot = {
-        uid: user.uid,
-        exists: preflight.exists(),
-        data: preflight.exists() ? preflight.data() : null,
-        readFailed: false,
-      };
-      window.__lootlinguaProfileSnapshot = knownSnapshot;
-    }
+    let persistedData = await runTransaction(profileDb, async transaction => {
+      const current = await transaction.get(reference);
+      if (!isCurrent()) throw Object.assign(new Error('Authenticated user changed'), { code: 'auth/identity-changed' });
+      const remote = current.exists() ? current.data() : {};
+      knownSnapshot = { uid: owner.uid, exists: current.exists(), data: remote, readFailed: false };
+      patch = { ...appearance, updatedAt: new Date(), _syncRevision: (Number(remote._syncRevision) || 0) + 1 };
+      transaction.set(reference, patch, { merge: true });
+      return { ...remote, ...patch };
+    });
     if (!isCurrent()) return false;
-    await setDoc(reference, data, { merge: true });
-    // A submitted write stays bound to its original account. Its continuation
-    // must not publish that account's snapshot into a newer session or load.
-    if (!isCurrent()) return false;
-    let persistedData = knownSnapshot.data ? { ...knownSnapshot.data, ...data } : data;
     if (options.verify === true) {
       const verification = await getDoc(reference);
       if (!isCurrent()) return false;
       persistedData = verification.exists() ? verification.data() : null;
-      if (!verification.exists() || !persistedProfileValueMatches(persistedData, data)) {
-        const verificationError = new Error('Profile write could not be verified');
-        verificationError.code = 'profile/write-verification-failed';
-        throw verificationError;
+      if (!verification.exists() || !persistedProfileValueMatches(persistedData, appearance) ||
+          Number(persistedData?._syncRevision || 0) < patch._syncRevision) {
+        throw Object.assign(new Error('Profile write could not be verified'), { code: 'profile/write-verification-failed' });
       }
     }
-    window.__lootlinguaProfileSnapshot = {
-      uid: user.uid,
-      exists: true,
-      data: persistedData,
-      readFailed: false,
-    };
+    const newest = window.__lootlinguaProfileSnapshot;
+    if (newest?.uid === owner.uid && Number(newest.data?._syncRevision || 0) > Number(persistedData?._syncRevision || 0)) {
+      persistedData = newest.data;
+    }
+    window.__lootlinguaProfileSnapshot = { uid: owner.uid, exists: true, data: persistedData, readFailed: false };
     window.__lootlinguaLastProfileSaveFailure = null;
     return true;
-  } catch (e) {
+  } catch (error) {
     if (!isCurrent()) return false;
-    const operation = knownSnapshot?.uid === user.uid
-      ? (knownSnapshot.exists ? 'merge-update' : 'create-with-merge')
-      : 'preflight-read';
-    reportProfileSaveFailure(e, referencePath, operation, data);
+    const operation = knownSnapshot?.uid === owner.uid ? (knownSnapshot.exists ? 'merge-update' : 'create-with-merge') : 'preflight-read';
+    reportProfileSaveFailure(error, referencePath, operation, patch);
     return false;
   }
 }
 
 async function performProfileSave(force = false, options = {}, owner = captureProfileOwner()) {
-  if (!isProfileOperationCurrent(owner, options.profileLoadOwner)) return false;
-  if (!force && (window.__applyingCloudProfile || window.isInitialLoad || window.__suppressUnlockNotices)) return false;
-  const get = window.getLootlinguaProfilePayload;
-  if (typeof get !== "function") return false;
-  const base = get();
-  const data = { ...base, updatedAt: new Date() };
-  return writeProfileData(data, options, owner);
+  if (!isProfileOwnerCurrent(owner)) return false;
+  if (!force && window.__profileHydrating) return false;
+  const base = window.getLootlinguaProfilePayload?.();
+  if (!base) return false;
+  if (options.guestMigration) {
+    const migration = options.guestMigration;
+    const snapshotId = migration.guestSnapshotId || localStorage.getItem('lootlingua:guest-migration-snapshot:v1:guest') || ('legacy-' + (migration.createdAt || 0));
+    queueProfileCommands([{ type: 'guest-import', eventId: snapshotId, profile: migration.profile || {} }], { project: false });
+  } else {
+    // Financial/progress fields never originate from a cached full payload.
+    // Their explicit intents were persisted at the mutation's call site.
+    const baseline = _profileLocalBaselines.get(owner.uid);
+    const commands = [];
+    if (baseline) {
+      const patch = {};
+      for (const field of ['displayName', 'activeTitleId']) if (base[field] !== baseline[field]) patch[field] = base[field];
+      if (Object.keys(patch).length) commands.push({ type: 'appearance', patch });
+      if (JSON.stringify(base.quizExposureHistory || []) !== JSON.stringify(baseline.quizExposureHistory || [])) commands.push({ type: 'exposure', entries: base.quizExposureHistory || [] });
+    }
+    for (const field of ['maxStreak', 'runnerBestDistance', 'xpEconomyVersion']) {
+      if (Number(base[field]) > Number(baseline?.[field] || 0)) commands.push({ type: 'max', field, value: base[field] });
+    }
+    if (commands.length) queueProfileCommands(commands, { project: false });
+  }
+  const outcome = await window.flushProfileIntents({ ...options, profileOwner: owner });
+  return outcome.saved === true;
 }
 
 // Explicit appearance changes write only these fields, even when the local
@@ -227,7 +442,6 @@ window.saveProfilePreferencesToCloud = async function(patch, options = {}) {
     }
   }
   if (!Object.keys(data).length) return false;
-  data.updatedAt = new Date();
   // Preserve the order of explicit appearance changes through delayed preflight
   // reads. A different auth session has its own queue and never waits for this one.
   const queueKey = JSON.stringify([owner.uid, owner.generation, owner.epoch, owner.loadSequence]);
@@ -303,9 +517,7 @@ window.loadProfileFromCloud = async function(user, options = {}) {
       window.setLootlinguaDisplayName(user.displayName);
     }
     if (!isCurrent()) return abandoned();
-    if (cloudData && typeof window.mergeLootlinguaProfileFromCloud === "function") {
-      window.mergeLootlinguaProfileFromCloud(cloudData);
-    }
+    if (cloudData) applyCanonicalProfile(cloudData, owner);
     if (!isCurrent()) return abandoned();
     const inMemoryMigration = window.__acceptedGuestProfileMigration;
     const persistedMigration = readPendingGuestProfileMigration(user);
@@ -345,34 +557,26 @@ window.loadProfileFromCloud = async function(user, options = {}) {
     const shouldMergeGuestState = Boolean(
       accepted || shouldMergeGuestProfile || hasCurrentExplicitTheme
     );
-    if (shouldMergeGuestState && typeof window.mergeLootlinguaProfileFromCloud === "function") {
-      for (const guestProfile of mergeableGuestProfiles) {
-        if (!isCurrent()) return abandoned();
-        const guestProfileForMerge = { ...guestProfile };
-        // A stale guest appearance must never override an account preference.
-        // Only the current explicit Entry session below may do so.
-        delete guestProfileForMerge.theme;
-        delete guestProfileForMerge.oasisMode;
-        window.mergeLootlinguaProfileFromCloud(guestProfileForMerge, { guestMigration: true });
-      }
-      if (!isCurrent()) return abandoned();
-      if (hasCurrentExplicitTheme) {
-        window.mergeLootlinguaProfileFromCloud({
-          theme: explicitThemeId,
-          oasisMode: explicitOasisMode,
-        });
-      }
+    if (hasCurrentExplicitTheme) {
+      queueProfileCommands([{ type: 'appearance', patch: { theme: explicitThemeId, oasisMode: explicitOasisMode } }], { project: false });
     }
     if (!isCurrent()) return abandoned();
     // Do not create/backfill a profile merely because it was read. A write is
     // warranted only after an explicit guest-data merge or a later user action.
     if (profileAlreadyCommitted) {
-      outcome.pendingProfileCommitted = true;
+      // A verified marker from an older client predates server receipts. Seal
+      // the same snapshot ID without importing its already credited balances.
+      const snapshotId = accepted.guestSnapshotId || localStorage.getItem('lootlingua:guest-migration-snapshot:v1:guest') || ('legacy-' + (accepted.createdAt || 0));
+      queueProfileCommands([{ type: 'acknowledge' }], { id: profileOperationId({ type: 'guest-import', eventId: snapshotId }), project: false });
+      const sealed = await window.flushProfileIntents({ profileOwner: owner, profileLoadOwner: loadOwner, verify: true });
+      if (!isCurrent()) return abandoned();
+      outcome.pendingProfileCommitted = sealed.saved === true;
     } else if (shouldMergeGuestState && window._saveProfileToCloudNow) {
       const saved = await window._saveProfileToCloudNow({
         verify: Boolean(persistedMigration || options.requirePendingProfileCommit),
         profileOwner: owner,
         profileLoadOwner: loadOwner,
+        guestMigration: accepted || null,
       });
       if (!isCurrent()) return abandoned();
       outcome.pendingProfileCommitted = completePendingGuestProfileMigration(
@@ -388,6 +592,20 @@ window.loadProfileFromCloud = async function(user, options = {}) {
         return outcome;
       }
     }
+    if (!isCurrent()) return abandoned();
+    _profileLocalBaselines.set(owner.uid, window.getLootlinguaProfilePayload?.() || cloudData || {});
+    _profileSnapshotUnsubscribe?.();
+    _profileSnapshotUnsubscribe = onSnapshot(doc(profileDb, 'users', owner.uid, 'meta', 'profile'), (snapshot) => {
+      if (!isCurrent() || snapshot.metadata?.hasPendingWrites || snapshot.metadata?.fromCache || !snapshot.exists()) return;
+      const data = snapshot.data();
+      const known = window.__lootlinguaProfileSnapshot;
+      if (known?.uid === owner.uid && Number(known.data?._syncRevision || 0) > Number(data?._syncRevision || 0)) return;
+      window.__lootlinguaProfileSnapshot = { uid: owner.uid, exists: true, data, readFailed: false };
+      applyCanonicalProfile(data, owner);
+    }, (error) => {
+      if (isCurrent()) console.error('loadProfile: live synchronization unavailable', error);
+    });
+    if (readProfileOutbox(owner.uid).length) scheduleProfileFlush();
   } catch (e) {
     if (!isCurrent()) return abandoned();
     if (!profileReadCompleted) {
@@ -433,6 +651,10 @@ onAuthStateChanged(profileAuth, (user) => {
   clearTimeout(_saveProfileDebounce);
   _saveProfileDebounce = null;
   _activeProfileLoad = null;
+  _profileSnapshotUnsubscribe?.();
+  _profileSnapshotUnsubscribe = null;
+  clearTimeout(_profileRetryTimer);
+  _profileRetryTimer = null;
   window.__applyingCloudProfile = false;
   window._profileLoaded = false;
   const authOwner = captureProfileOwner(user);
