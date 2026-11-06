@@ -1,8 +1,8 @@
 (function(root) {
   'use strict';
   const LANES = 3, MAX_HEARTS = 3, MAX_ENTITIES = 48, MAX_EVENTS = 16;
-  const FAR = 80, SPAWN_Z = 64, BASE_SPEED = 12, MAX_SPEED = 23;
-  const JUMP_MS = 850, SLIDE_MS = 800, INVULNERABLE_MS = 1100;
+  const FAR = 80, SPAWN_Z = 64, BASE_SPEED = 14, MAX_SPEED = 32;
+  const JUMP_MS = 1100, SLIDE_MS = 900, INVULNERABLE_MS = 1100;
   const clamp = (value, low, high) => Math.max(low, Math.min(high, value));
   const clean = value => String(value ?? '').trim().replace(/\s+/g, ' ');
 
@@ -24,14 +24,15 @@
   }
   function createState(words, options = {}) {
     const normalized = normalizeWords(words);
+    const rng = typeof options.random === 'function' ? options.random : Math.random;
     return {
       words: normalized, lane: 1, hearts: MAX_HEARTS, coins: 0,
       distance: 0, speed: BASE_SPEED, elapsed: 0, running: true, paused: false, over: false,
       action: 'run', actionStartedAt: 0, actionUntil: 0, invulnerableUntil: 0,
       entities: [], gate: null, feedback: null, events: [],
-      _random: typeof options.random === 'function' ? options.random : Math.random,
+      _random: rng,
       _pool: Array.from({ length: MAX_ENTITIES }, () => ({})), _nextId: 1,
-      _nextRowAt: 700, _nextGateAt: 12000, _row: 0, _escapeLane: 1, _safeUntil: 0,
+      _nextRowAt: 400, _nextGateAt: 30000 + Math.floor(clamp(Number(rng()) || 0, 0, 1) * 12000), _row: 0, _escapeLane: 1, _safeUntil: 0,
       _canGate: new Set(normalized.map(item => item.meaning)).size >= LANES,
     };
   }
@@ -53,6 +54,19 @@
   }
   function jump(state) { return startAction(state, 'jump', JUMP_MS); }
   function slide(state) { return startAction(state, 'slide', SLIDE_MS); }
+  // Shared by collision and drawing: heights are measured in standing bodies.
+  function getPose(state, at = state.elapsed) {
+    const action = getAction(state, at);
+    const fraction = clamp((at - state.actionStartedAt) / Math.max(1, state.actionUntil - state.actionStartedAt), 0, 1);
+    let floor = 0;
+    for (const entity of state.entities) {
+      if (entity.obstacleType !== 'train' || entity.lane !== state.lane) continue;
+      const z = entity.z + state.speed * (state.elapsed - at) / 1000;
+      if (z <= 0 && z >= -entity.length) floor = Math.max(floor, Math.min(1, -z / 6, (entity.length + z) / 3) * 1.05);
+    }
+    const lift = action === 'jump' ? Math.sin(fraction * Math.PI) * 1.12 : 0;
+    return { action, feet: floor + lift, top: floor + lift + (action === 'slide' ? .43 : 1), floor, lift };
+  }
   function allocate(state, data) {
     const entity = state._pool.pop();
     if (!entity) return null;
@@ -94,28 +108,33 @@
       if (entity.kind === 'obstacle' && entity.z > 0) retire(state, index);
     }
     state.gate = gate;
-    state._nextGateAt = state.elapsed + 16000 + random(state) * 4000;
+    state._nextGateAt = state.elapsed + 30000 + random(state) * 18000;
     emit(state, { type: 'gate-approach', id: gate.id, word: gate.word });
   }
   function spawnRow(state) {
-    if (state.elapsed < state._nextRowAt || state.elapsed < state._safeUntil || (state.gate && !state.gate.resolved)) return;
-    const clearance = SPAWN_Z / BASE_SPEED * 1000 + 500;
-    if (hasGateWords(state) && state._nextGateAt - state.elapsed < clearance) return;
+    if (state.elapsed < state._nextRowAt || state.elapsed < state._safeUntil) return;
+    const reading = state.gate && !state.gate.resolved;
+    const clearance = (SPAWN_Z + 24) / BASE_SPEED * 1000 + 250;
+    const draining = !reading && hasGateWords(state) && state._nextGateAt - state.elapsed < clearance;
+    const spawnZ = reading ? Math.max(SPAWN_Z, state.gate.z + 24) : SPAWN_Z;
     const escapeOptions = [0, 1, 2].filter(lane => Math.abs(lane - state._escapeLane) <= 1);
     const escape = choose(state, escapeOptions);
     const blocked = [0, 1, 2].filter(lane => lane !== escape);
     if (random(state) > .5) blocked.reverse();
-    const obstacleCount = state.speed > 16 && random(state) > .45 ? 2 : 1;
-    if (state._pool.length < obstacleCount + 2) return;
+    const obstacleCount = state.distance > 120 && random(state) > .25 ? 2 : 1;
+    if (state._pool.length < obstacleCount + 4) return;
     const row = ++state._row;
-    for (let index = 0; index < obstacleCount; index++) {
-      allocate(state, { kind: 'obstacle', obstacleType: choose(state, ['low', 'overhead', 'wall']),
-        lane: blocked[index], z: SPAWN_Z, row });
+    for (let index = 0; index < (draining ? 0 : obstacleCount); index++) {
+      const lane = blocked[index];
+      if (state.entities.some(item => item.obstacleType === 'train' && item.lane === lane && item.z > -item.length)) continue;
+      const type = row > 5 && row % 7 === 0 && index === 0 ? 'train' : choose(state, ['low', 'overhead', 'wall']);
+      allocate(state, { kind: 'obstacle', obstacleType: type, length: type === 'train' ? 20 : 0, lane, z: spawnZ, row });
+      if (type === 'train') for (const offset of [10, 15]) allocate(state, { kind: 'coin', lane, z: spawnZ + offset, height: 1.49, row });
     }
-    allocate(state, { kind: 'coin', lane: escape, z: SPAWN_Z + 3, row });
-    allocate(state, { kind: 'coin', lane: escape, z: SPAWN_Z + 6, row });
+    allocate(state, { kind: 'coin', lane: escape, z: spawnZ + 3, row });
+    allocate(state, { kind: 'coin', lane: escape, z: spawnZ + 6, row });
     state._escapeLane = escape;
-    state._nextRowAt = state.elapsed + Math.max(750, 1300 - state.distance / 4);
+    state._nextRowAt = state.elapsed + Math.max(680, 1150 - state.distance / 3) + random(state) * 240;
   }
   function damage(state, at, cause) {
     if (at < state.invulnerableUntil || state.over) return false;
@@ -134,11 +153,17 @@
       state._safeUntil = state.elapsed + 1200;
       emit(state, { type: 'gate', correct, word: entity.word, correctMeaning: entity.correctMeaning, chosenLane: state.lane });
     } else if (entity.lane === state.lane && entity.kind === 'coin') {
-      entity.collected = true;
-      state.coins++; emit(state, { type: 'coin', id: entity.id, amount: 1, total: state.coins });
+      const pose = getPose(state, at), height = entity.height ?? .44;
+      if (pose.feet <= height + .12 && pose.top >= height - .12) {
+        entity.collected = true;
+        state.coins++; emit(state, { type: 'coin', id: entity.id, amount: 1, total: state.coins });
+      }
     } else if (entity.lane === state.lane && entity.kind === 'obstacle') {
-      const action = getAction(state, at);
-      const cleared = entity.obstacleType === 'low' && action === 'jump' || entity.obstacleType === 'overhead' && action === 'slide';
+      const pose = getPose(state, at);
+      const cleared = entity.obstacleType === 'train' ||
+        entity.obstacleType === 'low' && pose.feet >= .37 ||
+        entity.obstacleType === 'overhead' && (pose.top <= .6 || pose.feet >= .88) ||
+        entity.obstacleType === 'wall' && pose.feet >= 1.4;
       if (!cleared) damage(state, at, entity.obstacleType);
     }
   }
@@ -150,22 +175,22 @@
     state.elapsed += dt;
     if (state.feedback && state.elapsed >= state.feedback.until) state.feedback = null;
     maybeGate(state);
-    const desired = Math.min(MAX_SPEED, BASE_SPEED + state.distance / 150);
-    state.speed = state.gate && !state.gate.resolved ? BASE_SPEED : desired;
+    const desired = Math.min(MAX_SPEED, BASE_SPEED + state.distance / 70);
+    state.speed = state.gate && !state.gate.resolved ? 12 : desired;
     const travelled = state.speed * dt / 1000;
     state.distance += travelled;
+    for (const entity of state.entities) entity.z -= travelled;
     for (const entity of state.entities) {
-      const oldZ = entity.z;
-      entity.z -= travelled;
+      const oldZ = entity.z + travelled;
       if (!entity.resolved && oldZ > 0 && entity.z <= 0) cross(state, entity, before + dt * oldZ / travelled);
       if (state.over) break;
     }
-    for (let index = state.entities.length - 1; index >= 0; index--) if (state.entities[index].z < -8) retire(state, index);
+    for (let index = state.entities.length - 1; index >= 0; index--) if (state.entities[index].z < -((state.entities[index].length || 0) + 8)) retire(state, index);
     if (getAction(state) === 'run') state.action = 'run';
     if (!state.over) spawnRow(state);
     return state;
   }
-  root.LootLinguaRunnerEngine = Object.freeze({ createState, update, move, jump, slide, getAction, normalizeWords, createWordGate,
+  root.LootLinguaRunnerEngine = Object.freeze({ createState, update, move, jump, slide, getAction, getPose, normalizeWords, createWordGate,
     constants: Object.freeze({ LANES, MAX_HEARTS, MAX_ENTITIES, MAX_EVENTS, FAR, SPAWN_Z, BASE_SPEED, MAX_SPEED, JUMP_MS, SLIDE_MS, INVULNERABLE_MS }),
   });
 })(window);

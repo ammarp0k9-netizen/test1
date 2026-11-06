@@ -33,18 +33,18 @@ test('pause freezes movement, action timers and collision state; oversized dt ad
   assert.equal(state.elapsed, 50); assert.ok(state.distance <= 1.15); assert.equal(obstacle.resolved, true); assert.equal(state.hearts, 2);
 });
 
-test('low obstacles require jump, overhead obstacles require slide, and solid walls require a clear lane', () => {
-  for (const [obstacleType, action, hearts] of [['low', 'jump', 3], ['low', 'slide', 2], ['overhead', 'slide', 3], ['overhead', 'jump', 2], ['wall', 'jump', 2]]) {
-    const state = make(); engine[action](state); entity(state, { kind: 'obstacle', obstacleType }); engine.update(state, 50);
+test('obstacles use physical clearances: jump low bars, slide under beams and change lanes around tall walls', () => {
+  for (const [obstacleType, action, hearts] of [['low', 'jump', 3], ['low', 'slide', 2], ['overhead', 'slide', 3], ['overhead', 'jump', 3], ['wall', 'jump', 2]]) {
+    const state = make(); engine[action](state); state.elapsed = state.actionUntil * .4; entity(state, { kind: 'obstacle', obstacleType }); engine.update(state, 50);
     assert.equal(state.hearts, hearts, obstacleType + ' / ' + action);
   }
   const escaped = make(); entity(escaped, { kind: 'obstacle', obstacleType: 'wall' }); engine.move(escaped, 0); engine.update(escaped, 50); assert.equal(escaped.hearts, 3);
 });
 
 test('collisions use action timing at the crossing instant rather than the end of the frame', () => {
-  const state = make(); engine.jump(state); state.elapsed = state.actionUntil - 20;
+  const state = make(); engine.jump(state); state.elapsed = state.actionUntil - 130;
   entity(state, { kind: 'obstacle', obstacleType: 'low', z: .05 }); engine.update(state, 50);
-  assert.equal(state.hearts, 3); assert.equal(engine.getAction(state), 'run');
+  assert.equal(state.hearts, 3); assert.ok(engine.getPose(state).feet < .37);
 });
 
 test('a row crossing cannot charge several hearts during invulnerability and cannot charge a resolved obstacle twice', () => {
@@ -82,10 +82,10 @@ test('gates have three distinct meanings and at least four seconds of reading ti
   assert.equal(engine.createWordGate(make([{ word: 'a', meaning: 'same' }, { word: 'b', meaning: 'same' }])), null);
 });
 
-test('active reading gates exclude obstacle rows and coins collect once in the player lane only', () => {
+test('reading gates keep obstacles behind them and coins collect once in the player lane only', () => {
   const state = make(); state._nextRowAt = 0; state._nextGateAt = 0;
   engine.update(state, 50); assert.ok(state.gate);
-  for (let index = 0; index < 60; index++) { engine.update(state, 50); assert.ok(state.entities.every(item => item.kind !== 'obstacle')); }
+  for (let index = 0; index < 60; index++) { engine.update(state, 50); assert.ok(state.entities.every(item => item.kind !== 'obstacle' || item.z > state.gate.z + 10)); }
   const coins = make(); entity(coins, { kind: 'coin' }); entity(coins, { kind: 'coin', lane: 0 }); engine.update(coins, 50);
   assert.equal(coins.coins, 1); engine.update(coins, 50); assert.equal(coins.coins, 1);
 });
@@ -102,4 +102,34 @@ test('spawn rows always provide an escape and recycle a fixed pool during a long
     rows = Math.max(rows, state._row);
   }
   assert.ok(rows > 200); assert.equal(fastest, engine.constants.MAX_SPEED);
+});
+
+test('jumping above a coin misses it; shared physical height clears a low obstacle at the apex', () => {
+  const state = make(); engine.jump(state); state.elapsed = state.actionUntil / 2;
+  entity(state, { kind: 'coin' }); entity(state, { kind: 'obstacle', obstacleType: 'low' });
+  engine.update(state, 50); assert.equal(state.coins, 0); assert.equal(state.hearts, 3);
+  const landing = make(); engine.jump(landing); landing.elapsed = landing.actionUntil - 20;
+  entity(landing, { kind: 'obstacle', obstacleType: 'low' }); engine.update(landing, 50);
+  assert.equal(landing.hearts, 2, 'feet are already below the barrier during landing');
+});
+
+test('gate intervals leave a long randomized run and restore distance-based speed after crossing', () => {
+  for (const seed of [1, 2, 100]) {
+    const state = engine.createState(words, { random: seeded(seed) });
+    assert.ok(state._nextGateAt >= 30000 && state._nextGateAt <= 42000);
+    state.distance = 1400; state._nextGateAt = 0; engine.update(state, 50);
+    assert.equal(state.speed, 12);
+    assert.ok(state._nextGateAt - state.elapsed >= 30000);
+    state.lane = state.gate.correctLane; state.gate.z = .1; engine.update(state, 50); engine.update(state, 50);
+    assert.equal(state.speed, 32);
+  }
+});
+
+test('train ramp lifts the runner, roof coins require roof height, and leaving its lane drops support', () => {
+  const state = make();
+  entity(state, { kind: 'obstacle', obstacleType: 'train', length: 20, z: -10, resolved: true });
+  assert.equal(engine.getPose(state).floor, 1.05);
+  entity(state, { kind: 'coin', height: 1.49 }); entity(state, { kind: 'coin' });
+  engine.update(state, 50); assert.equal(state.coins, 1);
+  engine.move(state, 0); assert.equal(engine.getPose(state).floor, 0);
 });

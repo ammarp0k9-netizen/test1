@@ -127,12 +127,12 @@ try {
       await key('ArrowLeft'); assert.equal((await evaluate('LootLinguaGateRunner.getDiagnostics()')).lane, 0);
       await key('ArrowRight'); assert.equal((await evaluate('LootLinguaGateRunner.getDiagnostics()')).lane, 1);
       await key(' '); assert.equal((await evaluate('LootLinguaGateRunner.getDiagnostics()')).action, 'jump');
-      await delay(900); await key('ArrowDown'); assert.equal((await evaluate('LootLinguaGateRunner.getDiagnostics()')).action, 'slide');
+      await wait(`LootLinguaGateRunner.getDiagnostics().action==='run'`, 'jump landing'); await key('ArrowDown'); assert.equal((await evaluate('LootLinguaGateRunner.getDiagnostics()')).action, 'slide');
     } else {
       await swipe(90, 0); assert.equal((await evaluate('LootLinguaGateRunner.getDiagnostics()')).lane, 2);
       await swipe(-180, 0); assert.equal((await evaluate('LootLinguaGateRunner.getDiagnostics()')).lane, 1, 'a swipe changes only one lane');
       await swipe(0, -80); assert.equal((await evaluate('LootLinguaGateRunner.getDiagnostics()')).action, 'jump');
-      await delay(900); await swipe(0, 80); assert.equal((await evaluate('LootLinguaGateRunner.getDiagnostics()')).action, 'slide');
+      await wait(`LootLinguaGateRunner.getDiagnostics().action==='run'`, 'jump landing'); await swipe(0, 80); assert.equal((await evaluate('LootLinguaGateRunner.getDiagnostics()')).action, 'slide');
     }
     await key('p'); const beforePause = await evaluate('LootLinguaGateRunner.getDiagnostics()'); await delay(170);
     const afterPause = await evaluate('LootLinguaGateRunner.getDiagnostics()'); assert.equal(afterPause.distance, beforePause.distance); assert.equal(afterPause.paused, true);
@@ -163,12 +163,13 @@ try {
   report.pool = await evaluate(`(()=>{const E=fixtureEngine,s=E.createState(fixtureWords,{random:()=>.5});let max=0,events=0,metrics,dom=document.querySelectorAll('*').length;const started=performance.now();for(let frame=0;frame<2400;frame++){E.move(s,s.gate&&!s.gate.resolved?s.gate.correctLane:1);E.update(s,50);if(frame%4===0)metrics=fixtureRenderer.draw(s);max=Math.max(max,s.entities.length);events=Math.max(events,s.events.length);if(s.over)throw Error('deterministic safe route died')}return{simulatedSeconds:120,draws:600,executionMs:performance.now()-started,maxEntities:max,pool:s._pool.length,active:s.entities.length,total:s._pool.length+s.entities.length,maxEvents:events,dpr:metrics.dpr,domBefore:dom,domAfter:document.querySelectorAll('*').length}})()`);
   assert.equal(report.pool.total, 48); assert.ok(report.pool.maxEntities <= 48 && report.pool.maxEvents <= 16 && report.pool.dpr <= 1.5); assert.equal(report.pool.domBefore, report.pool.domAfter);
   await evaluate('fixtureRenderer.destroy();fixtureCanvas.remove()');
-  for (const [width, action, imageName] of [[390, 'jump', 'mobile-gate-jump'], [320, 'slide', 'small-mobile-slide']]) {
+  for (const [width, action, imageName] of [[390, 'jump', 'mobile-gate-jump'], [320, 'slide', 'small-mobile-slide'], [1280, 'run', 'train-rooftop']]) {
     await send('Emulation.setDeviceMetricsOverride', { width, height: 844, deviceScaleFactor: 3, mobile: true });
     await evaluate(`fixtureContext.progress={readinessNextAt:0};await LootLinguaGateRunner.launch(fixtureContext);window.fixtureVisualUI=document.querySelector('.llr-overlay').cloneNode(true)`);
     await key('Escape');
     await wait(`!document.querySelector('.llr-overlay')`, 'close controller before isolated renderer scene');
     await evaluate(`document.body.append(fixtureVisualUI);document.querySelector('.llr-screen').hidden=true;window.fixtureVisualState=fixtureEngine.createState(fixtureWords,{random:()=>.5});Object.assign(fixtureVisualState,{elapsed:500,action:'${action}',actionStartedAt:100,actionUntil:900,lane:1,distance:85});fixtureVisualState.entities=[{id:1,active:true,kind:'gate',z:24,lane:1,word:'lantern',options:['جسر','فانوس','نهر'],correctLane:1},{id:2,active:true,kind:'obstacle',obstacleType:'low',lane:2,z:9},{id:3,active:true,kind:'obstacle',obstacleType:'overhead',lane:0,z:13},{id:4,active:true,kind:'obstacle',obstacleType:'wall',lane:2,z:30},{id:5,active:true,kind:'coin',lane:0,z:6}];window.fixtureVisual=LootLinguaRunnerRenderer.createRenderer(document.querySelector('.llr-canvas'));const b=document.querySelector('.llr-viewport').getBoundingClientRect();fixtureVisual.resize(b.width,b.height);fixtureVisual.draw(fixtureVisualState);document.querySelector('.llr-challenge').hidden=false;document.querySelector('.llr-challenge strong').textContent='lantern';document.querySelector('.llr-gate-labels').hidden=false;document.querySelector('.llr-gate-labels').style.top=(b.height*.48)+'px';document.querySelectorAll('.llr-gate-label').forEach((label,i)=>{label.textContent=fixtureVisualState.entities[0].options[i]});`);
+    if (imageName === 'train-rooftop') await evaluate(`Object.assign(fixtureVisualState,{lane:1,distance:300,action:'run'});fixtureVisualState.entities=[{id:1,active:true,kind:'obstacle',obstacleType:'train',lane:1,z:-10,length:20,resolved:true},{id:2,active:true,kind:'coin',lane:1,z:2,height:1.49},{id:3,active:true,kind:'obstacle',obstacleType:'low',lane:0,z:14},{id:4,active:true,kind:'obstacle',obstacleType:'overhead',lane:2,z:20}];document.querySelector('.llr-challenge').hidden=true;document.querySelector('.llr-gate-labels').hidden=true;fixtureVisual.draw(fixtureVisualState);`);
     await screenshot(imageName);
     const pixels = await evaluate(`(()=>{const c=document.querySelector('.llr-canvas'),data=c.getContext('2d').getImageData(0,0,c.width,c.height).data;const colors=new Set();for(let i=0;i<data.length;i+=400)colors.add(data[i]+','+data[i+1]+','+data[i+2]);return colors.size})()`);
     assert.ok(pixels > 15, 'renderer must produce a nonblank scene');

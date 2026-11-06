@@ -25,6 +25,7 @@
 .llr-status { position: absolute; left: 5%; right: 5%; bottom: 7px; margin: 0; padding: 8px; border-radius: 9px; text-align: center; font-size: 13px; font-weight: 800; background: #09241ae8; color: #abf4cd; direction: rtl; pointer-events: none; }
 .llr-status:empty { display: none; }
 .llr-status[data-tone="wrong"] { background: #3c1823eb; color: #ffd0c5; }
+.llr-status[data-tone="hint"] { background: #092432ee; color: #ffe5ac; border: 1px solid #b99b60; }
 .llr-screen { position: absolute; z-index: 5; inset: 0; padding: clamp(16px,4vw,40px); display: flex; flex-direction: column; justify-content: center; align-items: center; gap: 14px; text-align: center; direction: rtl; background: linear-gradient(#05131ee8,#0a2535eb); overflow-y: auto; }
 .llr-screen-kicker { color: #79daca; letter-spacing: .25em; font-size: 10px; }
 .llr-screen h2 { margin: 0; color: #f7d796; font-size: clamp(24px,5vw,42px); line-height: 1.2; }

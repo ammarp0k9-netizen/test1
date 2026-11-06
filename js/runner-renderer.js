@@ -142,13 +142,22 @@
           column(lane, z, index);
         }
       }
+      // A moving tunnel section adds scenery with a handful of canvas paths.
+      const tunnel = Math.floor(distance / 240) % 2 === 1;
+      if (tunnel) for (const z of [12, 30, 48, 66]) {
+        const a = project(-.68, z), b = project(2.68, z), h = actorHeight * 2.6 * a.scale;
+        context.strokeStyle = '#36515a'; context.lineWidth = Math.max(3, laneWidth * .09 * a.scale);
+        context.beginPath(); context.moveTo(a.x, a.y); context.lineTo(a.x, a.y - h * .7);
+        context.quadraticCurveTo(width / 2, a.y - h * 1.25, b.x, b.y - h * .7); context.lineTo(b.x, b.y); context.stroke();
+        line(context, a.x, a.y - h * .68, b.x, b.y - h * .68, '#b99b60', Math.max(1, a.scale * 2));
+      }
     }
     function shadow(x, y, w, h, alpha = .3) {
       context.fillStyle = `rgba(0,7,12,${alpha})`; context.beginPath(); context.ellipse(x, y, w, h, 0, 0, Math.PI * 2); context.fill();
     }
     function coin(entity, p, time) {
       const phase = time * .005 + (Number(entity.id) || 0), radius = laneWidth * .095 * p.scale;
-      const x = p.x, y = p.y - actorHeight * .44 * p.scale + Math.sin(phase * 1.7) * radius * .12;
+      const x = p.x, y = p.y - actorHeight * (entity.height ?? .44) * p.scale + Math.sin(phase * 1.7) * radius * .12;
       shadow(x, p.y + 1, radius * 1.25, radius * .28, .23);
       context.save(); context.translate(x, y); context.scale(Math.max(.23, Math.abs(Math.cos(phase))), 1);
       const metal = context.createLinearGradient(-radius, -radius, radius, radius);
@@ -163,6 +172,25 @@
       const type = entity.obstacleType || entity.type;
       const w = laneWidth * .72 * p.scale, h = actorHeight * p.scale;
       shadow(p.x, p.y, w * .58, h * .1, .36);
+      if (type === 'train') {
+        const ramp = project(entity.lane, entity.z + 6), end = project(entity.lane, entity.z + entity.length);
+        const rw = laneWidth * .76 * ramp.scale, ew = laneWidth * .76 * end.scale;
+        const ry = ramp.y - actorHeight * 1.05 * ramp.scale, ey = end.y - actorHeight * 1.05 * end.scale;
+        quad(context, ramp.x - rw / 2, ry, end.x - ew / 2, ey, end.x + ew / 2, ey, ramp.x + rw / 2, ry, '#497780');
+        quad(context, ramp.x + rw / 2, ry, end.x + ew / 2, ey, end.x + ew / 2, end.y, ramp.x + rw / 2, ramp.y, '#163a49');
+        quad(context, p.x - w / 2, p.y, p.x + w / 2, p.y, ramp.x + rw / 2, ry, ramp.x - rw / 2, ry, '#bc9b61');
+        for (let i = 1; i < 6; i++) {
+          const t = i / 6;
+          line(context, p.x - w / 2 + (ramp.x - rw / 2 - p.x + w / 2) * t, p.y + (ry - p.y) * t,
+            p.x + w / 2 + (ramp.x + rw / 2 - p.x - w / 2) * t, p.y + (ry - p.y) * t, '#4b5a55', Math.max(1, p.scale * 2));
+        }
+        for (let i = 8; i < entity.length; i += 4) {
+          const q = project(entity.lane, entity.z + i), qw = laneWidth * .76 * q.scale;
+          context.fillStyle = '#b7d6cf'; context.fillRect(q.x + qw * .51, q.y - actorHeight * .78 * q.scale, Math.max(2, qw * .08), actorHeight * .32 * q.scale);
+        }
+        line(context, ramp.x - rw * .43, ry, end.x - ew * .43, ey, '#e7c77c', Math.max(1, ramp.scale * 2));
+        return;
+      }
       if (type === 'overhead') {
         const left = p.x - w / 2, right = p.x + w / 2, beamY = p.y - h * .72, thickness = h * .14;
         context.fillStyle = '#344c57'; context.fillRect(left, beamY, w * .08, h * .72); context.fillRect(right - w * .08, beamY, w * .08, h * .72);
@@ -173,7 +201,7 @@
         return;
       }
       const low = type === 'low' || type === 'lowbar';
-      const blockHeight = h * (low ? .37 : .95), x = p.x - w / 2, y = p.y - blockHeight, depth = h * .12;
+      const blockHeight = h * (low ? .37 : 1.4), x = p.x - w / 2, y = p.y - blockHeight, depth = h * .12;
       quad(context, x, y, x + depth, y - depth, x + w + depth, y - depth, x + w, y, low ? '#e0b86d' : '#94724b');
       quad(context, x + w, y, x + w + depth, y - depth, x + w + depth, p.y - depth, x + w, p.y, low ? '#7c663b' : '#5b4a37');
       context.fillStyle = low ? '#b88d48' : '#6e593e'; context.fillRect(x, y, w, blockHeight);
@@ -186,11 +214,17 @@
       }
     }
     function gate(entity, state) {
+      if (!entity.resolved) {
+        const a = project(-.56, entity.z), b = project(2.56, entity.z);
+        const farLeft = project(-.56, FAR), farRight = project(2.56, FAR);
+        // Opaque veil hides the continuing road until the physical crossing.
+        quad(context, a.x, a.y, b.x, b.y, farRight.x, farRight.y, farLeft.x, farLeft.y, '#040c18');
+      }
       for (let lane = 0; lane < 3; lane++) {
         const p = project(lane, entity.z), w = laneWidth * .9 * p.scale, h = actorHeight * 1.48 * p.scale;
         const x = p.x - w / 2, y = p.y - h, rim = Math.max(2, w * .085), color = laneColors[lane];
         shadow(p.x, p.y, w * .58, h * .04, .2);
-        context.fillStyle = 'rgba(49,130,129,.07)'; rounded(context, x + rim, y + rim, w - rim * 2, h - rim, w * .44); context.fill();
+        context.fillStyle = entity.resolved ? (state.feedback?.correct ? '#135846' : '#642a39') : '#040c18'; rounded(context, x + rim, y + rim, w - rim * 2, h - rim, w * .44); context.fill();
         context.strokeStyle = '#172d38'; context.lineWidth = rim * 2.8; context.lineCap = 'butt';
         context.beginPath(); context.moveTo(x + rim, p.y); context.lineTo(x + rim, y + w * .48);
         context.quadraticCurveTo(x + rim, y + rim, p.x, y + rim); context.quadraticCurveTo(x + w - rim, y + rim, x + w - rim, y + w * .48); context.lineTo(x + w - rim, p.y); context.stroke();
@@ -209,12 +243,12 @@
     }
     function actor(state, delta) {
       visualLane += (clamp(Number(state.lane) || 0, 0, 2) - visualLane) * (1 - Math.exp(-delta / 72));
-      const p = project(visualLane, 0), h = actorHeight, phase = activeTime * .014;
-      const fraction = clamp((Number(state.elapsed) - Number(state.actionStartedAt)) / Math.max(1, Number(state.actionUntil) - Number(state.actionStartedAt)), 0, 1);
-      const jumping = state.action === 'jump', sliding = state.action === 'slide';
-      const elevation = jumping ? Math.sin(fraction * Math.PI) * h * .88 : 0;
-      const sway = jumping || sliding ? 0 : Math.sin(phase) * h * .018;
-      shadow(p.x, p.y + h * .025, h * (sliding ? .34 : .25) * (1 - elevation / h * .18), h * .065, .4 - elevation / h * .18);
+      const p = project(visualLane, 0), h = actorHeight, phase = (Number(state.distance) || 0) * 1.55;
+      const pose = root.LootLinguaRunnerEngine.getPose(state);
+      const jumping = pose.action === 'jump', sliding = pose.action === 'slide';
+      const elevation = pose.feet * h;
+      const sway = jumping || sliding ? 0 : -Math.abs(Math.sin(phase)) * h * .025;
+      shadow(p.x, p.y - pose.floor * h + h * .025, h * (sliding ? .34 : .25) * (1 - pose.lift * .18), h * .065, .4 - pose.lift * .18);
       context.save(); context.translate(p.x, p.y - elevation + sway);
       if (Number(state.invulnerableUntil) > Number(state.elapsed) && Math.floor(activeTime / 80) % 2) context.globalAlpha = .58;
       if (sliding) {
@@ -227,10 +261,14 @@
         line(context, -h * .08, -h * .35, h * .02, -h * .35, '#f4ca7a', h * .05);
       } else {
         const stride = jumping ? .38 : Math.sin(phase);
-        limb(-h * .09, -h * .34, -h * (.09 + stride * .13), -h * .17, -h * (.08 - stride * .15), jumping ? -h * .15 : 0, '#173747', h * .125);
-        limb(h * .09, -h * .34, h * (.09 - stride * .13), -h * .17, h * (.08 + stride * .15), jumping ? -h * .08 : -h * .03, '#285366', h * .125);
-        line(context, -h * (.08 - stride * .15) - h * .04, jumping ? -h * .15 : 0, -h * (.08 - stride * .15) + h * .055, jumping ? -h * .15 : 0, '#dbbe85', h * .065);
-        line(context, h * (.08 + stride * .15) - h * .04, jumping ? -h * .08 : -h * .03, h * (.08 + stride * .15) + h * .055, jumping ? -h * .08 : -h * .03, '#dbbe85', h * .065);
+        // Viewed from behind: feet cycle in depth/height, never sweep sideways.
+        for (const side of [-1, 1]) {
+          const swing = stride * side, x = side * h * .09;
+          const kneeY = -h * (.17 + Math.max(0, swing) * .08);
+          const footY = jumping ? -h * (.12 + side * .035) : -h * Math.max(0, swing) * .2;
+          limb(x, -h * .34, x + side * h * .018, kneeY, x, footY, side < 0 ? '#173747' : '#285366', h * .125);
+          line(context, x - h * .045, footY, x + h * .045, footY, '#dbbe85', h * .065);
+        }
         limb(-h * .19, -h * .68, -h * .27, -h * (.47 + stride * .08), -h * .2, -h * (.35 + stride * .1), '#d9ab7c', h * .09);
         limb(h * .19, -h * .68, h * .27, -h * (.47 - stride * .08), h * .2, -h * (.35 - stride * .1), '#d9ab7c', h * .09);
         // Teal explorer jacket, brass belt and a small geometric loot backpack.
@@ -260,12 +298,18 @@
       road(distance); environment(distance);
       ordered.length = 0; metrics.drawn = 0; metrics.culled = 0;
       for (const entity of state.entities || []) {
-        if (!entity || entity.active === false || entity.z < -6 || entity.z > FAR || entity.collected || entity.hit) { metrics.culled++; continue; }
+        if (!entity || entity.active === false || entity.z + (entity.length || 0) < -6 || entity.z > FAR || entity.collected || entity.hit) { metrics.culled++; continue; }
         ordered.push(entity);
       }
       ordered.sort(byDepth);
+      const readingGate = ordered.find(item => item.kind === 'gate' && !item.resolved);
+      // Roofs are support surfaces. Paint them before their elevated coins
+      // and the runner, regardless of where the carriage's front is located.
+      for (const train of ordered) if (train.obstacleType === 'train' && (!readingGate || train.z < readingGate.z)) { obstacle(train, project(train.lane, train.z)); metrics.drawn++; }
       let actorDrawn = false;
       for (const entity of ordered) {
+        if (readingGate && entity !== readingGate && entity.z > readingGate.z) { metrics.culled++; continue; }
+        if (entity.obstacleType === 'train') continue;
         if (!actorDrawn && entity.z < 0) { actor(state, delta); actorDrawn = true; }
         const p = project(entity.lane ?? 1, entity.z);
         if (entity.kind === 'gate' || entity.type === 'gate') gate(entity, state);
