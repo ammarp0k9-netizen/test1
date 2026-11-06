@@ -42,20 +42,35 @@ function safeClassToken(v) {
 }
 
 // ── Stats Panel ───────────────────────────────────────
+let statsPanelRequest = 0;
+let statsPanelHideTimer = null;
+window.cancelPendingStatsPanel = function() { statsPanelRequest++; clearTimeout(statsPanelHideTimer); };
 async function openStatsPanel() {
+  const request = ++statsPanelRequest;
+  const owner = window.auth?.currentUser?.uid || 'guest';
+  const generation = Number(window.__lootlinguaAuthGeneration) || 0;
   if (await window.LootLinguaDictionaryPages?.requireComplete() === false) return;
+  if (request !== statsPanelRequest || owner !== (window.auth?.currentUser?.uid || 'guest') ||
+      generation !== (Number(window.__lootlinguaAuthGeneration) || 0)) return;
   const p=document.getElementById('statsPanel'); if(!p)return;
+  clearTimeout(statsPanelHideTimer);
   lockBackgroundScroll('stats');
-  p.style.display='flex'; setTimeout(()=>p.classList.add('show'),10);
+  p.style.display='flex'; p.setAttribute('aria-hidden', 'false');
+  setTimeout(()=>{ if (request === statsPanelRequest) p.classList.add('show'); },10);
+  window.LootLinguaModalFocus?.open(p, { dialog: p.querySelector('.stats-box') || p, onEscape: closeStatsPanel });
   renderHeatmap(); renderStatsNumbers();
   setAppRoute('overlay', 'stats');
 }
 function closeStatsPanel() {
+  statsPanelRequest++;
   closeRouteEntry('overlay', 'stats', () => {
     const p=document.getElementById('statsPanel'); if(!p)return;
     p.classList.remove('show');
+    p.setAttribute('aria-hidden', 'true');
     unlockBackgroundScroll('stats');
-    setTimeout(()=>p.style.display='none',300);
+    window.LootLinguaModalFocus?.close(p);
+    clearTimeout(statsPanelHideTimer);
+    statsPanelHideTimer = setTimeout(()=>p.style.display='none',300);
   });
 }
 function renderHeatmap() {
@@ -1101,13 +1116,22 @@ function announceDictionarySearchResult(type, status, word) {
 async function buildAiRequestHeaders() {
   const headers = { 'Content-Type': 'application/json' };
   const user = window.auth?.currentUser;
+  const generation = Number(window.__lootlinguaAuthGeneration) || 0;
   if (user) {
+    let token;
     try {
-      const token = await user.getIdToken();
-      headers.Authorization = `Bearer ${token}`;
-    } catch (e) {
-      console.warn('getIdToken failed:', e);
+      token = await user.getIdToken();
+    } catch {
+      throw Object.assign(new Error('تعذّر تأكيد جلسة الدخول. تحقق من اتصالك وأعد البحث.'), { code: 401 });
     }
+    if (window.auth?.currentUser?.uid !== user.uid ||
+        generation !== (Number(window.__lootlinguaAuthGeneration) || 0)) {
+      throw Object.assign(new Error('تغيّر الحساب. أعد البحث من الحساب الحالي.'), { code: 401 });
+    }
+    if (typeof token !== 'string' || !token.trim()) {
+      throw Object.assign(new Error('تعذّر تأكيد جلسة الدخول. سجّل الدخول مجددًا أو أعد المحاولة.'), { code: 401 });
+    }
+    headers.Authorization = `Bearer ${token}`;
   }
   return headers;
 }
@@ -1131,6 +1155,13 @@ function bindSearchLockOverlays() {
 async function fetchAiMeaningsWithCache(word, type) {
   const trimmed = String(word || '').trim();
   if (!trimmed) return { ok: false, data: [], error: 'empty' };
+  const owner = window.auth?.currentUser?.uid || 'guest';
+  const generation = Number(window.__lootlinguaAuthGeneration) || 0;
+  const assertOwner = () => {
+    if (owner !== (window.auth?.currentUser?.uid || 'guest') || generation !== (Number(window.__lootlinguaAuthGeneration) || 0)) {
+      throw Object.assign(new Error('تغيّر الحساب. أعد البحث من الحساب الحالي.'), { code: 401 });
+    }
+  };
 
   if (!guardGuestAiSearch(type)) {
     const err = new Error('Forbidden');
@@ -1141,10 +1172,12 @@ async function fetchAiMeaningsWithCache(word, type) {
   if (typeof window.getAiGlobalCache === 'function') {
     try {
       const cached = await window.getAiGlobalCache(trimmed, type);
+      assertOwner();
       if (Array.isArray(cached) && cached.length) {
         return { ok: true, data: cached, fromCache: true };
       }
     } catch (e) {
+      if (e.code === 401) throw e;
       console.warn('fetchAiMeaningsWithCache: cache read', e);
     }
   }
@@ -1157,6 +1190,7 @@ async function fetchAiMeaningsWithCache(word, type) {
 
   const endpoint = type === 'gamer' ? '/api/gamer-dictionary' : '/api/dictionary';
   const headers = await buildAiRequestHeaders();
+  assertOwner();
   const res = await fetch(`${DICT_API_BASE}${endpoint}`, {
     method: 'POST',
     headers,
@@ -1164,7 +1198,14 @@ async function fetchAiMeaningsWithCache(word, type) {
   });
 
   const payload = await res.json().catch(() => ({}));
+  assertOwner();
+  if (res.status === 401) {
+    throw Object.assign(new Error('تعذّر تأكيد جلسة الدخول. سجّل الدخول مجددًا أو أعد البحث.'), { code: 401 });
+  }
   if (res.status === 403) {
+    if (owner !== 'guest') {
+      throw Object.assign(new Error(payload.error || 'تعذّر إكمال البحث من هذا الحساب. أعد المحاولة.'), { code: 'dictionary/forbidden', status: 403 });
+    }
     markGuestSearchUsed(type);
     showGuestTrialBlocked();
     const err = new Error('Forbidden');
@@ -1647,7 +1688,9 @@ window.fetchSuggestions = async function() {
     console.error("Frontend Error:", error);
     
     // التعامل مع الأخطاء بطريقة مريحة للمستخدم
-    if (error.message === "sleeping" || error.message.includes("fetch")) {
+    if (error.code === 401 || error.code === 'dictionary/forbidden') {
+         list.innerHTML = `<p class="gamer-suggestions-error">${escapeHtml(error.message)}</p>`;
+    } else if (error.message === "sleeping" || error.message.includes("fetch")) {
          list.innerHTML = "<p style='color:var(--warning);text-align:center;font-size:12px;padding:10px;'>السيرفر كان في وضع السكون ويستيقظ الآن.. جرب الضغط على بحث مرة أخرى بعد ثوانٍ</p>";
     } else {
          list.innerHTML = "<p style='color:var(--danger);text-align:center;font-size:12px;padding:10px;'>فشل في جلب البيانات من السيرفر</p>";
@@ -1928,7 +1971,7 @@ async function handleWordHunterWordClick(event, btn) {
       showWordHunterPopover(btn, { word, meaning: 'سجل دخولك لاستخدام البحث الذكي بعد التجربة.', empty: true });
       return;
     }
-    showWordHunterPopover(btn, { word, meaning: 'تعذر جلب المعنى الآن.', empty: true });
+    showWordHunterPopover(btn, { word, meaning: error.code === 401 ? error.message : 'تعذر جلب المعنى الآن.', empty: true });
   }
 }
 
@@ -2019,7 +2062,7 @@ window.fetchWordHunterGamerMeaning = async function(event) {
       });
     }
   } catch (err) {
-    if (err.code !== 403) showToast('تعذر جلب معنى الألعاب الآن.', 'warning', 3600);
+    if (err.code !== 403) showToast(err.code === 401 ? err.message : 'تعذر جلب معنى الألعاب الآن.', 'warning', 3600);
   }
 };
 

@@ -286,6 +286,7 @@
     // Product Entry owns the first-screen decision. It calls this only after
     // either its onboarding surface is open or the existing app is confirmed.
     completeStartup: function() {
+      window.LootLinguaStartupRecovery?.complete();
       document.documentElement.classList.remove('startup-pending');
       scheduleDismiss();
     },
@@ -794,6 +795,10 @@ window.toggleProfileModal = function() {
   modal.setAttribute('aria-hidden', open ? 'false' : 'true');
   document.body.classList.toggle('profile-modal-open', open);
   lockBackgroundScroll('profile');
+  window.LootLinguaModalFocus?.open(modal, {
+    dialog: modal.querySelector('.profile-modal-sheet') || modal,
+    onEscape: () => closeProfileModal(),
+  });
   syncHeroAvatar();
   renderProfileModalStats();
   renderXPBar();
@@ -813,6 +818,7 @@ window.closeProfileModal = function(silent) {
     modal.setAttribute('aria-hidden', 'true');
     document.body.classList.remove('profile-modal-open');
     unlockBackgroundScroll('profile');
+    window.LootLinguaModalFocus?.close(modal);
   };
   if (silent) close();
   else closeRouteEntry('overlay', 'profile', close);
