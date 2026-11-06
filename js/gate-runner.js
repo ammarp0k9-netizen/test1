@@ -67,15 +67,53 @@
     });
     const css = document.querySelector('link[data-runner-style]');
     const styles = css ? Promise.resolve() : new Promise((resolve, reject) => {
-      const link = document.createElement('link'); link.rel = 'stylesheet'; link.href = 'runner.css?v=20261106-runner-2';
+      const link = document.createElement('link'); link.rel = 'stylesheet'; link.href = 'runner.css?v=20261106-runner-3';
       link.dataset.runnerStyle = ''; link.onload = resolve; link.onerror = () => { link.remove(); reject(new Error('Runner styles unavailable')); };
       document.head.append(link);
     });
-    resources = Promise.all([styles, module('LootLinguaRunnerEngine', 'js/runner-engine.js?v=20261106-runner-2'), module('LootLinguaRunnerRenderer', 'js/runner-renderer.js?v=20261106-runner-2')]).catch(error => { resources = null; throw error; });
+    resources = Promise.all([styles, module('LootLinguaRunnerEngine', 'js/runner-engine.js?v=20261106-runner-3'), module('LootLinguaRunnerRenderer', 'js/runner-renderer.js?v=20261106-runner-3')]).catch(error => { resources = null; throw error; });
     return resources;
   }
   function button(label, cls, action) {
     const result = node('button', cls, label); result.type = 'button'; result.addEventListener('click', action); return result;
+  }
+  function createCoinAudio() {
+    const key = 'lootlingua.runner.sound.v1';
+    let enabled = true, context = null, master = null, closed = false, lastNote = -Infinity;
+    try { enabled = localStorage.getItem(key) !== '0'; } catch {}
+    function unlock() {
+      if (!enabled || closed) return;
+      try {
+        const Audio = window.AudioContext || window.webkitAudioContext;
+        if (!context && Audio) { context = new Audio(); master = context.createGain(); master.gain.value = 1; master.connect(context.destination); }
+        if (context?.state === 'suspended') void context.resume().catch(() => {});
+      } catch { /* Audio is optional; gameplay never waits for it. */ }
+    }
+    return {
+      get enabled() { return enabled; }, unlock,
+      toggle() {
+        enabled = !enabled;
+        try { localStorage.setItem(key, enabled ? '1' : '0'); } catch {}
+        if (master) master.gain.setTargetAtTime(enabled ? 1 : 0, context.currentTime, .008);
+        if (enabled) unlock();
+      },
+      play() {
+        if (!enabled || closed || context?.state !== 'running' || context.currentTime - lastNote < .065) return;
+        try {
+          const now = context.currentTime; lastNote = now;
+          for (const [pitch, delay] of [[1174.66, 0], [1760, .035]]) {
+            const note = context.createOscillator(), gain = context.createGain(), at = now + delay;
+            note.type = 'sine'; note.frequency.setValueAtTime(pitch, at);
+            gain.gain.setValueAtTime(.0001, at); gain.gain.exponentialRampToValueAtTime(.035, at + .006);
+            gain.gain.exponentialRampToValueAtTime(.0001, at + .13);
+            note.connect(gain); gain.connect(master);
+            note.onended = () => { note.disconnect(); gain.disconnect(); };
+            note.start(at); note.stop(at + .14);
+          }
+        } catch { /* Unsupported or interrupted audio stays silent. */ }
+      },
+      destroy() { closed = true; if (context) void context.close().catch(() => {}); },
+    };
   }
   async function launch(context) {
     if (activeRun) { activeRun.focus(); return false; }
@@ -96,8 +134,12 @@
     game.setAttribute('role', 'dialog'); game.setAttribute('aria-modal', 'true'); game.setAttribute('aria-label', 'لووت رنر — جري البوابات'); game.tabIndex = -1;
     const header = node('header', 'llr-header'), brand = node('div', 'llr-brand');
     brand.append(node('small', '', 'LOOT RUNNER'), node('strong', '', 'جري البوابات'));
+    const audio = createCoinAudio();
+    const sound = button('', 'llr-icon-button llr-sound', () => { audio.toggle(); syncSound(); });
+    function syncSound() { sound.textContent = audio.enabled ? 'صوت ✓' : 'صوت ×'; sound.setAttribute('aria-label', audio.enabled ? 'كتم صوت العملات' : 'تشغيل صوت العملات'); sound.setAttribute('aria-pressed', String(audio.enabled)); }
+    syncSound();
     const pause = button('إيقاف', 'llr-icon-button', () => setPaused(!state.paused)), exit = button('خروج', 'llr-icon-button', () => cleanup());
-    header.append(brand, pause, exit);
+    header.append(brand, sound, pause, exit);
     const viewport = node('div', 'llr-viewport'), canvas = node('canvas', 'llr-canvas');
     canvas.setAttribute('aria-hidden', 'true'); viewport.tabIndex = 0;
     viewport.setAttribute('aria-label', 'ثلاثة مسارات. الأسهم يمين ويسار للحركة، أعلى للقفز وأسفل للانزلاق. على الهاتف اسحب في الاتجاه نفسه.');
@@ -131,7 +173,7 @@
     };
     function cleanup() {
       if (destroyed) return; saveRun(); destroyed = true; cancelAnimationFrame(raf);
-      resizeObserver?.disconnect(); renderer?.destroy();
+      resizeObserver?.disconnect(); renderer?.destroy(); audio.destroy();
       window.removeEventListener('resize', resize); window.removeEventListener('keydown', keyboard, true);
       document.removeEventListener('visibilitychange', visibility);
       window.removeEventListener('lootlingua:auth-state', authChanged);
@@ -152,7 +194,7 @@
       if (!state.running || state.over) return;
       state.paused = value; pause.textContent = value ? 'متابعة' : 'إيقاف';
       if (value) { cancelAnimationFrame(raf); showScreen('استراحة قصيرة', 'خذ وقتك. الطريق ينتظرك.', 'متابعة الجري', () => setPaused(false)); }
-      else { screen.hidden = true; previous = performance.now(); raf = requestAnimationFrame(frame); viewport.focus({ preventScroll: true }); }
+      else { audio.unlock(); screen.hidden = true; previous = performance.now(); raf = requestAnimationFrame(frame); viewport.focus({ preventScroll: true }); }
     }
     function finish(reason) {
       state.running = false; cancelAnimationFrame(raf); saveRun(); challenge.hidden = options.hidden = true;
@@ -187,7 +229,9 @@
       if (!runnerOwnerCurrent(owner)) { cleanup(); return; }
       if (now - lastDueCheck > 1000) { lastDueCheck = now; if (reviewIsDue(context?.progress)) { finish('حان وقت المراجعة الموثّقة'); return; } }
       const delta = Math.min(50, Math.max(0, now - previous)); previous = now;
-      E.update(state, delta); renderer.draw(state); syncHUD();
+      E.update(state, delta);
+      if (state.events.some(event => event.type === 'coin')) audio.play();
+      renderer.draw(state); syncHUD();
       if (state.over) finish('رحلة جميلة! حاول تحطيم رقمك');
       else if (!state.paused && state.running) raf = requestAnimationFrame(frame);
     }
@@ -231,7 +275,7 @@
       syncHUD(); renderer.draw(state);
       const free = new Set(words.map(w => w.meaning)).size < 3;
       showScreen('الطريق لك', `اختر مسارك، اقفز فوق الحواجز وانزلق تحت العوارض. ${free ? 'هذه جولة جري حر؛ البوابة تحتاج ثلاثة معانٍ مختلفة لأسئلة الكلمات.' : 'عند ظهور كلمة، اعبر بوابة معناها الصحيح.'}`, 'انطلق', () => {
-        screen.hidden = true; state.running = true; state.paused = false; previous = performance.now(); viewport.focus({ preventScroll: true }); raf = requestAnimationFrame(frame);
+        audio.unlock(); screen.hidden = true; state.running = true; state.paused = false; previous = performance.now(); viewport.focus({ preventScroll: true }); raf = requestAnimationFrame(frame);
       });
       screen.insertBefore(node('div', 'llr-tutorial', '← → مسارات   ↑ قفز   ↓ انزلاق\nالهاتف: اسحب في الاتجاه نفسه أو استخدم الأزرار'), screen.lastChild);
       return true;

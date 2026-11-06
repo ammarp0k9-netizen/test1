@@ -9,7 +9,7 @@ No Firebase or production API writes occur.
 
 Final result: all focused checks pass; `runtimeExceptions` is empty.
 
-`npm run test:runner` also passes 21 focused engine, profile synchronization
+`npm run test:runner` also passes 24 focused engine, profile synchronization
 and expedition tests: crossing-time collisions, gate evaluation, pause,
 invulnerability and bounded object reuse over 20,000 updates.
 
@@ -34,14 +34,22 @@ invulnerability and bounded object reuse over 20,000 updates.
 images use the real renderer and cloned controller UI after controller cleanup,
 with explicit public engine states for a gate, low/overhead/wall obstacles,
 jump and slide. This avoids mutating a live run or competing resize callbacks.
-`train-rooftop.png` shows the shared roof support height, elevated coins and
-the lightweight tunnel scenery in another isolated renderer state.
+`train-rooftop.png` shows the shared roof support height and the cargo truck
+in another isolated renderer state. The tunnel has been removed.
 
 The second iteration spaces gates 30–48 seconds apart (30–42 seconds for the
 first), gradually increases running speed, and temporarily slows reading gates.
-Rows queue behind a gate's dark road veil, so play resumes without waiting for
-a completely new obstacle batch. Collision and drawing share one height model:
+Hidden hazard rows no longer queue behind the reading veil. A recovery pause
+plus the next row's approach leaves over three seconds before the first
+possible collision even at maximum speed. Collision and drawing share one height model:
 high jumps miss ground coins, slides clear overhead beams, and carriage ramps
 support the runner and elevated coins. Near-obstacle hints help time actions.
+
+Bonus coins are placed above low jumpable barriers or below slidable beams;
+they require the matching body clearance. Tall walls never receive these
+trails. Coin chimes use short quiet Web Audio notes only on actual coin events,
+with a persisted mute toggle and audio-context cleanup on exit. The browser
+check verifies note creation, absence of notes before collection, and muting;
+musical preference still needs a human listening check.
 
 These are focused local measurements, not a claim of 60 FPS on every device.

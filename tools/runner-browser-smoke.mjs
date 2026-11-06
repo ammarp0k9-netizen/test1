@@ -58,7 +58,7 @@ function send(method, params = {}) {
   });
 }
 async function evaluate(expression) {
-  const value = await send('Runtime.evaluate', { expression, awaitPromise: true, returnByValue: true, replMode: true });
+  const value = await send('Runtime.evaluate', { expression, awaitPromise: true, returnByValue: true, replMode: true, userGesture: true });
   if (value.exceptionDetails) throw Error(value.exceptionDetails.exception?.description || value.exceptionDetails.text);
   return value.result?.value;
 }
@@ -120,7 +120,7 @@ try {
     await wait(`!!document.querySelector('.llr-screen .llr-primary')`, 'intro');
     const intro = await evaluate(`({title:document.querySelector('.llr-screen h2').textContent,inside:document.querySelector('.llr-game').contains(document.activeElement),locked:document.documentElement.classList.contains('modal-scroll-locked'),inert:document.getElementById('fixtureBackground').inert,dom:document.querySelector('.llr-overlay').querySelectorAll('*').length})`);
     assert.ok(intro.inside && intro.locked && intro.inert);
-    await evaluate(`document.querySelector('.llr-screen .llr-primary').click()`);
+    await evaluate(`window.fixtureNotes=0;const NativeAudio=window.AudioContext;if(NativeAudio&&!window.fixtureAudioInstrumented){window.fixtureAudioInstrumented=true;const original=NativeAudio.prototype.createOscillator;NativeAudio.prototype.createOscillator=function(...args){window.fixtureNotes++;return original.apply(this,args)}}document.querySelector('.llr-screen .llr-primary').click()`);
     await wait(`LootLinguaGateRunner.getDiagnostics()?.distance>0`, 'running');
     await key('Enter'); assert.equal(await evaluate('fixtureAdds'), 0, 'Enter must not submit the background dictionary');
     if (width === 1280) {
@@ -137,7 +137,14 @@ try {
     await key('p'); const beforePause = await evaluate('LootLinguaGateRunner.getDiagnostics()'); await delay(170);
     const afterPause = await evaluate('LootLinguaGateRunner.getDiagnostics()'); assert.equal(afterPause.distance, beforePause.distance); assert.equal(afterPause.paused, true);
     await key('p'); await wait('LootLinguaGateRunner.getDiagnostics().distance>' + afterPause.distance, 'resume');
-    if (width === 1280) { await delay(5400); await screenshot('desktop-running'); }
+    if (width === 1280) {
+      assert.equal(await evaluate('fixtureNotes'), 0, 'movement and jumping alone must not chime');
+      await delay(5400); await screenshot('desktop-running');
+      assert.ok(await evaluate('fixtureNotes>0'), 'collected coins create the chime');
+      const notes = await evaluate(`document.querySelector('.llr-sound').click();window.fixtureNotes`);
+      assert.equal(await evaluate(`document.querySelector('.llr-sound').getAttribute('aria-pressed')`), 'false');
+      await delay(240); assert.equal(await evaluate('fixtureNotes'), notes, 'muting stops new notes');
+    } else assert.equal(await evaluate(`document.querySelector('.llr-sound').getAttribute('aria-pressed')`), 'false', 'mute preference survives reopening');
     const state = await evaluate(`(()=>{const canvas=document.querySelector('.llr-canvas'),viewport=document.querySelector('.llr-viewport').getBoundingClientRect(),box=document.querySelector('.llr-game').getBoundingClientRect(),d=LootLinguaGateRunner.getDiagnostics();return{...d,viewportWidth:innerWidth,dpr:canvas.width/Math.round(viewport.width),backingPerCssPixel:canvas.width/canvas.clientWidth,dom:document.querySelector('.llr-overlay').querySelectorAll('*').length,overflow:document.documentElement.scrollWidth>innerWidth,insideViewport:box.left>=0&&box.right<=innerWidth&&box.top>=0&&box.bottom<=innerHeight}})()`);
     assert.ok(state.dpr <= 1.51 && state.entities <= 48 && state.dom <= intro.dom + 1 && !state.overflow && state.insideViewport, JSON.stringify(state));
     await key('Escape'); await wait('!document.querySelector(".llr-overlay")', 'exit cleanup');

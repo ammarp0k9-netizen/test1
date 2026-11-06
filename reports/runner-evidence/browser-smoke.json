@@ -8,18 +8,18 @@
         "inside": true,
         "locked": true,
         "inert": true,
-        "dom": 44
+        "dom": 45
       },
       "measured": {
         "lane": 1,
         "action": "run",
         "paused": false,
-        "entities": 12,
-        "distance": 104.33696363851885,
+        "entities": 20,
+        "distance": 111.32947708240106,
         "viewportWidth": 1280,
         "dpr": 1,
         "backingPerCssPixel": 1.0020661157024793,
-        "dom": 43,
+        "dom": 44,
         "overflow": false,
         "insideViewport": true
       }
@@ -31,18 +31,18 @@
         "inside": true,
         "locked": true,
         "inert": true,
-        "dom": 44
+        "dom": 45
       },
       "measured": {
         "lane": 1,
         "action": "slide",
         "paused": false,
-        "entities": 6,
-        "distance": 26.478414052280627,
+        "entities": 15,
+        "distance": 47.298501835135454,
         "viewportWidth": 390,
         "dpr": 1.5,
         "backingPerCssPixel": 1.5083333333333333,
-        "dom": 43,
+        "dom": 44,
         "overflow": false,
         "insideViewport": true
       }
@@ -54,18 +54,18 @@
         "inside": true,
         "locked": true,
         "inert": true,
-        "dom": 44
+        "dom": 45
       },
       "measured": {
         "lane": 1,
         "action": "slide",
         "paused": false,
-        "entities": 6,
-        "distance": 26.71812845773236,
+        "entities": 10,
+        "distance": 42.03939977104159,
         "viewportWidth": 320,
         "dpr": 1.5,
         "backingPerCssPixel": 1.5103448275862068,
-        "dom": 43,
+        "dom": 44,
         "overflow": false,
         "insideViewport": true
       }
@@ -80,8 +80,8 @@
           "intent": {
             "type": "wallet-delta",
             "field": "runnerCoins",
-            "amount": 4,
-            "eventId": "8428d6eb-bcb5-48c3-8f00-14465230975b"
+            "amount": 5,
+            "eventId": "b8b85540-f771-4215-9ae0-3544da5e7beb"
           }
         }
       ]
@@ -94,12 +94,12 @@
   "pool": {
     "simulatedSeconds": 120,
     "draws": 600,
-    "executionMs": 346.8000000715256,
+    "executionMs": 665.7000000476837,
     "maxEntities": 32,
-    "pool": 18,
-    "active": 30,
+    "pool": 36,
+    "active": 12,
     "total": 48,
-    "maxEvents": 3,
+    "maxEvents": 2,
     "dpr": 1.5,
     "domBefore": 17,
     "domAfter": 17

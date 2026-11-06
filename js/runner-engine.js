@@ -115,14 +115,16 @@
     if (state.elapsed < state._nextRowAt || state.elapsed < state._safeUntil) return;
     const reading = state.gate && !state.gate.resolved;
     const clearance = (SPAWN_Z + 24) / BASE_SPEED * 1000 + 250;
-    const draining = !reading && hasGateWords(state) && state._nextGateAt - state.elapsed < clearance;
-    const spawnZ = reading ? Math.max(SPAWN_Z, state.gate.z + 24) : SPAWN_Z;
+    // Do not queue hidden hazards behind the reading veil: returning to full
+    // speed would compress their spacing and reveal them too close together.
+    const draining = reading || hasGateWords(state) && state._nextGateAt - state.elapsed < clearance;
+    const spawnZ = SPAWN_Z;
     const escapeOptions = [0, 1, 2].filter(lane => Math.abs(lane - state._escapeLane) <= 1);
     const escape = choose(state, escapeOptions);
     const blocked = [0, 1, 2].filter(lane => lane !== escape);
     if (random(state) > .5) blocked.reverse();
     const obstacleCount = state.distance > 120 && random(state) > .25 ? 2 : 1;
-    if (state._pool.length < obstacleCount + 4) return;
+    if (state._pool.length < obstacleCount + 6) return;
     const row = ++state._row;
     for (let index = 0; index < (draining ? 0 : obstacleCount); index++) {
       const lane = blocked[index];
@@ -130,6 +132,10 @@
       const type = row > 5 && row % 7 === 0 && index === 0 ? 'train' : choose(state, ['low', 'overhead', 'wall']);
       allocate(state, { kind: 'obstacle', obstacleType: type, length: type === 'train' ? 20 : 0, lane, z: spawnZ, row });
       if (type === 'train') for (const offset of [10, 15]) allocate(state, { kind: 'coin', lane, z: spawnZ + offset, height: 1.49, row });
+      if (['low', 'overhead'].includes(type) && random(state) < .65) {
+        for (const offset of [0, 2]) allocate(state, { kind: 'coin', lane, z: spawnZ + offset,
+          height: type === 'low' ? 1.5 : .22, requires: type === 'low' ? 'jump' : 'slide', row });
+      }
     }
     allocate(state, { kind: 'coin', lane: escape, z: spawnZ + 3, row });
     allocate(state, { kind: 'coin', lane: escape, z: spawnZ + 6, row });
@@ -154,7 +160,8 @@
       emit(state, { type: 'gate', correct, word: entity.word, correctMeaning: entity.correctMeaning, chosenLane: state.lane });
     } else if (entity.lane === state.lane && entity.kind === 'coin') {
       const pose = getPose(state, at), height = entity.height ?? .44;
-      if (pose.feet <= height + .12 && pose.top >= height - .12) {
+      const reachable = !entity.requires || entity.requires === 'jump' && pose.feet >= .37 || entity.requires === 'slide' && pose.top <= .6;
+      if (reachable && pose.feet <= height + .12 && pose.top >= height - .12) {
         entity.collected = true;
         state.coins++; emit(state, { type: 'coin', id: entity.id, amount: 1, total: state.coins });
       }

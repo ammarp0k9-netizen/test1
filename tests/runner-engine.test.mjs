@@ -133,3 +133,42 @@ test('train ramp lifts the runner, roof coins require roof height, and leaving i
   engine.update(state, 50); assert.equal(state.coins, 1);
   engine.move(state, 0); assert.equal(engine.getPose(state).floor, 0);
 });
+
+test('even at maximum speed, crossing a gate leaves over three seconds before the next hazard', () => {
+  const state = engine.createState(words, { random: seeded() });
+  state.distance = 100000; state._nextGateAt = 0;
+  engine.update(state, 50);
+  for (let frame = 0; frame < 80; frame++) {
+    engine.update(state, 50);
+    assert.ok(state.entities.every(item => item.kind !== 'obstacle'));
+  }
+  state.gate.z = .1; state.lane = state.gate.correctLane; engine.update(state, 50);
+  for (let frame = 0; frame < 60; frame++) {
+    engine.update(state, 50);
+    assert.ok(state.entities.every(item => item.kind !== 'obstacle' || item.z > 0));
+  }
+  assert.equal(state.hearts, 3);
+  assert.ok(state.entities.some(item => item.kind === 'obstacle'), 'hazards resume after the recovery gap');
+});
+
+test('bonus coin trails accompany jumpable or slidable hazards, never tall walls', () => {
+  const state = engine.createState([], { random: seeded() }); let trails = 0;
+  state.invulnerableUntil = Infinity;
+  for (let frame = 0; frame < 1500; frame++) {
+    engine.update(state, 50);
+    for (const coin of state.entities.filter(item => item.requires && item.z > 0)) {
+      const obstacle = state.entities.find(item => item.kind === 'obstacle' && item.row === coin.row && item.lane === coin.lane);
+      assert.equal(obstacle?.obstacleType, coin.requires === 'jump' ? 'low' : 'overhead');
+      assert.equal(coin.height, coin.requires === 'jump' ? 1.5 : .22); trails++;
+    }
+  }
+  assert.ok(trails > 0);
+});
+
+test('bonus coins require the matching safe body pose', () => {
+  for (const [requires, action, expected] of [['jump', null, 0], ['jump', 'jump', 1], ['slide', null, 0], ['slide', 'slide', 1]]) {
+    const state = make(); if (action) { engine[action](state); state.elapsed = state.actionUntil / 2; }
+    entity(state, { kind: 'coin', requires, height: requires === 'jump' ? 1.5 : .22 });
+    engine.update(state, 50); assert.equal(state.coins, expected, `${requires}/${action}`);
+  }
+});

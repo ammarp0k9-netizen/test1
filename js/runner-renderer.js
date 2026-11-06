@@ -142,15 +142,6 @@
           column(lane, z, index);
         }
       }
-      // A moving tunnel section adds scenery with a handful of canvas paths.
-      const tunnel = Math.floor(distance / 240) % 2 === 1;
-      if (tunnel) for (const z of [12, 30, 48, 66]) {
-        const a = project(-.68, z), b = project(2.68, z), h = actorHeight * 2.6 * a.scale;
-        context.strokeStyle = '#36515a'; context.lineWidth = Math.max(3, laneWidth * .09 * a.scale);
-        context.beginPath(); context.moveTo(a.x, a.y); context.lineTo(a.x, a.y - h * .7);
-        context.quadraticCurveTo(width / 2, a.y - h * 1.25, b.x, b.y - h * .7); context.lineTo(b.x, b.y); context.stroke();
-        line(context, a.x, a.y - h * .68, b.x, b.y - h * .68, '#b99b60', Math.max(1, a.scale * 2));
-      }
     }
     function shadow(x, y, w, h, alpha = .3) {
       context.fillStyle = `rgba(0,7,12,${alpha})`; context.beginPath(); context.ellipse(x, y, w, h, 0, 0, Math.PI * 2); context.fill();
@@ -176,18 +167,38 @@
         const ramp = project(entity.lane, entity.z + 6), end = project(entity.lane, entity.z + entity.length);
         const rw = laneWidth * .76 * ramp.scale, ew = laneWidth * .76 * end.scale;
         const ry = ramp.y - actorHeight * 1.05 * ramp.scale, ey = end.y - actorHeight * 1.05 * end.scale;
-        quad(context, ramp.x - rw / 2, ry, end.x - ew / 2, ey, end.x + ew / 2, ey, ramp.x + rw / 2, ry, '#497780');
-        quad(context, ramp.x + rw / 2, ry, end.x + ew / 2, ey, end.x + ew / 2, end.y, ramp.x + rw / 2, ramp.y, '#163a49');
+        // A parked cargo truck: rubber tyres, chassis, ribbed cargo roof,
+        // cab and rear loading ramp. All geometry shares the roof support height.
+        for (const offset of [7.5, entity.length - 4]) {
+          const axle = project(entity.lane, entity.z + offset), aw = laneWidth * .76 * axle.scale;
+          for (const side of [-1, 1]) {
+            const x = axle.x + side * aw * .48, y = axle.y - actorHeight * .08 * axle.scale;
+            context.fillStyle = '#070d12'; context.beginPath(); context.ellipse(x, y, aw * .095, actorHeight * .17 * axle.scale, 0, 0, Math.PI * 2); context.fill();
+            context.fillStyle = '#7b8d91'; context.beginPath(); context.ellipse(x, y, aw * .04, actorHeight * .075 * axle.scale, 0, 0, Math.PI * 2); context.fill();
+          }
+        }
+        quad(context, ramp.x - rw / 2, ry, end.x - ew / 2, ey, end.x - ew / 2, end.y - h * .05, ramp.x - rw / 2, ramp.y - h * .08, '#244c58');
+        quad(context, ramp.x + rw / 2, ry, end.x + ew / 2, ey, end.x + ew / 2, end.y - h * .05, ramp.x + rw / 2, ramp.y - h * .08, '#173944');
+        quad(context, ramp.x - rw / 2, ry, end.x - ew / 2, ey, end.x + ew / 2, ey, ramp.x + rw / 2, ry, '#527d86');
+        for (let offset = 8; offset < entity.length - 3; offset += 2.5) {
+          const rib = project(entity.lane, entity.z + offset), ribWidth = laneWidth * .76 * rib.scale, roofY = rib.y - actorHeight * 1.05 * rib.scale;
+          line(context, rib.x - ribWidth * .46, roofY, rib.x + ribWidth * .46, roofY, '#355e69', Math.max(1, rib.scale * 1.5));
+          for (const side of [-1, 1]) line(context, rib.x + side * ribWidth * .5, roofY, rib.x + side * ribWidth * .5, rib.y - actorHeight * .23 * rib.scale, '#739498', Math.max(1, rib.scale));
+        }
+        const cab = project(entity.lane, entity.z + entity.length - 3), cw = laneWidth * .76 * cab.scale, cy = cab.y - actorHeight * .82 * cab.scale;
+        quad(context, cab.x - cw / 2, cy, end.x - ew / 2, ey, end.x + ew / 2, ey, cab.x + cw / 2, cy, '#bd975c');
+        context.fillStyle = '#17303e'; context.fillRect(cab.x - cw * .38, cy + actorHeight * .06 * cab.scale, cw * .76, actorHeight * .2 * cab.scale);
+        line(context, cab.x, cy + actorHeight * .06 * cab.scale, cab.x, cy + actorHeight * .26 * cab.scale, '#b7c8c6', Math.max(1, cab.scale));
+        context.fillStyle = '#263943'; context.fillRect(ramp.x - rw * .5, ramp.y - h * .17, rw, h * .12);
+        for (const side of [-1, 1]) { context.fillStyle = '#eb6b51'; context.fillRect(ramp.x + side * rw * .4 - rw * .04, ramp.y - h * .16, rw * .08, h * .07); }
         quad(context, p.x - w / 2, p.y, p.x + w / 2, p.y, ramp.x + rw / 2, ry, ramp.x - rw / 2, ry, '#bc9b61');
         for (let i = 1; i < 6; i++) {
           const t = i / 6;
           line(context, p.x - w / 2 + (ramp.x - rw / 2 - p.x + w / 2) * t, p.y + (ry - p.y) * t,
             p.x + w / 2 + (ramp.x + rw / 2 - p.x - w / 2) * t, p.y + (ry - p.y) * t, '#4b5a55', Math.max(1, p.scale * 2));
         }
-        for (let i = 8; i < entity.length; i += 4) {
-          const q = project(entity.lane, entity.z + i), qw = laneWidth * .76 * q.scale;
-          context.fillStyle = '#b7d6cf'; context.fillRect(q.x + qw * .51, q.y - actorHeight * .78 * q.scale, Math.max(2, qw * .08), actorHeight * .32 * q.scale);
-        }
+        line(context, p.x - w / 2, p.y, ramp.x - rw / 2, ry, '#efce80', Math.max(1, p.scale * 2));
+        line(context, p.x + w / 2, p.y, ramp.x + rw / 2, ry, '#efce80', Math.max(1, p.scale * 2));
         line(context, ramp.x - rw * .43, ry, end.x - ew * .43, ey, '#e7c77c', Math.max(1, ramp.scale * 2));
         return;
       }
