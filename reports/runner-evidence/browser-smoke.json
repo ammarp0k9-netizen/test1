@@ -1,0 +1,113 @@
+{
+  "isolation": "Real Chrome and real lazy controller/engine/renderer/CSS; deterministic local published words and profile adapters; external HTTPS blocked",
+  "viewports": [
+    {
+      "width": 1280,
+      "intro": {
+        "title": "الطريق لك",
+        "inside": true,
+        "locked": true,
+        "inert": true,
+        "dom": 44
+      },
+      "measured": {
+        "lane": 1,
+        "action": "run",
+        "paused": false,
+        "entities": 13,
+        "distance": 85.70938571256436,
+        "viewportWidth": 1280,
+        "dpr": 1,
+        "backingPerCssPixel": 1.0020661157024793,
+        "dom": 43,
+        "overflow": false,
+        "insideViewport": true
+      }
+    },
+    {
+      "width": 390,
+      "intro": {
+        "title": "الطريق لك",
+        "inside": true,
+        "locked": true,
+        "inert": true,
+        "dom": 44
+      },
+      "measured": {
+        "lane": 1,
+        "action": "slide",
+        "paused": false,
+        "entities": 3,
+        "distance": 22.54610146687638,
+        "viewportWidth": 390,
+        "dpr": 1.5,
+        "backingPerCssPixel": 1.5083333333333333,
+        "dom": 43,
+        "overflow": false,
+        "insideViewport": true
+      }
+    },
+    {
+      "width": 320,
+      "intro": {
+        "title": "الطريق لك",
+        "inside": true,
+        "locked": true,
+        "inert": true,
+        "dom": 44
+      },
+      "measured": {
+        "lane": 1,
+        "action": "slide",
+        "paused": false,
+        "entities": 3,
+        "distance": 20.338928256879125,
+        "viewportWidth": 320,
+        "dpr": 1.5,
+        "backingPerCssPixel": 1.5103448275862068,
+        "dom": 43,
+        "overflow": false,
+        "insideViewport": true
+      }
+    }
+  ],
+  "checks": [
+    {
+      "name": "wallet award once per run, no XP or SRS intent",
+      "credits": [
+        {
+          "uid": "runner-A",
+          "intent": {
+            "type": "wallet-delta",
+            "field": "runnerCoins",
+            "amount": 2,
+            "eventId": "ba03ffc2-3c0a-4573-8144-5510ac56c928"
+          }
+        }
+      ]
+    },
+    {
+      "name": "account switching, word-load failure and review due before/during launch are guarded",
+      "passed": true
+    }
+  ],
+  "pool": {
+    "simulatedSeconds": 120,
+    "draws": 600,
+    "executionMs": 459.5,
+    "maxEntities": 16,
+    "pool": 47,
+    "active": 1,
+    "total": 48,
+    "maxEvents": 1,
+    "dpr": 1.5,
+    "domBefore": 17,
+    "domAfter": 17
+  },
+  "assets": [
+    "/js/runner-engine.js",
+    "/runner.css",
+    "/js/runner-renderer.js"
+  ],
+  "runtimeExceptions": []
+}

@@ -1,0 +1,291 @@
+/* LootLingua Runner: visual projection only. No DOM reads, rewards or physics. */
+(function(root) {
+  'use strict';
+  const FAR = 80;
+  const clamp = (value, low, high) => Math.max(low, Math.min(high, value));
+  const laneColors = ['#53e5d2', '#f6c56a', '#82a8ff'];
+  const palette = Object.freeze({ sky: '#071722', dark: '#061019', stone: '#24414b', edge: '#4d7272', gold: '#efc578', teal: '#5be6d1' });
+
+  function createRenderer(canvas, options = {}) {
+    const context = canvas?.getContext?.('2d', { alpha: false });
+    if (!context) throw new Error('Runner needs a 2D canvas.');
+    const document = canvas.ownerDocument || root.document;
+    const background = document.createElement('canvas');
+    const back = background.getContext('2d', { alpha: false });
+    let width = 1, height = 1, dpr = 1, laneWidth = 1, horizon = 1, ground = 1, actorHeight = 1;
+    let destroyed = false, visualLane = 1, lastElapsed = null, activeTime = 0;
+    const ordered = [];
+    const metrics = { drawn: 0, culled: 0, dpr: 1 };
+    const byDepth = (a, b) => b.z - a.z;
+
+    function rounded(ctx, x, y, w, h, radius) {
+      const r = Math.min(radius, w / 2, h / 2);
+      ctx.beginPath(); ctx.moveTo(x + r, y); ctx.lineTo(x + w - r, y);
+      ctx.quadraticCurveTo(x + w, y, x + w, y + r); ctx.lineTo(x + w, y + h - r);
+      ctx.quadraticCurveTo(x + w, y + h, x + w - r, y + h); ctx.lineTo(x + r, y + h);
+      ctx.quadraticCurveTo(x, y + h, x, y + h - r); ctx.lineTo(x, y + r);
+      ctx.quadraticCurveTo(x, y, x + r, y); ctx.closePath();
+    }
+    function quad(ctx, ax, ay, bx, by, cx, cy, dx, dy, color) {
+      ctx.fillStyle = color; ctx.beginPath(); ctx.moveTo(ax, ay); ctx.lineTo(bx, by);
+      ctx.lineTo(cx, cy); ctx.lineTo(dx, dy); ctx.closePath(); ctx.fill();
+    }
+    function line(ctx, ax, ay, bx, by, color, size = 1) {
+      ctx.strokeStyle = color; ctx.lineWidth = size; ctx.beginPath(); ctx.moveTo(ax, ay); ctx.lineTo(bx, by); ctx.stroke();
+    }
+    function project(lane, z) {
+      const depth = Number(z) || 0, scale = 17 / Math.max(5, 17 + depth);
+      return { x: width / 2 + ((Number(lane) || 0) - 1) * laneWidth * scale,
+        y: horizon + (ground - horizon) * scale, scale, laneWidth: laneWidth * scale,
+        visible: depth >= -6 && depth <= FAR,
+        gateTop: horizon + (ground - horizon) * scale - actorHeight * 1.48 * scale,
+        labelY: horizon + (ground - horizon) * scale - actorHeight * 1.16 * scale };
+    }
+    function cacheBackground() {
+      back.setTransform(dpr, 0, 0, dpr, 0, 0);
+      const sky = back.createLinearGradient(0, 0, 0, height);
+      sky.addColorStop(0, '#06121f'); sky.addColorStop(.38, '#12373e'); sky.addColorStop(1, '#0a1c25');
+      back.fillStyle = sky; back.fillRect(0, 0, width, height);
+      const glow = back.createRadialGradient(width * .5, horizon * .86, 1, width * .5, horizon, width * .62);
+      glow.addColorStop(0, 'rgba(94,230,199,.19)'); glow.addColorStop(.55, 'rgba(43,103,112,.07)'); glow.addColorStop(1, 'rgba(8,23,35,0)');
+      back.fillStyle = glow; back.fillRect(0, 0, width, height);
+      for (let index = 0; index < 24; index++) {
+        const x = (index * 137.51 % 100) / 100 * width, y = (index * 31.73 % 100) / 100 * horizon * .74;
+        back.fillStyle = index % 4 ? 'rgba(187,222,218,.28)' : 'rgba(246,197,106,.55)';
+        back.fillRect(x, y, index % 4 ? 1 : 2, index % 4 ? 1 : 2);
+      }
+      // A distant original ruin-city silhouette stays cached; nearby columns
+      // below move in world space and establish the player's forward motion.
+      for (let index = 0; index < 22; index++) {
+        const x = index * width / 21 - width * .025;
+        const w = width * (.035 + index % 4 * .008), h = height * (.045 + index * 13 % 8 * .012);
+        back.fillStyle = index % 2 ? '#102c36' : '#15343d'; back.fillRect(x, horizon - h, w, h + height * .1);
+        quad(back, x - 2, horizon - h, x + w / 2, horizon - h - w * .4, x + w + 2, horizon - h, x + w / 2, horizon - h + 2, '#1a3e46');
+        if (index % 3 === 0) {
+          back.fillStyle = '#b59558'; back.fillRect(x + w * .4, horizon - h * .65, Math.max(1, w * .12), h * .16);
+        }
+      }
+      const floor = back.createLinearGradient(0, horizon, 0, height);
+      floor.addColorStop(0, '#17333b'); floor.addColorStop(1, '#07151f');
+      back.fillStyle = floor; back.fillRect(0, horizon, width, height - horizon);
+      // The sky arch is architecture, not an option gate: no text or symbols.
+      const radius = width * .23;
+      back.strokeStyle = '#294950'; back.lineWidth = Math.max(8, width * .025);
+      back.beginPath(); back.arc(width / 2, horizon * 1.03, radius, Math.PI, 0); back.stroke();
+      back.strokeStyle = 'rgba(240,197,120,.4)'; back.lineWidth = 1;
+      back.beginPath(); back.arc(width / 2, horizon * 1.03, Math.max(0, radius - Math.max(5, width * .013)), Math.PI, 0); back.stroke();
+    }
+    function resize(nextWidth, nextHeight) {
+      if (destroyed) return;
+      width = clamp(Math.round(Number(nextWidth) || 1), 1, 4096);
+      height = clamp(Math.round(Number(nextHeight) || 1), 1, 4096);
+      dpr = clamp(Number(root.devicePixelRatio) || 1, 1, Math.min(2, Number(options.dprCap) || 1.5));
+      canvas.width = background.width = Math.round(width * dpr);
+      canvas.height = background.height = Math.round(height * dpr);
+      laneWidth = Math.min(width * .94, height * 1.24) / 3;
+      horizon = height * .285; ground = height * .84;
+      actorHeight = clamp(Math.min(height * .2, laneWidth * .85), 57, 128);
+      metrics.dpr = dpr; cacheBackground();
+    }
+    function road(distance) {
+      const nearLeft = project(-.54, -6), nearRight = project(2.54, -6);
+      const farLeft = project(-.54, FAR), farRight = project(2.54, FAR);
+      quad(context, farLeft.x, farLeft.y, farRight.x, farRight.y, nearRight.x, nearRight.y, nearLeft.x, nearLeft.y, '#183039');
+      const offset = distance % 6;
+      for (let index = 15; index >= -1; index--) {
+        const z = index * 6 - offset;
+        const a = project(-.5, z), b = project(2.5, z), c = project(2.5, z + 6), d = project(-.5, z + 6);
+        quad(context, a.x, a.y, b.x, b.y, c.x, c.y, d.x, d.y, index % 2 ? '#203a42' : '#1b333c');
+        line(context, a.x, a.y, b.x, b.y, 'rgba(114,155,151,.19)', Math.max(.5, a.scale));
+        // Offset paving joints and narrow inlays add speed cues without noise.
+        for (const boundary of [.5, 1.5]) {
+          const front = project(boundary, z), rear = project(boundary, z + 6);
+          line(context, rear.x, rear.y, front.x, front.y, 'rgba(95,207,193,.48)', Math.max(.8, front.scale * 2));
+        }
+        if (index % 2 === 0) {
+          const front = project(1, z), rear = project(1, z + 2);
+          line(context, rear.x, rear.y, front.x, front.y, 'rgba(239,197,120,.23)', Math.max(1, front.scale * 3));
+        }
+      }
+      for (const edge of [-.53, 2.53]) {
+        const a = project(edge, -6), b = project(edge, FAR);
+        line(context, a.x, a.y, b.x, b.y, '#c3a76a', Math.max(1, width * .004));
+        const c = project(edge < 1 ? edge - .06 : edge + .06, -6), d = project(edge < 1 ? edge - .06 : edge + .06, FAR);
+        line(context, c.x, c.y, d.x, d.y, '#47b7a9', Math.max(1, width * .006));
+      }
+    }
+    function column(lane, z, index) {
+      const p = project(lane, z), w = laneWidth * .18 * p.scale, h = height * (.34 + index % 3 * .025) * p.scale;
+      if (p.x + w < 0 || p.x - w > width) return;
+      const x = p.x - w / 2, y = p.y - h, side = w * .3;
+      quad(context, x + w, y, x + w + side, y - side, x + w + side, p.y - side, x + w, p.y, '#122d37');
+      const stone = context.createLinearGradient(x, 0, x + w, 0);
+      stone.addColorStop(0, '#304d54'); stone.addColorStop(.4, '#43666a'); stone.addColorStop(1, '#24434b');
+      context.fillStyle = stone; context.fillRect(x, y, w, h);
+      context.fillStyle = '#b79c64'; context.fillRect(x - w * .15, y, w * 1.3, Math.max(2, h * .035));
+      context.fillStyle = '#416266'; context.fillRect(x - w * .12, p.y - h * .08, w * 1.24, h * .08);
+      for (let row = 1; row < 4; row++) line(context, x, y + h * row / 4, x + w, y + h * row / 4, '#1a3740', Math.max(.5, p.scale));
+      context.fillStyle = '#dfba72'; context.beginPath(); context.moveTo(p.x, y + h * .18);
+      context.lineTo(p.x + w * .17, y + h * .26); context.lineTo(p.x, y + h * .34); context.lineTo(p.x - w * .17, y + h * .26); context.fill();
+      line(context, p.x, y + h * .43, p.x, y + h * .7, '#65c5b4', Math.max(.7, w * .045));
+    }
+    function environment(distance) {
+      const offset = distance % 12;
+      for (let index = 8; index >= 0; index--) {
+        const z = index * 12 - offset;
+        if (z < -6 || z > FAR) continue;
+        for (const lane of [-.97, 2.97]) {
+          const p = project(lane, z), edge = lane < 1 ? -1 : 1, h = height * .37 * p.scale;
+          const far = project(lane + edge * 1.45, z + 9);
+          quad(context, p.x, p.y, far.x, far.y, far.x, far.y - h * .82, p.x, p.y - h, index % 2 ? '#152f3a' : '#1a3640');
+          line(context, p.x, p.y - h, far.x, far.y - h * .82, '#3c5c60', Math.max(1, p.scale * 2));
+          column(lane, z, index);
+        }
+      }
+    }
+    function shadow(x, y, w, h, alpha = .3) {
+      context.fillStyle = `rgba(0,7,12,${alpha})`; context.beginPath(); context.ellipse(x, y, w, h, 0, 0, Math.PI * 2); context.fill();
+    }
+    function coin(entity, p, time) {
+      const phase = time * .005 + (Number(entity.id) || 0), radius = laneWidth * .095 * p.scale;
+      const x = p.x, y = p.y - actorHeight * .44 * p.scale + Math.sin(phase * 1.7) * radius * .12;
+      shadow(x, p.y + 1, radius * 1.25, radius * .28, .23);
+      context.save(); context.translate(x, y); context.scale(Math.max(.23, Math.abs(Math.cos(phase))), 1);
+      const metal = context.createLinearGradient(-radius, -radius, radius, radius);
+      metal.addColorStop(0, '#fff0a5'); metal.addColorStop(.45, '#f7c558'); metal.addColorStop(1, '#a96520');
+      context.fillStyle = metal; context.strokeStyle = '#ffdc80'; context.lineWidth = Math.max(.5, radius * .12);
+      context.beginPath(); context.arc(0, 0, radius, 0, Math.PI * 2); context.fill(); context.stroke();
+      context.strokeStyle = '#9c6d2a'; context.lineWidth = Math.max(.6, radius * .07);
+      context.beginPath(); context.arc(0, 0, radius * .65, 0, Math.PI * 2); context.stroke();
+      context.fillStyle = '#fff0a6'; context.beginPath(); context.moveTo(0, -radius * .45); context.lineTo(radius * .3, 0); context.lineTo(0, radius * .45); context.lineTo(-radius * .3, 0); context.fill(); context.restore();
+    }
+    function obstacle(entity, p) {
+      const type = entity.obstacleType || entity.type;
+      const w = laneWidth * .72 * p.scale, h = actorHeight * p.scale;
+      shadow(p.x, p.y, w * .58, h * .1, .36);
+      if (type === 'overhead') {
+        const left = p.x - w / 2, right = p.x + w / 2, beamY = p.y - h * .72, thickness = h * .14;
+        context.fillStyle = '#344c57'; context.fillRect(left, beamY, w * .08, h * .72); context.fillRect(right - w * .08, beamY, w * .08, h * .72);
+        quad(context, left, beamY, right, beamY, right + h * .05, beamY - h * .07, left + h * .05, beamY - h * .07, '#c58a48');
+        context.fillStyle = '#dbac5e'; context.fillRect(left, beamY, w, thickness);
+        for (let part = 0; part < 5; part++) quad(context, left + part * w / 5, beamY, left + (part + .5) * w / 5, beamY, left + (part + 1) * w / 5, beamY + thickness, left + (part + .5) * w / 5, beamY + thickness, '#453c38');
+        line(context, left, beamY + thickness, right, beamY + thickness, '#f7d38b', Math.max(.7, p.scale * 2));
+        return;
+      }
+      const low = type === 'low' || type === 'lowbar';
+      const blockHeight = h * (low ? .37 : .95), x = p.x - w / 2, y = p.y - blockHeight, depth = h * .12;
+      quad(context, x, y, x + depth, y - depth, x + w + depth, y - depth, x + w, y, low ? '#e0b86d' : '#94724b');
+      quad(context, x + w, y, x + w + depth, y - depth, x + w + depth, p.y - depth, x + w, p.y, low ? '#7c663b' : '#5b4a37');
+      context.fillStyle = low ? '#b88d48' : '#6e593e'; context.fillRect(x, y, w, blockHeight);
+      context.strokeStyle = low ? '#ffcf70' : '#b28d57'; context.lineWidth = Math.max(1, h * .035); context.strokeRect(x + w * .07, y + blockHeight * .08, w * .86, blockHeight * .82);
+      if (low) {
+        for (let part = 0; part < 4; part++) quad(context, x + part * w / 4, y, x + (part + .5) * w / 4, y, x + (part + 1) * w / 4, p.y, x + (part + .5) * w / 4, p.y, '#30444a');
+      } else {
+        line(context, x + w * .08, y + blockHeight * .1, x + w * .92, y + blockHeight * .9, '#b38c57', Math.max(1, h * .05));
+        line(context, x + w * .92, y + blockHeight * .1, x + w * .08, y + blockHeight * .9, '#b38c57', Math.max(1, h * .05));
+      }
+    }
+    function gate(entity, state) {
+      for (let lane = 0; lane < 3; lane++) {
+        const p = project(lane, entity.z), w = laneWidth * .9 * p.scale, h = actorHeight * 1.48 * p.scale;
+        const x = p.x - w / 2, y = p.y - h, rim = Math.max(2, w * .085), color = laneColors[lane];
+        shadow(p.x, p.y, w * .58, h * .04, .2);
+        context.fillStyle = 'rgba(49,130,129,.07)'; rounded(context, x + rim, y + rim, w - rim * 2, h - rim, w * .44); context.fill();
+        context.strokeStyle = '#172d38'; context.lineWidth = rim * 2.8; context.lineCap = 'butt';
+        context.beginPath(); context.moveTo(x + rim, p.y); context.lineTo(x + rim, y + w * .48);
+        context.quadraticCurveTo(x + rim, y + rim, p.x, y + rim); context.quadraticCurveTo(x + w - rim, y + rim, x + w - rim, y + w * .48); context.lineTo(x + w - rim, p.y); context.stroke();
+        context.strokeStyle = color; context.lineWidth = Math.max(1, rim * .35); context.stroke();
+        context.fillStyle = '#dfbc7b'; context.fillRect(x, p.y - rim * .9, rim * 2, rim); context.fillRect(x + w - rim * 2, p.y - rim * .9, rim * 2, rim);
+        context.fillStyle = color; context.beginPath(); context.moveTo(p.x, y - rim); context.lineTo(p.x + rim * .62, y + rim * .8); context.lineTo(p.x, y + rim * 2); context.lineTo(p.x - rim * .62, y + rim * .8); context.fill();
+        if (entity.resolved && state.feedback?.chosenLane === lane) {
+          context.strokeStyle = state.feedback.correct ? '#81f6a5' : '#fa8278'; context.lineWidth = rim * .7;
+          context.beginPath(); context.moveTo(x, p.y); context.lineTo(x + w, p.y); context.stroke();
+        }
+      }
+    }
+    function limb(ax, ay, bx, by, cx, cy, color, thickness) {
+      context.strokeStyle = color; context.lineWidth = thickness; context.lineCap = 'round'; context.lineJoin = 'round';
+      context.beginPath(); context.moveTo(ax, ay); context.lineTo(bx, by); context.lineTo(cx, cy); context.stroke();
+    }
+    function actor(state, delta) {
+      visualLane += (clamp(Number(state.lane) || 0, 0, 2) - visualLane) * (1 - Math.exp(-delta / 72));
+      const p = project(visualLane, 0), h = actorHeight, phase = activeTime * .014;
+      const fraction = clamp((Number(state.elapsed) - Number(state.actionStartedAt)) / Math.max(1, Number(state.actionUntil) - Number(state.actionStartedAt)), 0, 1);
+      const jumping = state.action === 'jump', sliding = state.action === 'slide';
+      const elevation = jumping ? Math.sin(fraction * Math.PI) * h * .88 : 0;
+      const sway = jumping || sliding ? 0 : Math.sin(phase) * h * .018;
+      shadow(p.x, p.y + h * .025, h * (sliding ? .34 : .25) * (1 - elevation / h * .18), h * .065, .4 - elevation / h * .18);
+      context.save(); context.translate(p.x, p.y - elevation + sway);
+      if (Number(state.invulnerableUntil) > Number(state.elapsed) && Math.floor(activeTime / 80) % 2) context.globalAlpha = .58;
+      if (sliding) {
+        limb(-h * .03, -h * .19, -h * .24, -h * .08, -h * .31, 0, '#173d51', h * .12);
+        limb(h * .08, -h * .19, h * .24, -h * .09, h * .34, -h * .02, '#244d5e', h * .12);
+        context.fillStyle = '#317e80'; rounded(context, -h * .24, -h * .4, h * .44, h * .23, h * .09); context.fill();
+        limb(-h * .15, -h * .31, -h * .3, -h * .27, -h * .35, -h * .15, '#d2a077', h * .08);
+        context.fillStyle = '#dcae7b'; context.beginPath(); context.arc(h * .15, -h * .38, h * .115, 0, Math.PI * 2); context.fill();
+        context.fillStyle = '#162e3c'; context.beginPath(); context.arc(h * .15, -h * .41, h * .115, Math.PI, Math.PI * 2); context.fill();
+        line(context, -h * .08, -h * .35, h * .02, -h * .35, '#f4ca7a', h * .05);
+      } else {
+        const stride = jumping ? .38 : Math.sin(phase);
+        limb(-h * .09, -h * .34, -h * (.09 + stride * .13), -h * .17, -h * (.08 - stride * .15), jumping ? -h * .15 : 0, '#173747', h * .125);
+        limb(h * .09, -h * .34, h * (.09 - stride * .13), -h * .17, h * (.08 + stride * .15), jumping ? -h * .08 : -h * .03, '#285366', h * .125);
+        line(context, -h * (.08 - stride * .15) - h * .04, jumping ? -h * .15 : 0, -h * (.08 - stride * .15) + h * .055, jumping ? -h * .15 : 0, '#dbbe85', h * .065);
+        line(context, h * (.08 + stride * .15) - h * .04, jumping ? -h * .08 : -h * .03, h * (.08 + stride * .15) + h * .055, jumping ? -h * .08 : -h * .03, '#dbbe85', h * .065);
+        limb(-h * .19, -h * .68, -h * .27, -h * (.47 + stride * .08), -h * .2, -h * (.35 + stride * .1), '#d9ab7c', h * .09);
+        limb(h * .19, -h * .68, h * .27, -h * (.47 - stride * .08), h * .2, -h * (.35 - stride * .1), '#d9ab7c', h * .09);
+        // Teal explorer jacket, brass belt and a small geometric loot backpack.
+        context.fillStyle = '#2b7478'; rounded(context, -h * .2, -h * .76, h * .4, h * .45, h * .08); context.fill();
+        context.fillStyle = '#143d4c'; rounded(context, -h * .12, -h * .68, h * .24, h * .27, h * .04); context.fill();
+        context.strokeStyle = '#c5a46d'; context.lineWidth = h * .025; context.stroke();
+        context.fillStyle = '#f1c879'; context.beginPath(); context.moveTo(0, -h * .62); context.lineTo(h * .055, -h * .55); context.lineTo(0, -h * .48); context.lineTo(-h * .055, -h * .55); context.fill();
+        line(context, -h * .18, -h * .34, h * .18, -h * .34, '#cfa76a', h * .045);
+        context.fillStyle = '#d8a579'; context.beginPath(); context.arc(0, -h * .875, h * .12, 0, Math.PI * 2); context.fill();
+        context.fillStyle = '#172d39'; context.beginPath(); context.arc(0, -h * .9, h * .122, Math.PI * .86, Math.PI * 2.14); context.fill();
+        line(context, -h * .11, -h * .87, h * .11, -h * .87, '#e6bd6c', h * .035);
+        // A short scarf trails toward the camera; its flap never obscures lanes.
+        quad(context, -h * .11, -h * .76, -h * .03, -h * .74, -h * (.12 + .035 * Math.sin(phase * .7)), -h * .58, -h * .18, -h * .62, '#edbd65');
+      }
+      context.restore();
+    }
+    function draw(input = {}) {
+      if (destroyed) return metrics;
+      const state = input.engine || input;
+      const elapsed = Number(state.elapsed) || 0;
+      const delta = lastElapsed === null ? 16 : clamp(elapsed - lastElapsed, 0, 80);
+      if (lastElapsed === null || elapsed < lastElapsed) visualLane = clamp(Number(state.lane) || 0, 0, 2);
+      lastElapsed = elapsed; activeTime += delta;
+      context.setTransform(dpr, 0, 0, dpr, 0, 0); context.globalAlpha = 1;
+      context.drawImage(background, 0, 0, background.width, background.height, 0, 0, width, height);
+      const distance = Math.max(0, Number(state.distance) || 0);
+      road(distance); environment(distance);
+      ordered.length = 0; metrics.drawn = 0; metrics.culled = 0;
+      for (const entity of state.entities || []) {
+        if (!entity || entity.active === false || entity.z < -6 || entity.z > FAR || entity.collected || entity.hit) { metrics.culled++; continue; }
+        ordered.push(entity);
+      }
+      ordered.sort(byDepth);
+      let actorDrawn = false;
+      for (const entity of ordered) {
+        if (!actorDrawn && entity.z < 0) { actor(state, delta); actorDrawn = true; }
+        const p = project(entity.lane ?? 1, entity.z);
+        if (entity.kind === 'gate' || entity.type === 'gate') gate(entity, state);
+        else if (entity.kind === 'coin' || entity.type === 'coin') coin(entity, p, elapsed);
+        else obstacle(entity, p);
+        metrics.drawn++;
+      }
+      if (!actorDrawn) actor(state, delta);
+      // Soft foreground vignette keeps HUD text in the DOM readable.
+      context.fillStyle = 'rgba(3,12,20,.12)'; context.fillRect(0, 0, width, height * .12);
+      return metrics;
+    }
+    function destroy() {
+      if (destroyed) return;
+      destroyed = true; ordered.length = 0;
+      background.width = background.height = 1;
+      context.clearRect(0, 0, canvas.width, canvas.height);
+    }
+    resize(options.width || 1, options.height || 1);
+    return Object.freeze({ resize, draw, project, destroy });
+  }
+  root.LootLinguaRunnerRenderer = Object.freeze({ createRenderer, FAR, laneColors, palette });
+})(window);

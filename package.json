@@ -2,6 +2,8 @@
   "name": "lootlingua-content-system-tests",
   "private": true,
   "scripts": {
+    "test:runner": "node --test tests/runner-engine.test.mjs tests/runner-profile-sync.test.mjs tests/gate-expedition.test.mjs",
+    "test:runner:browser": "node tools/runner-browser-smoke.mjs",
     "test:integrity": "node --test tests/dictionary-cloud-write.test.mjs tests/dictionary-write-ui.test.mjs tests/profile-cloud-auth.test.mjs tests/profile-cloud-preferences.test.mjs tests/guest-migration-auth.test.mjs tests/suggestion-render-safety.test.mjs tests/integrity-integration.test.mjs tests/dictionary-pages.test.mjs tests/quiz-learning-regression.test.mjs tests/chest-claim-integrity.test.mjs tests/streak-freeze.test.mjs tests/xp-auth.test.mjs",
     "test:integrity:browser": "node tools/dictionary-render-browser-smoke.mjs --paged --integrity && node tools/theme-accessibility-browser-smoke.mjs",
     "test:landing": "node --test tests/landing-routing.test.mjs tests/landing-auth.test.mjs tests/shared-auth-ui.test.mjs tests/logout-flow.test.mjs",

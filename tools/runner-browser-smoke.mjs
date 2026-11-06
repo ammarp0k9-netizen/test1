@@ -1,0 +1,187 @@
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import http from 'node:http';
+import os from 'node:os';
+import path from 'node:path';
+import { spawn } from 'node:child_process';
+import WebSocket from 'ws';
+
+const root = path.resolve(import.meta.dirname, '..');
+const read = file => fs.readFileSync(path.join(root, file), 'utf8');
+const output = path.join(root, 'reports', 'runner-evidence');
+fs.mkdirSync(output, { recursive: true });
+const locks = read('js/core.js');
+const lockCode = locks.slice(locks.indexOf('const backgroundScrollLocks'), locks.indexOf('function syncHeroAvatar()'));
+const runtime = read('js/core-runtime.js');
+const shortcuts = runtime.slice(runtime.indexOf("document.addEventListener('keydown', function(e)"), runtime.indexOf('// Init'));
+const requests = [];
+const html = `<!doctype html><html lang="ar" dir="rtl" data-theme="lootlingua"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><link rel="stylesheet" href="/style.css"><style>body{margin:0;padding:24px;background:#09121c}main{height:1500px}main button{padding:12px;margin:8px}</style></head><body><main id="fixtureBackground"><button id="trigger">اللعب</button><button id="addBtn">إضافة كلمة خلف اللعبة</button></main><script>
+window.auth={currentUser:{uid:'runner-A'}};window.__lootlinguaAuthGeneration=1;
+window.fixtureWords=[{word:'lantern',meaning:'فانوس'},{word:'bridge',meaning:'جسر'},{word:'river',meaning:'نهر'},{word:'treasure',meaning:'كنز'}];
+window.fixtureIntents=[];window.fixtureToasts=[];window.fixtureAdds=0;window.fixtureReceipts=new Set();
+window.commitProfileIntent=async intent=>{fixtureIntents.push({uid:auth.currentUser?.uid,intent:structuredClone(intent)});if(!fixtureReceipts.has(intent.eventId)){fixtureReceipts.add(intent.eventId);if(intent.type==='wallet-delta')localStorage.setItem('lootlingua.runner.coins.v1',String(Number(localStorage.getItem('lootlingua.runner.coins.v1')||0)+intent.amount));}return{saved:true,applied:true}};
+window.queueProfileIntent=intent=>{fixtureIntents.push({uid:auth.currentUser?.uid,intent:structuredClone(intent)});return'fixture-max'};
+window._saveProfileToCloudNow=async()=>true;
+window.showToast=(...args)=>fixtureToasts.push(args);
+window.LootLinguaPublishedContent={listAllPublishedGateWords:async()=>{if(window.fixtureWordsGate)await window.fixtureWordsGate;if(window.fixtureRejectWords)throw Error('simulated offline');return structuredClone(fixtureWords)}};
+window.fixtureContext={worldId:'world',rankId:'rank',gateId:'gate',progress:{readinessNextAt:0}};
+document.getElementById('addBtn').addEventListener('click',()=>fixtureAdds++);
+var currentView='personal';
+${lockCode}
+${shortcuts}
+</script><script src="/js/modal-focus.js"></script><script src="/js/gate-runner.js"></script></body></html>`;
+const server = http.createServer((req, res) => {
+  const pathname = new URL(req.url, 'http://localhost').pathname;
+  requests.push(pathname);
+  if (pathname === '/fixture') { res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' }).end(html); return; }
+  const target = path.resolve(root, pathname.replace(/^\/+/, ''));
+  if (!target.startsWith(root + path.sep) || !fs.existsSync(target) || !fs.statSync(target).isFile()) { res.writeHead(404).end(); return; }
+  res.writeHead(200, { 'Content-Type': target.endsWith('.css') ? 'text/css' : target.endsWith('.js') ? 'text/javascript' : 'application/octet-stream' });
+  res.end(fs.readFileSync(target));
+});
+await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+const origin = 'http://127.0.0.1:' + server.address().port;
+const browserPath = ['C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe', 'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe'].find(fs.existsSync);
+if (!browserPath) throw Error('Chrome/Edge not found');
+const debugPort = 23000 + process.pid % 1500;
+const profile = fs.mkdtempSync(path.join(os.tmpdir(), 'lootlingua-runner-'));
+const browser = spawn(browserPath, ['--headless=new', '--no-first-run', '--disable-extensions', '--disable-background-networking', '--disable-gpu', '--no-sandbox', '--remote-allow-origins=*', '--remote-debugging-port=' + debugPort, '--user-data-dir=' + profile, 'about:blank'], { stdio: 'ignore', windowsHide: true });
+let socket, nextId = 0;
+const pending = new Map(), exceptions = [], caughtExceptions = [];
+const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
+function send(method, params = {}) {
+  const id = ++nextId;
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => { pending.delete(id); reject(Error('CDP timeout: ' + method)); }, 20000);
+    pending.set(id, { resolve: value => { clearTimeout(timer); resolve(value); }, reject: error => { clearTimeout(timer); reject(error); } });
+    socket.send(JSON.stringify({ id, method, params }));
+  });
+}
+async function evaluate(expression) {
+  const value = await send('Runtime.evaluate', { expression, awaitPromise: true, returnByValue: true, replMode: true });
+  if (value.exceptionDetails) throw Error(value.exceptionDetails.exception?.description || value.exceptionDetails.text);
+  return value.result?.value;
+}
+async function wait(expression, name, timeout = 5000) {
+  const until = Date.now() + timeout;
+  while (Date.now() < until) { if (await evaluate(expression)) return; await delay(35); }
+  throw Error(name + ': ' + JSON.stringify(await evaluate(`({diagnostics:window.LootLinguaGateRunner?.getDiagnostics(),active:document.activeElement?.outerHTML?.slice(0,120),toasts:window.fixtureToasts,exceptions:${JSON.stringify(exceptions)}})`)));
+}
+async function key(name) {
+  const codes = { ArrowLeft: 37, ArrowRight: 39, ArrowUp: 38, ArrowDown: 40, ' ': 32, p: 80, Enter: 13, Escape: 27 };
+  await send('Input.dispatchKeyEvent', { type: 'keyDown', key: name, code: name === ' ' ? 'Space' : name === 'p' ? 'KeyP' : name, windowsVirtualKeyCode: codes[name] });
+  await send('Input.dispatchKeyEvent', { type: 'keyUp', key: name, windowsVirtualKeyCode: codes[name] });
+  await delay(35);
+}
+async function screenshot(name) {
+  const result = await send('Page.captureScreenshot', { format: 'png', captureBeyondViewport: false });
+  fs.writeFileSync(path.join(output, name + '.png'), Buffer.from(result.data, 'base64'));
+}
+async function swipe(dx, dy) {
+  const box = await evaluate(`(()=>{const r=document.querySelector('.llr-viewport').getBoundingClientRect();return{x:r.left+r.width*.5,y:r.top+r.height*.65}})()`);
+  await send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: box.x, y: box.y, id: 1 }] });
+  await send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x: box.x + dx, y: box.y + dy, id: 1 }] });
+  await send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+  await delay(45);
+}
+const report = { isolation: 'Real Chrome and real lazy controller/engine/renderer/CSS; deterministic local published words and profile adapters; external HTTPS blocked', viewports: [], checks: [] };
+try {
+  for (let attempt = 0; ; attempt++) {
+    try { await fetch('http://127.0.0.1:' + debugPort + '/json/version'); break; }
+    catch (error) { if (attempt > 60) throw error; await delay(100); }
+  }
+  const target = await (await fetch('http://127.0.0.1:' + debugPort + '/json/new?about:blank', { method: 'PUT' })).json();
+  socket = new WebSocket(target.webSocketDebuggerUrl);
+  await new Promise(resolve => socket.once('open', resolve));
+  socket.on('message', data => {
+    const message = JSON.parse(data);
+    if (message.method === 'Debugger.paused') {
+      caughtExceptions.push(message.params.data?.description || message.params.reason);
+      void send('Debugger.resume');
+    }
+    if (message.method === 'Runtime.exceptionThrown') exceptions.push(message.params.exceptionDetails.exception?.description || message.params.exceptionDetails.text);
+    const call = pending.get(message.id); if (!call) return;
+    pending.delete(message.id); if (message.error) call.reject(Error(message.error.message)); else call.resolve(message.result);
+  });
+  await send('Page.enable'); await send('Page.bringToFront'); await send('Runtime.enable'); await send('Network.enable');
+  await send('Debugger.enable'); await send('Debugger.setPauseOnExceptions', { state: 'all' });
+  await send('Network.setBlockedURLs', { urls: ['https://*'] });
+  await send('Emulation.setDeviceMetricsOverride', { width: 1280, height: 900, deviceScaleFactor: 1, mobile: false });
+  await send('Page.navigate', { url: origin + '/fixture' }); await wait('!!window.LootLinguaGateRunner', 'fixture load');
+  assert.equal(requests.some(item => /runner-engine|runner-renderer|runner\.css/.test(item)), false, 'expensive Runner resources must remain lazy');
+  // Preload the actual engine only to supply its supported deterministic RNG;
+  // the controller still loads renderer/CSS through its production loader.
+  await evaluate(`await new Promise((resolve,reject)=>{const s=document.createElement('script');s.src='js/runner-engine.js';s.onload=resolve;s.onerror=reject;document.head.append(s)});window.fixtureEngine=LootLinguaRunnerEngine;window.LootLinguaRunnerEngine=Object.freeze({...fixtureEngine,createState:(words,options)=>fixtureEngine.createState(words,{...options,random:()=>.5})});`);
+  for (const width of [1280, 390, 320]) {
+    await send('Emulation.setDeviceMetricsOverride', { width, height: width === 1280 ? 900 : 844, deviceScaleFactor: width < 600 ? 3 : 1, mobile: width < 600 });
+    await send('Emulation.setTouchEmulationEnabled', { enabled: width < 600 });
+    assert.equal(await evaluate('innerWidth'), width, 'the responsive test must use the requested CSS viewport');
+    await evaluate(`fixtureContext.progress={readinessNextAt:0};document.getElementById('trigger').focus();await LootLinguaGateRunner.launch(fixtureContext);`);
+    await wait(`!!document.querySelector('.llr-screen .llr-primary')`, 'intro');
+    const intro = await evaluate(`({title:document.querySelector('.llr-screen h2').textContent,inside:document.querySelector('.llr-game').contains(document.activeElement),locked:document.documentElement.classList.contains('modal-scroll-locked'),inert:document.getElementById('fixtureBackground').inert,dom:document.querySelector('.llr-overlay').querySelectorAll('*').length})`);
+    assert.ok(intro.inside && intro.locked && intro.inert);
+    await evaluate(`document.querySelector('.llr-screen .llr-primary').click()`);
+    await wait(`LootLinguaGateRunner.getDiagnostics()?.distance>0`, 'running');
+    await key('Enter'); assert.equal(await evaluate('fixtureAdds'), 0, 'Enter must not submit the background dictionary');
+    if (width === 1280) {
+      await key('ArrowLeft'); assert.equal((await evaluate('LootLinguaGateRunner.getDiagnostics()')).lane, 0);
+      await key('ArrowRight'); assert.equal((await evaluate('LootLinguaGateRunner.getDiagnostics()')).lane, 1);
+      await key(' '); assert.equal((await evaluate('LootLinguaGateRunner.getDiagnostics()')).action, 'jump');
+      await delay(900); await key('ArrowDown'); assert.equal((await evaluate('LootLinguaGateRunner.getDiagnostics()')).action, 'slide');
+    } else {
+      await swipe(90, 0); assert.equal((await evaluate('LootLinguaGateRunner.getDiagnostics()')).lane, 2);
+      await swipe(-180, 0); assert.equal((await evaluate('LootLinguaGateRunner.getDiagnostics()')).lane, 1, 'a swipe changes only one lane');
+      await swipe(0, -80); assert.equal((await evaluate('LootLinguaGateRunner.getDiagnostics()')).action, 'jump');
+      await delay(900); await swipe(0, 80); assert.equal((await evaluate('LootLinguaGateRunner.getDiagnostics()')).action, 'slide');
+    }
+    await key('p'); const beforePause = await evaluate('LootLinguaGateRunner.getDiagnostics()'); await delay(170);
+    const afterPause = await evaluate('LootLinguaGateRunner.getDiagnostics()'); assert.equal(afterPause.distance, beforePause.distance); assert.equal(afterPause.paused, true);
+    await key('p'); await wait('LootLinguaGateRunner.getDiagnostics().distance>' + afterPause.distance, 'resume');
+    if (width === 1280) { await delay(5400); await screenshot('desktop-running'); }
+    const state = await evaluate(`(()=>{const canvas=document.querySelector('.llr-canvas'),viewport=document.querySelector('.llr-viewport').getBoundingClientRect(),box=document.querySelector('.llr-game').getBoundingClientRect(),d=LootLinguaGateRunner.getDiagnostics();return{...d,viewportWidth:innerWidth,dpr:canvas.width/Math.round(viewport.width),backingPerCssPixel:canvas.width/canvas.clientWidth,dom:document.querySelector('.llr-overlay').querySelectorAll('*').length,overflow:document.documentElement.scrollWidth>innerWidth,insideViewport:box.left>=0&&box.right<=innerWidth&&box.top>=0&&box.bottom<=innerHeight}})()`);
+    assert.ok(state.dpr <= 1.51 && state.entities <= 48 && state.dom <= intro.dom + 1 && !state.overflow && state.insideViewport, JSON.stringify(state));
+    await key('Escape'); await wait('!document.querySelector(".llr-overlay")', 'exit cleanup');
+    assert.equal(await evaluate(`!window.__lootlinguaRunnerInputActive&&!document.documentElement.classList.contains('modal-scroll-locked')&&!document.getElementById('fixtureBackground').inert&&document.activeElement.id==='trigger'`), true);
+    report.viewports.push({ width, intro, measured: state });
+  }
+  const credits = await evaluate(`fixtureIntents.filter(row=>row.intent.type==='wallet-delta')`);
+  assert.equal(credits.length, 1, 'the collected desktop coins must be credited once despite cleanup'); assert.ok(credits[0].intent.amount > 0);
+  report.checks.push({ name: 'wallet award once per run, no XP or SRS intent', credits });
+  await evaluate(`await LootLinguaGateRunner.launch(fixtureContext);document.querySelector('.llr-screen .llr-primary').click();auth.currentUser={uid:'runner-B'};window.__lootlinguaAuthGeneration++;`);
+  await wait('LootLinguaGateRunner.getDiagnostics()===null', 'account switch closes run');
+  assert.equal((await evaluate(`fixtureIntents.filter(row=>row.uid==='runner-B'&&row.intent.type==='wallet-delta').length`)), 0);
+  await evaluate(`fixtureContext.progress={availableForReviewNowCount:1};window.fixtureDueResult=await LootLinguaGateRunner.launch(fixtureContext)`);
+  assert.equal(await evaluate('fixtureDueResult'), false);
+  await evaluate(`fixtureContext.progress={readinessNextAt:0};window.fixtureRejectWords=true;window.fixtureOfflineResult=await LootLinguaGateRunner.launch(fixtureContext);window.fixtureRejectWords=false;`);
+  assert.equal(await evaluate('fixtureOfflineResult'), false); assert.equal(await evaluate(`!!document.querySelector('.llr-overlay')`), false);
+  await evaluate(`let release;window.fixtureWordsGate=new Promise(resolve=>{release=resolve});window.fixtureLaunch=LootLinguaGateRunner.launch(fixtureContext);await new Promise(r=>setTimeout(r,30));fixtureContext.progress.availableForReviewNowCount=1;release();await fixtureLaunch;window.fixtureWordsGate=null;`);
+  assert.equal(await evaluate(`!!document.querySelector('.llr-overlay')`), false);
+  await evaluate(`fixtureContext.progress={readinessNextAt:0};await LootLinguaGateRunner.launch(fixtureContext);document.querySelector('.llr-screen .llr-primary').click();fixtureContext.progress.availableForReviewNowCount=1;`);
+  await wait(`document.querySelector('.llr-screen h2')?.textContent.includes('المراجعة')`, 'review becomes due'); await key('Escape');
+  report.checks.push({ name: 'account switching, word-load failure and review due before/during launch are guarded', passed: true });
+  await evaluate(`fixtureContext.progress={readinessNextAt:0};window.fixtureCanvas=document.createElement('canvas');fixtureCanvas.style.cssText='width:360px;height:520px';document.body.append(fixtureCanvas);window.fixtureRenderer=LootLinguaRunnerRenderer.createRenderer(fixtureCanvas);fixtureRenderer.resize(360,520);`);
+  report.pool = await evaluate(`(()=>{const E=fixtureEngine,s=E.createState(fixtureWords,{random:()=>.5});let max=0,events=0,metrics,dom=document.querySelectorAll('*').length;const started=performance.now();for(let frame=0;frame<2400;frame++){E.move(s,s.gate&&!s.gate.resolved?s.gate.correctLane:1);E.update(s,50);if(frame%4===0)metrics=fixtureRenderer.draw(s);max=Math.max(max,s.entities.length);events=Math.max(events,s.events.length);if(s.over)throw Error('deterministic safe route died')}return{simulatedSeconds:120,draws:600,executionMs:performance.now()-started,maxEntities:max,pool:s._pool.length,active:s.entities.length,total:s._pool.length+s.entities.length,maxEvents:events,dpr:metrics.dpr,domBefore:dom,domAfter:document.querySelectorAll('*').length}})()`);
+  assert.equal(report.pool.total, 48); assert.ok(report.pool.maxEntities <= 48 && report.pool.maxEvents <= 16 && report.pool.dpr <= 1.5); assert.equal(report.pool.domBefore, report.pool.domAfter);
+  await evaluate('fixtureRenderer.destroy();fixtureCanvas.remove()');
+  for (const [width, action, imageName] of [[390, 'jump', 'mobile-gate-jump'], [320, 'slide', 'small-mobile-slide']]) {
+    await send('Emulation.setDeviceMetricsOverride', { width, height: 844, deviceScaleFactor: 3, mobile: true });
+    await evaluate(`fixtureContext.progress={readinessNextAt:0};await LootLinguaGateRunner.launch(fixtureContext);window.fixtureVisualUI=document.querySelector('.llr-overlay').cloneNode(true)`);
+    await key('Escape');
+    await wait(`!document.querySelector('.llr-overlay')`, 'close controller before isolated renderer scene');
+    await evaluate(`document.body.append(fixtureVisualUI);document.querySelector('.llr-screen').hidden=true;window.fixtureVisualState=fixtureEngine.createState(fixtureWords,{random:()=>.5});Object.assign(fixtureVisualState,{elapsed:500,action:'${action}',actionStartedAt:100,actionUntil:900,lane:1,distance:85});fixtureVisualState.entities=[{id:1,active:true,kind:'gate',z:24,lane:1,word:'lantern',options:['جسر','فانوس','نهر'],correctLane:1},{id:2,active:true,kind:'obstacle',obstacleType:'low',lane:2,z:9},{id:3,active:true,kind:'obstacle',obstacleType:'overhead',lane:0,z:13},{id:4,active:true,kind:'obstacle',obstacleType:'wall',lane:2,z:30},{id:5,active:true,kind:'coin',lane:0,z:6}];window.fixtureVisual=LootLinguaRunnerRenderer.createRenderer(document.querySelector('.llr-canvas'));const b=document.querySelector('.llr-viewport').getBoundingClientRect();fixtureVisual.resize(b.width,b.height);fixtureVisual.draw(fixtureVisualState);document.querySelector('.llr-challenge').hidden=false;document.querySelector('.llr-challenge strong').textContent='lantern';document.querySelector('.llr-gate-labels').hidden=false;document.querySelector('.llr-gate-labels').style.top=(b.height*.48)+'px';document.querySelectorAll('.llr-gate-label').forEach((label,i)=>{label.textContent=fixtureVisualState.entities[0].options[i]});`);
+    await screenshot(imageName);
+    const pixels = await evaluate(`(()=>{const c=document.querySelector('.llr-canvas'),data=c.getContext('2d').getImageData(0,0,c.width,c.height).data;const colors=new Set();for(let i=0;i<data.length;i+=400)colors.add(data[i]+','+data[i+1]+','+data[i+2]);return colors.size})()`);
+    assert.ok(pixels > 15, 'renderer must produce a nonblank scene');
+    await evaluate(`fixtureVisual.destroy();fixtureVisualUI.remove()`);
+  }
+  report.assets = requests.filter(item => /runner-engine|runner-renderer|runner\.css/.test(item));
+  report.runtimeExceptions = exceptions; assert.deepEqual(exceptions, []);
+  fs.writeFileSync(path.join(output, 'browser-smoke.json'), JSON.stringify(report, null, 2) + '\n');
+  console.log(JSON.stringify(report, null, 2));
+} catch (error) {
+  report.failure = String(error?.stack || error); report.runtimeExceptions = exceptions; report.caughtExceptions = caughtExceptions;
+  fs.writeFileSync(path.join(output, 'browser-smoke-failed.json'), JSON.stringify(report, null, 2) + '\n');
+  throw error;
+} finally {
+  socket?.close(); browser.kill(); await new Promise(resolve => server.close(resolve));
+}

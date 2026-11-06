@@ -10,6 +10,7 @@ function runner() {
     localStorage: { getItem: (key) => values.get(key) || null, setItem: (key, value) => values.set(key, value) },
     Date, Number, String, Array, JSON, Math, Object, Set,
   };
+  vm.runInNewContext(fs.readFileSync(new URL('../js/runner-engine.js', import.meta.url), 'utf8'), context);
   vm.runInNewContext(fs.readFileSync(new URL('../js/gate-runner.js', import.meta.url), 'utf8'), context);
   return context.window.LootLinguaGateRunner;
 }

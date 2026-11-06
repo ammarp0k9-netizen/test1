@@ -101,7 +101,7 @@ function handleEscapeShortcut(e) {
 }
 
 document.addEventListener('keydown', function(e) {
-  if (e.defaultPrevented || window.__entryExperienceActive || document.getElementById('journeyAuthPrompt')) return;
+  if (e.defaultPrevented || window.__lootlinguaRunnerInputActive || window.__entryExperienceActive || document.getElementById('journeyAuthPrompt')) return;
   if (currentView === 'admin' && e.altKey && (e.key === 'ArrowRight' || e.key === 'ArrowLeft')) {
     e.preventDefault();
     return;
