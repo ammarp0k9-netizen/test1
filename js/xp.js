@@ -41,7 +41,7 @@ const THEME_DISPLAY_NAMES = {
 };
 
 /** ثيمات/ميزات معطّلة مؤقتاً — تظهر باهتة مع «قريباً» */
-const THEMES_COMING_SOON = new Set(['glass']);
+const THEMES_COMING_SOON = new Set();
 function isThemeComingSoon(theme) {
   return THEMES_COMING_SOON.has(theme);
 }

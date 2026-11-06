@@ -100,7 +100,11 @@ try {
   await evaluate(`document.querySelector('[data-theme="glass"].theme-option').focus()`);
   await key('Enter', 'Enter', 13);
   assert.equal((await state()).theme, 'golden');
-  report.keyboard.push({ action: 'Enter respects coming-soon glass', ...(await state()) });
+  report.keyboard.push({ action: 'Enter respects glass level lock', ...(await state()) });
+  await evaluate('userXP=150;refreshThemeLockUI()');
+  await key('Enter', 'Enter', 13);
+  assert.deepEqual((await state()).selected, ['glass']);
+  report.keyboard.push({ action: 'Enter selects glass at Level 5', ...(await state()) });
   await evaluate('userXP=0;refreshThemeLockUI()');
   assert.deepEqual((await state()).selected, ['lootlingua']);
   report.keyboard.push({ action: 'Level relock synchronizes selected state', ...(await state()) });
