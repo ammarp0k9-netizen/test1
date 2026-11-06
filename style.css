@@ -3850,6 +3850,33 @@ ul { list-style: none; padding: 0; margin: 0; }
   color: var(--accent);
 }
 
+/* Scroll cards share parchment, aged ink and restrained pigment accents. */
+[data-theme="scroll"] :is(.word-card, .published-word-card) {
+  --card-bg: #f6efdf;
+  --surface-bg: #ede1cd;
+  --text-white: #382a20;
+  --text-gray: #6e5945;
+  --accent: #795632;
+  --accent2: #6d573e;
+  --border: #cbb798;
+  --star: #966019;
+  --success: #4f6540;
+  --danger: #97473a;
+  --accent-soft: rgba(121, 86, 50, .10);
+  --success-soft: rgba(79, 101, 64, .10);
+  --danger-soft: rgba(151, 71, 58, .09);
+  --star-soft: rgba(150, 96, 25, .13);
+  --text-on-accent: #fffaf0;
+  --tag-verb: #8e552f;
+  --tag-noun: #685477;
+  --tag-adj: #526745;
+  --tag-tool: #944c42;
+  --tag-sentence: #426b60;
+  --tag-general: #76634e;
+  --tag-adverb: #4e637c;
+  --tag-game: #8a602a;
+}
+
 /* للثيمات الفاتحة - ظل أوضح للبطاقات مع تباين */
 [data-theme="ocean"] .word-card,
 [data-theme="scroll"] .word-card {
@@ -3857,6 +3884,23 @@ ul { list-style: none; padding: 0; margin: 0; }
   box-shadow: 0 4px 16px -2px rgba(0, 0, 0, 0.12), 0 2px 8px -1px rgba(0, 0, 0, 0.08);
   border: 1px solid var(--border);
   border-right: 4px solid var(--accent);
+}
+
+[data-theme="scroll"] :is(.word-card, .published-word-card) {
+  background: linear-gradient(135deg, var(--card-bg), #f0e5d1);
+  box-shadow: inset 0 1px 0 #fffaf0, 0 3px 9px rgba(81, 57, 31, .09);
+}
+[data-theme="scroll"] :is(.word-card, .published-word-card):is(:hover, :focus-within) {
+  border-color: #ac8e64;
+}
+[data-theme="scroll"] .word-card .icon-circle {
+  border: 1px solid color-mix(in srgb, currentColor 20%, transparent);
+}
+[data-theme="scroll"] .word-card .mastery-dot.filled {
+  box-shadow: none;
+}
+[data-theme="scroll"] .word-card:is(.bulk-selected, .selected-for-move) {
+  box-shadow: inset 0 0 0 2px #9a7547, 0 3px 9px rgba(81, 57, 31, .09);
 }
 
 @keyframes slideIn {
