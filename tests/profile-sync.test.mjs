@@ -313,3 +313,39 @@ test('account onboarding imports local completion and restores it to another dev
   b.switchTo('B');
   assert.equal(b.localStorage.getItem('lootlingua:feature-discovery:v1:user:B'), null);
 });
+
+
+test('Firestore map field order cannot create an onboarding echo write',async()=>{
+  const progress=mergeOnboardingProgress('treasure',null,{status:'completed',startedAt:100,completedAt:200,updatedAt:200});
+  const reordered=Object.fromEntries(Object.entries(progress).sort(([a],[b])=>a.localeCompare(b)));
+  const db=database({onboardingProgress:{treasure:reordered}}),a=client(db);
+  for(let i=0;i<3;i++){await a.root.loadProfileFromCloud({uid:'A'});await a.root.flushProfileIntents()}
+  assert.equal(a.pending.length,0);assert.equal(db.controls.transactions,0);assert.equal(db.controls.commits,0);
+});
+
+test('duplicate onboarding requests compact without dropping wallet rewards',async()=>{
+  const db=database({runnerCoins:2}),a=client(db);
+  for(let i=0;i<100;i++)a.root.queueProfileIntent({type:'onboarding',tour:'treasure',state:{status:i===99?'completed':'in-progress',step:i%5,updatedAt:i+1,completedAt:i===99?100:0}});
+  a.root.queueProfileIntent({type:'wallet-delta',field:'runnerCoins',amount:7,eventId:'real-run'});
+  await a.root.flushProfileIntents();
+  assert.equal(db.profile().onboardingProgress.treasure.status,'completed');assert.equal(db.profile().runnerCoins,9);
+  assert.equal(db.controls.commits,1);assert.equal(db.docs.size,3);assert.equal(a.pending.length,0);
+});
+
+test('quota-paused appearance requests remain durable and sync the latest choice after recovery',async()=>{
+  const db=database({theme:'lootlingua',userXP:300}),a=client(db);let blocked=true;
+  a.root.LootLinguaCloudBackoff={remaining:()=>blocked?60000:0,pause:()=>60000,recovered(){},assertAvailable(){if(blocked)throw Object.assign(new Error('quota'),{code:'resource-exhausted',capacityBackoff:true})}};
+  assert.equal(await a.root.saveProfilePreferencesToCloud({theme:'ocean'}),false);
+  assert.equal(await a.root.saveProfilePreferencesToCloud({theme:'golden'}),false);
+  assert.equal(db.controls.transactions,0);assert.ok(a.pending.length>0);
+  const b=client(db,{storage:a.localStorage});await b.root.flushProfileIntents();
+  assert.equal(db.profile().theme,'golden');assert.equal(db.profile().userXP,300);assert.equal(b.pending.length,0);
+});
+
+test('a newer successful appearance cannot later be reverted by an older failed preference',async()=>{
+  const db=database({theme:'lootlingua'}),a=client(db);let blocked=true;
+  a.root.LootLinguaCloudBackoff={remaining:()=>blocked?60000:0,pause:()=>60000,recovered(){},assertAvailable(){if(blocked)throw Object.assign(new Error('quota'),{code:'resource-exhausted',capacityBackoff:true})}};
+  await a.root.saveProfilePreferencesToCloud({theme:'ocean'});blocked=false;
+  assert.equal(await a.root.saveProfilePreferencesToCloud({theme:'golden'}),true);await a.root.flushProfileIntents();
+  assert.equal(db.profile().theme,'golden');assert.equal(a.pending.length,0);
+});

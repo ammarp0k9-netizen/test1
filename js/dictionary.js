@@ -258,6 +258,7 @@ function isDictionaryWriteContextCurrent(context) {
 }
 
 function dictionaryWriteErrorMessage(error) {
+  if (error?.code === 'resource-exhausted') return 'بلغت السحابة حصة الاستخدام أو حد الطلبات. لم نؤكد حفظ الكلمة؛ بقيت المدخلات للمحاولة لاحقًا.';
   if (error?.code === 'permission-denied') return 'رفضت السحابة حفظ الكلمة لهذا الحساب. أعد تسجيل الدخول وحاول مجددًا؛ بقيت المدخلات محفوظة هنا.';
   if (['unavailable', 'deadline-exceeded', 'dictionary/offline'].includes(error?.code)) return 'تعذّر الاتصال بالسحابة لحفظ الكلمة. بقيت المدخلات للمحاولة عند عودة الاتصال.';
   if (['auth/identity-changed', 'word-lifecycle/sign-in-required'].includes(error?.code)) return 'تغيّرت جلسة الحساب. افتح القاموس من حسابك الحالي وحاول مجددًا.';

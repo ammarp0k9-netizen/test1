@@ -107,7 +107,7 @@ function reportProfileSaveFailure(error, referencePath, operation, payload) {
   };
   window.__lootlinguaLastProfileSaveFailure = diagnostic;
   // Preserve the original Firebase error object, including its code and stack.
-  console.error('saveProfile:', diagnostic, error);
+  if (!error?.capacityBackoff) console.error('saveProfile:', diagnostic, error);
   return diagnostic;
 }
 
@@ -166,12 +166,14 @@ function syncOnboardingProgress(data, owner) {
     const remote = data.onboardingProgress?.[tour];
     const merged = mergeOnboardingProgress(tour, remote, local);
     if (!merged) continue;
-    if (JSON.stringify(local) !== JSON.stringify(merged)) {
+    if (JSON.stringify(mergeOnboardingProgress(tour, local, null)) !== JSON.stringify(merged)) {
       changed = true;
       if (personal) localStorage.setItem(personalKey, JSON.stringify(merged));
       else features[tour] = merged;
     }
-    if (JSON.stringify(remote) !== JSON.stringify(merged)) {
+    // Firestore maps can return fields in a different order. Compare the
+    // normalized values, never the serialization order of a server map.
+    if (JSON.stringify(mergeOnboardingProgress(tour, remote, null)) !== JSON.stringify(merged)) {
       // Hydration suppresses intents. Import the account's local checkpoints
       // after hydration, guarded against sign-out/account switching.
       queueMicrotask(() => {
@@ -213,7 +215,34 @@ function applyCanonicalProfile(data, owner) {
 }
 function scheduleProfileFlush() {
   clearTimeout(_profileRetryTimer);
-  _profileRetryTimer = setTimeout(() => { window.flushProfileIntents?.(); }, 450);
+  _profileRetryTimer = setTimeout(() => { window.flushProfileIntents?.(); }, Math.max(450, window.LootLinguaCloudBackoff?.remaining() || 0));
+}
+window.addEventListener?.('lootlingua:cloud-capacity-change', scheduleProfileFlush);
+
+function compactPresentationIntents(owner) {
+  const groups = new Map();
+  for (const operation of readProfileOutbox(owner.uid)) {
+    if (operation.commands.length !== 1) continue;
+    const command = operation.commands[0];
+    if (!['onboarding', 'appearance'].includes(command.type)) continue;
+    if (command.type === 'appearance' && Object.keys(command.patch || {}).some(field => !['theme', 'oasisMode', 'themeIntroSeen'].includes(field))) continue;
+    const key = command.type === 'appearance' ? 'appearance' : `onboarding:${command.tour}`;
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(operation);
+  }
+  for (const operations of groups.values()) {
+    if (operations.length < 2) continue;
+    let merged = {};
+    for (const operation of operations) merged = applyProfileIntent(merged, operation.commands[0]).profile;
+    const last = operations.at(-1), command = last.commands[0];
+    const combined = command.type === 'onboarding'
+      ? { type: 'onboarding', tour: command.tour, state: merged.onboardingProgress?.[command.tour] }
+      : { type: 'appearance', patch: Object.fromEntries(['theme', 'oasisMode', 'themeIntroSeen'].filter(field => Object.hasOwn(merged, field)).map(field => [field, merged[field]])) };
+    // Persist the replacement before removing duplicates. Only idempotent
+    // presentation intents are compacted; wallet/XP receipts stay untouched.
+    const id = `presentation-compact:${Date.now()}-${++_profileOperationSequence}-${Math.random().toString(36).slice(2)}`;
+    if (queueProfileCommands([combined], { id, project: false })) for (const operation of operations) localStorage.removeItem(operation.key);
+  }
 }
 function queueProfileCommands(commands, options = {}) {
   const owner = captureProfileOwner();
@@ -319,15 +348,18 @@ window.flushProfileIntents = function(options = {}) {
   if (!isProfileOwnerCurrent(owner)) return Promise.resolve({ saved: false, reason: 'auth/identity-changed' });
   const work = async () => {
     try {
+      compactPresentationIntents(owner);
+      window.LootLinguaCloudBackoff?.assertAvailable();
       const outcome = await transactProfileOutbox(owner, options);
       if (outcome.saved && outcome.profile) applyCanonicalProfile(outcome.profile, owner);
-      if (outcome.saved) window.__lootlinguaLastProfileSaveFailure = null;
+      if (outcome.saved && outcome.profile) { window.__lootlinguaLastProfileSaveFailure = null; window.LootLinguaCloudBackoff?.recovered(); }
       return outcome;
     } catch (error) {
       if (isProfileOwnerCurrent(owner)) {
         reportProfileSaveFailure(error, `users/${owner.uid}/meta/profile`, 'transaction-sync', {});
         clearTimeout(_profileRetryTimer);
-        _profileRetryTimer = setTimeout(() => window.flushProfileIntents?.(), 5000);
+        const quotaDelay = window.LootLinguaCloudBackoff?.pause(error) || (error?.code === 'resource-exhausted' ? 60000 : 0);
+        _profileRetryTimer = setTimeout(() => window.flushProfileIntents?.(), Math.max(5000, quotaDelay));
       }
       return { saved: false, reason: error?.code || 'profile/sync-failed' };
     }
@@ -383,10 +415,13 @@ async function writeProfileData(data, options, owner) {
   const referencePath = `users/${owner.uid}/meta/profile`;
   const reference = doc(profileDb, 'users', owner.uid, 'meta', 'profile');
   const appearance = {};
+  const pendingAppearance = readProfileOutbox(owner.uid).filter(operation => operation.commands.length === 1 && operation.commands[0].type === 'appearance' && Object.keys(operation.commands[0].patch || {}).every(key => fields.includes(key)));
+  for (const operation of pendingAppearance) Object.assign(appearance, operation.commands[0].patch);
   for (const key of fields) if (Object.hasOwn(data, key)) appearance[key] = data[key];
   let patch;
   let knownSnapshot = window.__lootlinguaProfileSnapshot;
   try {
+    window.LootLinguaCloudBackoff?.assertAvailable();
     let persistedData = await runTransaction(profileDb, async transaction => {
       const current = await transaction.get(reference);
       if (!isCurrent()) throw Object.assign(new Error('Authenticated user changed'), { code: 'auth/identity-changed' });
@@ -412,11 +447,17 @@ async function writeProfileData(data, options, owner) {
     }
     window.__lootlinguaProfileSnapshot = { uid: owner.uid, exists: true, data: persistedData, readFailed: false };
     window.__lootlinguaLastProfileSaveFailure = null;
+    for (const operation of pendingAppearance) localStorage.removeItem(operation.key);
+    window.LootLinguaCloudBackoff?.recovered();
     return true;
   } catch (error) {
     if (!isCurrent()) return false;
     const operation = knownSnapshot?.uid === owner.uid ? (knownSnapshot.exists ? 'merge-update' : 'create-with-merge') : 'preflight-read';
     reportProfileSaveFailure(error, referencePath, operation, patch);
+    if (['resource-exhausted', 'unavailable', 'deadline-exceeded'].includes(error?.code)) {
+      window.LootLinguaCloudBackoff?.pause(error);
+      queueProfileCommands([{ type: 'appearance', patch: appearance }], { project: false });
+    }
     return false;
   }
 }
@@ -482,7 +523,7 @@ window.saveProfilePreferencesToCloud = async function(patch, options = {}) {
   const queueKey = JSON.stringify([owner.uid, owner.generation, owner.epoch, owner.loadSequence]);
   const previous = _profilePreferenceSaves.get(queueKey) || Promise.resolve();
   const writeOptions = { verify: options.verify === true };
-  const saving = previous.then(() => writeProfileData(data, writeOptions, owner));
+  const saving = previous.then(() => enqueueProfileTask(owner, () => writeProfileData(data, writeOptions, owner)));
   _profilePreferenceSaves.set(queueKey, saving);
   try {
     return await saving;

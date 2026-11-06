@@ -240,3 +240,17 @@ test('quiz readiness awaits the complete personal source and retains its request
   const result = await context.ensureQuizSourceReady('personal');
   assert.equal(result.candidateCount, 2000); assert.equal(pages.state().complete, true);
 });
+
+
+test('head updates share cached aggregation counts rather than querying on each change',async()=>{
+  let now=0,calls=0;const pages=api().create({ownerId:'A',clock:()=>now,fetchPage:async()=>({words:[],done:true}),fetchCounts:async()=>{calls++;return{total:2000,indexed:2000,starred:20}}});
+  for(let i=0;i<30;i++)await pages.refreshCounts();assert.equal(calls,1);
+  now=60001;await pages.refreshCounts();assert.equal(calls,2);
+});
+
+test('exhausted count queries back off without preventing bounded word loading',async()=>{
+  let now=0,calls=0;const pages=api().create({ownerId:'A',clock:()=>now,fetchPage:async()=>({words:words(80),cursor:80,done:false}),fetchCounts:async()=>{calls++;throw Object.assign(new Error('quota'),{code:'resource-exhausted'})}});
+  for(let i=0;i<20;i++)await assert.rejects(pages.refreshCounts(),{code:'resource-exhausted'});
+  assert.equal(calls,1);await pages.next();assert.equal(pages.words().length,80);assert.equal(pages.state().complete,false);
+  now=60001;await assert.rejects(pages.refreshCounts());assert.equal(calls,2);
+});

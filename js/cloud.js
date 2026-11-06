@@ -305,6 +305,7 @@
         };
       },
       async fetchCounts() {
+        window.LootLinguaCloudBackoff?.assertAvailable();
         const results = await Promise.all([
           getCountFromServer(reference),
           getCountFromServer(query(reference, orderBy('order', 'asc'))),
@@ -373,6 +374,7 @@
         else if (store.state().error?.code === 'dictionary/offline') store.next().catch(() => {});
         return;
       }
+      if (!snapshot.docChanges().length) return;
       if (snapshot.docs) headIds = new Set(snapshot.docs.map(item => item.id));
       const changed = snapshot.docChanges().filter(change => change.type !== 'removed').map(change => mapWordDoc(change.doc));
       if (changed.length) store.merge(changed);
@@ -383,7 +385,7 @@
         } catch (_) { /* The next explicit refresh retries; do not infer deletion offline. */ }
       });
       store.refreshCounts().catch(() => {});
-    }, error => { clearTimeout(initialWaitTimer); rejectHead(error); console.warn('[Dictionary] Head listener:', error.code); });
+    }, error => { clearTimeout(initialWaitTimer); rejectHead(error); window.LootLinguaCloudBackoff?.pause(error); console.warn('[Dictionary] Head listener:', error.code); });
     wordsUnsubscribe = () => {
       clearTimeout(initialWaitTimer); clearTimeout(visibleTimer); visibleStops.forEach(stop => stop()); stopHead();
       rejectHead(Object.assign(new Error('Dictionary owner changed.'), { code: 'dictionary/stale' })); store.dispose();

@@ -3,12 +3,13 @@
 
   // Data pagination and DOM windowing are independent. Nothing here drains
   // the source in the background: next() reads exactly one bounded page.
-  function create({ ownerId, fetchPage, fetchCounts, onChange = () => {}, pageSize = 80, yieldTask = () => new Promise(resolve => setTimeout(resolve, 0)) }) {
+  function create({ ownerId, fetchPage, fetchCounts, onChange = () => {}, pageSize = 80, countCacheMs = 60000, clock = () => Date.now(), yieldTask = () => new Promise(resolve => setTimeout(resolve, 0)) }) {
     const rows = new Map();
     const fullRequests = new Set();
     let cursor = null, complete = false, disposed = false, pending = null, draining = null;
     let error = null, counts = null, countPending = null, revision = 0, offline = false;
     let snapshot = [];
+    let countsAt = -Infinity, countRetryAt = 0, countFailure = null;
     const stale = () => Object.assign(new Error('Dictionary owner changed.'), { code: 'dictionary/stale' });
     const state = () => ({ ownerId, pageSize, loaded: rows.size, complete, loading: Boolean(pending), error, counts, revision, offline });
     function publish() {
@@ -16,14 +17,22 @@
       snapshot = [...rows.values()];
       if (!disposed) onChange(snapshot, state());
     }
-    async function refreshCounts() {
+    async function refreshCounts({ force = false } = {}) {
       if (!fetchCounts || disposed) return counts;
       if (countPending) return countPending;
-      countPending = Promise.resolve().then(fetchCounts).then(value => {
+      if (!force && counts && clock() - countsAt < countCacheMs) return counts;
+      if (clock() < countRetryAt) { if (counts) return counts; throw countFailure; }
+      countPending = Promise.resolve().then(() => { root.LootLinguaCloudBackoff?.assertAvailable(); return fetchCounts(); }).then(value => {
         if (disposed) throw stale();
         counts = value;
+        countsAt = clock(); countFailure = null; countRetryAt = 0;
         publish();
         return counts;
+      }).catch(reason => {
+        countFailure = reason;
+        const pause = root.LootLinguaCloudBackoff?.pause(reason) || (reason?.code === 'resource-exhausted' ? 60000 : 10000);
+        countRetryAt = clock() + pause;
+        throw reason;
       }).finally(() => { countPending = null; });
       return countPending;
     }

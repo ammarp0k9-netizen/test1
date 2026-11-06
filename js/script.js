@@ -1788,7 +1788,8 @@ function requestProfilePreferencesSave(patch) {
   const generation = Number(window.__lootlinguaAuthGeneration) || 0;
   const notify = () => {
     if (window.auth?.currentUser?.uid === uid && (Number(window.__lootlinguaAuthGeneration) || 0) === generation) {
-      showToast('تم تطبيق المظهر على هذا الجهاز، لكن تعذّرت مزامنته مع حسابك.', 'warning', 5000);
+      const quota = window.__lootlinguaLastProfileSaveFailure?.code === 'resource-exhausted' || window.LootLinguaCloudBackoff?.remaining() > 0;
+      showToast(quota ? 'بلغت السحابة حد الاستخدام مؤقتًا. المظهر محفوظ محليًا وبانتظار إعادة المزامنة؛ لم يُؤكّد حفظه بالسحابة بعد.' : 'تم تطبيق المظهر على هذا الجهاز، لكن تعذّرت مزامنته مع حسابك.', 'warning', 6500);
     }
   };
   if (typeof window.saveProfilePreferencesToCloud !== 'function') { notify(); return; }
