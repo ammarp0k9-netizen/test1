@@ -513,8 +513,57 @@ test('a missing source membership rejects an explicit move before writes and pre
   assert.deepEqual([...h.documents], before);
   assert.deepEqual(h.documents.get(h.personalPath), h.legacy);
   assert.equal(h.transactions.length, 0);
-  await assert.rejects(h.move(), /target-personal-upload-failed/);
+  await assert.rejects(h.move(), { code: 'word-lifecycle/source-membership-missing' });
   assert.deepEqual([...h.documents], before);
   assert.equal(h.transactions.length, 0);
   assert.equal(h.stored(), null);
+});
+
+
+function freshAccountWordHarness() {
+  const documents=new Map();let readBarrier=null;
+  const root={auth:{currentUser:{uid:'new-A'}},__lootlinguaAuthGeneration:1,words:[]};
+  const context=vm.createContext({window:root,auth:root.auth,db:{},console:{error(){}},serverTimestamp:()=>123,
+    doc:(_db,...parts)=>parts.join('/'),
+    async runTransaction(_db,callback){
+      const pending=[];
+      const result=await callback({
+        get:async path=>{if(readBarrier){const wait=readBarrier;readBarrier=null;await wait;}return {exists:()=>documents.has(path),data:()=>clone(documents.get(path))}},
+        set:(path,value)=>pending.push([path,clone(value)]),
+        update:(path,value)=>pending.push([path,{...documents.get(path),...clone(value)}]),
+        delete:path=>pending.push([path,null]),
+      });
+      for(const [path,value]of pending)if(value)documents.set(path,value);else documents.delete(path);
+      return result;
+    }
+  });
+  vm.runInContext(schemaSource,context);vm.runInContext(lifecycleSource,context);
+  vm.runInContext(between('  const USER_WORD_EDUCATIONAL_FIELDS','  function guestMigrationError'),context);
+  vm.runInContext(between('  window.saveWordToCloud =','  window.updateWordInCloud ='),context);
+  return {root,documents,save:()=>root.saveWordToCloud('journey','عام','رحلة','',0,{}),pause:promise=>{readBarrier=promise}};
+}
+
+test('a brand-new account saves its first manual word with canonical/source/personal records and no duplicate on retry',async()=>{
+  const h=freshAccountWordHarness();const id=await h.save();assert.ok(id);
+  const row=h.documents.get('users/new-A/words/'+id);
+  assert.equal(row.userId,'new-A');assert.equal(row.meaning,'رحلة');assert.equal(row.personalDictionaryState,'active');
+  assert.equal(h.documents.size,3);assert.equal(await h.save(),id);assert.equal(h.documents.size,3);
+});
+
+test('switching accounts during a first-word transaction aborts before any write',async()=>{
+  const h=freshAccountWordHarness();let release;h.pause(new Promise(resolve=>{release=resolve}));
+  const saving=h.save();await new Promise(resolve=>setImmediate(resolve));
+  h.root.auth.currentUser={uid:'new-B'};h.root.__lootlinguaAuthGeneration++;release();
+  await assert.rejects(saving,{code:'auth/identity-changed'});assert.equal(h.documents.size,0);
+  const id=await h.save();assert.equal(h.documents.get('users/new-B/words/'+id).userId,'new-B');
+});
+
+
+test('word drafts are isolated by account as well as dictionary scope',async()=>{
+  const text=await readFile(new URL('../js/dictionary.js',import.meta.url),'utf8');
+  const start=text.indexOf('function getAddFormDraftScope()');
+  const code=text.slice(start,text.indexOf('function readAddFormDraftFromDom()',start));
+  const root={auth:{currentUser:{uid:'A'}}};const context=vm.createContext({window:root,isCustomWorldView:()=>false});
+  vm.runInContext(code,context);const a=context.getAddFormDraftScope();
+  root.auth.currentUser={uid:'B'};assert.notEqual(context.getAddFormDraftScope(),a);
 });

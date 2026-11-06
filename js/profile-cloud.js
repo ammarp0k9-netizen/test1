@@ -205,6 +205,7 @@ function applyCanonicalProfile(data, owner) {
     if (typeof window.applyCanonicalLootlinguaProfile === 'function') window.applyCanonicalLootlinguaProfile(projected);
     else window.mergeLootlinguaProfileFromCloud?.(projected, { canonical: true });
     syncOnboardingProgress(projected, owner);
+    window.LootLinguaGateRunner?.acceptProfile?.(projected, owner.uid);
     _profileLocalBaselines.set(owner.uid, window.getLootlinguaProfilePayload?.() || projected);
     try { window.LootLinguaMotivation?.acceptProfile?.(data, owner.uid); }
     catch (error) { console.warn('[Motivation] Profile presentation deferred.', error); }
@@ -552,6 +553,7 @@ window.loadProfileFromCloud = async function(user, options = {}) {
     }
     if (!isCurrent()) return abandoned();
     if (cloudData) applyCanonicalProfile(cloudData, owner);
+    else window.LootLinguaGateRunner?.acceptProfile?.({}, owner.uid);
     if (!isCurrent()) return abandoned();
     const inMemoryMigration = window.__acceptedGuestProfileMigration;
     const persistedMigration = readPendingGuestProfileMigration(user);

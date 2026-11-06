@@ -7,6 +7,8 @@ import WebSocketClient from 'ws';
 const root = path.resolve(import.meta.dirname, '..');
 const evidenceDir = process.argv.includes('--integrity')
   ? path.join(root, 'reports', 'integrity-evidence', 'entry')
+  : process.argv.some(flag => ['--sessions', '--session-switch'].includes(flag))
+    ? path.join(root, 'reports', 'session-evidence')
   : path.join(root, 'reports', 'product-entry-evidence');
 const evidenceScreenshotNames = new Set([
   'guest-new-desktop-welcome',
@@ -1196,9 +1198,13 @@ async function runAccountSwitch() {
   const initialA = await navigateScenario(id);
   const completedA = await completeCurrentAccount();
   assertion(completedA.final.status === 'completed', 'account A did not complete', failures);
-  await click('[data-switch-account="account-b"]');
+  const appCode = fs.readFileSync(path.join(root, 'js/script.js'), 'utf8');
+  const closeCode = appCode.slice(appCode.indexOf('function closeRouteOverlays()'), appCode.indexOf('function openRouteOverlay('));
+  await evaluate(`(async()=>{window.unlockBackgroundScroll=()=>{};${closeCode};window.closeRouteOverlays=closeRouteOverlays;await new Promise(resolve=>{const s=document.createElement('script');s.src='/js/modal-focus.js';s.onload=resolve;document.head.append(s)});const profile=document.createElement('section');profile.id='profileModal';profile.className='profile-modal open';profile.setAttribute('role','dialog');profile.setAttribute('aria-modal','true');profile.setAttribute('aria-hidden','false');profile.innerHTML='<button>الملف الشخصي للحساب السابق</button>';document.body.append(profile);LootLinguaModalFocus.open(profile);})()`);
+  await evaluate(`document.querySelector('[data-switch-account="account-b"]').click()`);
   await waitFor(`document.getElementById('entryExperienceRoot')?.hidden === false`, 'account B Entry');
   const initialB = await snapshot();
+  assertion(await evaluate(`!document.getElementById('profileModal').classList.contains('open')&&!document.getElementById('entryExperienceRoot').inert`), 'previous profile dialog blocked the new onboarding', failures);
   images.push(await screenshot(`${id}-account-b-entry`));
   assertion(initialB.classification === 'brand-new' && initialB.stage === 'welcome', `account B inherited A state (${initialB.classification}/${initialB.stage})`, failures);
   const completedB = await completeCurrentAccount();
@@ -1327,6 +1333,13 @@ try {
     patterns: [{ urlPattern: `${origin}/app*`, resourceType: 'Document', requestStage: 'Request' }],
   });
 
+  if (process.argv.includes('--session-switch')) {
+    await record(runAccountSwitch);
+  } else if (process.argv.includes('--sessions')) {
+    await record(() => runHappy('account-new', { classification: 'brand-new', actionId: 'open-selected-world', destination: 'worldsView' }));
+    await record(runRefreshAccountTheme);
+    await record(runAccountSwitch);
+  } else {
   await record(() => runHappy('guest-new-desktop', { classification: 'brand-new', actionId: 'open-selected-world', destination: 'worldsView' }));
   await record(() => runHappy('guest-new-320', { classification: 'brand-new', actionId: 'open-selected-world', destination: 'worldsView' }));
   await record(() => runGuestDictionary('guest-words'));
@@ -1339,6 +1352,7 @@ try {
   await record(() => runTerminalFailure('entry-cloud-failure', 'entry'));
   await record(() => runTerminalFailure('profile-cloud-failure', 'profile'));
   await record(runAccountSwitch);
+  }
 
   results.forEach((result) => {
     result.images = (result.images || []).filter(Boolean);

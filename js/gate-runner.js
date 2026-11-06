@@ -2,8 +2,26 @@
 (function () {
   'use strict';
   const MAX_HEARTS = 3, COIN_KEY = 'lootlingua.runner.coins.v1', BEST_DISTANCE_KEY = 'lootlingua.runner.best-distance.v1';
+  const accountProgressKey = (uid, field) => `lootlingua.runner.progress.v1:user:${encodeURIComponent(uid)}:${field}`;
+  function progressValue(field, guestKey) {
+    try {
+      const uid = window.auth?.currentUser?.uid;
+      return Math.max(0, Number(localStorage.getItem(uid ? accountProgressKey(uid, field) : guestKey)) || 0);
+    } catch { return 0; }
+  }
+  function refreshProgressUI() {
+    if (typeof document === 'undefined') return;
+    document.querySelectorAll('[data-runner-wallet]').forEach(el => { el.textContent = String(RunnerCoinWallet.balance()); });
+    document.querySelectorAll('[data-runner-best]').forEach(el => { el.textContent = String(RunnerBestDistance.value()); });
+  }
+  function acceptProfile(profile, uid) {
+    if (!uid || window.auth?.currentUser?.uid !== uid) return;
+    localStorage.setItem(accountProgressKey(uid, 'runnerCoins'), String(Math.max(0, Number(profile?.runnerCoins) || 0)));
+    localStorage.setItem(accountProgressKey(uid, 'runnerBestDistance'), String(Math.max(0, Number(profile?.runnerBestDistance) || 0)));
+    refreshProgressUI();
+  }
   function normalizeWords(words) { const seen = new Set(); return (Array.isArray(words) ? words : []).map((x) => ({ word: String(x?.word || x?.term || '').trim(), meaning: String(x?.translation || x?.meaning || x?.ar || x?.definition || '').trim() })).filter((x) => x.word && x.meaning && !seen.has(`${x.word}\u0000${x.meaning}`) && seen.add(`${x.word}\u0000${x.meaning}`)); }
-  const RunnerCoinWallet = Object.freeze({ balance() { try { return Math.max(0, Number(localStorage.getItem(COIN_KEY)) || 0); } catch { return 0; } }, credit(amount, eventId) {
+  const RunnerCoinWallet = Object.freeze({ balance() { return progressValue('runnerCoins', COIN_KEY); }, credit(amount, eventId) {
     const value = Math.max(0, Math.floor(Number(amount) || 0));
     if (!value) return;
     if (window.auth?.currentUser) {
@@ -14,16 +32,19 @@
           return { saved: false, applied: false };
         });
     }
-    try { localStorage.setItem(COIN_KEY, String(this.balance() + value)); } catch {}
+    try { localStorage.setItem(COIN_KEY, String(this.balance() + value)); window.markGuestProfileDataDirty?.(COIN_KEY); refreshProgressUI(); } catch {}
   } });
-  const RunnerBestDistance = Object.freeze({ value() { try { return Math.max(0, Math.floor(Number(localStorage.getItem(BEST_DISTANCE_KEY)) || 0)); } catch { return 0; } }, save(distance) {
+  const RunnerBestDistance = Object.freeze({ value() { return Math.floor(progressValue('runnerBestDistance', BEST_DISTANCE_KEY)); }, save(distance) {
     const next = Math.max(0, Math.floor(Number(distance) || 0));
     if (next <= this.value()) return false;
     try {
       if (window.auth?.currentUser) {
         if (!window.queueProfileIntent?.({ type: 'max', field: 'runnerBestDistance', value: next })) return false;
+        const key = accountProgressKey(window.auth.currentUser.uid, 'runnerBestDistance');
+        localStorage.setItem(key, String(Math.max(next, Number(localStorage.getItem(key)) || 0)));
       }
       localStorage.setItem(BEST_DISTANCE_KEY, String(next));
+      refreshProgressUI();
     } catch { return false; }
     return true;
   } });
@@ -39,9 +60,13 @@
   }
   function render(context) {
     const card = node('aside', 'gate-runner-card'), copy = node('div', 'gate-runner-card-copy');
+    const totals = node('small', 'gate-runner-cosmetic'), wallet = node('span'), best = node('span');
+    wallet.dataset.runnerWallet = ''; wallet.textContent = String(RunnerCoinWallet.balance());
+    best.dataset.runnerBest = ''; best.textContent = String(RunnerBestDistance.value());
+    totals.append('عملاتك: ', wallet, ' · أفضل مسافة: ', best, ' م');
     copy.append(node('strong', '', 'لووت رنر — جري البوابات'),
       node('span', '', 'ثلاثة مسارات، قفز وانزلاق. تفادَ العوائق واعبر بوابة المعنى الصحيح.'),
-      node('small', 'gate-runner-cosmetic', `عملاتك: ${RunnerCoinWallet.balance()} · أفضل مسافة: ${RunnerBestDistance.value()} م`));
+      totals);
     const play = node('button', 'gate-runner-launch', 'ابدأ الجري'); play.type = 'button';
     const due = reviewIsDue(context?.progress); play.disabled = due; play.setAttribute('aria-disabled', String(due));
     play.addEventListener('click', async () => {
@@ -70,11 +95,11 @@
     });
     const css = document.querySelector('link[data-runner-style]');
     const styles = css ? Promise.resolve() : new Promise((resolve, reject) => {
-      const link = document.createElement('link'); link.rel = 'stylesheet'; link.href = 'runner.css?v=20261106-runner-5';
+      const link = document.createElement('link'); link.rel = 'stylesheet'; link.href = 'runner.css?v=20261106-session-1';
       link.dataset.runnerStyle = ''; link.onload = resolve; link.onerror = () => { link.remove(); reject(new Error('Runner styles unavailable')); };
       document.head.append(link);
     });
-    resources = Promise.all([styles, module('LootLinguaRunnerEngine', 'js/runner-engine.js?v=20261106-runner-5'), module('LootLinguaRunnerRenderer', 'js/runner-renderer.js?v=20261106-runner-5')]).catch(error => { resources = null; throw error; });
+    resources = Promise.all([styles, module('LootLinguaRunnerEngine', 'js/runner-engine.js?v=20261106-session-1'), module('LootLinguaRunnerRenderer', 'js/runner-renderer.js?v=20261106-session-1')]).catch(error => { resources = null; throw error; });
     return resources;
   }
   function button(label, cls, action) {
@@ -329,8 +354,11 @@
     reduced?.addEventListener?.('change', resume);
   }
   window.LootLinguaGateRunner = {
-    render, launch, mountPreview, reviewIsDue, normalizeWords, RunnerCoinWallet, RunnerBestDistance, MAX_HEARTS,
+    render, launch, mountPreview, acceptProfile, refreshProgressUI, reviewIsDue, normalizeWords, RunnerCoinWallet, RunnerBestDistance, MAX_HEARTS,
     createState: (...args) => engine().createState(...args), step: (...args) => engine().update(...args), chooseLane: (...args) => engine().move(...args),
     getDiagnostics: () => activeRun ? { lane: activeRun.state.lane, action: activeRun.state.action, paused: activeRun.state.paused, entities: activeRun.state.entities.filter(e => e.active !== false).length, distance: activeRun.state.distance } : null,
   };
+  window.addEventListener?.('lootlingua:auth-state', refreshProgressUI);
+  const initialProfile = window.__lootlinguaProfileSnapshot;
+  if (initialProfile?.uid && initialProfile.uid === window.auth?.currentUser?.uid) acceptProfile(initialProfile.data, initialProfile.uid);
 })();

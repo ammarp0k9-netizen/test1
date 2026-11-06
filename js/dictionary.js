@@ -258,6 +258,9 @@ function isDictionaryWriteContextCurrent(context) {
 }
 
 function dictionaryWriteErrorMessage(error) {
+  if (error?.code === 'permission-denied') return 'رفضت السحابة حفظ الكلمة لهذا الحساب. أعد تسجيل الدخول وحاول مجددًا؛ بقيت المدخلات محفوظة هنا.';
+  if (['unavailable', 'deadline-exceeded', 'dictionary/offline'].includes(error?.code)) return 'تعذّر الاتصال بالسحابة لحفظ الكلمة. بقيت المدخلات للمحاولة عند عودة الاتصال.';
+  if (['auth/identity-changed', 'word-lifecycle/sign-in-required'].includes(error?.code)) return 'تغيّرت جلسة الحساب. افتح القاموس من حسابك الحالي وحاول مجددًا.';
   if (error?.code === 'dictionary/identity-change') return 'هذا التعديل يغيّر هوية الكلمة وتقدمها. أضف الكلمة المختلفة ككلمة جديدة؛ بقيت الحقول كما هي.';
   if (error?.code === 'dictionary/invalid-patch') return 'تعذّر حفظ هذه القيم. تحقق من طول الحقول وصحتها؛ بقيت المدخلات للمحاولة مجددًا.';
   return 'تعذّر حفظ الكلمة الآن. بقيت المدخلات للمحاولة مجددًا.';
@@ -373,7 +376,8 @@ window.isExpanded = isExpanded;
 const addFormDrafts = new Map();
 
 function getAddFormDraftScope() {
-  return isCustomWorldView() ? `custom:${activeCustomWorldId}` : 'personal';
+  const owner = window.auth?.currentUser?.uid || 'guest';
+  return `${owner}:${isCustomWorldView() ? `custom:${activeCustomWorldId}` : 'personal'}`;
 }
 
 function readAddFormDraftFromDom() {

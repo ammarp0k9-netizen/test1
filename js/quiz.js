@@ -1095,6 +1095,7 @@ function getConfiguredQuizWords(options = {}) {
 }
 
 function refreshQuizAvailableCount() {
+  window.LootLinguaGateRunner?.refreshProgressUI?.();
   window.LootLinguaGateRunner?.mountPreview?.(document.getElementById('runnerModePreview'));
   const runnerLock = document.getElementById('runnerModeLock');
   if (runnerLock) {

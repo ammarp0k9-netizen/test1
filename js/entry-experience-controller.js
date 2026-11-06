@@ -4,6 +4,8 @@
   const runtime = {
     initialized: false,
     bootToken: 0,
+    authEpoch: 0,
+    bootRequest: null,
     user: null,
     state: null,
     presentation: null,
@@ -86,6 +88,9 @@
   }
 
   function guestProfileSnapshot() {
+    // The legacy profile cache is also used by signed-in accounts. Its mere
+    // presence is never proof that a new account owns guest progress.
+    if (localStorage.getItem('lootlinguaGuestDataDirty') !== '1') return {};
     return {
       userXP: Number(localStorage.getItem('userXP')) || 0,
       dailyStreak: Number(localStorage.getItem('dailyStreak')) || 0,
@@ -439,7 +444,16 @@
     }
   }
 
-  async function boot() {
+  function boot() {
+    const owner = `${runtime.authEpoch}:${root.__lootlinguaAuthUser?.uid || 'guest'}`;
+    if (runtime.bootRequest?.owner === owner) return runtime.bootRequest.promise;
+    if (runtime.opened && runtime.state && runtime.user?.uid === root.__lootlinguaAuthUser?.uid) return Promise.resolve();
+    const request = { owner, promise: null };
+    runtime.bootRequest = request;
+    request.promise = performBoot().finally(() => { if (runtime.bootRequest === request) runtime.bootRequest = null; });
+    return request.promise;
+  }
+  async function performBoot() {
     if (!runtime.initialized || !api() || !root.__lootlinguaAuthResolved) return;
     if (!root.__lootlinguaInitialDataReady) return;
     if (!cloud() && root.__lootlinguaAuthUser) return;
@@ -624,6 +638,7 @@
       signals.journeyDestination,
       Date.now()
     );
+    persistLocalState(runtime.state, user);
     announceEntryState();
     open();
     completeStartup();
@@ -1452,26 +1467,35 @@
   }
 
   async function saveCheckpoint(label) {
-    persistLocalState(runtime.state, runtime.user);
-    if (!runtime.user || !cloud()?.save) {
+    const state = runtime.state, user = runtime.user, epoch = runtime.authEpoch;
+    const current = () => epoch === runtime.authEpoch && (user?.uid || '') === (root.auth?.currentUser?.uid || '');
+    persistLocalState(state, user);
+    if (!user || !cloud()?.save) {
       announceEntryState();
       return runtime.state;
     }
     setBusy(true, label);
-    runtime.savePromise = runtime.savePromise.catch(() => {}).then(() => cloud().save(runtime.state, runtime.user));
+    runtime.savePromise = runtime.savePromise.catch(() => {}).then(() => {
+      if (!current()) throw Object.assign(new Error('Account changed.'), { code: 'entry/auth-changed' });
+      return cloud().save(state, user);
+    });
     try {
       const saved = await runtime.savePromise;
-      runtime.state = saved || runtime.state;
-      persistLocalState(runtime.state, runtime.user);
+      if (!current()) throw Object.assign(new Error('Account changed.'), { code: 'entry/auth-changed' });
+      runtime.state = saved || state;
+      persistLocalState(runtime.state, user);
       announceEntryState();
       return runtime.state;
     } finally {
-      setBusy(false);
+      if (current()) setBusy(false);
     }
   }
 
   async function commitTerminalState(candidate, label, options) {
     const previous = runtime.state;
+    const user = runtime.user, epoch = runtime.authEpoch;
+    const current = () => epoch === runtime.authEpoch && (user?.uid || '') === (root.auth?.currentUser?.uid || '');
+    const assertCurrent = () => { if (!current()) throw Object.assign(new Error('Account changed.'), { code: 'entry/auth-changed' }); };
     const normalized = api().normalizeEntryState(candidate);
     if (!normalized || !api().isTerminalState(normalized)) {
       throw new TypeError('A terminal Entry Experience state is required.');
@@ -1494,6 +1518,7 @@
             appearance.themeIntroSeen = root.getThemeIntroSeenList();
           }
           const profileSaved = await root.saveProfilePreferencesToCloud(appearance, { verify: true });
+          assertCurrent();
           if (profileSaved !== true) {
             throw Object.assign(new Error('The selected appearance was not saved to the account.'), {
               code: 'entry/profile-write-failed',
@@ -1503,32 +1528,37 @@
       }
 
       let committed = normalized;
-      if (runtime.user) {
+      assertCurrent();
+      if (user) {
         if (!cloud()?.save) {
           throw Object.assign(new Error('Entry persistence is unavailable.'), {
             code: 'entry/write-failed',
           });
         }
-        committed = await cloud().save(normalized, runtime.user, {
+        committed = await cloud().save(normalized, user, {
           operation: 'entry-completion',
           verify: true,
         }) || normalized;
       }
+      assertCurrent();
       runtime.state = committed;
-      persistLocalState(committed, runtime.user);
+      persistLocalState(committed, user);
       announceEntryState();
       return committed;
     } catch (error) {
-      runtime.state = previous;
-      if (previous) persistLocalState(previous, runtime.user);
+      if (current()) {
+        runtime.state = previous;
+        if (previous) persistLocalState(previous, user);
+      }
       throw error;
     } finally {
-      setBusy(false);
+      if (current()) setBusy(false);
     }
   }
 
   async function handleAction(action) {
     if (!runtime.state) return;
+    const epoch = runtime.authEpoch;
     if (action === 'cancel-settings') {
       runtime.state = runtime.settingsBaseState;
       runtime.settingsBaseState = null;
@@ -1606,6 +1636,7 @@
       render();
       focusEntryHeading();
     } catch (error) {
+      if (epoch !== runtime.authEpoch || error?.code === 'entry/auth-changed') return;
       setBusy(false);
       if (runtime.state && runtime.state.status === 'in-progress') {
         render();
@@ -1975,6 +2006,7 @@
   }
 
   async function runCta(id) {
+    const epoch = runtime.authEpoch;
     if (!runtime.state || runtime.state.status !== 'in-progress' || runtime.state.currentStep !== 'destination') return;
     const expected = currentNextAction();
     if (![expected?.id, expected?.secondaryId].filter(Boolean).includes(id)) return;
@@ -1986,6 +2018,7 @@
       const startsGuidedFirstJourney = id === 'open-selected-world' &&
         root.LootLinguaGuidedFirstJourneyContract?.shouldStartForPresentation(runtime.presentation);
       const destination = await openEntryDestination(id, expected);
+      if (epoch !== runtime.authEpoch) return;
       if (startsGuidedFirstJourney && destination?.type === 'world') {
         // Dictionary guidance is its own tiny, resumable hand-off.  It is
         // planned before the public gate journey but cannot surface until that
@@ -2000,13 +2033,16 @@
           worldId: destination.worldId,
         });
       }
+      if (epoch !== runtime.authEpoch) return;
       const completed = api().transitionState(runtime.state, { type: 'complete' }, Date.now());
       await commitTerminalState(completed, 'جارٍ حفظ اكتمال التجربة…', { applyAppearance: true });
+      if (epoch !== runtime.authEpoch) return;
       close();
       if (destination.focusWordInput) {
         setTimeout(() => document.getElementById('wordInput')?.focus(), 0);
       }
     } catch (error) {
+      if (epoch !== runtime.authEpoch || error?.code === 'entry/auth-changed') return;
       setBusy(false);
       const status = document.getElementById('entryExperienceStatus');
       if (status) status.textContent = error?.code === 'entry/write-failed'
@@ -2097,6 +2133,7 @@
       if (runtime.opened) render();
       return;
     }
+    root.closeRouteOverlays?.();
     runtime.opened = true;
     runtime.previousFocus = document.activeElement;
     root.__entryExperienceActive = true;
@@ -2135,6 +2172,13 @@
     runtime.initialized = true;
     root.addEventListener('lootlingua:auth-state', (event) => {
       runtime.bootToken += 1;
+      runtime.authEpoch += 1;
+      runtime.savePromise = Promise.resolve();
+      close({ silent: true });
+      runtime.state = null;
+      runtime.user = event.detail?.user || null;
+      runtime.settingsMode = '';
+      runtime.settingsBaseState = null;
       if (event.detail?.user) {
         captureGuestSnapshot();
         claimGuestPendingIntentForUser(event.detail.user);

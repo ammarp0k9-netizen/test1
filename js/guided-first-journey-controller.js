@@ -2,7 +2,7 @@
   'use strict';
 
   const runtime = {
-    state: null, loadedOwner: '', loading: null, persistQueue: Promise.resolve(),
+    state: null, loadedOwner: '', loading: null, persistQueue: Promise.resolve(), authEpoch: 0,
     handoff: null, lastRoute: null, handoffAttempts: 0, reengagementOwner: '',
   };
   const COACH_ID = 'guidedFirstJourneyCoach';
@@ -33,6 +33,7 @@
   function preferNewestState(local, remote) {
     if (!local) return remote;
     if (!remote) return local;
+    if (local.phase === 'completed' || remote.phase === 'completed') return local.phase === 'completed' ? local : remote;
     if (Number(local.updatedAt) !== Number(remote.updatedAt)) {
       return Number(local.updatedAt) > Number(remote.updatedAt) ? local : remote;
     }
@@ -54,6 +55,7 @@
   }
 
   async function persist(state) {
+    const epoch = runtime.authEpoch;
     // A previous phase may still be awaiting Firestore while the user has
     // already completed the quiz. Never let that older phase overwrite the
     // newest local or cloud state.
@@ -65,7 +67,7 @@
     if (!current || !cloud()?.save) return latest;
     const ownerId = current.uid;
     const write = runtime.persistQueue.catch(() => {}).then(async () => {
-      if (user()?.uid !== ownerId) return latest;
+      if (epoch !== runtime.authEpoch || user()?.uid !== ownerId) return latest;
       const currentState = runtime.state &&
         Number(runtime.state.updatedAt) > Number(latest.updatedAt)
         ? runtime.state
@@ -85,15 +87,20 @@
 
   async function boot() {
     const owner = api().storageKey(identity());
+    const epoch = runtime.authEpoch;
+    const isCurrent = () => epoch === runtime.authEpoch && api().storageKey(identity()) === owner;
     if (runtime.loadedOwner === owner) return runtime.state;
-    if (runtime.loading) return runtime.loading;
-    runtime.loading = (async () => {
+    if (runtime.loading) return runtime.loading.promise;
+    const request = { promise: null };
+    runtime.loading = request;
+    request.promise = (async () => {
       const local = readLocal();
       let remote = null;
       const current = user();
       if (current && cloud()?.load) {
         try { remote = await cloud().load(current); } catch (_) {}
       }
+      if (!isCurrent()) return null;
       runtime.state = preferNewestState(local, remote);
       const handoff = readHandoff();
       const pending = current ? pendingIntentFor(current) : null;
@@ -109,7 +116,6 @@
       const handoffStillPending = current && !runtime.state && handoff?.state &&
         handoff?.claimedBy !== current.uid && handoff?.operationId;
       runtime.loadedOwner = owner;
-      runtime.loading = null;
       announce();
       if (current && runtime.state?.guestDictionaryAvailable && runtime.reengagementOwner !== owner) {
         runtime.reengagementOwner = owner;
@@ -120,13 +126,13 @@
       // copying guest state to an arbitrary account.
       if (handoffStillPending && runtime.handoffAttempts < 4) {
         runtime.handoffAttempts += 1;
-        setTimeout(() => { runtime.loadedOwner = ''; void boot(); }, 350);
+        setTimeout(() => { if (!isCurrent()) return; runtime.loadedOwner = ''; void boot(); }, 350);
       } else if (runtime.state) {
         runtime.handoffAttempts = 0;
       }
       return runtime.state;
-    })();
-    return runtime.loading;
+    })().finally(() => { if (runtime.loading === request) runtime.loading = null; });
+    return request.promise;
   }
 
   async function beginFromEntry(payload) {
@@ -279,7 +285,12 @@
     requestAnimationFrame(() => applyRoute(runtime.lastRoute));
   });
 
-  root.addEventListener('lootlingua:auth-state', () => { runtime.loadedOwner = ''; runtime.handoffAttempts = 0; void boot(); });
+  root.addEventListener('lootlingua:auth-state', () => {
+    runtime.authEpoch++; runtime.loadedOwner = ''; runtime.loading = null;
+    runtime.state = null; runtime.persistQueue = Promise.resolve(); runtime.handoffAttempts = 0;
+    root.LootLinguaPopover?.closeIf?.(COACH_ID, { silent: true });
+    announce(); void boot();
+  });
   root.addEventListener('lootlingua:guided-first-journey-cloud-ready', () => { runtime.loadedOwner = ''; void boot(); });
   root.addEventListener('lootlingua:initial-data-ready', () => { void boot(); });
 

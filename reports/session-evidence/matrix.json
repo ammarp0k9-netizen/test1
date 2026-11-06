@@ -1,0 +1,55 @@
+{
+  "generatedAt": "2026-11-06T19:10:57.106Z",
+  "browser": "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",
+  "appUrl": "http://127.0.0.1:9159/app",
+  "harness": "real Chrome DOM/input/reload with Firebase replaced by an in-page deterministic adapter",
+  "passed": true,
+  "caseCount": 1,
+  "failures": [],
+  "runtimeExceptions": [],
+  "errorLogs": [],
+  "cases": [
+    {
+      "id": "account-switch",
+      "classification": {
+        "accountA": "brand-new",
+        "accountB": "brand-new"
+      },
+      "visibleSteps": {
+        "accountA": [
+          "welcome",
+          "interests",
+          "theme",
+          "worlds",
+          "journey",
+          "destination"
+        ],
+        "accountB": [
+          "welcome",
+          "interests",
+          "theme",
+          "worlds",
+          "journey",
+          "destination"
+        ]
+      },
+      "onboardingInteraction": {
+        "accountA": true,
+        "accountB": true
+      },
+      "auth": "two real auth-state callbacks on one browser profile",
+      "completion": {
+        "accountA": "completed",
+        "accountB": "completed"
+      },
+      "destination": {
+        "accountA": "worldsView",
+        "accountB": "worldsView"
+      },
+      "accountAReturnVisible": false,
+      "images": [],
+      "failures": [],
+      "passed": true
+    }
+  ]
+}

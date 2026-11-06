@@ -1045,7 +1045,7 @@ test('guest sign-in with saved words resumes one account destination instead of 
 });
 
 test('matrix: guest XP alone still begins at the personal dictionary without Product Entry', async () => {
-  const storage = new MemoryStorage({ userXP: '25' });
+  const storage = new MemoryStorage({ userXP: '25', lootlinguaGuestDataDirty: '1' });
   const harness = await createHarness({ storage });
 
   assert.equal(harness.controller.getPresentation().classification, 'returning-guest-with-local-data');
@@ -1394,4 +1394,35 @@ test('auth success claims the exact guest operation and consumes it only after r
   assert.ok(consumed.consumedAt > 0);
   assert.equal(storage.getItem(contract.pendingIntentStorageKey({})), null);
   assert.equal(harness.document.getElementById('journeyAuthPrompt'), null);
+});
+
+
+test('an old account profile cache is not guest learning evidence for a new account', async () => {
+  const storage=new MemoryStorage({userXP:'900',dailyStreak:'20'});
+  const h=await createHarness({user:freshUser('fresh-with-stale-cache'),storage});
+  assert.equal(h.controller.getPresentation().classification,'brand-new');
+  assert.equal(h.controller.getState().currentStep,'welcome');
+});
+
+test('late onboarding checkpoint cannot replace a new account and refresh keeps its own draft', async () => {
+  let release;
+  const pending=new Promise(resolve=>{release=resolve});
+  const h=await createHarness({user:freshUser('old-checkpoint'),entrySave:(_state,user)=>user.uid==='old-checkpoint'?pending:clone(_state)});
+  await h.click('[data-entry-action="continue-welcome"]');
+  let closed=0;h.root.closeRouteOverlays=()=>{closed++};
+  const next=freshUser('new-checkpoint');await h.switchUser(next);
+  assert.equal(h.controller.getState().currentStep,'welcome');assert.ok(closed>0);
+  release({ ...h.controller.getState(),currentStep:'interests' });await settle();
+  assert.equal(h.controller.getState().currentStep,'welcome');
+  const refreshed=await createHarness({user:next,storage:h.storage});
+  assert.equal(refreshed.controller.getState().currentStep,'welcome');assert.equal(refreshed.controller.isActive(),true);
+});
+
+test('unrelated profile/mastery arrivals cannot restart an open onboarding draft', async () => {
+  const h=await createHarness({user:freshUser('stable-open-tour')});
+  await h.click('[data-entry-action="continue-welcome"]');
+  const reads=h.calls.entryLoads.length;
+  h.root.dispatchEvent(new FakeCustomEvent('lootlingua:profile-snapshot'));
+  h.root.dispatchEvent(new FakeCustomEvent('lootlingua:word-mastery-snapshot'));await settle();
+  assert.equal(h.controller.getState().currentStep,'interests');assert.equal(h.calls.entryLoads.length,reads);
 });

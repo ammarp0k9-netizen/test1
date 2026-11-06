@@ -615,7 +615,18 @@ window.replaceWordsForCurrentUser = function(words, type = 'normal', uid) {
   writeWordsToStorage(window.words, type, uid);
 };
 
-window.clearDictionaryState = function({ renderView = true } = {}) {
+window.clearDictionaryState = function({ renderView = true, resetSession = false } = {}) {
+  if (resetSession) {
+    activeCustomWorldId = null;
+    customWorlds = [];
+    currentView = 'personal';
+    window.__dictionaryNavigationGeneration = (Number(window.__dictionaryNavigationGeneration) || 0) + 1;
+    window.dispatchEvent(new CustomEvent('lootlingua:dictionary-navigation'));
+    delete window.__dictionarySaveInFlight;
+    if (typeof restoreActiveAddFormDraft === 'function') restoreActiveAddFormDraft();
+    else if (typeof resetAddFormEditState === 'function') resetAddFormEditState();
+    document.getElementById('addBtn')?.removeAttribute('aria-busy');
+  }
   window.words = [];
   editId = null;
   pendingDeleteId = null;

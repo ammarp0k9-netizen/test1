@@ -351,6 +351,7 @@
           <strong>جري البوابات</strong>
           <span>شخصيتك، ثلاثة مسارات، وبوابات من كلماتك. اقفز، انزلق واجمع العملات.</span>
           <small id="runnerModeLock">تفتح عند 10 كلمات في قاموسك</small>
+          <small>عملاتك: <span data-runner-wallet>0</span> · أفضل مسافة: <span data-runner-best>0</span> م</small>
         </button>
         <button type="button" class="quiz-mode-card quiz-mode-flashcards"  onclick="openQuizModeSettings('flashcards')">
           <span class="quiz-mode-icon"><i class="fa-solid fa-layer-group" aria-hidden="true"></i></span>
@@ -383,6 +384,7 @@
       <p id="quizSettingsDesc">اضبط التحدي قبل ما تبدأ.</p>
       <div id="runnerSetupBrief" class="runner-setup-brief" hidden>
         <span>٣ مسارات</span><span>↑ قفز · ↓ انزلاق</span><span>♥ ٣ فرص</span>
+        <p>عملاتك: <b data-runner-wallet>0</b> · أفضل مسافة: <b data-runner-best>0</b> م — مشتركة مع جميع بوابات الجري.</p>
         <p>اختر مجموعة كلمات الطريق. الجري مستمر حتى تنتهي فرصك؛ العدد يحدد كلمات البوابات، وليس عدد البوابات.</p>
       </div>
       <div id="flashcardPresetOptions" class="flashcard-preset-options" style="display:none;">
@@ -1153,12 +1155,12 @@
 <script src="js/entry-experience-contract.js?v=20261029-entry-simplify-1"></script>
   <script src="js/guided-first-journey-contract.js?v=20260827-1"></script>
   <script src="js/feature-discovery-contract.js?v=20261104-discovery-1"></script>
-<script data-startup-critical src="js/entry-experience-controller.js?v=20261106-motivation-1"></script>
-<script src="js/guided-first-journey-controller.js?v=20261104-coach-polish-3"></script>
+<script data-startup-critical src="js/entry-experience-controller.js?v=20261106-session-1"></script>
+<script src="js/guided-first-journey-controller.js?v=20261106-session-1"></script>
 <script src="js/personal-dictionary-onboarding.js?v=20261106-onboarding-sync-1"></script>
   <script src="js/feature-discovery-controller.js?v=20261106-onboarding-sync-1"></script>
 <script src="js/feature-mini-onboarding.js?v=20261106-rewards-layout-1"></script>
-<script data-startup-critical type="module" src="js/cloud.js?v=20261106-stage2-1"></script>
+<script data-startup-critical type="module" src="js/cloud.js?v=20261106-session-1"></script>
 <script data-startup-critical type="module" src="js/entry-experience-cloud.js?v=20260808-1"></script>
 <script type="module" src="js/guided-first-journey-cloud.js?v=20260827-1"></script>
 
@@ -1194,7 +1196,7 @@
 </div>
 
 <!-- ══ FIREBASE PROFILE SYNC ══ -->
-  <script data-startup-critical type="module" src="js/profile-cloud.js?v=20261106-onboarding-sync-1"></script>
+  <script data-startup-critical type="module" src="js/profile-cloud.js?v=20261106-session-1"></script>
 <script type="module" src="js/published-content.js?v=20260722-1"></script>
 <script data-startup-critical type="module" src="js/journey-cloud.js?v=20261105-pages-1"></script>
 <script type="module" src="js/notification-cloud.js?v=20260811-1"></script>
@@ -1208,7 +1210,7 @@
   <script src="js/modal-focus.js?v=20261106-stage2-1"></script>
   <script data-startup-critical src="js/core.js?v=20261106-stage2-1"></script>
 <script src="js/operation-runtime.js?v=20260811-3"></script>
-    <script data-startup-critical src="js/storage.js?v=20261106-motivation-1"></script>
+    <script data-startup-critical src="js/storage.js?v=20261106-session-1"></script>
   <script src="js/content-schema.js?v=20260722-1"></script>
 <script src="js/word-lifecycle.js?v=20260722-1"></script>
 <script src="js/quiz-core.js?v=20260811-1"></script>
@@ -1221,15 +1223,15 @@
 <script data-startup-critical src="js/script.js?v=20261106-admin-fixes-1"></script>
 <script src="js/xp.js?v=20261106-glass-paused-1"></script>
 <script src="js/xp-batch.js?v=20261105-integrity-1"></script>
-<script src="js/dictionary.js?v=20261106-stage2-1"></script>
+<script src="js/dictionary.js?v=20261106-session-1"></script>
 <script src="js/gate-game-migration.js?v=20261007-1"></script>
-<script src="js/gate-runner.js?v=20261106-runner-5"></script>
+<script src="js/gate-runner.js?v=20261106-session-1"></script>
 <script src="js/worlds.js?v=20261106-motivation-1"></script>
 <script src="js/dictionary-window.js?v=20261105-render-1"></script>
 <script src="js/dictionary-render.js?v=20261105-pages-1"></script>
 <script src="js/srs.js?v=20261105-render-1"></script>
 <script src="js/popover-overrides.js?v=20260817-1"></script>
-<script src="js/quiz.js?v=20261106-runner-5"></script>
+<script src="js/quiz.js?v=20261106-session-1"></script>
 <script src="js/srs-transitions.js"></script>
 <script src="js/srs-transition-batch.js?v=20260722-1"></script>
 <script src="js/quiz-runtime.js?v=20261106-stage2-1"></script>

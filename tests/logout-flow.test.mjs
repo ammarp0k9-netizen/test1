@@ -74,3 +74,10 @@ test('public landing path respects Vercel and GitHub Pages project roots', () =>
   assert.equal(publicLandingPath({ hostname: 'loot-lingua.vercel.app', pathname: '/app/dictionary' }), '/');
   assert.equal(publicLandingPath({ hostname: 'example.github.io', pathname: '/lootlingua/app/dictionary' }), '/lootlingua/');
 });
+
+
+test('a stalled cloud save cannot indefinitely block logout and its durable outbox is retained', async () => {
+  const calls=[];
+  await runLogoutSequence({saveTimeoutMs:10,savePendingProfile:()=>new Promise(()=>{}),signOut:async()=>calls.push('out'),clearAccountState:()=>calls.push('clear'),navigateToLanding:()=>calls.push('navigate')});
+  assert.deepEqual(calls,['out','clear','navigate']);
+});

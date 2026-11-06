@@ -301,3 +301,20 @@ test('the public-world journey stays separate from feature eligibility', () => {
   assert.match(popoverSource, /getActiveId/);
   assert.match(popoverSource, /lootlingua:popover-closed/);
 });
+
+
+test('a completed guest boot does not block loading a newly signed-in account', async () => {
+  const {root,controller}=createControllerHarness();root.auth.currentUser=null;await controller.boot();
+  let loads=0;root.LootLinguaGuidedFirstJourneyCloud={load:async()=>{loads++;return guided.create('world-b',100)}};
+  root.auth.currentUser={uid:'B'};root.dispatchEvent({type:'lootlingua:auth-state'});await controller.boot();
+  assert.equal(loads,1);assert.equal(controller.getState().worldId,'world-b');
+});
+
+test('a late guided-journey read from A cannot overwrite B', async () => {
+  const {root,controller}=createControllerHarness();let release;
+  const pending=new Promise(resolve=>{release=resolve});
+  root.LootLinguaGuidedFirstJourneyCloud={load:async user=>user.uid==='guided-user'?pending:guided.create('world-b',200)};
+  const old=controller.boot();root.auth.currentUser={uid:'B'};root.dispatchEvent({type:'lootlingua:auth-state'});
+  await controller.boot();release(guided.create('world-a',100));await old;
+  assert.equal(controller.getState().worldId,'world-b');
+});

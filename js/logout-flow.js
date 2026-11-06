@@ -7,7 +7,15 @@ export function publicLandingPath(locationLike = {}) {
 }
 
 export async function runLogoutSequence(operations = {}) {
-  await operations.savePendingProfile?.();
+  // The durable, account-scoped outbox survives sign-out. An unavailable
+  // network must not hold the authentication action hostage indefinitely.
+  let timer;
+  try {
+    await Promise.race([
+      Promise.resolve().then(() => operations.savePendingProfile?.()).catch(() => {}),
+      new Promise(resolve => { timer = setTimeout(resolve, operations.saveTimeoutMs ?? 2000); }),
+    ]);
+  } finally { clearTimeout(timer); }
   operations.prepareLogout?.();
   const accountCleanup = operations.waitForAccountCleanup?.() || Promise.resolve();
 

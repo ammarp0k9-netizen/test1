@@ -11,7 +11,7 @@
     getDoc, setDoc, getDocs, runTransaction, writeBatch,
     limit, startAfter, documentId, where, getCountFromServer
   } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
-  import { publicLandingPath, runLogoutSequence } from './logout-flow.js?v=20260811-1';
+  import { publicLandingPath, runLogoutSequence } from './logout-flow.js?v=20261106-session-1';
   import { mountAppAuth } from './app-auth-ui.js?v=20260811-2';
 
   const firebaseConfig = {
@@ -90,6 +90,7 @@
     window.__lootlinguaMasterySnapshot = null;
     window.__lootlinguaInitialDataReady = false;
     window._profileLoaded = false;
+    window.closeRouteOverlays?.();
     window.dispatchEvent(new CustomEvent('lootlingua:auth-state', { detail: { user: user || null } }));
     // Notify Smart Loading Overlay that auth state is resolved
     if (window.SmartLoadingOverlay && window.SmartLoadingOverlay.onAuthResolved) {
@@ -134,7 +135,7 @@
       }
       // The startup gate remains up until Entry decides the first screen; an
       // empty intermediate dictionary render cannot be seen or used.
-      if (typeof window.clearDictionaryState === 'function') window.clearDictionaryState({ renderView: false });
+      if (typeof window.clearDictionaryState === 'function') window.clearDictionaryState({ renderView: false, resetSession: true });
       else window.words = [];
       loadWordsFromCloud(user);
       loadGlobalWordMasteryFromCloud(user);
@@ -147,6 +148,7 @@
         }
       }, 0);
     } else {
+      window.clearDictionaryState?.({ renderView: false, resetSession: true });
       if (suppressNextGuestLoad) {
         suppressNextGuestLoad = false;
         if (typeof window.clearDictionaryState === 'function') window.clearDictionaryState();
@@ -222,6 +224,8 @@
   });
 
   window.confirmLogout = async function() {
+    if (window.__lootlinguaLogoutPending) return;
+    window.__lootlinguaLogoutPending = true;
     let authStateHandler = null;
     const waitForAccountCleanup = () => new Promise((resolve) => {
       if (window.__lootlinguaAuthResolved && !window.__lootlinguaAuthUser) {
@@ -257,10 +261,11 @@
         navigateToLanding: () => location.assign(publicLandingPath(location)),
       });
     } catch (error) {
+      suppressNextGuestLoad = false;
       if (authStateHandler) window.removeEventListener('lootlingua:auth-state', authStateHandler);
       console.error(error?.code || 'auth/logout-error', error?.message || error);
       window.showToast?.('تعذر تسجيل الخروج الآن. جرّب مرة أخرى.', 'danger', 4200, { critical: true });
-    }
+    } finally { window.__lootlinguaLogoutPending = false; }
   };
 
   function loadWordsFromCloud(user) {
@@ -650,6 +655,10 @@
   async function upsertUserWordWithSource(input = {}) {
     const user = auth.currentUser;
     if (!user) throw wordLifecycleError('word-lifecycle/sign-in-required', 'Sign in is required.');
+    const generation = Number(window.__lootlinguaAuthGeneration) || 0;
+    const assertCurrent = () => {
+      if (auth.currentUser?.uid !== user.uid || generation !== (Number(window.__lootlinguaAuthGeneration) || 0)) throw wordLifecycleError('auth/identity-changed', 'The account changed during the word write.');
+    };
     await window.LootLinguaDictionaryPages?.current(user.uid)?.ensureComplete();
     if (auth.currentUser?.uid !== user.uid) throw wordLifecycleError('word-lifecycle/user-mismatch', 'Word owner changed.');
     if (input.uid && String(input.uid) !== user.uid) {
@@ -756,6 +765,7 @@
           movedDictionaryFields.translation = movedDictionaryFields.meaning;
         }
         const wasHidden = legacy?.hiddenFromDictionary === true;
+        assertCurrent();
         const restored = Boolean(input.restoreHidden === true && wasHidden);
         const sourceLinked = !sourceSnapshot.exists();
         const sourceRemoved = Boolean(removePrivateSourceSnapshot?.exists());
@@ -871,10 +881,12 @@
             : null,
         };
       });
+      assertCurrent();
       if (result.legacyProjectionPending && result.legacyProjection) {
         const projection = result.legacyProjection;
         await runTransaction(db, async (transaction) => {
           const snapshot = await transaction.get(projection.reference);
+          assertCurrent();
           trace?.count('firestoreReads');
           if (snapshot.exists()) return;
           transaction.set(projection.reference, projection.payload);
@@ -2011,7 +2023,7 @@
       });
       window.__lastUserWordLifecycleResult = result;
       return result.wordId;
-    } catch (e) { console.error("فشل الرفع:", e); return null; }
+    } catch (e) { console.error("فشل الرفع:", e); throw e; }
   };
 
   window.updateWordInCloud = async function(docId, data) {

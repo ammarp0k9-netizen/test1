@@ -12,6 +12,7 @@ function harness(signed = true) {
     queueProfileIntent: intent => { intents.push(intent); return 'queued-max'; },
   };
   vm.runInNewContext(source, { window: root, localStorage: { getItem: key => values.get(key), setItem: (key, value) => values.set(key, value) }, console });
+  if (signed) root.LootLinguaGateRunner.acceptProfile({ runnerCoins: 100, runnerBestDistance: 10 }, 'A');
   return { api: root.LootLinguaGateRunner, root, values, intents };
 }
 test('Runner account coins use the earned delta and immutable run ID without rewriting a cached balance', async () => {
@@ -35,4 +36,15 @@ test('unavailable account sync does not fabricate a new local wallet balance', a
   const h = harness(); delete h.root.commitProfileIntent;
   h.api.RunnerCoinWallet.credit(10);
   assert.equal(h.values.get('lootlingua.runner.coins.v1'), '100'); assert.equal(h.intents.length, 0);
+});
+
+
+test('all runner entry points share account progress while different accounts stay isolated', () => {
+  const h=harness();assert.equal(h.api.RunnerCoinWallet.balance(),100);
+  h.root.auth.currentUser={uid:'B'};
+  assert.equal(h.api.RunnerCoinWallet.balance(),0);assert.equal(h.api.RunnerBestDistance.value(),0);
+  h.api.acceptProfile({runnerCoins:999,runnerBestDistance:999},'A');assert.equal(h.api.RunnerCoinWallet.balance(),0);
+  h.api.acceptProfile({runnerCoins:7,runnerBestDistance:320},'B');
+  assert.equal(h.api.RunnerCoinWallet.balance(),7);assert.equal(h.api.RunnerBestDistance.value(),320);
+  h.root.auth.currentUser={uid:'A'};assert.equal(h.api.RunnerCoinWallet.balance(),100);assert.equal(h.api.RunnerBestDistance.value(),10);
 });
