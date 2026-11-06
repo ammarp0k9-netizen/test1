@@ -3,43 +3,48 @@ import test from 'node:test';
 import fs from 'node:fs';
 import vm from 'node:vm';
 
-function expedition() {
+function runner() {
   const values = new Map();
   const context = {
     window: { auth: { currentUser: { uid: 'player-1' } } },
     localStorage: { getItem: (key) => values.get(key) || null, setItem: (key, value) => values.set(key, value) },
     Date, Number, String, Array, JSON, Math, Object, Set,
   };
-  vm.runInNewContext(fs.readFileSync('js/gate-expedition.js', 'utf8'), context);
-  return context.window.LootLinguaGateExpedition;
+  vm.runInNewContext(fs.readFileSync(new URL('../js/gate-runner.js', import.meta.url), 'utf8'), context);
+  return context.window.LootLinguaGateRunner;
 }
 
-const gate = { worldId: 'world', rankId: 'rank', gateId: 'gate' };
-
-test('two-hour and next-day waits receive bounded shard goals', () => {
-  const api = expedition();
-  assert.equal(api.windowTarget('two-hour', 2 * 3600000), 2);
-  assert.equal(api.windowTarget('next-day', 24 * 3600000), 4);
-  assert.equal(api.windowTarget('next-day', 30 * 60000), 1);
+test('retired Gate Expedition is absent from both assets and application entrypoints', () => {
+  assert.equal(fs.existsSync(new URL('../js/gate-expedition.js', import.meta.url)), false);
+  for (const file of ['index.html', 'js/worlds.js', 'js/script.js']) {
+    assert.doesNotMatch(fs.readFileSync(new URL('../' + file, import.meta.url), 'utf8'), /LootLinguaGateExpedition|gate-expedition\.js/);
+  }
 });
 
-test('the two wait phases rotate between the two games for one gate', () => {
-  const api = expedition();
-  assert.notEqual(api.gameFor(gate, 'two-hour'), api.gameFor(gate, 'next-day'));
+test('the remaining optional Runner is blocked while an official review is due', () => {
+  const api = runner();
+  assert.equal(api.reviewIsDue({ availableForReviewNowCount: 1 }, 1000), true);
+  assert.equal(api.reviewIsDue({ readinessNextAt: 999 }, 1000), true);
+  assert.equal(api.reviewIsDue({ readinessNextAt: 1001 }, 1000), false);
 });
 
-test('an official review suppresses side-game play without touching SRS data', () => {
-  const api = expedition();
-  const view = api.getView({ ...gate, progress: { availableForReviewNowCount: 1 } });
-  assert.equal(view.mode, 'official-due');
-  assert.equal(view.window, null);
+test('completing the exact official due-word set releases the optional Runner without a progression write', () => {
+  const api = runner();
+  const progress = { availableForReviewNowCount: 2, runnerReviewDueWordKeys: ['one', 'two'], runnerReviewCompletedDueWordKeys: ['one'] };
+  const before = structuredClone(progress);
+  assert.equal(api.reviewIsDue(progress, 1000), true);
+  assert.deepEqual(progress, before);
+  assert.equal(api.reviewIsDue({ ...progress, runnerReviewCompletedDueWordKeys: ['one', 'two'] }, 1000), false);
 });
 
-test('a waiting window is stable for the same official review deadline', () => {
-  const api = expedition();
-  const context = { ...gate, progress: { waitingLaterTodayCount: 1, readinessNextAt: Date.now() + 2 * 3600000 } };
-  const first = api.getView(context);
-  const second = api.getView(context);
-  assert.equal(first.window.id, second.window.id);
-  assert.equal(first.window.target, 2);
+test('Runner gameplay keeps its source dictionary and SRS fields unchanged', () => {
+  const api = runner();
+  const words = [{ word: 'Apple', meaning: 'fruit', mastery_status: 'Reviewing', eligibleEvidenceCount: 2 }];
+  const before = structuredClone(words);
+  const state = api.createState(words);
+  state.running = true;
+  api.step(state, 16000, () => 0.3);
+  api.chooseLane(state, state.event?.correctLane || 0, 1000);
+  assert.deepEqual(words, before);
+  assert.doesNotMatch(fs.readFileSync(new URL('../js/gate-runner.js', import.meta.url), 'utf8'), /recordQuizEvidenceBatch|awardWordTransitionXP|updateGateProgress|upsertUserWordWithSource/);
 });

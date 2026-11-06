@@ -278,6 +278,7 @@ test('the phase adds no Function export, callable, or trigger', () => {
     'bulkUpdateContentWords', 'deleteContentGate', 'deleteContentRank', 'deleteContentWord',
     'deleteContentWorld', 'duplicateContentGate', 'duplicateContentRank', 'duplicateContentWord',
     'moveContentGate', 'moveContentWord',
+    'submitFeedback', // Existing feedback endpoint is unrelated to World completion.
   ].sort());
   assert.doesNotMatch(cloudSource, /worldCompletion.*httpsCallable|onCall\(|onCreate\(|onUpdate\(/s);
   assert.equal(functionEntries.some((name) => /world-completion|test-clock|notification/i.test(name)), false);

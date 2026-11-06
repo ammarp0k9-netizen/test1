@@ -1,0 +1,83 @@
+{
+  "isolation": "All Firebase modules replaced or removed; no Firebase credentials/DB access; HTTPS blocked; fresh temporary profile",
+  "device": {
+    "width": 390,
+    "height": 844,
+    "cpuSlowdown": 6,
+    "latencyMs": 150,
+    "downloadBytesPerSecond": 204800
+  },
+  "cases": [
+    {
+      "name": "before-cosmetic-deferral",
+      "readyMs": 13546.900000035763,
+      "domContentLoadedMs": 13556.700000047684,
+      "longTasksBeforeReady": [
+        {
+          "start": 10565.700000047684,
+          "duration": 780
+        },
+        {
+          "start": 13540.700000047684,
+          "duration": 127
+        }
+      ],
+      "oasisStartMs": 1394.9000000357628,
+      "entryActive": true,
+      "entryStep": "welcome",
+      "authResolved": true,
+      "authUser": null,
+      "overflow": false
+    },
+    {
+      "name": "after-cosmetic-deferral",
+      "readyMs": 15462.199999988079,
+      "domContentLoadedMs": 15465.599999964237,
+      "longTasksBeforeReady": [],
+      "oasisStartMs": 15557,
+      "entryActive": true,
+      "entryStep": "welcome",
+      "authResolved": true,
+      "authUser": null,
+      "overflow": false
+    },
+    {
+      "name": "module-failed",
+      "status": {
+        "completed": false,
+        "failed": true,
+        "canContinueGuest": false
+      },
+      "guestHidden": true,
+      "gate": true,
+      "overlay": true,
+      "entryActive": false,
+      "authResolved": false,
+      "authUid": null,
+      "word": null,
+      "retryAvailable": true,
+      "overflow": false
+    },
+    {
+      "name": "account-dependency-failed",
+      "status": {
+        "completed": false,
+        "failed": true,
+        "canContinueGuest": false
+      },
+      "guestHidden": true,
+      "gate": true,
+      "overlay": true,
+      "entryActive": false,
+      "authResolved": true,
+      "authUid": "fixture-private-account",
+      "word": "PrivateAccountWord",
+      "retryAvailable": true,
+      "overflow": false
+    },
+    {
+      "name": "retry-reloads-and-resumes-entry",
+      "passed": true
+    }
+  ]
+}

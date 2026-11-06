@@ -139,24 +139,18 @@ test('deep published routes resolve local assets from the application root', () 
     /<script>\s*(\(function \(location, document\)[\s\S]*?)<\/script>/
   )?.[1];
   assert.ok(headScript, 'The early route/base script must exist.');
+  assert.ok(htmlSource.includes('<base id="assetBase" href="/">'));
   assert.ok(
-    htmlSource.indexOf('document.head.appendChild(assetBase)') <
+    htmlSource.indexOf('<base id="assetBase"') <
       htmlSource.indexOf('href="style.css'),
     'The asset base must be installed before relative styles load.'
   );
 
   function runHeadScript(location) {
-    const appended = [];
+    const assetBase = { tagName: 'BASE', href: '/' };
     const historyCalls = [];
     const documentObject = {
-      head: {
-        appendChild(element) {
-          appended.push(element);
-        },
-      },
-      createElement(tagName) {
-        return { tagName: tagName.toUpperCase(), href: '' };
-      },
+      getElementById(id) { assert.equal(id, 'assetBase'); return assetBase; },
     };
     const windowObject = {
       location,
@@ -172,7 +166,7 @@ test('deep published routes resolve local assets from the application root', () 
       document: documentObject,
       window: windowObject,
     });
-    return { appended, historyCalls };
+    return { assetBase, historyCalls };
   }
 
   const vercel = runHeadScript({
@@ -183,7 +177,7 @@ test('deep published routes resolve local assets from the application root', () 
     search: '',
     hash: '',
   });
-  assert.equal(vercel.appended[0].href, '/');
+  assert.equal(vercel.assetBase.href, '/');
   assert.equal(vercel.historyCalls.length, 0);
 
   const github = runHeadScript({
@@ -194,7 +188,7 @@ test('deep published routes resolve local assets from the application root', () 
     search: '?p=%2Fworlds%2Fworld-a%2Franks%2Frank-a',
     hash: '',
   });
-  assert.equal(github.appended[0].href, '/LootLingua/');
+  assert.equal(github.assetBase.href, '/LootLingua/');
   assert.equal(github.historyCalls[0][2], '/LootLingua/worlds/world-a/ranks/rank-a');
 });
 
@@ -365,7 +359,13 @@ test('published presentation has compact words, polished states, and responsive 
   assert.match(wordCard, /translation\.setAttribute\('dir', 'rtl'\)/);
   assert.match(styleSource, /\.published-word-text[\s\S]*text-align: right/);
   assert.match(styleSource, /\.published-word-actions[\s\S]*grid-area: actions/);
-  assert.doesNotMatch(publishedUi, /innerHTML/);
+  const picker = sourceSection(worldsSource, 'async function openPublishedGateQuizPicker', '// Smart Journey notifications');
+  assert.doesNotMatch(publishedUi.replace(picker, ''), /innerHTML/);
+  assert.doesNotMatch(wordCard, /innerHTML/);
+  assert.match(picker, /escapeHtml\(gate\.title \|\| 'البوابة الحالية'\)/);
+  assert.match(picker, /GATE_QUIZ_MODE_CARDS\.forEach\(\(mode\)/);
+  const modeCards = sourceSection(worldsSource, 'const GATE_QUIZ_MODE_CARDS =', 'async function openPublishedGateQuizPicker');
+  assert.doesNotMatch(modeCards, /\bworld\.|\bgate\.|\bword\.|\$\{/);
   assert.match(styleSource, /@media \(max-width: 640px\)/);
   assert.match(styleSource, /@media \(prefers-reduced-motion: reduce\)/);
   assert.match(worldsSource, /ready: Object\.freeze\(\{ label: 'جاهزة للاجتياز'/);
@@ -376,6 +376,36 @@ test('published presentation has compact words, polished states, and responsive 
   assert.match(styleSource, /\.published-journey-node\.is-cleared[\s\S]*var\(--success\)/);
   assert.match(styleSource, /\.published-gate-switcher-rail \{ display: none; \}/);
   assert.match(styleSource, /\.published-gate-switcher-select \{ display: block; \}/);
+});
+
+test('published word content remains literal text for hostile markup and quotes', () => {
+  const nodes = [];
+  const document = {
+    createElement(tagName) {
+      const node = { tagName, children: [], textContent: '', attributes: {}, classList: { toggle() {} },
+        append(...children) { this.children.push(...children); },
+        setAttribute(name, value) { this.attributes[name] = value; }, addEventListener() {},
+        get childElementCount() { return this.children.length; },
+        set innerHTML(_) { throw new Error('Untrusted published content must never be parsed as HTML'); },
+      };
+      nodes.push(node); return node;
+    },
+    createTextNode: value => ({ textContent: String(value) }),
+  };
+  const context = vm.createContext({ document, window: {},
+    getPublishedUserWord: () => null, isDictionaryWordHidden: () => false,
+    publishedDetailText: value => value == null ? '' : String(value),
+  });
+  const helper = sourceSection(worldsSource, 'function publishedElement(', 'function setPublishedTabState(');
+  const meta = sourceSection(worldsSource, 'function appendMetaChip(', 'function ');
+  vm.runInContext(helper + '\n' + meta + '\n' + sourceSection(worldsSource, 'function makePublishedWordCard(', 'function getPublishedWordPageMeta('), context);
+  const hostile = '<img src=x onerror="globalThis.compromised=1"> \' &#39; &quot; 🎮';
+  const card = context.makePublishedWordCard({ word: hostile, translation: hostile, example: hostile, definition: hostile, category: hostile });
+  assert.equal(card.tagName, 'article');
+  assert.equal(nodes.find(node => node.className === 'published-word-text').textContent, hostile);
+  assert.equal(nodes.find(node => node.className === 'published-word-translation').textContent, hostile);
+  assert.equal(nodes.some(node => node.tagName === 'img'), false);
+  assert.equal(context.compromised, undefined);
 });
 
 test('published pagination clicks replace items and return to the cached first page', async () => {

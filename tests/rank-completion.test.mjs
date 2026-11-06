@@ -175,14 +175,30 @@ test('Gate Clear owns the atomic Rank completion commit and the CTA returns to t
   assert.doesNotMatch(resultUi, /awardXP|claimXP|localStorage/);
 });
 
-test('post-commit decoration failure cannot report a successful Gate Clear as failed', () => {
+test('post-commit decoration failure cannot report a successful Gate Clear as failed', async () => {
   const answer = cloudSource.slice(
     cloudSource.indexOf('async function answerGateClearQuestion'),
     cloudSource.indexOf('async function abandonGateClearAttempt')
   );
-  assert.match(answer, /const result = await finalizeGateClearAttempt/);
-  assert.match(answer, /Gate Clear committed; result decoration failed/);
-  assert.match(answer, /return \{ attempt: nextSession, words: \[\], question: null, result \}/);
+  assert.match(answer, /finalizeResumedGateClearAttempt/);
+  const helper = cloudSource.slice(cloudSource.indexOf('async function finalizeResumedGateClearAttempt'), cloudSource.indexOf('async function finalizeGateClearAttempt'));
+  const result = { passed: true, completedRankIds: ['rank-a'] };
+  const attempt = { attemptId: 'attempt', status: 'submitting' };
+  let commits = 0;
+  const scope = vm.createContext({
+    async finalizeGateClearAttempt() { commits++; return result; },
+    async getGateClearAttempt() { throw Object.assign(new Error('Decoration unavailable'), { code: 'unavailable' }); },
+    console: { warn() {} },
+  });
+  vm.runInContext(helper, scope);
+  const saved = await scope.finalizeResumedGateClearAttempt('world', 'rank-a', 'gate', 'attempt', attempt);
+  assert.equal(commits, 1);
+  assert.equal(saved.result, result);
+  assert.equal(saved.attempt, attempt);
+  assert.equal(saved.question, null);
+  assert.equal(saved.words.length, 0);
+  scope.finalizeGateClearAttempt = async () => { throw new Error('Commit rejected'); };
+  await assert.rejects(scope.finalizeResumedGateClearAttempt('world', 'rank-a', 'gate', 'attempt', attempt), /Commit rejected/);
 });
 
 test('Rank reward is deliberately separate from completion and no new callable exists', () => {

@@ -45,7 +45,9 @@
     "test:stage-a": "npm run test:contracts && npm run test:rules",
     "test:stage-b": "npm run test:contracts && npm run test:admin && npm --prefix functions run check && npm --prefix functions test && npm run test:rules",
     "test:stage-c1": "npm run test:contracts && npm run test:admin && npm run test:admin:browser && npm --prefix functions run check && npm --prefix functions test && npm run test:rules",
-    "test:stage-c2": "npm run test:contracts && npm run test:admin && npm run test:admin:browser && npm run test:admin:gate-browser && npm --prefix functions run check && npm --prefix functions test && npm run test:rules"
+    "test:stage-c2": "npm run test:contracts && npm run test:admin && npm run test:admin:browser && npm run test:admin:gate-browser && npm --prefix functions run check && npm --prefix functions test && npm run test:rules",
+    "test:stage-two": "node --test tests/profile-cloud-auth.test.mjs tests/profile-cloud-preferences.test.mjs tests/profile-hydration.test.mjs tests/profile-sync.test.mjs tests/runner-profile-sync.test.mjs tests/guest-migration-auth.test.mjs tests/streak-freeze.test.mjs tests/chest-cloud-atomic.test.mjs tests/chest-claim-integrity.test.mjs tests/loot-open-ui.test.mjs tests/dictionary-search-auth.test.mjs tests/startup-recovery.test.mjs tests/quiz-learning-regression.test.mjs",
+    "test:stage-two:browser": "node tools/modal-focus-browser-smoke.mjs && node tools/streak-freeze-browser-smoke.mjs"
   },
   "devDependencies": {
     "@firebase/rules-unit-testing": "5.0.1",

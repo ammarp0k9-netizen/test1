@@ -1,0 +1,62 @@
+{
+  "isolation": "All Firebase modules replaced or removed; no Firebase credentials/DB access; HTTPS blocked; fresh temporary profile",
+  "device": {
+    "width": 390,
+    "height": 844,
+    "cpuSlowdown": 6,
+    "latencyMs": 150,
+    "downloadBytesPerSecond": 204800
+  },
+  "cases": [
+    {
+      "name": "module-failed",
+      "status": {
+        "completed": false,
+        "failed": true,
+        "canContinueGuest": false
+      },
+      "guestHidden": true,
+      "gate": true,
+      "overlay": true,
+      "entryActive": false,
+      "authResolved": false,
+      "authUid": null,
+      "word": null,
+      "retryAvailable": true,
+      "overflow": false
+    },
+    {
+      "name": "account-dependency-failed",
+      "status": {
+        "completed": false,
+        "failed": true,
+        "canContinueGuest": false
+      },
+      "guestHidden": true,
+      "gate": true,
+      "overlay": true,
+      "entryActive": false,
+      "authResolved": true,
+      "authUid": "fixture-private-account",
+      "word": "PrivateAccountWord",
+      "retryAvailable": true,
+      "overflow": false
+    },
+    {
+      "name": "confirmed-local-guest-still-passes-through-entry",
+      "entryActive": true,
+      "step": "welcome",
+      "status": {
+        "completed": true,
+        "failed": true,
+        "canContinueGuest": true
+      },
+      "auth": null
+    },
+    {
+      "name": "retry-reloads-and-resumes-entry",
+      "passed": true
+    }
+  ],
+  "runtimeExceptions": []
+}

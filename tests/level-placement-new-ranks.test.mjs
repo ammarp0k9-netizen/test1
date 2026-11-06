@@ -288,8 +288,8 @@ test('failed explicit progression is classified without mutating cached Journey 
   assert.match(cloudSource, /__LOOTLINGUA_JOURNEY_DIAGNOSTICS__/);
 });
 
-test('Published UI labels and counts only the new ranks', () => {
-  assert.match(worldsSource, /'new-content': 'اختبار الرتب الجديدة'/);
+test('Published UI labels new content and counts only the unassessed ranks', () => {
+  assert.match(worldsSource, /'new-content': 'اختبار المحتوى الجديد'/);
   assert.match(worldsSource, /const newRankCount = overview\?\.unassessedRankIds\?\.length \|\| 0/);
   assert.match(worldsSource, /published-level-new-count/);
 });
@@ -299,7 +299,7 @@ test('Published UI reports new-ranks start failures precisely and preserves the 
     worldsSource.indexOf('async function beginPublishedLevelPlacement'),
     worldsSource.indexOf('async function maybeRenderPublishedLevelPlacementResume')
   );
-  assert.match(worldsSource, /تعذر بدء اختبار الرتب الجديدة\. لم يتم تغيير تقدمك\./);
+  assert.match(worldsSource, /تعذر بدء اختبار المحتوى الجديد\. لم يتم تغيير تقدمك\./);
   assert.match(beginBlock, /publishedContentState\.levelPlacementPending = true/);
   assert.match(beginBlock, /if \(publishedContentState\.levelPlacementPending\) return null/);
   assert.match(beginBlock, /start-new-ranks-placement/);

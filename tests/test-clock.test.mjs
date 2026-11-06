@@ -3,13 +3,14 @@ import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 import vm from 'node:vm';
 
-const [contractSource, clockSource, evidenceSource, rulesSource, adminSource, htmlSource] = await Promise.all([
+const [contractSource, clockSource, evidenceSource, rulesSource, adminSource, htmlSource, routerSource] = await Promise.all([
   readFile(new URL('../js/test-clock-contract.js', import.meta.url), 'utf8'),
   readFile(new URL('../js/test-clock.js', import.meta.url), 'utf8'),
   readFile(new URL('../js/learning-evidence.js', import.meta.url), 'utf8'),
   readFile(new URL('../firestore.rules', import.meta.url), 'utf8'),
   readFile(new URL('../js/admin.js', import.meta.url), 'utf8'),
   readFile(new URL('../index.html', import.meta.url), 'utf8'),
+  readFile(new URL('../js/script.js', import.meta.url), 'utf8'),
 ]);
 
 const root = {};
@@ -49,8 +50,9 @@ test('Test Clock is claim-gated, account-scoped, event-driven, and visible only 
   assert.match(adminSource, /وضع الزمن التجريبي مفعّل/);
 });
 
-test('the clock module is loaded once and never changes server timestamps or reward modules', () => {
-  assert.equal((htmlSource.match(/src="js\/test-clock\.js(?:\?[^\"]+)?"/g) || []).length, 1);
+test('the clock module is loaded once on the admin path and never changes server timestamps or reward modules', () => {
+  assert.equal((htmlSource.match(/src="js\/test-clock\.js(?:\?[^\"]+)?"/g) || []).length, 0);
+  assert.equal((routerSource.match(/loadFeatureScript\('js\/test-clock\.js(?:\?[^']+)?', \{ module: true \}\)/g) || []).length, 1);
   assert.doesNotMatch(clockSource, /xp\.js|awardXP|streak|serverTimestamp\s*=/i);
   assert.doesNotMatch(rulesSource, /function effectiveRequestTime|fakeRequestTime/);
 });

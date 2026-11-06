@@ -1,0 +1,3518 @@
+{
+  "isolation": "Real Chrome DOM/input with actual header, modal, CSS, streak, hydration and keyboard functions; in-memory storage; all network blocked",
+  "layout": [
+    {
+      "width": 320,
+      "theme": "lootlingua",
+      "count": 0,
+      "bar": {
+        "x": 10,
+        "y": 10,
+        "width": 300,
+        "height": 64,
+        "right": 310,
+        "bottom": 74
+      },
+      "freeze": {
+        "x": 156.765625,
+        "y": 42,
+        "width": 78.234375,
+        "height": 24,
+        "right": 235,
+        "bottom": 66
+      },
+      "help": {
+        "x": 156.765625,
+        "y": 42,
+        "width": 24,
+        "height": 24,
+        "right": 180.765625,
+        "bottom": 66
+      },
+      "widgets": [
+        {
+          "x": 245,
+          "y": 17,
+          "width": 54,
+          "height": 50,
+          "right": 299,
+          "bottom": 67
+        },
+        {
+          "x": 156.765625,
+          "y": 18,
+          "width": 78.234375,
+          "height": 48,
+          "right": 235,
+          "bottom": 66
+        },
+        {
+          "x": 108.765625,
+          "y": 21,
+          "width": 42,
+          "height": 42,
+          "right": 150.765625,
+          "bottom": 63
+        },
+        {
+          "x": 62.765625,
+          "y": 22,
+          "width": 40,
+          "height": 40,
+          "right": 102.765625,
+          "bottom": 62
+        },
+        {
+          "x": 16.765625,
+          "y": 22,
+          "width": 40,
+          "height": 40,
+          "right": 56.765625,
+          "bottom": 62
+        }
+      ],
+      "text": "بدون فريز",
+      "label": "شرح حماية الستريك بالفريز. رصيدك 0 فريز",
+      "overflow": false,
+      "overlap": [],
+      "inside": true
+    },
+    {
+      "width": 320,
+      "theme": "lootlingua",
+      "count": 2,
+      "bar": {
+        "x": 10,
+        "y": 10,
+        "width": 300,
+        "height": 64,
+        "right": 310,
+        "bottom": 74
+      },
+      "freeze": {
+        "x": 161,
+        "y": 42,
+        "width": 63.953125,
+        "height": 24,
+        "right": 224.953125,
+        "bottom": 66
+      },
+      "help": {
+        "x": 161,
+        "y": 42,
+        "width": 24,
+        "height": 24,
+        "right": 185,
+        "bottom": 66
+      },
+      "widgets": [
+        {
+          "x": 245,
+          "y": 17,
+          "width": 54,
+          "height": 50,
+          "right": 299,
+          "bottom": 67
+        },
+        {
+          "x": 161,
+          "y": 18,
+          "width": 63.953125,
+          "height": 48,
+          "right": 224.953125,
+          "bottom": 66
+        },
+        {
+          "x": 113,
+          "y": 21,
+          "width": 42,
+          "height": 42,
+          "right": 155,
+          "bottom": 63
+        },
+        {
+          "x": 67,
+          "y": 22,
+          "width": 40,
+          "height": 40,
+          "right": 107,
+          "bottom": 62
+        },
+        {
+          "x": 21,
+          "y": 22,
+          "width": 40,
+          "height": 40,
+          "right": 61,
+          "bottom": 62
+        }
+      ],
+      "text": "2 فريز",
+      "label": "شرح حماية الستريك بالفريز. رصيدك 2 فريز",
+      "overflow": false,
+      "overlap": [],
+      "inside": true
+    },
+    {
+      "width": 320,
+      "theme": "lootlingua",
+      "count": 999999,
+      "bar": {
+        "x": 10,
+        "y": 10,
+        "width": 300,
+        "height": 64,
+        "right": 310,
+        "bottom": 74
+      },
+      "freeze": {
+        "x": 142.296875,
+        "y": 42,
+        "width": 92.703125,
+        "height": 24,
+        "right": 235,
+        "bottom": 66
+      },
+      "help": {
+        "x": 142.296875,
+        "y": 42,
+        "width": 24,
+        "height": 24,
+        "right": 166.296875,
+        "bottom": 66
+      },
+      "widgets": [
+        {
+          "x": 245,
+          "y": 17,
+          "width": 54,
+          "height": 50,
+          "right": 299,
+          "bottom": 67
+        },
+        {
+          "x": 142.296875,
+          "y": 18,
+          "width": 92.703125,
+          "height": 48,
+          "right": 235,
+          "bottom": 66
+        },
+        {
+          "x": 94.296875,
+          "y": 21,
+          "width": 42,
+          "height": 42,
+          "right": 136.296875,
+          "bottom": 63
+        },
+        {
+          "x": 48.296875,
+          "y": 22,
+          "width": 40,
+          "height": 40,
+          "right": 88.296875,
+          "bottom": 62
+        },
+        {
+          "x": 2.296875,
+          "y": 22,
+          "width": 40,
+          "height": 40,
+          "right": 42.296875,
+          "bottom": 62
+        }
+      ],
+      "text": "999999 فريز",
+      "label": "شرح حماية الستريك بالفريز. رصيدك 999999 فريز",
+      "overflow": false,
+      "overlap": [],
+      "inside": true
+    },
+    {
+      "width": 320,
+      "theme": "golden",
+      "count": 0,
+      "bar": {
+        "x": 10,
+        "y": 10,
+        "width": 300,
+        "height": 64,
+        "right": 310,
+        "bottom": 74
+      },
+      "freeze": {
+        "x": 156.765625,
+        "y": 42,
+        "width": 78.234375,
+        "height": 24,
+        "right": 235,
+        "bottom": 66
+      },
+      "help": {
+        "x": 156.765625,
+        "y": 42,
+        "width": 24,
+        "height": 24,
+        "right": 180.765625,
+        "bottom": 66
+      },
+      "widgets": [
+        {
+          "x": 245,
+          "y": 17,
+          "width": 54,
+          "height": 50,
+          "right": 299,
+          "bottom": 67
+        },
+        {
+          "x": 156.765625,
+          "y": 18,
+          "width": 78.234375,
+          "height": 48,
+          "right": 235,
+          "bottom": 66
+        },
+        {
+          "x": 108.765625,
+          "y": 21,
+          "width": 42,
+          "height": 42,
+          "right": 150.765625,
+          "bottom": 63
+        },
+        {
+          "x": 62.765625,
+          "y": 22,
+          "width": 40,
+          "height": 40,
+          "right": 102.765625,
+          "bottom": 62
+        },
+        {
+          "x": 16.765625,
+          "y": 22,
+          "width": 40,
+          "height": 40,
+          "right": 56.765625,
+          "bottom": 62
+        }
+      ],
+      "text": "بدون فريز",
+      "label": "شرح حماية الستريك بالفريز. رصيدك 0 فريز",
+      "overflow": false,
+      "overlap": [],
+      "inside": true
+    },
+    {
+      "width": 320,
+      "theme": "golden",
+      "count": 2,
+      "bar": {
+        "x": 10,
+        "y": 10,
+        "width": 300,
+        "height": 64,
+        "right": 310,
+        "bottom": 74
+      },
+      "freeze": {
+        "x": 161,
+        "y": 42,
+        "width": 63.953125,
+        "height": 24,
+        "right": 224.953125,
+        "bottom": 66
+      },
+      "help": {
+        "x": 161,
+        "y": 42,
+        "width": 24,
+        "height": 24,
+        "right": 185,
+        "bottom": 66
+      },
+      "widgets": [
+        {
+          "x": 245,
+          "y": 17,
+          "width": 54,
+          "height": 50,
+          "right": 299,
+          "bottom": 67
+        },
+        {
+          "x": 161,
+          "y": 18,
+          "width": 63.953125,
+          "height": 48,
+          "right": 224.953125,
+          "bottom": 66
+        },
+        {
+          "x": 113,
+          "y": 21,
+          "width": 42,
+          "height": 42,
+          "right": 155,
+          "bottom": 63
+        },
+        {
+          "x": 67,
+          "y": 22,
+          "width": 40,
+          "height": 40,
+          "right": 107,
+          "bottom": 62
+        },
+        {
+          "x": 21,
+          "y": 22,
+          "width": 40,
+          "height": 40,
+          "right": 61,
+          "bottom": 62
+        }
+      ],
+      "text": "2 فريز",
+      "label": "شرح حماية الستريك بالفريز. رصيدك 2 فريز",
+      "overflow": false,
+      "overlap": [],
+      "inside": true
+    },
+    {
+      "width": 320,
+      "theme": "golden",
+      "count": 999999,
+      "bar": {
+        "x": 10,
+        "y": 10,
+        "width": 300,
+        "height": 64,
+        "right": 310,
+        "bottom": 74
+      },
+      "freeze": {
+        "x": 142.296875,
+        "y": 42,
+        "width": 92.703125,
+        "height": 24,
+        "right": 235,
+        "bottom": 66
+      },
+      "help": {
+        "x": 142.296875,
+        "y": 42,
+        "width": 24,
+        "height": 24,
+        "right": 166.296875,
+        "bottom": 66
+      },
+      "widgets": [
+        {
+          "x": 245,
+          "y": 17,
+          "width": 54,
+          "height": 50,
+          "right": 299,
+          "bottom": 67
+        },
+        {
+          "x": 142.296875,
+          "y": 18,
+          "width": 92.703125,
+          "height": 48,
+          "right": 235,
+          "bottom": 66
+        },
+        {
+          "x": 94.296875,
+          "y": 21,
+          "width": 42,
+          "height": 42,
+          "right": 136.296875,
+          "bottom": 63
+        },
+        {
+          "x": 48.296875,
+          "y": 22,
+          "width": 40,
+          "height": 40,
+          "right": 88.296875,
+          "bottom": 62
+        },
+        {
+          "x": 2.296875,
+          "y": 22,
+          "width": 40,
+          "height": 40,
+          "right": 42.296875,
+          "bottom": 62
+        }
+      ],
+      "text": "999999 فريز",
+      "label": "شرح حماية الستريك بالفريز. رصيدك 999999 فريز",
+      "overflow": false,
+      "overlap": [],
+      "inside": true
+    },
+    {
+      "width": 320,
+      "theme": "scroll",
+      "count": 0,
+      "bar": {
+        "x": 10,
+        "y": 10,
+        "width": 300,
+        "height": 64,
+        "right": 310,
+        "bottom": 74
+      },
+      "freeze": {
+        "x": 156.765625,
+        "y": 42,
+        "width": 78.234375,
+        "height": 24,
+        "right": 235,
+        "bottom": 66
+      },
+      "help": {
+        "x": 156.765625,
+        "y": 42,
+        "width": 24,
+        "height": 24,
+        "right": 180.765625,
+        "bottom": 66
+      },
+      "widgets": [
+        {
+          "x": 245,
+          "y": 17,
+          "width": 54,
+          "height": 50,
+          "right": 299,
+          "bottom": 67
+        },
+        {
+          "x": 156.765625,
+          "y": 18,
+          "width": 78.234375,
+          "height": 48,
+          "right": 235,
+          "bottom": 66
+        },
+        {
+          "x": 108.765625,
+          "y": 21,
+          "width": 42,
+          "height": 42,
+          "right": 150.765625,
+          "bottom": 63
+        },
+        {
+          "x": 62.765625,
+          "y": 22,
+          "width": 40,
+          "height": 40,
+          "right": 102.765625,
+          "bottom": 62
+        },
+        {
+          "x": 16.765625,
+          "y": 22,
+          "width": 40,
+          "height": 40,
+          "right": 56.765625,
+          "bottom": 62
+        }
+      ],
+      "text": "بدون فريز",
+      "label": "شرح حماية الستريك بالفريز. رصيدك 0 فريز",
+      "overflow": false,
+      "overlap": [],
+      "inside": true
+    },
+    {
+      "width": 320,
+      "theme": "scroll",
+      "count": 2,
+      "bar": {
+        "x": 10,
+        "y": 10,
+        "width": 300,
+        "height": 64,
+        "right": 310,
+        "bottom": 74
+      },
+      "freeze": {
+        "x": 161,
+        "y": 42,
+        "width": 63.953125,
+        "height": 24,
+        "right": 224.953125,
+        "bottom": 66
+      },
+      "help": {
+        "x": 161,
+        "y": 42,
+        "width": 24,
+        "height": 24,
+        "right": 185,
+        "bottom": 66
+      },
+      "widgets": [
+        {
+          "x": 245,
+          "y": 17,
+          "width": 54,
+          "height": 50,
+          "right": 299,
+          "bottom": 67
+        },
+        {
+          "x": 161,
+          "y": 18,
+          "width": 63.953125,
+          "height": 48,
+          "right": 224.953125,
+          "bottom": 66
+        },
+        {
+          "x": 113,
+          "y": 21,
+          "width": 42,
+          "height": 42,
+          "right": 155,
+          "bottom": 63
+        },
+        {
+          "x": 67,
+          "y": 22,
+          "width": 40,
+          "height": 40,
+          "right": 107,
+          "bottom": 62
+        },
+        {
+          "x": 21,
+          "y": 22,
+          "width": 40,
+          "height": 40,
+          "right": 61,
+          "bottom": 62
+        }
+      ],
+      "text": "2 فريز",
+      "label": "شرح حماية الستريك بالفريز. رصيدك 2 فريز",
+      "overflow": false,
+      "overlap": [],
+      "inside": true
+    },
+    {
+      "width": 320,
+      "theme": "scroll",
+      "count": 999999,
+      "bar": {
+        "x": 10,
+        "y": 10,
+        "width": 300,
+        "height": 64,
+        "right": 310,
+        "bottom": 74
+      },
+      "freeze": {
+        "x": 142.296875,
+        "y": 42,
+        "width": 92.703125,
+        "height": 24,
+        "right": 235,
+        "bottom": 66
+      },
+      "help": {
+        "x": 142.296875,
+        "y": 42,
+        "width": 24,
+        "height": 24,
+        "right": 166.296875,
+        "bottom": 66
+      },
+      "widgets": [
+        {
+          "x": 245,
+          "y": 17,
+          "width": 54,
+          "height": 50,
+          "right": 299,
+          "bottom": 67
+        },
+        {
+          "x": 142.296875,
+          "y": 18,
+          "width": 92.703125,
+          "height": 48,
+          "right": 235,
+          "bottom": 66
+        },
+        {
+          "x": 94.296875,
+          "y": 21,
+          "width": 42,
+          "height": 42,
+          "right": 136.296875,
+          "bottom": 63
+        },
+        {
+          "x": 48.296875,
+          "y": 22,
+          "width": 40,
+          "height": 40,
+          "right": 88.296875,
+          "bottom": 62
+        },
+        {
+          "x": 2.296875,
+          "y": 22,
+          "width": 40,
+          "height": 40,
+          "right": 42.296875,
+          "bottom": 62
+        }
+      ],
+      "text": "999999 فريز",
+      "label": "شرح حماية الستريك بالفريز. رصيدك 999999 فريز",
+      "overflow": false,
+      "overlap": [],
+      "inside": true
+    },
+    {
+      "width": 320,
+      "theme": "ocean",
+      "mode": "light",
+      "count": 0,
+      "bar": {
+        "x": 10,
+        "y": 10,
+        "width": 300,
+        "height": 64,
+        "right": 310,
+        "bottom": 74
+      },
+      "freeze": {
+        "x": 156.765625,
+        "y": 42,
+        "width": 78.234375,
+        "height": 24,
+        "right": 235,
+        "bottom": 66
+      },
+      "help": {
+        "x": 156.765625,
+        "y": 42,
+        "width": 24,
+        "height": 24,
+        "right": 180.765625,
+        "bottom": 66
+      },
+      "widgets": [
+        {
+          "x": 245,
+          "y": 17,
+          "width": 54,
+          "height": 50,
+          "right": 299,
+          "bottom": 67
+        },
+        {
+          "x": 156.765625,
+          "y": 18,
+          "width": 78.234375,
+          "height": 48,
+          "right": 235,
+          "bottom": 66
+        },
+        {
+          "x": 108.765625,
+          "y": 21,
+          "width": 42,
+          "height": 42,
+          "right": 150.765625,
+          "bottom": 63
+        },
+        {
+          "x": 62.765625,
+          "y": 22,
+          "width": 40,
+          "height": 40,
+          "right": 102.765625,
+          "bottom": 62
+        },
+        {
+          "x": 16.765625,
+          "y": 22,
+          "width": 40,
+          "height": 40,
+          "right": 56.765625,
+          "bottom": 62
+        }
+      ],
+      "text": "بدون فريز",
+      "label": "شرح حماية الستريك بالفريز. رصيدك 0 فريز",
+      "overflow": false,
+      "overlap": [],
+      "inside": true
+    },
+    {
+      "width": 320,
+      "theme": "ocean",
+      "mode": "light",
+      "count": 2,
+      "bar": {
+        "x": 10,
+        "y": 10,
+        "width": 300,
+        "height": 64,
+        "right": 310,
+        "bottom": 74
+      },
+      "freeze": {
+        "x": 161,
+        "y": 42,
+        "width": 63.953125,
+        "height": 24,
+        "right": 224.953125,
+        "bottom": 66
+      },
+      "help": {
+        "x": 161,
+        "y": 42,
+        "width": 24,
+        "height": 24,
+        "right": 185,
+        "bottom": 66
+      },
+      "widgets": [
+        {
+          "x": 245,
+          "y": 17,
+          "width": 54,
+          "height": 50,
+          "right": 299,
+          "bottom": 67
+        },
+        {
+          "x": 161,
+          "y": 18,
+          "width": 63.953125,
+          "height": 48,
+          "right": 224.953125,
+          "bottom": 66
+        },
+        {
+          "x": 113,
+          "y": 21,
+          "width": 42,
+          "height": 42,
+          "right": 155,
+          "bottom": 63
+        },
+        {
+          "x": 67,
+          "y": 22,
+          "width": 40,
+          "height": 40,
+          "right": 107,
+          "bottom": 62
+        },
+        {
+          "x": 21,
+          "y": 22,
+          "width": 40,
+          "height": 40,
+          "right": 61,
+          "bottom": 62
+        }
+      ],
+      "text": "2 فريز",
+      "label": "شرح حماية الستريك بالفريز. رصيدك 2 فريز",
+      "overflow": false,
+      "overlap": [],
+      "inside": true
+    },
+    {
+      "width": 320,
+      "theme": "ocean",
+      "mode": "light",
+      "count": 999999,
+      "bar": {
+        "x": 10,
+        "y": 10,
+        "width": 300,
+        "height": 64,
+        "right": 310,
+        "bottom": 74
+      },
+      "freeze": {
+        "x": 142.296875,
+        "y": 42,
+        "width": 92.703125,
+        "height": 24,
+        "right": 235,
+        "bottom": 66
+      },
+      "help": {
+        "x": 142.296875,
+        "y": 42,
+        "width": 24,
+        "height": 24,
+        "right": 166.296875,
+        "bottom": 66
+      },
+      "widgets": [
+        {
+          "x": 245,
+          "y": 17,
+          "width": 54,
+          "height": 50,
+          "right": 299,
+          "bottom": 67
+        },
+        {
+          "x": 142.296875,
+          "y": 18,
+          "width": 92.703125,
+          "height": 48,
+          "right": 235,
+          "bottom": 66
+        },
+        {
+          "x": 94.296875,
+          "y": 21,
+          "width": 42,
+          "height": 42,
+          "right": 136.296875,
+          "bottom": 63
+        },
+        {
+          "x": 48.296875,
+          "y": 22,
+          "width": 40,
+          "height": 40,
+          "right": 88.296875,
+          "bottom": 62
+        },
+        {
+          "x": 2.296875,
+          "y": 22,
+          "width": 40,
+          "height": 40,
+          "right": 42.296875,
+          "bottom": 62
+        }
+      ],
+      "text": "999999 فريز",
+      "label": "شرح حماية الستريك بالفريز. رصيدك 999999 فريز",
+      "overflow": false,
+      "overlap": [],
+      "inside": true
+    },
+    {
+      "width": 320,
+      "theme": "ocean",
+      "mode": "dark",
+      "count": 0,
+      "bar": {
+        "x": 10,
+        "y": 10,
+        "width": 300,
+        "height": 64,
+        "right": 310,
+        "bottom": 74
+      },
+      "freeze": {
+        "x": 156.765625,
+        "y": 42,
+        "width": 78.234375,
+        "height": 24,
+        "right": 235,
+        "bottom": 66
+      },
+      "help": {
+        "x": 156.765625,
+        "y": 42,
+        "width": 24,
+        "height": 24,
+        "right": 180.765625,
+        "bottom": 66
+      },
+      "widgets": [
+        {
+          "x": 245,
+          "y": 17,
+          "width": 54,
+          "height": 50,
+          "right": 299,
+          "bottom": 67
+        },
+        {
+          "x": 156.765625,
+          "y": 18,
+          "width": 78.234375,
+          "height": 48,
+          "right": 235,
+          "bottom": 66
+        },
+        {
+          "x": 108.765625,
+          "y": 21,
+          "width": 42,
+          "height": 42,
+          "right": 150.765625,
+          "bottom": 63
+        },
+        {
+          "x": 62.765625,
+          "y": 22,
+          "width": 40,
+          "height": 40,
+          "right": 102.765625,
+          "bottom": 62
+        },
+        {
+          "x": 16.765625,
+          "y": 22,
+          "width": 40,
+          "height": 40,
+          "right": 56.765625,
+          "bottom": 62
+        }
+      ],
+      "text": "بدون فريز",
+      "label": "شرح حماية الستريك بالفريز. رصيدك 0 فريز",
+      "overflow": false,
+      "overlap": [],
+      "inside": true
+    },
+    {
+      "width": 320,
+      "theme": "ocean",
+      "mode": "dark",
+      "count": 2,
+      "bar": {
+        "x": 10,
+        "y": 10,
+        "width": 300,
+        "height": 64,
+        "right": 310,
+        "bottom": 74
+      },
+      "freeze": {
+        "x": 161,
+        "y": 42,
+        "width": 63.953125,
+        "height": 24,
+        "right": 224.953125,
+        "bottom": 66
+      },
+      "help": {
+        "x": 161,
+        "y": 42,
+        "width": 24,
+        "height": 24,
+        "right": 185,
+        "bottom": 66
+      },
+      "widgets": [
+        {
+          "x": 245,
+          "y": 17,
+          "width": 54,
+          "height": 50,
+          "right": 299,
+          "bottom": 67
+        },
+        {
+          "x": 161,
+          "y": 18,
+          "width": 63.953125,
+          "height": 48,
+          "right": 224.953125,
+          "bottom": 66
+        },
+        {
+          "x": 113,
+          "y": 21,
+          "width": 42,
+          "height": 42,
+          "right": 155,
+          "bottom": 63
+        },
+        {
+          "x": 67,
+          "y": 22,
+          "width": 40,
+          "height": 40,
+          "right": 107,
+          "bottom": 62
+        },
+        {
+          "x": 21,
+          "y": 22,
+          "width": 40,
+          "height": 40,
+          "right": 61,
+          "bottom": 62
+        }
+      ],
+      "text": "2 فريز",
+      "label": "شرح حماية الستريك بالفريز. رصيدك 2 فريز",
+      "overflow": false,
+      "overlap": [],
+      "inside": true
+    },
+    {
+      "width": 320,
+      "theme": "ocean",
+      "mode": "dark",
+      "count": 999999,
+      "bar": {
+        "x": 10,
+        "y": 10,
+        "width": 300,
+        "height": 64,
+        "right": 310,
+        "bottom": 74
+      },
+      "freeze": {
+        "x": 142.296875,
+        "y": 42,
+        "width": 92.703125,
+        "height": 24,
+        "right": 235,
+        "bottom": 66
+      },
+      "help": {
+        "x": 142.296875,
+        "y": 42,
+        "width": 24,
+        "height": 24,
+        "right": 166.296875,
+        "bottom": 66
+      },
+      "widgets": [
+        {
+          "x": 245,
+          "y": 17,
+          "width": 54,
+          "height": 50,
+          "right": 299,
+          "bottom": 67
+        },
+        {
+          "x": 142.296875,
+          "y": 18,
+          "width": 92.703125,
+          "height": 48,
+          "right": 235,
+          "bottom": 66
+        },
+        {
+          "x": 94.296875,
+          "y": 21,
+          "width": 42,
+          "height": 42,
+          "right": 136.296875,
+          "bottom": 63
+        },
+        {
+          "x": 48.296875,
+          "y": 22,
+          "width": 40,
+          "height": 40,
+          "right": 88.296875,
+          "bottom": 62
+        },
+        {
+          "x": 2.296875,
+          "y": 22,
+          "width": 40,
+          "height": 40,
+          "right": 42.296875,
+          "bottom": 62
+        }
+      ],
+      "text": "999999 فريز",
+      "label": "شرح حماية الستريك بالفريز. رصيدك 999999 فريز",
+      "overflow": false,
+      "overlap": [],
+      "inside": true
+    },
+    {
+      "width": 390,
+      "theme": "lootlingua",
+      "count": 0,
+      "bar": {
+        "x": 10,
+        "y": 10,
+        "width": 370,
+        "height": 64,
+        "right": 380,
+        "bottom": 74
+      },
+      "freeze": {
+        "x": 161,
+        "y": 42,
+        "width": 78.234375,
+        "height": 24,
+        "right": 239.234375,
+        "bottom": 66
+      },
+      "help": {
+        "x": 161,
+        "y": 42,
+        "width": 24,
+        "height": 24,
+        "right": 185,
+        "bottom": 66
+      },
+      "widgets": [
+        {
+          "x": 315,
+          "y": 17,
+          "width": 54,
+          "height": 50,
+          "right": 369,
+          "bottom": 67
+        },
+        {
+          "x": 161,
+          "y": 18,
+          "width": 78.234375,
+          "height": 48,
+          "right": 239.234375,
+          "bottom": 66
+        },
+        {
+          "x": 113,
+          "y": 21,
+          "width": 42,
+          "height": 42,
+          "right": 155,
+          "bottom": 63
+        },
+        {
+          "x": 67,
+          "y": 22,
+          "width": 40,
+          "height": 40,
+          "right": 107,
+          "bottom": 62
+        },
+        {
+          "x": 21,
+          "y": 22,
+          "width": 40,
+          "height": 40,
+          "right": 61,
+          "bottom": 62
+        }
+      ],
+      "text": "بدون فريز",
+      "label": "شرح حماية الستريك بالفريز. رصيدك 0 فريز",
+      "overflow": false,
+      "overlap": [],
+      "inside": true
+    },
+    {
+      "width": 390,
+      "theme": "lootlingua",
+      "count": 2,
+      "bar": {
+        "x": 10,
+        "y": 10,
+        "width": 370,
+        "height": 64,
+        "right": 380,
+        "bottom": 74
+      },
+      "freeze": {
+        "x": 161,
+        "y": 42,
+        "width": 63.953125,
+        "height": 24,
+        "right": 224.953125,
+        "bottom": 66
+      },
+      "help": {
+        "x": 161,
+        "y": 42,
+        "width": 24,
+        "height": 24,
+        "right": 185,
+        "bottom": 66
+      },
+      "widgets": [
+        {
+          "x": 315,
+          "y": 17,
+          "width": 54,
+          "height": 50,
+          "right": 369,
+          "bottom": 67
+        },
+        {
+          "x": 161,
+          "y": 18,
+          "width": 63.953125,
+          "height": 48,
+          "right": 224.953125,
+          "bottom": 66
+        },
+        {
+          "x": 113,
+          "y": 21,
+          "width": 42,
+          "height": 42,
+          "right": 155,
+          "bottom": 63
+        },
+        {
+          "x": 67,
+          "y": 22,
+          "width": 40,
+          "height": 40,
+          "right": 107,
+          "bottom": 62
+        },
+        {
+          "x": 21,
+          "y": 22,
+          "width": 40,
+          "height": 40,
+          "right": 61,
+          "bottom": 62
+        }
+      ],
+      "text": "2 فريز",
+      "label": "شرح حماية الستريك بالفريز. رصيدك 2 فريز",
+      "overflow": false,
+      "overlap": [],
+      "inside": true
+    },
+    {
+      "width": 390,
+      "theme": "lootlingua",
+      "count": 999999,
+      "bar": {
+        "x": 10,
+        "y": 10,
+        "width": 370,
+        "height": 64,
+        "right": 380,
+        "bottom": 74
+      },
+      "freeze": {
+        "x": 161,
+        "y": 42,
+        "width": 92.703125,
+        "height": 24,
+        "right": 253.703125,
+        "bottom": 66
+      },
+      "help": {
+        "x": 161,
+        "y": 42,
+        "width": 24,
+        "height": 24,
+        "right": 185,
+        "bottom": 66
+      },
+      "widgets": [
+        {
+          "x": 315,
+          "y": 17,
+          "width": 54,
+          "height": 50,
+          "right": 369,
+          "bottom": 67
+        },
+        {
+          "x": 161,
+          "y": 18,
+          "width": 92.703125,
+          "height": 48,
+          "right": 253.703125,
+          "bottom": 66
+        },
+        {
+          "x": 113,
+          "y": 21,
+          "width": 42,
+          "height": 42,
+          "right": 155,
+          "bottom": 63
+        },
+        {
+          "x": 67,
+          "y": 22,
+          "width": 40,
+          "height": 40,
+          "right": 107,
+          "bottom": 62
+        },
+        {
+          "x": 21,
+          "y": 22,
+          "width": 40,
+          "height": 40,
+          "right": 61,
+          "bottom": 62
+        }
+      ],
+      "text": "999999 فريز",
+      "label": "شرح حماية الستريك بالفريز. رصيدك 999999 فريز",
+      "overflow": false,
+      "overlap": [],
+      "inside": true
+    },
+    {
+      "width": 390,
+      "theme": "golden",
+      "count": 0,
+      "bar": {
+        "x": 10,
+        "y": 10,
+        "width": 370,
+        "height": 64,
+        "right": 380,
+        "bottom": 74
+      },
+      "freeze": {
+        "x": 161,
+        "y": 42,
+        "width": 78.234375,
+        "height": 24,
+        "right": 239.234375,
+        "bottom": 66
+      },
+      "help": {
+        "x": 161,
+        "y": 42,
+        "width": 24,
+        "height": 24,
+        "right": 185,
+        "bottom": 66
+      },
+      "widgets": [
+        {
+          "x": 315,
+          "y": 17,
+          "width": 54,
+          "height": 50,
+          "right": 369,
+          "bottom": 67
+        },
+        {
+          "x": 161,
+          "y": 18,
+          "width": 78.234375,
+          "height": 48,
+          "right": 239.234375,
+          "bottom": 66
+        },
+        {
+          "x": 113,
+          "y": 21,
+          "width": 42,
+          "height": 42,
+          "right": 155,
+          "bottom": 63
+        },
+        {
+          "x": 67,
+          "y": 22,
+          "width": 40,
+          "height": 40,
+          "right": 107,
+          "bottom": 62
+        },
+        {
+          "x": 21,
+          "y": 22,
+          "width": 40,
+          "height": 40,
+          "right": 61,
+          "bottom": 62
+        }
+      ],
+      "text": "بدون فريز",
+      "label": "شرح حماية الستريك بالفريز. رصيدك 0 فريز",
+      "overflow": false,
+      "overlap": [],
+      "inside": true
+    },
+    {
+      "width": 390,
+      "theme": "golden",
+      "count": 2,
+      "bar": {
+        "x": 10,
+        "y": 10,
+        "width": 370,
+        "height": 64,
+        "right": 380,
+        "bottom": 74
+      },
+      "freeze": {
+        "x": 161,
+        "y": 42,
+        "width": 63.953125,
+        "height": 24,
+        "right": 224.953125,
+        "bottom": 66
+      },
+      "help": {
+        "x": 161,
+        "y": 42,
+        "width": 24,
+        "height": 24,
+        "right": 185,
+        "bottom": 66
+      },
+      "widgets": [
+        {
+          "x": 315,
+          "y": 17,
+          "width": 54,
+          "height": 50,
+          "right": 369,
+          "bottom": 67
+        },
+        {
+          "x": 161,
+          "y": 18,
+          "width": 63.953125,
+          "height": 48,
+          "right": 224.953125,
+          "bottom": 66
+        },
+        {
+          "x": 113,
+          "y": 21,
+          "width": 42,
+          "height": 42,
+          "right": 155,
+          "bottom": 63
+        },
+        {
+          "x": 67,
+          "y": 22,
+          "width": 40,
+          "height": 40,
+          "right": 107,
+          "bottom": 62
+        },
+        {
+          "x": 21,
+          "y": 22,
+          "width": 40,
+          "height": 40,
+          "right": 61,
+          "bottom": 62
+        }
+      ],
+      "text": "2 فريز",
+      "label": "شرح حماية الستريك بالفريز. رصيدك 2 فريز",
+      "overflow": false,
+      "overlap": [],
+      "inside": true
+    },
+    {
+      "width": 390,
+      "theme": "golden",
+      "count": 999999,
+      "bar": {
+        "x": 10,
+        "y": 10,
+        "width": 370,
+        "height": 64,
+        "right": 380,
+        "bottom": 74
+      },
+      "freeze": {
+        "x": 161,
+        "y": 42,
+        "width": 92.703125,
+        "height": 24,
+        "right": 253.703125,
+        "bottom": 66
+      },
+      "help": {
+        "x": 161,
+        "y": 42,
+        "width": 24,
+        "height": 24,
+        "right": 185,
+        "bottom": 66
+      },
+      "widgets": [
+        {
+          "x": 315,
+          "y": 17,
+          "width": 54,
+          "height": 50,
+          "right": 369,
+          "bottom": 67
+        },
+        {
+          "x": 161,
+          "y": 18,
+          "width": 92.703125,
+          "height": 48,
+          "right": 253.703125,
+          "bottom": 66
+        },
+        {
+          "x": 113,
+          "y": 21,
+          "width": 42,
+          "height": 42,
+          "right": 155,
+          "bottom": 63
+        },
+        {
+          "x": 67,
+          "y": 22,
+          "width": 40,
+          "height": 40,
+          "right": 107,
+          "bottom": 62
+        },
+        {
+          "x": 21,
+          "y": 22,
+          "width": 40,
+          "height": 40,
+          "right": 61,
+          "bottom": 62
+        }
+      ],
+      "text": "999999 فريز",
+      "label": "شرح حماية الستريك بالفريز. رصيدك 999999 فريز",
+      "overflow": false,
+      "overlap": [],
+      "inside": true
+    },
+    {
+      "width": 390,
+      "theme": "scroll",
+      "count": 0,
+      "bar": {
+        "x": 10,
+        "y": 10,
+        "width": 370,
+        "height": 64,
+        "right": 380,
+        "bottom": 74
+      },
+      "freeze": {
+        "x": 161,
+        "y": 42,
+        "width": 78.234375,
+        "height": 24,
+        "right": 239.234375,
+        "bottom": 66
+      },
+      "help": {
+        "x": 161,
+        "y": 42,
+        "width": 24,
+        "height": 24,
+        "right": 185,
+        "bottom": 66
+      },
+      "widgets": [
+        {
+          "x": 315,
+          "y": 17,
+          "width": 54,
+          "height": 50,
+          "right": 369,
+          "bottom": 67
+        },
+        {
+          "x": 161,
+          "y": 18,
+          "width": 78.234375,
+          "height": 48,
+          "right": 239.234375,
+          "bottom": 66
+        },
+        {
+          "x": 113,
+          "y": 21,
+          "width": 42,
+          "height": 42,
+          "right": 155,
+          "bottom": 63
+        },
+        {
+          "x": 67,
+          "y": 22,
+          "width": 40,
+          "height": 40,
+          "right": 107,
+          "bottom": 62
+        },
+        {
+          "x": 21,
+          "y": 22,
+          "width": 40,
+          "height": 40,
+          "right": 61,
+          "bottom": 62
+        }
+      ],
+      "text": "بدون فريز",
+      "label": "شرح حماية الستريك بالفريز. رصيدك 0 فريز",
+      "overflow": false,
+      "overlap": [],
+      "inside": true
+    },
+    {
+      "width": 390,
+      "theme": "scroll",
+      "count": 2,
+      "bar": {
+        "x": 10,
+        "y": 10,
+        "width": 370,
+        "height": 64,
+        "right": 380,
+        "bottom": 74
+      },
+      "freeze": {
+        "x": 161,
+        "y": 42,
+        "width": 63.953125,
+        "height": 24,
+        "right": 224.953125,
+        "bottom": 66
+      },
+      "help": {
+        "x": 161,
+        "y": 42,
+        "width": 24,
+        "height": 24,
+        "right": 185,
+        "bottom": 66
+      },
+      "widgets": [
+        {
+          "x": 315,
+          "y": 17,
+          "width": 54,
+          "height": 50,
+          "right": 369,
+          "bottom": 67
+        },
+        {
+          "x": 161,
+          "y": 18,
+          "width": 63.953125,
+          "height": 48,
+          "right": 224.953125,
+          "bottom": 66
+        },
+        {
+          "x": 113,
+          "y": 21,
+          "width": 42,
+          "height": 42,
+          "right": 155,
+          "bottom": 63
+        },
+        {
+          "x": 67,
+          "y": 22,
+          "width": 40,
+          "height": 40,
+          "right": 107,
+          "bottom": 62
+        },
+        {
+          "x": 21,
+          "y": 22,
+          "width": 40,
+          "height": 40,
+          "right": 61,
+          "bottom": 62
+        }
+      ],
+      "text": "2 فريز",
+      "label": "شرح حماية الستريك بالفريز. رصيدك 2 فريز",
+      "overflow": false,
+      "overlap": [],
+      "inside": true
+    },
+    {
+      "width": 390,
+      "theme": "scroll",
+      "count": 999999,
+      "bar": {
+        "x": 10,
+        "y": 10,
+        "width": 370,
+        "height": 64,
+        "right": 380,
+        "bottom": 74
+      },
+      "freeze": {
+        "x": 161,
+        "y": 42,
+        "width": 92.703125,
+        "height": 24,
+        "right": 253.703125,
+        "bottom": 66
+      },
+      "help": {
+        "x": 161,
+        "y": 42,
+        "width": 24,
+        "height": 24,
+        "right": 185,
+        "bottom": 66
+      },
+      "widgets": [
+        {
+          "x": 315,
+          "y": 17,
+          "width": 54,
+          "height": 50,
+          "right": 369,
+          "bottom": 67
+        },
+        {
+          "x": 161,
+          "y": 18,
+          "width": 92.703125,
+          "height": 48,
+          "right": 253.703125,
+          "bottom": 66
+        },
+        {
+          "x": 113,
+          "y": 21,
+          "width": 42,
+          "height": 42,
+          "right": 155,
+          "bottom": 63
+        },
+        {
+          "x": 67,
+          "y": 22,
+          "width": 40,
+          "height": 40,
+          "right": 107,
+          "bottom": 62
+        },
+        {
+          "x": 21,
+          "y": 22,
+          "width": 40,
+          "height": 40,
+          "right": 61,
+          "bottom": 62
+        }
+      ],
+      "text": "999999 فريز",
+      "label": "شرح حماية الستريك بالفريز. رصيدك 999999 فريز",
+      "overflow": false,
+      "overlap": [],
+      "inside": true
+    },
+    {
+      "width": 390,
+      "theme": "ocean",
+      "mode": "light",
+      "count": 0,
+      "bar": {
+        "x": 10,
+        "y": 10,
+        "width": 370,
+        "height": 64,
+        "right": 380,
+        "bottom": 74
+      },
+      "freeze": {
+        "x": 161,
+        "y": 42,
+        "width": 78.234375,
+        "height": 24,
+        "right": 239.234375,
+        "bottom": 66
+      },
+      "help": {
+        "x": 161,
+        "y": 42,
+        "width": 24,
+        "height": 24,
+        "right": 185,
+        "bottom": 66
+      },
+      "widgets": [
+        {
+          "x": 315,
+          "y": 17,
+          "width": 54,
+          "height": 50,
+          "right": 369,
+          "bottom": 67
+        },
+        {
+          "x": 161,
+          "y": 18,
+          "width": 78.234375,
+          "height": 48,
+          "right": 239.234375,
+          "bottom": 66
+        },
+        {
+          "x": 113,
+          "y": 21,
+          "width": 42,
+          "height": 42,
+          "right": 155,
+          "bottom": 63
+        },
+        {
+          "x": 67,
+          "y": 22,
+          "width": 40,
+          "height": 40,
+          "right": 107,
+          "bottom": 62
+        },
+        {
+          "x": 21,
+          "y": 22,
+          "width": 40,
+          "height": 40,
+          "right": 61,
+          "bottom": 62
+        }
+      ],
+      "text": "بدون فريز",
+      "label": "شرح حماية الستريك بالفريز. رصيدك 0 فريز",
+      "overflow": false,
+      "overlap": [],
+      "inside": true
+    },
+    {
+      "width": 390,
+      "theme": "ocean",
+      "mode": "light",
+      "count": 2,
+      "bar": {
+        "x": 10,
+        "y": 10,
+        "width": 370,
+        "height": 64,
+        "right": 380,
+        "bottom": 74
+      },
+      "freeze": {
+        "x": 161,
+        "y": 42,
+        "width": 63.953125,
+        "height": 24,
+        "right": 224.953125,
+        "bottom": 66
+      },
+      "help": {
+        "x": 161,
+        "y": 42,
+        "width": 24,
+        "height": 24,
+        "right": 185,
+        "bottom": 66
+      },
+      "widgets": [
+        {
+          "x": 315,
+          "y": 17,
+          "width": 54,
+          "height": 50,
+          "right": 369,
+          "bottom": 67
+        },
+        {
+          "x": 161,
+          "y": 18,
+          "width": 63.953125,
+          "height": 48,
+          "right": 224.953125,
+          "bottom": 66
+        },
+        {
+          "x": 113,
+          "y": 21,
+          "width": 42,
+          "height": 42,
+          "right": 155,
+          "bottom": 63
+        },
+        {
+          "x": 67,
+          "y": 22,
+          "width": 40,
+          "height": 40,
+          "right": 107,
+          "bottom": 62
+        },
+        {
+          "x": 21,
+          "y": 22,
+          "width": 40,
+          "height": 40,
+          "right": 61,
+          "bottom": 62
+        }
+      ],
+      "text": "2 فريز",
+      "label": "شرح حماية الستريك بالفريز. رصيدك 2 فريز",
+      "overflow": false,
+      "overlap": [],
+      "inside": true
+    },
+    {
+      "width": 390,
+      "theme": "ocean",
+      "mode": "light",
+      "count": 999999,
+      "bar": {
+        "x": 10,
+        "y": 10,
+        "width": 370,
+        "height": 64,
+        "right": 380,
+        "bottom": 74
+      },
+      "freeze": {
+        "x": 161,
+        "y": 42,
+        "width": 92.703125,
+        "height": 24,
+        "right": 253.703125,
+        "bottom": 66
+      },
+      "help": {
+        "x": 161,
+        "y": 42,
+        "width": 24,
+        "height": 24,
+        "right": 185,
+        "bottom": 66
+      },
+      "widgets": [
+        {
+          "x": 315,
+          "y": 17,
+          "width": 54,
+          "height": 50,
+          "right": 369,
+          "bottom": 67
+        },
+        {
+          "x": 161,
+          "y": 18,
+          "width": 92.703125,
+          "height": 48,
+          "right": 253.703125,
+          "bottom": 66
+        },
+        {
+          "x": 113,
+          "y": 21,
+          "width": 42,
+          "height": 42,
+          "right": 155,
+          "bottom": 63
+        },
+        {
+          "x": 67,
+          "y": 22,
+          "width": 40,
+          "height": 40,
+          "right": 107,
+          "bottom": 62
+        },
+        {
+          "x": 21,
+          "y": 22,
+          "width": 40,
+          "height": 40,
+          "right": 61,
+          "bottom": 62
+        }
+      ],
+      "text": "999999 فريز",
+      "label": "شرح حماية الستريك بالفريز. رصيدك 999999 فريز",
+      "overflow": false,
+      "overlap": [],
+      "inside": true
+    },
+    {
+      "width": 390,
+      "theme": "ocean",
+      "mode": "dark",
+      "count": 0,
+      "bar": {
+        "x": 10,
+        "y": 10,
+        "width": 370,
+        "height": 64,
+        "right": 380,
+        "bottom": 74
+      },
+      "freeze": {
+        "x": 161,
+        "y": 42,
+        "width": 78.234375,
+        "height": 24,
+        "right": 239.234375,
+        "bottom": 66
+      },
+      "help": {
+        "x": 161,
+        "y": 42,
+        "width": 24,
+        "height": 24,
+        "right": 185,
+        "bottom": 66
+      },
+      "widgets": [
+        {
+          "x": 315,
+          "y": 17,
+          "width": 54,
+          "height": 50,
+          "right": 369,
+          "bottom": 67
+        },
+        {
+          "x": 161,
+          "y": 18,
+          "width": 78.234375,
+          "height": 48,
+          "right": 239.234375,
+          "bottom": 66
+        },
+        {
+          "x": 113,
+          "y": 21,
+          "width": 42,
+          "height": 42,
+          "right": 155,
+          "bottom": 63
+        },
+        {
+          "x": 67,
+          "y": 22,
+          "width": 40,
+          "height": 40,
+          "right": 107,
+          "bottom": 62
+        },
+        {
+          "x": 21,
+          "y": 22,
+          "width": 40,
+          "height": 40,
+          "right": 61,
+          "bottom": 62
+        }
+      ],
+      "text": "بدون فريز",
+      "label": "شرح حماية الستريك بالفريز. رصيدك 0 فريز",
+      "overflow": false,
+      "overlap": [],
+      "inside": true
+    },
+    {
+      "width": 390,
+      "theme": "ocean",
+      "mode": "dark",
+      "count": 2,
+      "bar": {
+        "x": 10,
+        "y": 10,
+        "width": 370,
+        "height": 64,
+        "right": 380,
+        "bottom": 74
+      },
+      "freeze": {
+        "x": 161,
+        "y": 42,
+        "width": 63.953125,
+        "height": 24,
+        "right": 224.953125,
+        "bottom": 66
+      },
+      "help": {
+        "x": 161,
+        "y": 42,
+        "width": 24,
+        "height": 24,
+        "right": 185,
+        "bottom": 66
+      },
+      "widgets": [
+        {
+          "x": 315,
+          "y": 17,
+          "width": 54,
+          "height": 50,
+          "right": 369,
+          "bottom": 67
+        },
+        {
+          "x": 161,
+          "y": 18,
+          "width": 63.953125,
+          "height": 48,
+          "right": 224.953125,
+          "bottom": 66
+        },
+        {
+          "x": 113,
+          "y": 21,
+          "width": 42,
+          "height": 42,
+          "right": 155,
+          "bottom": 63
+        },
+        {
+          "x": 67,
+          "y": 22,
+          "width": 40,
+          "height": 40,
+          "right": 107,
+          "bottom": 62
+        },
+        {
+          "x": 21,
+          "y": 22,
+          "width": 40,
+          "height": 40,
+          "right": 61,
+          "bottom": 62
+        }
+      ],
+      "text": "2 فريز",
+      "label": "شرح حماية الستريك بالفريز. رصيدك 2 فريز",
+      "overflow": false,
+      "overlap": [],
+      "inside": true
+    },
+    {
+      "width": 390,
+      "theme": "ocean",
+      "mode": "dark",
+      "count": 999999,
+      "bar": {
+        "x": 10,
+        "y": 10,
+        "width": 370,
+        "height": 64,
+        "right": 380,
+        "bottom": 74
+      },
+      "freeze": {
+        "x": 161,
+        "y": 42,
+        "width": 92.703125,
+        "height": 24,
+        "right": 253.703125,
+        "bottom": 66
+      },
+      "help": {
+        "x": 161,
+        "y": 42,
+        "width": 24,
+        "height": 24,
+        "right": 185,
+        "bottom": 66
+      },
+      "widgets": [
+        {
+          "x": 315,
+          "y": 17,
+          "width": 54,
+          "height": 50,
+          "right": 369,
+          "bottom": 67
+        },
+        {
+          "x": 161,
+          "y": 18,
+          "width": 92.703125,
+          "height": 48,
+          "right": 253.703125,
+          "bottom": 66
+        },
+        {
+          "x": 113,
+          "y": 21,
+          "width": 42,
+          "height": 42,
+          "right": 155,
+          "bottom": 63
+        },
+        {
+          "x": 67,
+          "y": 22,
+          "width": 40,
+          "height": 40,
+          "right": 107,
+          "bottom": 62
+        },
+        {
+          "x": 21,
+          "y": 22,
+          "width": 40,
+          "height": 40,
+          "right": 61,
+          "bottom": 62
+        }
+      ],
+      "text": "999999 فريز",
+      "label": "شرح حماية الستريك بالفريز. رصيدك 999999 فريز",
+      "overflow": false,
+      "overlap": [],
+      "inside": true
+    },
+    {
+      "width": 1280,
+      "theme": "lootlingua",
+      "count": 0,
+      "bar": {
+        "x": 330,
+        "y": 12,
+        "width": 620,
+        "height": 66,
+        "right": 950,
+        "bottom": 78
+      },
+      "freeze": {
+        "x": 511.515625,
+        "y": 45,
+        "width": 78.234375,
+        "height": 24,
+        "right": 589.75,
+        "bottom": 69
+      },
+      "help": {
+        "x": 511.515625,
+        "y": 45,
+        "width": 24,
+        "height": 24,
+        "right": 535.515625,
+        "bottom": 69
+      },
+      "widgets": [
+        {
+          "x": 834.15625,
+          "y": 20,
+          "width": 100.84375,
+          "height": 50,
+          "right": 935,
+          "bottom": 70
+        },
+        {
+          "x": 511.515625,
+          "y": 21,
+          "width": 78.234375,
+          "height": 48,
+          "right": 589.75,
+          "bottom": 69
+        },
+        {
+          "x": 461.515625,
+          "y": 24,
+          "width": 42,
+          "height": 42,
+          "right": 503.515625,
+          "bottom": 66
+        },
+        {
+          "x": 413.515625,
+          "y": 25,
+          "width": 40,
+          "height": 40,
+          "right": 453.515625,
+          "bottom": 65
+        },
+        {
+          "x": 345,
+          "y": 25,
+          "width": 60.515625,
+          "height": 40,
+          "right": 405.515625,
+          "bottom": 65
+        }
+      ],
+      "text": "بدون فريز",
+      "label": "شرح حماية الستريك بالفريز. رصيدك 0 فريز",
+      "overflow": false,
+      "overlap": [],
+      "inside": true
+    },
+    {
+      "width": 1280,
+      "theme": "lootlingua",
+      "count": 2,
+      "bar": {
+        "x": 330,
+        "y": 12,
+        "width": 620,
+        "height": 66,
+        "right": 950,
+        "bottom": 78
+      },
+      "freeze": {
+        "x": 511.515625,
+        "y": 45,
+        "width": 63.953125,
+        "height": 24,
+        "right": 575.46875,
+        "bottom": 69
+      },
+      "help": {
+        "x": 511.515625,
+        "y": 45,
+        "width": 24,
+        "height": 24,
+        "right": 535.515625,
+        "bottom": 69
+      },
+      "widgets": [
+        {
+          "x": 834.15625,
+          "y": 20,
+          "width": 100.84375,
+          "height": 50,
+          "right": 935,
+          "bottom": 70
+        },
+        {
+          "x": 511.515625,
+          "y": 21,
+          "width": 63.953125,
+          "height": 48,
+          "right": 575.46875,
+          "bottom": 69
+        },
+        {
+          "x": 461.515625,
+          "y": 24,
+          "width": 42,
+          "height": 42,
+          "right": 503.515625,
+          "bottom": 66
+        },
+        {
+          "x": 413.515625,
+          "y": 25,
+          "width": 40,
+          "height": 40,
+          "right": 453.515625,
+          "bottom": 65
+        },
+        {
+          "x": 345,
+          "y": 25,
+          "width": 60.515625,
+          "height": 40,
+          "right": 405.515625,
+          "bottom": 65
+        }
+      ],
+      "text": "2 فريز",
+      "label": "شرح حماية الستريك بالفريز. رصيدك 2 فريز",
+      "overflow": false,
+      "overlap": [],
+      "inside": true
+    },
+    {
+      "width": 1280,
+      "theme": "lootlingua",
+      "count": 999999,
+      "bar": {
+        "x": 330,
+        "y": 12,
+        "width": 620,
+        "height": 66,
+        "right": 950,
+        "bottom": 78
+      },
+      "freeze": {
+        "x": 511.515625,
+        "y": 45,
+        "width": 92.703125,
+        "height": 24,
+        "right": 604.21875,
+        "bottom": 69
+      },
+      "help": {
+        "x": 511.515625,
+        "y": 45,
+        "width": 24,
+        "height": 24,
+        "right": 535.515625,
+        "bottom": 69
+      },
+      "widgets": [
+        {
+          "x": 834.15625,
+          "y": 20,
+          "width": 100.84375,
+          "height": 50,
+          "right": 935,
+          "bottom": 70
+        },
+        {
+          "x": 511.515625,
+          "y": 21,
+          "width": 92.703125,
+          "height": 48,
+          "right": 604.21875,
+          "bottom": 69
+        },
+        {
+          "x": 461.515625,
+          "y": 24,
+          "width": 42,
+          "height": 42,
+          "right": 503.515625,
+          "bottom": 66
+        },
+        {
+          "x": 413.515625,
+          "y": 25,
+          "width": 40,
+          "height": 40,
+          "right": 453.515625,
+          "bottom": 65
+        },
+        {
+          "x": 345,
+          "y": 25,
+          "width": 60.515625,
+          "height": 40,
+          "right": 405.515625,
+          "bottom": 65
+        }
+      ],
+      "text": "999999 فريز",
+      "label": "شرح حماية الستريك بالفريز. رصيدك 999999 فريز",
+      "overflow": false,
+      "overlap": [],
+      "inside": true
+    },
+    {
+      "width": 1280,
+      "theme": "golden",
+      "count": 0,
+      "bar": {
+        "x": 330,
+        "y": 12,
+        "width": 620,
+        "height": 66,
+        "right": 950,
+        "bottom": 78
+      },
+      "freeze": {
+        "x": 511.515625,
+        "y": 45,
+        "width": 78.234375,
+        "height": 24,
+        "right": 589.75,
+        "bottom": 69
+      },
+      "help": {
+        "x": 511.515625,
+        "y": 45,
+        "width": 24,
+        "height": 24,
+        "right": 535.515625,
+        "bottom": 69
+      },
+      "widgets": [
+        {
+          "x": 834.15625,
+          "y": 20,
+          "width": 100.84375,
+          "height": 50,
+          "right": 935,
+          "bottom": 70
+        },
+        {
+          "x": 511.515625,
+          "y": 21,
+          "width": 78.234375,
+          "height": 48,
+          "right": 589.75,
+          "bottom": 69
+        },
+        {
+          "x": 461.515625,
+          "y": 24,
+          "width": 42,
+          "height": 42,
+          "right": 503.515625,
+          "bottom": 66
+        },
+        {
+          "x": 413.515625,
+          "y": 25,
+          "width": 40,
+          "height": 40,
+          "right": 453.515625,
+          "bottom": 65
+        },
+        {
+          "x": 345,
+          "y": 25,
+          "width": 60.515625,
+          "height": 40,
+          "right": 405.515625,
+          "bottom": 65
+        }
+      ],
+      "text": "بدون فريز",
+      "label": "شرح حماية الستريك بالفريز. رصيدك 0 فريز",
+      "overflow": false,
+      "overlap": [],
+      "inside": true
+    },
+    {
+      "width": 1280,
+      "theme": "golden",
+      "count": 2,
+      "bar": {
+        "x": 330,
+        "y": 12,
+        "width": 620,
+        "height": 66,
+        "right": 950,
+        "bottom": 78
+      },
+      "freeze": {
+        "x": 511.515625,
+        "y": 45,
+        "width": 63.953125,
+        "height": 24,
+        "right": 575.46875,
+        "bottom": 69
+      },
+      "help": {
+        "x": 511.515625,
+        "y": 45,
+        "width": 24,
+        "height": 24,
+        "right": 535.515625,
+        "bottom": 69
+      },
+      "widgets": [
+        {
+          "x": 834.15625,
+          "y": 20,
+          "width": 100.84375,
+          "height": 50,
+          "right": 935,
+          "bottom": 70
+        },
+        {
+          "x": 511.515625,
+          "y": 21,
+          "width": 63.953125,
+          "height": 48,
+          "right": 575.46875,
+          "bottom": 69
+        },
+        {
+          "x": 461.515625,
+          "y": 24,
+          "width": 42,
+          "height": 42,
+          "right": 503.515625,
+          "bottom": 66
+        },
+        {
+          "x": 413.515625,
+          "y": 25,
+          "width": 40,
+          "height": 40,
+          "right": 453.515625,
+          "bottom": 65
+        },
+        {
+          "x": 345,
+          "y": 25,
+          "width": 60.515625,
+          "height": 40,
+          "right": 405.515625,
+          "bottom": 65
+        }
+      ],
+      "text": "2 فريز",
+      "label": "شرح حماية الستريك بالفريز. رصيدك 2 فريز",
+      "overflow": false,
+      "overlap": [],
+      "inside": true
+    },
+    {
+      "width": 1280,
+      "theme": "golden",
+      "count": 999999,
+      "bar": {
+        "x": 330,
+        "y": 12,
+        "width": 620,
+        "height": 66,
+        "right": 950,
+        "bottom": 78
+      },
+      "freeze": {
+        "x": 511.515625,
+        "y": 45,
+        "width": 92.703125,
+        "height": 24,
+        "right": 604.21875,
+        "bottom": 69
+      },
+      "help": {
+        "x": 511.515625,
+        "y": 45,
+        "width": 24,
+        "height": 24,
+        "right": 535.515625,
+        "bottom": 69
+      },
+      "widgets": [
+        {
+          "x": 834.15625,
+          "y": 20,
+          "width": 100.84375,
+          "height": 50,
+          "right": 935,
+          "bottom": 70
+        },
+        {
+          "x": 511.515625,
+          "y": 21,
+          "width": 92.703125,
+          "height": 48,
+          "right": 604.21875,
+          "bottom": 69
+        },
+        {
+          "x": 461.515625,
+          "y": 24,
+          "width": 42,
+          "height": 42,
+          "right": 503.515625,
+          "bottom": 66
+        },
+        {
+          "x": 413.515625,
+          "y": 25,
+          "width": 40,
+          "height": 40,
+          "right": 453.515625,
+          "bottom": 65
+        },
+        {
+          "x": 345,
+          "y": 25,
+          "width": 60.515625,
+          "height": 40,
+          "right": 405.515625,
+          "bottom": 65
+        }
+      ],
+      "text": "999999 فريز",
+      "label": "شرح حماية الستريك بالفريز. رصيدك 999999 فريز",
+      "overflow": false,
+      "overlap": [],
+      "inside": true
+    },
+    {
+      "width": 1280,
+      "theme": "scroll",
+      "count": 0,
+      "bar": {
+        "x": 330,
+        "y": 12,
+        "width": 620,
+        "height": 66,
+        "right": 950,
+        "bottom": 78
+      },
+      "freeze": {
+        "x": 511.515625,
+        "y": 45,
+        "width": 78.234375,
+        "height": 24,
+        "right": 589.75,
+        "bottom": 69
+      },
+      "help": {
+        "x": 511.515625,
+        "y": 45,
+        "width": 24,
+        "height": 24,
+        "right": 535.515625,
+        "bottom": 69
+      },
+      "widgets": [
+        {
+          "x": 834.15625,
+          "y": 20,
+          "width": 100.84375,
+          "height": 50,
+          "right": 935,
+          "bottom": 70
+        },
+        {
+          "x": 511.515625,
+          "y": 21,
+          "width": 78.234375,
+          "height": 48,
+          "right": 589.75,
+          "bottom": 69
+        },
+        {
+          "x": 461.515625,
+          "y": 24,
+          "width": 42,
+          "height": 42,
+          "right": 503.515625,
+          "bottom": 66
+        },
+        {
+          "x": 413.515625,
+          "y": 25,
+          "width": 40,
+          "height": 40,
+          "right": 453.515625,
+          "bottom": 65
+        },
+        {
+          "x": 345,
+          "y": 25,
+          "width": 60.515625,
+          "height": 40,
+          "right": 405.515625,
+          "bottom": 65
+        }
+      ],
+      "text": "بدون فريز",
+      "label": "شرح حماية الستريك بالفريز. رصيدك 0 فريز",
+      "overflow": false,
+      "overlap": [],
+      "inside": true
+    },
+    {
+      "width": 1280,
+      "theme": "scroll",
+      "count": 2,
+      "bar": {
+        "x": 330,
+        "y": 12,
+        "width": 620,
+        "height": 66,
+        "right": 950,
+        "bottom": 78
+      },
+      "freeze": {
+        "x": 511.515625,
+        "y": 45,
+        "width": 63.953125,
+        "height": 24,
+        "right": 575.46875,
+        "bottom": 69
+      },
+      "help": {
+        "x": 511.515625,
+        "y": 45,
+        "width": 24,
+        "height": 24,
+        "right": 535.515625,
+        "bottom": 69
+      },
+      "widgets": [
+        {
+          "x": 834.15625,
+          "y": 20,
+          "width": 100.84375,
+          "height": 50,
+          "right": 935,
+          "bottom": 70
+        },
+        {
+          "x": 511.515625,
+          "y": 21,
+          "width": 63.953125,
+          "height": 48,
+          "right": 575.46875,
+          "bottom": 69
+        },
+        {
+          "x": 461.515625,
+          "y": 24,
+          "width": 42,
+          "height": 42,
+          "right": 503.515625,
+          "bottom": 66
+        },
+        {
+          "x": 413.515625,
+          "y": 25,
+          "width": 40,
+          "height": 40,
+          "right": 453.515625,
+          "bottom": 65
+        },
+        {
+          "x": 345,
+          "y": 25,
+          "width": 60.515625,
+          "height": 40,
+          "right": 405.515625,
+          "bottom": 65
+        }
+      ],
+      "text": "2 فريز",
+      "label": "شرح حماية الستريك بالفريز. رصيدك 2 فريز",
+      "overflow": false,
+      "overlap": [],
+      "inside": true
+    },
+    {
+      "width": 1280,
+      "theme": "scroll",
+      "count": 999999,
+      "bar": {
+        "x": 330,
+        "y": 12,
+        "width": 620,
+        "height": 66,
+        "right": 950,
+        "bottom": 78
+      },
+      "freeze": {
+        "x": 511.515625,
+        "y": 45,
+        "width": 92.703125,
+        "height": 24,
+        "right": 604.21875,
+        "bottom": 69
+      },
+      "help": {
+        "x": 511.515625,
+        "y": 45,
+        "width": 24,
+        "height": 24,
+        "right": 535.515625,
+        "bottom": 69
+      },
+      "widgets": [
+        {
+          "x": 834.15625,
+          "y": 20,
+          "width": 100.84375,
+          "height": 50,
+          "right": 935,
+          "bottom": 70
+        },
+        {
+          "x": 511.515625,
+          "y": 21,
+          "width": 92.703125,
+          "height": 48,
+          "right": 604.21875,
+          "bottom": 69
+        },
+        {
+          "x": 461.515625,
+          "y": 24,
+          "width": 42,
+          "height": 42,
+          "right": 503.515625,
+          "bottom": 66
+        },
+        {
+          "x": 413.515625,
+          "y": 25,
+          "width": 40,
+          "height": 40,
+          "right": 453.515625,
+          "bottom": 65
+        },
+        {
+          "x": 345,
+          "y": 25,
+          "width": 60.515625,
+          "height": 40,
+          "right": 405.515625,
+          "bottom": 65
+        }
+      ],
+      "text": "999999 فريز",
+      "label": "شرح حماية الستريك بالفريز. رصيدك 999999 فريز",
+      "overflow": false,
+      "overlap": [],
+      "inside": true
+    },
+    {
+      "width": 1280,
+      "theme": "ocean",
+      "mode": "light",
+      "count": 0,
+      "bar": {
+        "x": 330,
+        "y": 12,
+        "width": 620,
+        "height": 66,
+        "right": 950,
+        "bottom": 78
+      },
+      "freeze": {
+        "x": 511.515625,
+        "y": 45,
+        "width": 78.234375,
+        "height": 24,
+        "right": 589.75,
+        "bottom": 69
+      },
+      "help": {
+        "x": 511.515625,
+        "y": 45,
+        "width": 24,
+        "height": 24,
+        "right": 535.515625,
+        "bottom": 69
+      },
+      "widgets": [
+        {
+          "x": 834.15625,
+          "y": 20,
+          "width": 100.84375,
+          "height": 50,
+          "right": 935,
+          "bottom": 70
+        },
+        {
+          "x": 511.515625,
+          "y": 21,
+          "width": 78.234375,
+          "height": 48,
+          "right": 589.75,
+          "bottom": 69
+        },
+        {
+          "x": 461.515625,
+          "y": 24,
+          "width": 42,
+          "height": 42,
+          "right": 503.515625,
+          "bottom": 66
+        },
+        {
+          "x": 413.515625,
+          "y": 25,
+          "width": 40,
+          "height": 40,
+          "right": 453.515625,
+          "bottom": 65
+        },
+        {
+          "x": 345,
+          "y": 25,
+          "width": 60.515625,
+          "height": 40,
+          "right": 405.515625,
+          "bottom": 65
+        }
+      ],
+      "text": "بدون فريز",
+      "label": "شرح حماية الستريك بالفريز. رصيدك 0 فريز",
+      "overflow": false,
+      "overlap": [],
+      "inside": true
+    },
+    {
+      "width": 1280,
+      "theme": "ocean",
+      "mode": "light",
+      "count": 2,
+      "bar": {
+        "x": 330,
+        "y": 12,
+        "width": 620,
+        "height": 66,
+        "right": 950,
+        "bottom": 78
+      },
+      "freeze": {
+        "x": 511.515625,
+        "y": 45,
+        "width": 63.953125,
+        "height": 24,
+        "right": 575.46875,
+        "bottom": 69
+      },
+      "help": {
+        "x": 511.515625,
+        "y": 45,
+        "width": 24,
+        "height": 24,
+        "right": 535.515625,
+        "bottom": 69
+      },
+      "widgets": [
+        {
+          "x": 834.15625,
+          "y": 20,
+          "width": 100.84375,
+          "height": 50,
+          "right": 935,
+          "bottom": 70
+        },
+        {
+          "x": 511.515625,
+          "y": 21,
+          "width": 63.953125,
+          "height": 48,
+          "right": 575.46875,
+          "bottom": 69
+        },
+        {
+          "x": 461.515625,
+          "y": 24,
+          "width": 42,
+          "height": 42,
+          "right": 503.515625,
+          "bottom": 66
+        },
+        {
+          "x": 413.515625,
+          "y": 25,
+          "width": 40,
+          "height": 40,
+          "right": 453.515625,
+          "bottom": 65
+        },
+        {
+          "x": 345,
+          "y": 25,
+          "width": 60.515625,
+          "height": 40,
+          "right": 405.515625,
+          "bottom": 65
+        }
+      ],
+      "text": "2 فريز",
+      "label": "شرح حماية الستريك بالفريز. رصيدك 2 فريز",
+      "overflow": false,
+      "overlap": [],
+      "inside": true
+    },
+    {
+      "width": 1280,
+      "theme": "ocean",
+      "mode": "light",
+      "count": 999999,
+      "bar": {
+        "x": 330,
+        "y": 12,
+        "width": 620,
+        "height": 66,
+        "right": 950,
+        "bottom": 78
+      },
+      "freeze": {
+        "x": 511.515625,
+        "y": 45,
+        "width": 92.703125,
+        "height": 24,
+        "right": 604.21875,
+        "bottom": 69
+      },
+      "help": {
+        "x": 511.515625,
+        "y": 45,
+        "width": 24,
+        "height": 24,
+        "right": 535.515625,
+        "bottom": 69
+      },
+      "widgets": [
+        {
+          "x": 834.15625,
+          "y": 20,
+          "width": 100.84375,
+          "height": 50,
+          "right": 935,
+          "bottom": 70
+        },
+        {
+          "x": 511.515625,
+          "y": 21,
+          "width": 92.703125,
+          "height": 48,
+          "right": 604.21875,
+          "bottom": 69
+        },
+        {
+          "x": 461.515625,
+          "y": 24,
+          "width": 42,
+          "height": 42,
+          "right": 503.515625,
+          "bottom": 66
+        },
+        {
+          "x": 413.515625,
+          "y": 25,
+          "width": 40,
+          "height": 40,
+          "right": 453.515625,
+          "bottom": 65
+        },
+        {
+          "x": 345,
+          "y": 25,
+          "width": 60.515625,
+          "height": 40,
+          "right": 405.515625,
+          "bottom": 65
+        }
+      ],
+      "text": "999999 فريز",
+      "label": "شرح حماية الستريك بالفريز. رصيدك 999999 فريز",
+      "overflow": false,
+      "overlap": [],
+      "inside": true
+    },
+    {
+      "width": 1280,
+      "theme": "ocean",
+      "mode": "dark",
+      "count": 0,
+      "bar": {
+        "x": 330,
+        "y": 12,
+        "width": 620,
+        "height": 66,
+        "right": 950,
+        "bottom": 78
+      },
+      "freeze": {
+        "x": 511.515625,
+        "y": 45,
+        "width": 78.234375,
+        "height": 24,
+        "right": 589.75,
+        "bottom": 69
+      },
+      "help": {
+        "x": 511.515625,
+        "y": 45,
+        "width": 24,
+        "height": 24,
+        "right": 535.515625,
+        "bottom": 69
+      },
+      "widgets": [
+        {
+          "x": 834.15625,
+          "y": 20,
+          "width": 100.84375,
+          "height": 50,
+          "right": 935,
+          "bottom": 70
+        },
+        {
+          "x": 511.515625,
+          "y": 21,
+          "width": 78.234375,
+          "height": 48,
+          "right": 589.75,
+          "bottom": 69
+        },
+        {
+          "x": 461.515625,
+          "y": 24,
+          "width": 42,
+          "height": 42,
+          "right": 503.515625,
+          "bottom": 66
+        },
+        {
+          "x": 413.515625,
+          "y": 25,
+          "width": 40,
+          "height": 40,
+          "right": 453.515625,
+          "bottom": 65
+        },
+        {
+          "x": 345,
+          "y": 25,
+          "width": 60.515625,
+          "height": 40,
+          "right": 405.515625,
+          "bottom": 65
+        }
+      ],
+      "text": "بدون فريز",
+      "label": "شرح حماية الستريك بالفريز. رصيدك 0 فريز",
+      "overflow": false,
+      "overlap": [],
+      "inside": true
+    },
+    {
+      "width": 1280,
+      "theme": "ocean",
+      "mode": "dark",
+      "count": 2,
+      "bar": {
+        "x": 330,
+        "y": 12,
+        "width": 620,
+        "height": 66,
+        "right": 950,
+        "bottom": 78
+      },
+      "freeze": {
+        "x": 511.515625,
+        "y": 45,
+        "width": 63.953125,
+        "height": 24,
+        "right": 575.46875,
+        "bottom": 69
+      },
+      "help": {
+        "x": 511.515625,
+        "y": 45,
+        "width": 24,
+        "height": 24,
+        "right": 535.515625,
+        "bottom": 69
+      },
+      "widgets": [
+        {
+          "x": 834.15625,
+          "y": 20,
+          "width": 100.84375,
+          "height": 50,
+          "right": 935,
+          "bottom": 70
+        },
+        {
+          "x": 511.515625,
+          "y": 21,
+          "width": 63.953125,
+          "height": 48,
+          "right": 575.46875,
+          "bottom": 69
+        },
+        {
+          "x": 461.515625,
+          "y": 24,
+          "width": 42,
+          "height": 42,
+          "right": 503.515625,
+          "bottom": 66
+        },
+        {
+          "x": 413.515625,
+          "y": 25,
+          "width": 40,
+          "height": 40,
+          "right": 453.515625,
+          "bottom": 65
+        },
+        {
+          "x": 345,
+          "y": 25,
+          "width": 60.515625,
+          "height": 40,
+          "right": 405.515625,
+          "bottom": 65
+        }
+      ],
+      "text": "2 فريز",
+      "label": "شرح حماية الستريك بالفريز. رصيدك 2 فريز",
+      "overflow": false,
+      "overlap": [],
+      "inside": true
+    },
+    {
+      "width": 1280,
+      "theme": "ocean",
+      "mode": "dark",
+      "count": 999999,
+      "bar": {
+        "x": 330,
+        "y": 12,
+        "width": 620,
+        "height": 66,
+        "right": 950,
+        "bottom": 78
+      },
+      "freeze": {
+        "x": 511.515625,
+        "y": 45,
+        "width": 92.703125,
+        "height": 24,
+        "right": 604.21875,
+        "bottom": 69
+      },
+      "help": {
+        "x": 511.515625,
+        "y": 45,
+        "width": 24,
+        "height": 24,
+        "right": 535.515625,
+        "bottom": 69
+      },
+      "widgets": [
+        {
+          "x": 834.15625,
+          "y": 20,
+          "width": 100.84375,
+          "height": 50,
+          "right": 935,
+          "bottom": 70
+        },
+        {
+          "x": 511.515625,
+          "y": 21,
+          "width": 92.703125,
+          "height": 48,
+          "right": 604.21875,
+          "bottom": 69
+        },
+        {
+          "x": 461.515625,
+          "y": 24,
+          "width": 42,
+          "height": 42,
+          "right": 503.515625,
+          "bottom": 66
+        },
+        {
+          "x": 413.515625,
+          "y": 25,
+          "width": 40,
+          "height": 40,
+          "right": 453.515625,
+          "bottom": 65
+        },
+        {
+          "x": 345,
+          "y": 25,
+          "width": 60.515625,
+          "height": 40,
+          "right": 405.515625,
+          "bottom": 65
+        }
+      ],
+      "text": "999999 فريز",
+      "label": "شرح حماية الستريك بالفريز. رصيدك 999999 فريز",
+      "overflow": false,
+      "overlap": [],
+      "inside": true
+    }
+  ],
+  "helpThemes": [
+    {
+      "theme": "lootlingua",
+      "width": 320,
+      "visible": true,
+      "inside": true,
+      "horizontalOverflow": false,
+      "textColor": "rgb(148, 163, 184)",
+      "surfaceColor": "rgb(15, 23, 42)",
+      "buttonColor": "rgb(255, 255, 255)",
+      "buttonSurface": "rgb(239, 68, 68)"
+    },
+    {
+      "theme": "golden",
+      "width": 320,
+      "visible": true,
+      "inside": true,
+      "horizontalOverflow": false,
+      "textColor": "rgb(161, 161, 170)",
+      "surfaceColor": "rgb(23, 23, 23)",
+      "buttonColor": "rgb(255, 255, 255)",
+      "buttonSurface": "rgb(220, 38, 38)"
+    },
+    {
+      "theme": "scroll",
+      "width": 320,
+      "visible": true,
+      "inside": true,
+      "horizontalOverflow": false,
+      "textColor": "rgb(92, 64, 48)",
+      "surfaceColor": "rgb(232, 224, 212)",
+      "buttonColor": "rgb(255, 255, 255)",
+      "buttonSurface": "rgb(153, 27, 27)"
+    },
+    {
+      "theme": "ocean",
+      "mode": "light",
+      "width": 320,
+      "visible": true,
+      "inside": true,
+      "horizontalOverflow": false,
+      "textColor": "rgb(82, 109, 112)",
+      "surfaceColor": "rgba(255, 255, 255, 0.82)",
+      "buttonColor": "rgb(255, 255, 255)",
+      "buttonSurface": "rgb(220, 38, 38)"
+    },
+    {
+      "theme": "ocean",
+      "mode": "dark",
+      "width": 320,
+      "visible": true,
+      "inside": true,
+      "horizontalOverflow": false,
+      "textColor": "rgb(154, 168, 170)",
+      "surfaceColor": "rgb(17, 22, 26)",
+      "buttonColor": "rgb(4, 32, 30)",
+      "buttonSurface": "rgb(251, 113, 133)"
+    }
+  ],
+  "interactions": [
+    {
+      "name": "Enter opens help; Tab/Shift+Tab stay inside; Escape restores help focus",
+      "passed": true
+    },
+    {
+      "name": "two missed days spend two freezes and refresh the badge and open help balance",
+      "passed": true
+    },
+    {
+      "name": "canonical account hydration refreshes both badge and open help balance",
+      "passed": true
+    }
+  ],
+  "runtimeExceptions": [],
+  "passed": true
+}

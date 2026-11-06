@@ -1,0 +1,40 @@
+{
+  "isolation": "Real Chrome DOM/keyboard; cloud, render and routing adapters in memory; all network blocked",
+  "checks": [
+    {
+      "name": "profile focuses inside and isolates background",
+      "inside": true,
+      "backgroundInert": true,
+      "preexisting": true
+    },
+    {
+      "name": "Tab and Shift+Tab wrap within visible profile controls",
+      "passed": true
+    },
+    {
+      "name": "nested statistics closes alone and restores profile focus",
+      "passed": true
+    },
+    {
+      "name": "existing auth and custom layers suspend the underlying focus trap",
+      "passed": true
+    },
+    {
+      "name": "closing restores the trigger and preserves pre-existing isolation",
+      "passed": true
+    },
+    {
+      "name": "rapid reopen cancels the old hide timer; route cleanup releases isolation",
+      "passed": true
+    },
+    {
+      "name": "route cleanup cancels a pending statistics request in the same account",
+      "passed": true
+    },
+    {
+      "name": "a deferred statistics request cannot reopen for another account",
+      "passed": true
+    }
+  ],
+  "runtimeExceptions": []
+}

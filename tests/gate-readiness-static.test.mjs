@@ -28,9 +28,10 @@ test('the gate card exposes one aggregate progress bar and the three user catego
   );
   assert.match(panel, /published-gate-readiness-track/);
   assert.match(panel, /published-gate-readiness-fill/);
-  assert.match(panel, /خطوات الاستعداد:/);
-  assert.match(panel, /بانتظار ساعتين:/);
-  assert.match(panel, /بانتظار يوم جديد:/);
+  assert.match(panel, /خطة فتح تحدّي البوابة/);
+  assert.match(panel, /completedSteps\} \/ \$\{totalSteps/);
+  assert.match(panel, /كلمات بانتظار ساعتين:/);
+  assert.match(panel, /كلمات بانتظار يوم جديد:/);
   assert.doesNotMatch(panel, /published-word-readiness|word-readiness-indicator/);
 });
 

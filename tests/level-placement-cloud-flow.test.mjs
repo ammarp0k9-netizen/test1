@@ -24,6 +24,7 @@ function createHarness(options = {}) {
     failProgressProjection: false,
     failWorldRefresh: false,
     failReadinessProjection: false,
+    readinessProjectionFailures: 0,
     wordFailures: new Map(),
     outcomeCommitCount: 0,
     wordUpserts: [],
@@ -117,8 +118,9 @@ function createHarness(options = {}) {
       getDoc: async (reference) => {
         if (
           controls.failReadinessProjection &&
-          reference.path.endsWith('/contentProgress/world-a/ranks/rank-a2/gates/old-gate')
+          reference.path.endsWith('/contentWords/old-word-key')
         ) {
+          controls.readinessProjectionFailures++;
           const error = new Error('Injected readiness projection failure');
           error.code = 'unavailable';
           throw error;
@@ -599,6 +601,7 @@ test('ordinary quiz evidence success is not reported as result failure when read
   };
   const result = await harness.api.recordQuizEvidenceBatch(input);
   assert.equal(result.recorded, 1);
+  assert.equal(harness.controls.readinessProjectionFailures, 1, 'inject the failure in readiness projection, after destination resolution');
   assert.equal(result.readinessError?.code, 'unavailable');
   assert.equal(
     [...harness.values.keys()].some((path) => path.includes(`/contentWords/${identity.wordKey}/evidence/`)),

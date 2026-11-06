@@ -5,6 +5,7 @@ import test from 'node:test';
 const admin = readFileSync(new URL('../js/admin.js', import.meta.url), 'utf8');
 const importer = readFileSync(new URL('../js/admin-word-import.js', import.meta.url), 'utf8');
 const html = readFileSync(new URL('../index.html', import.meta.url), 'utf8');
+const router = readFileSync(new URL('../js/script.js', import.meta.url), 'utf8');
 const styles = readFileSync(new URL('../style.css', import.meta.url), 'utf8');
 const packageJson = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
 
@@ -16,12 +17,14 @@ function section(source, start, end) {
   return source.slice(startIndex, endIndex);
 }
 
-test('loads the import helper after the content schema and before the admin UI', () => {
+test('loads the import helper on demand after the schema and before the admin UI', () => {
   const schemaIndex = html.indexOf('src="js/content-schema.js');
-  const importIndex = html.indexOf('src="js/admin-word-import.js"');
-  const adminIndex = html.indexOf('src="js/admin.js');
-  assert.ok(schemaIndex >= 0 && schemaIndex < importIndex);
+  const loader = section(router, 'window.loadLootLinguaAdminFeature =', 'window.prepareLootLinguaAdminEntry =');
+  const importIndex = loader.indexOf("await loadFeatureScript('js/admin-word-import.js?");
+  const adminIndex = loader.indexOf("await loadFeatureScript('js/admin.js?");
+  assert.ok(schemaIndex >= 0 && importIndex >= 0);
   assert.ok(importIndex < adminIndex);
+  assert.doesNotMatch(html, /src="js\/admin-word-import\.js/);
 });
 
 test('renders the JSON import action only in the existing words header', () => {

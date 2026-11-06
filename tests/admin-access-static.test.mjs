@@ -5,6 +5,7 @@ const read = (path) => readFileSync(new URL(`../${path}`, import.meta.url), 'utf
 const adminCloud = read('js/admin-cloud.js');
 const cloud = read('js/cloud.js');
 const html = read('index.html');
+const router = read('js/script.js');
 
 assert.match(adminCloud, /getIdTokenResult\(options\.forceRefresh !== false\)/, 'Admin claim is not read from the Firebase ID token');
 assert.match(adminCloud, /token\?\.claims\?\.admin === true/, 'Admin claim must require strict boolean true');
@@ -36,7 +37,9 @@ assert.doesNotMatch(
 assert.doesNotMatch(adminCloud, /@|password|secret/i, 'Admin access module contains an email/password/secret marker');
 assert.match(cloud, /lootlingua:auth-state/, 'Main Auth listener does not notify account-safe role state');
 assert.equal((cloud.match(/initializeApp\(/g) || []).length, 1, 'Firebase must still initialize exactly once');
-assert.equal((html.match(/src="js\/admin-cloud\.js(?:\?[^"]+)?"/g) || []).length, 1, 'Admin claim module must be loaded exactly once');
+assert.equal((html.match(/src="js\/admin-cloud\.js(?:\?[^"]+)?"/g) || []).length, 0, 'Admin claim module must stay out of startup');
+assert.equal((router.match(/loadFeatureScript\('js\/admin-cloud\.js(?:\?[^']+)?', \{ module: true \}\)/g) || []).length, 1, 'The lazy access loader has one module entrypoint');
+assert.match(router, /if \(adminAccessLoadPromise\) return adminAccessLoadPromise/);
 assert.equal(
   (html.match(/src="js\/content-schema\.js(?:\?[^"]+)?"/g) || []).length,
   1,

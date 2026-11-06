@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import test from 'node:test';
+import vm from 'node:vm';
 
 const root = new URL('../', import.meta.url);
 const [html, router, worlds, runtime, admin, core, styles] = await Promise.all([
@@ -13,20 +14,31 @@ const [html, router, worlds, runtime, admin, core, styles] = await Promise.all([
   readFile(new URL('style.css', root), 'utf8'),
 ]);
 
-test('the admin route has one hidden host and one script entrypoint', () => {
+test('the admin route has one hidden host and one lazy script entrypoint', () => {
   assert.equal((html.match(/id="adminView"/g) || []).length, 1);
   assert.equal((html.match(/id="adminEntryBtn"/g) || []).length, 1);
-  assert.equal((html.match(/src="js\/admin\.js(?:\?[^"]+)?"/g) || []).length, 1);
+  assert.equal((html.match(/src="js\/admin\.js(?:\?[^"]+)?"/g) || []).length, 0);
+  assert.equal((router.match(/loadFeatureScript\('js\/admin\.js(?:\?[^']+)?'\)/g) || []).length, 1);
   assert.match(router, /admin:\s*'admin'/);
   assert.match(router, /typeof window\.loadAdminView === 'function'/);
 });
 
-test('the shared schema loads before the admin UI and auth facade', () => {
+test('lazy admin loading is shared and preserves access/import/UI/clock dependency order', async () => {
   const schemaIndex = html.indexOf('src="js/content-schema.js');
-  const uiIndex = html.indexOf('src="js/admin.js');
-  assert.ok(schemaIndex >= 0 && uiIndex > schemaIndex);
+  assert.ok(schemaIndex >= 0);
   assert.equal((html.match(/src="js\/content-schema\.js(?:\?[^"]+)?"/g) || []).length, 1);
-  assert.equal((html.match(/src="js\/admin-cloud\.js(?:\?[^"]+)?"/g) || []).length, 1);
+  const loaded = [];
+  const scope = { window: {}, document: {
+    createElement: () => ({}),
+    head: { appendChild(script) { loaded.push({ src: script.src.split('?')[0], type: script.type }); queueMicrotask(() => script.onload()); } },
+  }, console };
+  vm.runInNewContext(router.slice(router.indexOf('let adminFeatureLoadPromise'), router.indexOf('function showAdminRouteMessage')), scope);
+  const first = scope.window.loadLootLinguaAdminFeature();
+  assert.equal(first, scope.window.loadLootLinguaAdminFeature());
+  await first;
+  assert.deepEqual(loaded.map(item => item.src), ['js/admin-cloud.js', 'js/admin-word-import.js', 'js/admin.js', 'js/test-clock.js']);
+  assert.equal(loaded[0].type, 'module');
+  assert.equal(loaded[3].type, 'module');
 });
 
 test('navigation cannot silently discard a dirty or pending admin editor', () => {
