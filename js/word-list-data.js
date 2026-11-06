@@ -79,7 +79,9 @@
       normalized.rankId = String(source.rankId || '').trim();
       normalized.gateId = String(source.gateId || '').trim();
       normalized.search = normalizeSearch(source.search);
-    } else if (sourceType !== 'admin-content-word-import-staging') {
+    } else if (sourceType === 'admin-content-word-import-staging') {
+      normalized.search = normalizeSearch(source.search);
+    } else {
       Object.keys(source).sort().forEach((key) => {
         if (key in normalized || key === 'filter') return;
         const item = source[key];

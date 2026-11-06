@@ -95,7 +95,7 @@ assert.match(
 );
 assert.match(source, /content\/publish-requires-slug/, 'Published worlds are not required to have a slug.');
 assert.match(source, /\['draft', 'published', 'archived'\]/, 'World status values are not explicitly constrained.');
-assert.match(source, /httpsCallable\(functions, 'deleteContentWorld'\)/, 'World deletion does not use the backend callable.');
+assert.match(source, /return await deleteArchivedWorldDirect\(context, payload/, 'World deletion must use the guarded, paged client path without a paid callable.');
 assert.match(source, /const payload = \{ worldId: id, confirmationTitle \}/, 'The exact confirmation title is not forwarded.');
 assert.match(source, /auth\?\.currentUser\?\.uid !== context\.uid/, 'Async world requests are not account guarded.');
 assert.match(
@@ -121,4 +121,4 @@ assert.match(source, /httpsCallable\(functions, 'deleteContentRank'\)/, 'Rank de
 assert.match(source, /await duplicateContentRank\(\{[\s\S]*?operationId/, 'Rank duplication is not awaited or idempotency-keyed.');
 assert.match(source, /await deleteContentRank\(\{[\s\S]*?operationId/, 'Rank deletion is not awaited or idempotency-keyed.');
 
-console.log('Admin World/Rank cloud APIs are claim-gated, transactional, versioned, and backend-deleted.');
+console.log('Admin World/Rank APIs retain claim, version and transaction guards; world deletion is paged without Functions.');

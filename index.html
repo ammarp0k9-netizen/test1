@@ -212,7 +212,6 @@
 
   <!-- بطاقة الإضافة (تُخفى عند قواميس الألعاب) -->
   <div class="card-box" id="personalControls">
-    <div data-motivation-goal class="motivation-goal"></div>
     <div id="normalSearchZone" class="search-zone" data-search-type="normal">
       <div class="search-zone-inner dictionary-search-row">
         <button onclick="fetchSuggestions()" id="searchBtn" class="btn-ai dictionary-search-btn" data-tip="بحث ذكي">ابحث عن معنى</button>
@@ -569,7 +568,6 @@
       <p>افتح الصندوق اليومي، اجمع XP، وخلّي الألقاب تبين أنك مش داخل تتفرج بس.</p>
     </div>
 
-    <section id="motivationRewardsPanel" aria-label="إنجازات ومكافآت التعلّم"></section>
     <div class="treasure-stage" aria-label="الصندوق اليومي">
       <button id="dailyLootChest" class="treasure-chest-main" type="button" onpointerdown="startLootChestCharge(event)" onpointermove="moveLootChestCharge(event)" onpointerup="releaseLootChestCharge(event)" onpointerleave="cancelLootChestCharge(event)" onpointercancel="cancelLootChestCharge(event)" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();openDailyLootBox();}" aria-describedby="lootStatusText">
         <span class="chest-glow"></span>
@@ -615,6 +613,7 @@
       <i class="fa-solid fa-medal" aria-hidden="true"></i>
     </div>
     <div id="titlesGrid" class="titles-grid" aria-label="قائمة الألقاب"></div>
+    <section id="motivationRewardsPanel" aria-label="إنجازات ومكافآت التعلّم"></section>
   </section>
 
 
@@ -1148,7 +1147,7 @@
 <script src="js/guided-first-journey-controller.js?v=20261104-coach-polish-3"></script>
 <script src="js/personal-dictionary-onboarding.js?v=20261104-guidance-2"></script>
   <script src="js/feature-discovery-controller.js?v=20261104-world-guide-4"></script>
-<script src="js/feature-mini-onboarding.js?v=20261104-world-guide-4"></script>
+<script src="js/feature-mini-onboarding.js?v=20261106-rewards-layout-1"></script>
 <script data-startup-critical type="module" src="js/cloud.js?v=20261106-stage2-1"></script>
 <script data-startup-critical type="module" src="js/entry-experience-cloud.js?v=20260808-1"></script>
 <script type="module" src="js/guided-first-journey-cloud.js?v=20260827-1"></script>
@@ -1208,8 +1207,8 @@
 <script src="js/gate-clear.js?v=20260723-1"></script>
 <script src="js/placement.js?v=20260720-1"></script>
 <script src="js/level-placement.js?v=20260728-1"></script>
-<script src="js/word-list-data.js?v=20260719-3"></script>
-<script data-startup-critical src="js/script.js?v=20261106-motivation-1"></script>
+<script src="js/word-list-data.js?v=20261106-admin-fixes-1"></script>
+<script data-startup-critical src="js/script.js?v=20261106-admin-fixes-1"></script>
 <script src="js/xp.js?v=20261106-stage2-1"></script>
 <script src="js/xp-batch.js?v=20261105-integrity-1"></script>
 <script src="js/dictionary.js?v=20261106-stage2-1"></script>

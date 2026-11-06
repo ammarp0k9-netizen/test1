@@ -33,7 +33,6 @@ const db = app ? getFirestore(app) : null;
 const functions = app ? getFunctions(app) : null;
 const contentWorlds = db ? collection(db, 'content_worlds') : null;
 const contentWordImportStaging = db ? collection(db, 'content_word_import_staging') : null;
-const deleteContentWorld = functions ? httpsCallable(functions, 'deleteContentWorld') : null;
 const duplicateContentRank = functions ? httpsCallable(functions, 'duplicateContentRank') : null;
 const deleteContentRank = functions ? httpsCallable(functions, 'deleteContentRank') : null;
 const duplicateContentGate = functions ? httpsCallable(functions, 'duplicateContentGate') : null;
@@ -380,7 +379,6 @@ async function requireAdminContext() {
     !db ||
     !contentWorlds ||
     !functions ||
-    !deleteContentWorld ||
     !duplicateContentRank ||
     !deleteContentRank ||
     !duplicateContentGate ||
@@ -1434,6 +1432,9 @@ async function findGateWordDuplicate(
 }
 
 function assertStoredWorld(existing, worldId) {
+  if (existing._deleteLock && (!Number(existing._deleteLock.requestedAt?.toMillis?.() ?? existing._deleteLock.requestedAt) || Date.now() - Number(existing._deleteLock.requestedAt?.toMillis?.() ?? existing._deleteLock.requestedAt) < 15 * 60 * 1000)) {
+    throw adminCloudError('admin/operation-in-progress', 'This world is being deleted.');
+  }
   const countersAreValid = ['rankCount', 'gateCount', 'wordCount'].every((field) =>
     Number.isSafeInteger(existing[field]) && existing[field] >= 0
   );
@@ -1619,12 +1620,77 @@ async function requestDeleteWorld(worldId, options) {
       payload.expectedVersion = requireExpectedVersion(options.expectedVersion);
     }
     assertAdminContext(context);
-    const response = await deleteContentWorld(payload);
-    assertAdminContext(context);
-    return response.data;
+    return await deleteArchivedWorldDirect(context, payload, options.onProgress);
   } catch (error) {
     throw mapAdminCloudError(error, 'admin/delete-failed');
   }
+}
+
+async function deleteArchivedWorldDirect(context, payload, onProgress) {
+  const reference = doc(contentWorlds, payload.worldId);
+  const token = resolveOperationToken({}, `delete-world:${payload.worldId}`, context.uid);
+  const requestId = token.operationId, counts = { ranks: 0, gates: 0, words: 0 };
+  const millis = value => Number(value?.toMillis?.() ?? value) || 0;
+  const assertWorld = (world) => {
+    assertAdminContext(context);
+    if (world.status !== 'archived') throw adminCloudError('content/archive-required', 'Archive the world before deleting it.');
+    if (world.title !== payload.confirmationTitle) throw adminCloudError('content/exact-title-required', 'The confirmation title changed.');
+    if (payload.expectedVersion !== undefined && world.version !== payload.expectedVersion) throw adminCloudError('admin/version-conflict', 'The world version changed.');
+  };
+  const snapshot = await runTransaction(db, async transaction => {
+    assertAdminContext(context);
+    const saved = await transaction.get(reference);
+    if (!saved.exists()) return null;
+    const world = saved.data(); assertWorld(world);
+    const operation = world._adminWorldOperation;
+    if (operation && (!millis(operation.leaseAt) || Date.now() - millis(operation.leaseAt) < 15 * 60 * 1000)) throw adminCloudError('admin/operation-in-progress', 'A content operation is still running.');
+    const lock = world._deleteLock;
+    if (lock && lock.requestId !== requestId && (!millis(lock.requestedAt) || Date.now() - millis(lock.requestedAt) < 15 * 60 * 1000)) throw adminCloudError('admin/operation-in-progress', 'World deletion is already running.');
+    transaction.update(reference, { _deleteLock: { requestId, adminUid: context.uid, requestedAt: serverTimestamp() } });
+    return world;
+  });
+  if (!snapshot) { completeOperationToken(token); return { worldId: payload.worldId, deleted: true }; }
+  async function remove(documents) {
+    await runTransaction(db, async transaction => {
+      assertAdminContext(context);
+      const saved = await transaction.get(reference);
+      if (!saved.exists()) throw adminCloudError('admin/not-found', 'The world was already removed.');
+      const world = saved.data(); assertWorld(world);
+      if (world._deleteLock?.requestId !== requestId) throw adminCloudError('admin/operation-in-progress', 'The deletion lease changed.');
+      for (const item of documents) transaction.delete(item.ref);
+      transaction.update(reference, { _deleteLock: { requestId, adminUid: context.uid, requestedAt: serverTimestamp() } });
+    });
+  }
+  async function page(source) {
+    assertAdminContext(context);
+    const result = await getDocs(query(source, orderBy(documentId()), limit(60)));
+    assertAdminContext(context); return result.docs;
+  }
+  // Delete known prepared-content descendants first. User dictionaries and
+  // historical learning progress are deliberately outside this content tree.
+  for (let ranks = await page(ranksCollection(payload.worldId)); ranks.length; ranks = await page(ranksCollection(payload.worldId))) {
+    for (const rank of ranks) {
+      for (let gates = await page(gatesCollection(payload.worldId, rank.id)); gates.length; gates = await page(gatesCollection(payload.worldId, rank.id))) {
+        for (const gate of gates) {
+          for (let words = await page(wordsCollection(payload.worldId, rank.id, gate.id)); words.length; words = await page(wordsCollection(payload.worldId, rank.id, gate.id))) {
+            await remove(words); counts.words += words.length; if (typeof onProgress === 'function') onProgress({ ...counts });
+          }
+          await remove([gate]); counts.gates++;
+        }
+      }
+      await remove([rank]); counts.ranks++;
+    }
+  }
+  await runTransaction(db, async transaction => {
+    assertAdminContext(context);
+    const saved = await transaction.get(reference);
+    if (!saved.exists()) return;
+    const world = saved.data(); assertWorld(world);
+    if (world._deleteLock?.requestId !== requestId) throw adminCloudError('admin/operation-in-progress', 'The deletion lease changed.');
+    transaction.delete(reference);
+  });
+  assertAdminContext(context); completeOperationToken(token);
+  return { worldId: payload.worldId, deleted: true, affectedCounts: counts };
 }
 
 async function listRanks(worldId) {
@@ -2452,7 +2518,7 @@ async function listStagingWords(options) {
     const listData = getWordListDataApi();
     const settings = requireOptions(
       options,
-      new Set(['pageSize', 'pageToken', 'cursor', 'direction', 'sort', 'filters']),
+      new Set(['pageSize', 'pageToken', 'cursor', 'direction', 'sort', 'filters', 'search']),
       'Staging list options must be an object.',
       true
     );
@@ -2460,15 +2526,20 @@ async function listStagingWords(options) {
       sourceType: 'admin-content-word-import-staging',
       sort: settings.sort,
       filters: settings.filters,
+      search: settings.search,
       pageSize: settings.pageSize === undefined ? WORD_PAGE_SIZE_DEFAULT : settings.pageSize,
     });
     const pageSize = requireWordPageSize(normalizedQuery.pageSize);
     const direction = requireWordListDirection(settings.direction);
+    const search = requirePrefixSearch(normalizedQuery.search);
     const sort = requireListSort(normalizedQuery.sort, STAGING_SORTS, 'newest');
     const filters = requireListFilters(
       normalizedQuery.filters,
       new Set(['level', 'partOfSpeech', 'sourceFileName', 'importBatchId'])
     );
+    if (search && (Object.keys(filters).length || sort !== 'word-asc')) {
+      throw adminCloudError('admin/unsupported-filter-combination', 'Staging prefix search requires alphabetical sorting without filters.');
+    }
     if (Object.keys(filters).length && sort !== 'newest') {
       throw adminCloudError(
         'admin/unsupported-sort-combination',
@@ -2488,9 +2559,14 @@ async function listStagingWords(options) {
       ...normalizedQuery,
       sort,
       filters,
+      search,
       pageSize,
     });
     const constraints = [];
+    if (search) {
+      constraints.push(where('normalizedWord', '>=', search));
+      constraints.push(where('normalizedWord', '<=', `${search}\uf8ff`));
+    }
     Object.entries(filters).forEach(([field, value]) => {
       constraints.push(where(field, '==', value));
     });
@@ -3068,6 +3144,10 @@ async function createWord(worldId, rankId, gateId, payload) {
     );
     const savedWord = await runTransaction(db, async (transaction) => {
       assertAdminContext(context);
+      const parentWorld = await transaction.get(doc(contentWorlds, parentWorldId));
+      assertAdminContext(context);
+      if (!parentWorld.exists()) throw adminCloudError('admin/not-found', 'The parent world no longer exists.');
+      assertStoredWorld(parentWorld.data(), parentWorldId);
       const existingWordSnapshot = await transaction.get(wordReference);
       assertAdminContext(context);
       if (existingWordSnapshot.exists()) {

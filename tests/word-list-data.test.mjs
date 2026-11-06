@@ -107,7 +107,8 @@ test('isolates query signatures by every result-affecting field', () => {
     sourceType: 'admin-content-word-import-staging',
     sort: 'newest',
     filters: {},
-    pageSize: 25
+    pageSize: 25,
+    search: ''
   });
 });
 

@@ -76,6 +76,8 @@
     stagingHasNext: false,
     stagingHasPrevious: false,
     stagingSort: 'newest',
+    stagingSearch: '',
+    stagingSearchTimer: null,
     stagingFilterField: '',
     stagingFilterValue: '',
     stagingCount: null,
@@ -485,6 +487,7 @@
     return getWordListDataApi().normalizeQuery({
       sourceType: 'admin-content-word-import-staging',
       sort: String(ui.stagingSort || 'newest'),
+      search: ui.stagingSearch,
       filters: ui.stagingFilterField && ui.stagingFilterValue
         ? { [ui.stagingFilterField]: ui.stagingFilterValue }
         : {},
@@ -505,6 +508,7 @@
         cursor: request.cursor,
         direction: request.direction,
         sort: request.query.sort,
+        search: request.query.search,
         filters: request.query.filters
       })
     });
@@ -1976,6 +1980,11 @@
 
   function renderStagingQueryControls() {
     const controls = makeElement('section', 'admin-word-query-controls');
+    const searchLabel = makeElement('label', 'admin-word-query-field admin-word-search-field');
+    searchLabel.append(makeElement('span', 'admin-field-label', 'بحث في كل الكلمات غير الموزعة'));
+    const search = makeElement('input', 'admin-input admin-word-query-search');
+    search.type = 'search'; search.value = ui.stagingSearch; search.placeholder = 'بداية الكلمة الإنجليزية…'; search.autocomplete = 'off';
+    searchLabel.append(search);
     const sort = makeQuerySelect('الترتيب', ui.stagingSort, [
       { value: 'newest', label: 'أحدث استيراد' },
       { value: 'oldest', label: 'أقدم استيراد' },
@@ -1996,27 +2005,38 @@
       stagingFilterOptions(ui.stagingFilterField)
     );
     filterValue.select.disabled = !ui.stagingFilterField;
-    sort.select.disabled = Boolean(ui.stagingFilterValue);
+    sort.select.disabled = Boolean(ui.stagingSearch || ui.stagingFilterValue);
     const reset = makeButton('إعادة الضبط', 'reset-staging-query', {
       className: 'admin-btn admin-btn-secondary',
-      disabled: !ui.stagingFilterField && ui.stagingSort === 'newest'
+      disabled: !ui.stagingSearch && !ui.stagingFilterField && ui.stagingSort === 'newest'
     });
     appendChildren(controls, [
+      searchLabel,
       sort.wrapper,
       filterField.wrapper,
       filterValue.wrapper,
       reset,
-      makeElement('small', 'admin-count-note admin-word-query-note', 'تعمل التصفية على كامل مجموعة staging. يسمح بفلتر واحد في كل مرة.')
+      makeElement('small', 'admin-count-note admin-word-query-note', 'البحث يطابق بداية الكلمة في كامل الكلمات غير الموزعة، بما فيها الصفحات غير المعروضة. اختيار فلتر يلغي البحث.')
     ]);
+    search.addEventListener('input', () => {
+      root.clearTimeout(ui.stagingSearchTimer);
+      const value = search.value.trim();
+      ui.stagingSearchTimer = root.setTimeout(() => {
+        if (ui.view !== 'staging' || value === ui.stagingSearch) return;
+        ui.stagingSearch = value; ui.stagingFilterField = ''; ui.stagingFilterValue = '';
+        ui.stagingSort = value ? 'word-asc' : 'newest'; reloadStagingQuery();
+      }, 350);
+    });
     sort.select.addEventListener('change', () => {
       ui.stagingSort = sort.select.value;
       reloadStagingQuery();
     });
     filterField.select.addEventListener('change', () => {
+      root.clearTimeout(ui.stagingSearchTimer); ui.stagingSearch = '';
       ui.stagingFilterField = filterField.select.value;
       ui.stagingFilterValue = '';
       ui.stagingSort = 'newest';
-      renderStagingWords();
+      reloadStagingQuery();
     });
     filterValue.select.addEventListener('change', () => {
       ui.stagingFilterValue = filterValue.select.value;
@@ -3213,7 +3233,8 @@
   function chooseWordImportFile(world, rank, gate, returnFocus, destination) {
     if (ui.wordImportPending) return;
     ui.wordImportPending = true;
-    renderWords();
+    if (ui.view === 'staging') renderStagingWords();
+    else renderWords();
     const input = makeElement('input');
     input.type = 'file';
     input.accept = '.json,application/json';
@@ -5317,7 +5338,7 @@
       label: `اكتب العنوان حرفيًا للتأكيد: ${expectedTitle}`,
       value: '',
       required: true,
-      maxLength: 120,
+      maxLength: Math.max(160, expectedTitle.length),
       wide: true,
       help: 'يجب أن يطابق الإدخال العنوان بالكامل، بما في ذلك المسافات.'
     });
@@ -5378,7 +5399,8 @@
     try {
       await getCloudApi().requestDeleteWorld(String(modalState.world.worldId), {
         confirmationTitle: typedTitle,
-        expectedVersion: expectedVersion(modalState.world)
+        expectedVersion: expectedVersion(modalState.world),
+        onProgress(counts) { if (ui.modal === modalState) modalState.deleteButton.textContent = `جارٍ الحذف… ${counts.words} كلمة`; }
       });
       modalState.pending = false;
       closeAdminModal(true);
@@ -5707,6 +5729,7 @@
       return;
     }
     if (action === 'reset-staging-query') {
+      root.clearTimeout(ui.stagingSearchTimer); ui.stagingSearch = '';
       ui.stagingSort = 'newest';
       ui.stagingFilterField = '';
       ui.stagingFilterValue = '';
