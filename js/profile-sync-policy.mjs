@@ -185,6 +185,14 @@ export function applyProfileIntent(remote, intent, context = {}) {
       profile.extraChests = extras.extraChests;
       if (!profile.dailyLootState && guest.dailyLootState) profile.dailyLootState = copy(guest.dailyLootState);
       if (guest.dailyQuestDate) quest(profile, guest.dailyQuestDate, guest.dailyQuestState);
+      if (guest.motivationRewards?.version === 1) {
+        const saved = profile.motivationRewards || {}, incoming = guest.motivationRewards;
+        // XP was already imported above. Carry reward receipts too, so the
+        // same guest achievements cannot pay again after signing in.
+        profile.motivationRewards = { version: 1,
+          masteredKeys: unique([...(saved.masteredKeys || []), ...(incoming.masteredKeys || [])]).slice(0, 100),
+          worlds: saved.worlds || {}, rewards: { ...(incoming.rewards || {}), ...(saved.rewards || {}) } };
+      }
       break;
     }
     default: reason = 'unsupported-intent';

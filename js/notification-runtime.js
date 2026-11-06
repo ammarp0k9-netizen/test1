@@ -129,6 +129,7 @@
     const args = record.cta?.args || record.context || {};
     let handled = true;
     if (action === 'open-treasure') root.loadTreasureView?.();
+    else if (action === 'open-motivation-rewards') root.LootLinguaMotivation?.openHistory?.();
     else if (action === 'open-feature-discovery') handled = root.LootLinguaFeatureDiscovery?.open?.(String(args.feature || '')) === true;
     else if (action === 'resume-public-world-onboarding') {
       handled = await root.LootLinguaEntryExperienceController?.consumePendingJourneyIntent?.({ explicitDiscovery: true }) === true;

@@ -266,6 +266,7 @@ function purgeStaleGuestLocalData() {
   localStorage.removeItem(getPendingCustomWorldsStorageKey('guest'));
   localStorage.removeItem('lootlinguaQuizExposureHistory_guest');
   localStorage.removeItem('lootlinguaWordMastery_guest');
+  localStorage.removeItem('lootlinguaMotivation_v1_guest');
   localStorage.removeItem('active_quiz_session');
   localStorage.removeItem(LEGACY_DICTIONARY_KEY);
   localStorage.removeItem(GUEST_DATA_DIRTY_KEY);

@@ -3,7 +3,7 @@
 import { getApps }  from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
 import { getFirestore, doc, getDoc, runTransaction, onSnapshot } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
 import { getAuth, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js";
-import { applyProfileIntent, profileOperationId, profileStorageIntents } from './profile-sync-policy.mjs?v=20261106-stage2-1';
+import { applyProfileIntent, profileOperationId, profileStorageIntents } from './profile-sync-policy.mjs?v=20261106-motivation-1';
 
 // استخدم التطبيق الموجود فقط بدون إعادة تعريف إذا كان معرف مسبقًا
 let profileApp  = getApps()[0];
@@ -174,6 +174,8 @@ function applyCanonicalProfile(data, owner) {
     if (typeof window.applyCanonicalLootlinguaProfile === 'function') window.applyCanonicalLootlinguaProfile(projected);
     else window.mergeLootlinguaProfileFromCloud?.(projected, { canonical: true });
     _profileLocalBaselines.set(owner.uid, window.getLootlinguaProfilePayload?.() || projected);
+    try { window.LootLinguaMotivation?.acceptProfile?.(data, owner.uid); }
+    catch (error) { console.warn('[Motivation] Profile presentation deferred.', error); }
   } finally { window.__profileHydrating = wasHydrating; }
 }
 function scheduleProfileFlush() {

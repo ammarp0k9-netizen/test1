@@ -89,6 +89,7 @@
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
   <link rel="stylesheet" href="style.css?v=20261106-stage2-1">
   <link rel="stylesheet" href="entry-experience.css?v=20261104-world-guide-4">
+  <link rel="stylesheet" href="motivation.css?v=20261106-motivation-1">
 </head>
 <body class="legend-dock-visible">
 
@@ -211,6 +212,7 @@
 
   <!-- بطاقة الإضافة (تُخفى عند قواميس الألعاب) -->
   <div class="card-box" id="personalControls">
+    <div data-motivation-goal class="motivation-goal"></div>
     <div id="normalSearchZone" class="search-zone" data-search-type="normal">
       <div class="search-zone-inner dictionary-search-row">
         <button onclick="fetchSuggestions()" id="searchBtn" class="btn-ai dictionary-search-btn" data-tip="بحث ذكي">ابحث عن معنى</button>
@@ -567,6 +569,7 @@
       <p>افتح الصندوق اليومي، اجمع XP، وخلّي الألقاب تبين أنك مش داخل تتفرج بس.</p>
     </div>
 
+    <section id="motivationRewardsPanel" aria-label="إنجازات ومكافآت التعلّم"></section>
     <div class="treasure-stage" aria-label="الصندوق اليومي">
       <button id="dailyLootChest" class="treasure-chest-main" type="button" onpointerdown="startLootChestCharge(event)" onpointermove="moveLootChestCharge(event)" onpointerup="releaseLootChestCharge(event)" onpointerleave="cancelLootChestCharge(event)" onpointercancel="cancelLootChestCharge(event)" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();openDailyLootBox();}" aria-describedby="lootStatusText">
         <span class="chest-glow"></span>
@@ -1141,7 +1144,7 @@
 <script src="js/entry-experience-contract.js?v=20261029-entry-simplify-1"></script>
   <script src="js/guided-first-journey-contract.js?v=20260827-1"></script>
   <script src="js/feature-discovery-contract.js?v=20261104-discovery-1"></script>
-<script data-startup-critical src="js/entry-experience-controller.js?v=20261105-integrity-1"></script>
+<script data-startup-critical src="js/entry-experience-controller.js?v=20261106-motivation-1"></script>
 <script src="js/guided-first-journey-controller.js?v=20261104-coach-polish-3"></script>
 <script src="js/personal-dictionary-onboarding.js?v=20261104-guidance-2"></script>
   <script src="js/feature-discovery-controller.js?v=20261104-world-guide-4"></script>
@@ -1182,7 +1185,7 @@
 </div>
 
 <!-- ══ FIREBASE PROFILE SYNC ══ -->
-  <script data-startup-critical type="module" src="js/profile-cloud.js?v=20261106-stage2-1"></script>
+  <script data-startup-critical type="module" src="js/profile-cloud.js?v=20261106-motivation-1"></script>
 <script type="module" src="js/published-content.js?v=20260722-1"></script>
 <script data-startup-critical type="module" src="js/journey-cloud.js?v=20261105-pages-1"></script>
 <script type="module" src="js/notification-cloud.js?v=20260811-1"></script>
@@ -1196,7 +1199,7 @@
   <script src="js/modal-focus.js?v=20261106-stage2-1"></script>
   <script data-startup-critical src="js/core.js?v=20261106-stage2-1"></script>
 <script src="js/operation-runtime.js?v=20260811-3"></script>
-    <script data-startup-critical src="js/storage.js?v=20261105-pages-1"></script>
+    <script data-startup-critical src="js/storage.js?v=20261106-motivation-1"></script>
   <script src="js/content-schema.js?v=20260722-1"></script>
 <script src="js/word-lifecycle.js?v=20260722-1"></script>
 <script src="js/quiz-core.js?v=20260811-1"></script>
@@ -1206,13 +1209,13 @@
 <script src="js/placement.js?v=20260720-1"></script>
 <script src="js/level-placement.js?v=20260728-1"></script>
 <script src="js/word-list-data.js?v=20260719-3"></script>
-<script data-startup-critical src="js/script.js?v=20261106-stage2-1"></script>
+<script data-startup-critical src="js/script.js?v=20261106-motivation-1"></script>
 <script src="js/xp.js?v=20261106-stage2-1"></script>
 <script src="js/xp-batch.js?v=20261105-integrity-1"></script>
 <script src="js/dictionary.js?v=20261106-stage2-1"></script>
 <script src="js/gate-game-migration.js?v=20261007-1"></script>
 <script src="js/gate-runner.js?v=20261106-runner-3"></script>
-<script src="js/worlds.js?v=20261106-stage2-1"></script>
+<script src="js/worlds.js?v=20261106-motivation-1"></script>
 <script src="js/dictionary-window.js?v=20261105-render-1"></script>
 <script src="js/dictionary-render.js?v=20261105-pages-1"></script>
 <script src="js/srs.js?v=20261105-render-1"></script>
@@ -1222,7 +1225,10 @@
 <script src="js/srs-transition-batch.js?v=20260722-1"></script>
 <script src="js/quiz-runtime.js?v=20261106-stage2-1"></script>
 <script src="js/notification-sources.js?v=20261105-pages-1"></script>
-<script src="js/notification-runtime.js?v=20261105-pages-1"></script>
+<script src="js/notification-runtime.js?v=20261106-motivation-1"></script>
+<script src="js/motivation-policy.js?v=20261106-motivation-1"></script>
+<script src="js/motivation.js?v=20261106-motivation-1"></script>
+<script type="module" src="js/motivation-cloud.js?v=20261106-motivation-1"></script>
 <script src="js/core-runtime.js?v=20261106-runner-2"></script>
 <script src="js/theme-favicon.js" defer></script>
 <template data-startup-script="js/oasis-preview-animation.js"></template>

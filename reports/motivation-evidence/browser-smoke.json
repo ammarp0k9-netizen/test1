@@ -1,0 +1,39 @@
+{
+  "isolation": "Real Chrome/controller/policy/notification store/focus manager, isolated in-memory account adapter; no Firebase or production writes",
+  "checks": [
+    "confirmed bonus, one combined title/reward dialog after quiz, focus trap/restore, permanent notification, no repeated bonus",
+    "all four themes and small phones fit; second mastery bonus, station bonus, offline recovery without false XP",
+    "account switch discards an in-flight result and clears pending celebrations"
+  ],
+  "layouts": [
+    {
+      "theme": "lootlingua",
+      "width": 1100,
+      "overflow": false,
+      "goal": 760,
+      "contrast": 17.062933971317335
+    },
+    {
+      "theme": "golden",
+      "width": 390,
+      "overflow": false,
+      "goal": 350,
+      "contrast": 17.9278402530276
+    },
+    {
+      "theme": "ocean",
+      "width": 320,
+      "overflow": false,
+      "goal": 280,
+      "contrast": 17.85253496299567
+    },
+    {
+      "theme": "scroll",
+      "width": 320,
+      "overflow": false,
+      "goal": 280,
+      "contrast": 14.13233213524767
+    }
+  ],
+  "runtimeExceptions": []
+}

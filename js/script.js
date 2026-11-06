@@ -1830,6 +1830,7 @@ window.getLootlinguaProfilePayload = function() {
     // Runner rewards are cosmetic-only and deliberately separate from XP/SRS.
     runnerCoins:      loadInt('lootlingua.runner.coins.v1', 0),
     runnerBestDistance: loadInt('lootlingua.runner.best-distance.v1', 0),
+    motivationRewards: window.LootLinguaMotivation?.getState?.(),
   };
 };
 
@@ -2125,7 +2126,8 @@ function getGuestProgressSnapshot() {
   // treat as guest-owned only when a signed-out write marked that namespace as
   // dirty. Account hydration also uses these keys and is not guest evidence.
   if (typeof hasDirtyGuestData !== 'function' || !hasDirtyGuestData()) return {};
-  return window.getLootlinguaProfilePayload ? window.getLootlinguaProfilePayload() : {};
+  return window.getLootlinguaProfilePayload ? { ...window.getLootlinguaProfilePayload(),
+    motivationRewards: window.LootLinguaMotivation?.getGuestState?.() } : {};
 }
 
 function getGuestProgressSummary(profile) {

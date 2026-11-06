@@ -1,0 +1,24 @@
+.motivation-goal { display:flex; align-items:center; justify-content:space-between; gap:14px; padding:15px; margin:12px 0; border:1px solid var(--border, #47616d); border-radius:15px; background:var(--card-bg, #122833); color:var(--text-white, #edf6f4); direction:rtl; }
+.motivation-goal-copy { display:grid; gap:6px; flex:1; min-width:0; }
+.motivation-goal small, .motivation-guide { color:var(--text-gray, #c1d4d0); font-size:12px; line-height:1.8; }
+.motivation-goal strong { font-size:14px; line-height:1.7; }
+.motivation-goal span { font-size:12px; line-height:1.8; }
+.motivation-goal progress { width:100%; max-width:320px; height:8px; accent-color:var(--accent, #65d2c1); }
+.motivation-button { min-height:42px; padding:8px 13px; border:1px solid var(--border, #47616d); border-radius:10px; background:var(--card-bg, #142e3a); color:var(--text-white, #edf6f4); font:inherit; font-size:12px; cursor:pointer; }
+.motivation-button:focus-visible { outline:3px solid var(--accent, #65d2c1); outline-offset:3px; }
+#motivationRewardsPanel { margin:20px 0; padding:18px; border:1px solid var(--border, #47616d); border-radius:18px; background:var(--card-bg, #122833); color:var(--text-white, #edf6f4); scroll-margin-top:100px; }
+#motivationRewardsPanel h3 { margin:0 0 14px; }
+.motivation-history-row { display:flex; justify-content:space-between; align-items:center; gap:14px; padding:14px 0; border-bottom:1px solid var(--border, #47616d); }
+.motivation-history-row div { display:grid; gap:5px; min-width:0; }
+.motivation-history-row span, .motivation-history-row small { font-size:12px; line-height:1.7; }
+.motivation-history-row b { white-space:nowrap; font-size:14px; direction:ltr; }
+.motivation-celebration { position:fixed; inset:0; z-index:22000; display:grid; place-items:center; padding:16px; background:#030b15dc; direction:rtl; }
+.motivation-celebration-card { width:min(100%,480px); max-height:calc(100dvh - 32px); overflow:auto; padding:28px; border-radius:24px; border:1px solid var(--accent, #65d2c1); background:var(--card-bg, #122833); color:var(--text-white, #edf6f4); text-align:center; box-shadow:0 24px 80px #0006; }
+.motivation-emblem { display:block; font-size:60px; line-height:1.2; color:var(--accent, #65d2c1); }
+.motivation-celebration-card h2 { margin:14px 0; font-size:clamp(23px,5vw,32px); }
+.motivation-celebration-summary { max-height:45dvh; overflow:auto; }
+.motivation-celebration-summary p { font-size:14px; line-height:1.9; }
+.motivation-xp { display:block; margin:18px 0; font-size:30px; color:var(--accent, #65d2c1); direction:ltr; }
+.motivation-actions { display:flex; flex-wrap:wrap; justify-content:center; gap:8px; margin-top:18px; }
+.motivation-actions .motivation-button:first-child { background:var(--text-white, #edf6f4); color:var(--card-bg, #122833); font-weight:800; }
+@media(max-width:420px) { .motivation-goal { align-items:stretch; flex-direction:column; gap:10px; } .motivation-goal .motivation-button { align-self:flex-start; } .motivation-celebration-card { padding:20px; } #motivationRewardsPanel { padding:13px; } }

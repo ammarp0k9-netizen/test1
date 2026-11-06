@@ -625,6 +625,7 @@ function getTitleProgress(def, metrics = getTitleProgressMetrics()) {
 
 function showTitleUnlockMoment(definitions) {
   const titles = Array.isArray(definitions) ? definitions.filter(Boolean) : [];
+  if (titles.length && window.LootLinguaMotivation?.queueTitles?.(titles)) return;
   if (!titles.length || document.getElementById('titleUnlockMoment')) return;
   const primary = titles[0];
   const shell = document.createElement('section');
@@ -684,7 +685,7 @@ function evaluateTitleUnlocksFromData(celebrate = false) {
     localStorage.removeItem(ACTIVE_TITLE_KEY);
   }
   if (newly.length) saveTitleState(state);
-  if (newly.length && celebrate && !isJsonImportBatchActive()) {
+  if (newly.length && (celebrate || window.LootLinguaMotivation?.isLearningCommitActive?.()) && !isJsonImportBatchActive()) {
     showTitleUnlockMoment(newly);
   }
   renderTitlesGrid();
@@ -4747,6 +4748,7 @@ function renderPublishedGateClearResult(world, rank, gate, bundle) {
     if (!publishedContentState.shownGateClearCelebrations.has(celebrationKey)) {
       publishedContentState.shownGateClearCelebrations.add(celebrationKey);
       const titles = recordJourneyTitleProgress(world, rank, gate, bundle.result);
+      window.LootLinguaMotivation?.observeGates?.(world, rank, [{ worldId: world.worldId, rankId: rank.rankId, gateId: gate.gateId, clearedBy: 'gate-clear', lastClearResult: 'passed', status: 'cleared' }]);
       try { window.launchConfetti?.(); } catch (_) {}
       try { navigator.vibrate?.([35, 35, 85]); } catch (_) {}
       try { window.playUnlockSound?.(); } catch (_) {}
@@ -5390,6 +5392,8 @@ function renderPublishedRanks(world, ranks, journey, activeJourney) {
     ],
   });
   section.append(makePublishedJourneyPanel(world, ranks, journey, activeJourney));
+  const rewardGoal = window.LootLinguaMotivation?.makeGoal?.(world.worldId, null, { gateCount: world.gateCount, complete: journey?.contentJourneyStatus === 'completed-current-content' });
+  if (rewardGoal) section.append(rewardGoal);
   if (!ranks.length) {
     section.append(renderPublishedEmpty('لا توجد مستويات أو بوابات منشورة في هذا العالم.', 'fa-solid fa-dungeon'));
   } else {
@@ -5442,6 +5446,9 @@ function renderPublishedGates(
     gateProgressById,
     ranks
   );
+  window.LootLinguaMotivation?.observeGates?.(world, rank, gateProgressById);
+  const rewardGoal = window.LootLinguaMotivation?.makeGoal?.(world.worldId, null, { gateCount: world.gateCount, complete: journey?.contentJourneyStatus === 'completed-current-content' });
+  if (rewardGoal) section.append(rewardGoal);
   if (rankProgress.completed) {
     const achievement = publishedElement(
       'section',
@@ -5790,6 +5797,8 @@ function renderPublishedGateWords(world, rank, gate, snapshot) {
   );
   if (gateSwitcher) section.append(gateSwitcher);
   section.append(makePublishedGateJourneyPanel(world, rank, gate));
+  const rewardGoal = window.LootLinguaMotivation?.makeGoal?.(world.worldId, publishedContentState.gateProgress, { gateCount: world.gateCount, complete: publishedContentState.journey?.contentJourneyStatus === 'completed-current-content' });
+  if (rewardGoal) section.append(rewardGoal);
   const gateState = publishedGateJourneyState(
     gate,
     rank,
