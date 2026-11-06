@@ -10,6 +10,27 @@ function calendarTime(day) {
   return Number.isFinite(date.getTime()) && date.toISOString().slice(0, 10) === day ? date.getTime() : NaN;
 }
 export const PROFILE_SYNC_VERSION = 1;
+// Onboarding completion is monotonic across devices; replaying an older tour
+// checkpoint must never reopen a completed tour.
+export function mergeOnboardingProgress(tour, left, right) {
+  const personal = tour === 'personal-dictionary';
+  if (!personal && !['treasure', 'quiz', 'starred', 'custom-worlds'].includes(tour)) return null;
+  const phases = personal ? ['awaiting-journey', 'intro', 'awaiting-first-word', 'completed'] : ['available', 'in-progress', 'skipped', 'completed'];
+  const field = personal ? 'phase' : 'status';
+  const normalize = value => {
+    if (!value || !phases.includes(value[field])) return null;
+    const next = { version: 1, [field]: value[field], step: Math.min(personal ? 16 : 10, Math.floor(number(value.step))), updatedAt: number(value.updatedAt), completedAt: number(value.completedAt) };
+    if (personal) { next.requiresFirstWord = value.requiresFirstWord === true; next.firstWordSavedAt = number(value.firstWordSavedAt); }
+    else next.startedAt = number(value.startedAt);
+    return next;
+  };
+  const a = normalize(left), b = normalize(right);
+  if (!a || !b) return a || b;
+  const rank = value => phases.indexOf(value[field]);
+  if (rank(a) !== rank(b)) return rank(a) > rank(b) ? a : b;
+  if (a.step !== b.step) return a.step > b.step ? a : b;
+  return a.updatedAt >= b.updatedAt ? a : b;
+}
 export function profileOperationId(intent) {
   if (intent.type === 'learning-day') return `learning-day:${intent.day}`;
   if (intent.eventId) return `${intent.type}:${intent.eventId}`;
@@ -86,6 +107,12 @@ export function applyProfileIntent(remote, intent, context = {}) {
   let reason = '';
   const effects = {};
   switch (intent.type) {
+    case 'onboarding': {
+      const merged = mergeOnboardingProgress(intent.tour, profile.onboardingProgress?.[intent.tour], intent.state);
+      if (!merged) { reason = 'invalid-onboarding'; break; }
+      profile.onboardingProgress = { ...(profile.onboardingProgress || {}), [intent.tour]: merged };
+      break;
+    }
     case 'acknowledge': break;
     case 'wallet-delta': {
       if (!['runnerCoins', 'streakFreezes'].includes(intent.field) || !Number.isFinite(intent.amount)) { reason = 'invalid-wallet'; break; }

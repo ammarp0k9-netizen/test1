@@ -42,7 +42,7 @@ test('obstacles use physical clearances: jump low bars, slide under beams and ch
 });
 
 test('collisions use action timing at the crossing instant rather than the end of the frame', () => {
-  const state = make(); engine.jump(state); state.elapsed = state.actionUntil - 130;
+  const state = make(); engine.jump(state); state.elapsed = state.actionUntil - 80;
   entity(state, { kind: 'obstacle', obstacleType: 'low', z: .05 }); engine.update(state, 50);
   assert.equal(state.hearts, 3); assert.ok(engine.getPose(state).feet < .37);
 });
@@ -90,18 +90,52 @@ test('reading gates keep obstacles behind them and coins collect once in the pla
   assert.equal(coins.coins, 1); engine.update(coins, 50); assert.equal(coins.coins, 1);
 });
 
-test('spawn rows always provide an escape and recycle a fixed pool during a long run', () => {
-  const state = engine.createState([], { random: seeded() }); let rows = 0, fastest = 0;
+test('spawn rows always provide a traversable route and recycle a fixed pool during a long run', () => {
+  const state = engine.createState([], { random: seeded() }); let rows = 0, fastest = 0, closedRows = 0;
   for (let index = 0; index < 20000; index++) {
     state.invulnerableUntil = Infinity; engine.update(state, 50); fastest = Math.max(fastest, state.speed);
     assert.ok(state.entities.length <= 48); assert.equal(state.entities.length + state._pool.length, 48);
     assert.ok(state.events.length <= engine.constants.MAX_EVENTS);
     const byRow = new Map();
-    for (const item of state.entities) if (item.kind === 'obstacle') { if (!byRow.has(item.row)) byRow.set(item.row, new Set()); byRow.get(item.row).add(item.lane); }
-    for (const blocked of byRow.values()) assert.ok(blocked.size < 3);
+    for (const item of state.entities) if (item.kind === 'obstacle') { if (!byRow.has(item.row)) byRow.set(item.row, []); byRow.get(item.row).push(item); }
+    for (const blocked of byRow.values()) if (blocked.length === 3) {
+      assert.ok(blocked.some(item => ['low', 'overhead'].includes(item.obstacleType)));
+      closedRows++;
+    }
     rows = Math.max(rows, state._row);
   }
-  assert.ok(rows > 200); assert.equal(fastest, engine.constants.MAX_SPEED);
+  assert.ok(rows > 200); assert.equal(fastest, engine.constants.MAX_SPEED); assert.ok(closedRows > 0);
+});
+
+test('gate answer lanes use balanced shuffled bags without immediate repeats', () => {
+  const state = make(); let previous = -1;
+  for (let bag = 0; bag < 30; bag++) {
+    const lanes = [];
+    for (let index = 0; index < 3; index++) {
+      const gate = engine.createWordGate(state);
+      assert.notEqual(gate.correctLane, previous);
+      assert.equal(gate.options[gate.correctLane], gate.correctMeaning);
+      previous = gate.correctLane; lanes.push(previous);
+    }
+    assert.equal(new Set(lanes).size, 3);
+  }
+});
+
+test('actions buffer one repeat without extending the arc; sliding can immediately turn into jumping', () => {
+  for (const action of ['jump', 'slide']) {
+    const state = make(); engine[action](state); const end = state.actionUntil;
+    assert.equal(engine[action](state), false);
+    state.elapsed = end - 100;
+    assert.equal(engine[action](state), true);
+    assert.equal(engine[action](state), false);
+    assert.equal(state.actionUntil, end);
+    while (state.elapsed < end + 100) engine.update(state, 25);
+    assert.equal(engine.getAction(state), action);
+    assert.ok(state.actionStartedAt >= end + 70);
+  }
+  const state = make(); engine.slide(state); engine.update(state, 50);
+  assert.equal(engine.jump(state), true); assert.equal(engine.getAction(state), 'jump');
+  assert.equal(state._queuedAction, null);
 });
 
 test('jumping above a coin misses it; shared physical height clears a low obstacle at the apex', () => {

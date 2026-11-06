@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 import vm from 'node:vm';
-import { applyProfileIntent, profileOperationId, profileStorageIntents } from '../js/profile-sync-policy.mjs';
+import { applyProfileIntent, profileOperationId, profileStorageIntents, mergeOnboardingProgress } from '../js/profile-sync-policy.mjs';
 
 const source = (await readFile(new URL('../js/profile-cloud.js', import.meta.url), 'utf8')).replace(/^import .*;\r?\n/gm, '');
 const clone = (value) => value === undefined ? undefined : structuredClone(value);
@@ -69,7 +69,7 @@ function client(db, options = {}) {
   };
   vm.runInNewContext(source, {
     window: root, localStorage, sessionStorage: storage(), Date, Math, JSON,
-    applyProfileIntent, profileOperationId, profileStorageIntents,
+    applyProfileIntent, profileOperationId, profileStorageIntents, mergeOnboardingProgress, queueMicrotask,
     console: { error: (...args) => errors.push(args) },
     CustomEvent: class { constructor(type, init) { this.type = type; this.detail = init.detail; } },
     getApps: () => [{}], getFirestore: () => db, getAuth: () => auth, onAuthStateChanged() {},
@@ -281,4 +281,35 @@ test('storage mutation hooks synchronize set/flag writes but cannot turn a cache
   await a.root.flushProfileIntents();
   assert.equal(db.profile().streakFreezes, 0); assert.equal(db.profile().userXP, 500);
   assert.deepEqual(db.profile().addedGameWords, ['word']);
+});
+
+
+test('onboarding checkpoints merge monotonically without affecting rewards', () => {
+  let profile = {userXP: 42, runnerCoins: 7};
+  const apply = (tour, state) => { profile = applyProfileIntent(profile, {type: 'onboarding', tour, state}).profile; };
+  apply('treasure', {status:'completed', completedAt:100, updatedAt:100});
+  apply('treasure', {status:'in-progress', step:5, updatedAt:500});
+  apply('quiz', {status:'completed', completedAt:200});
+  apply('personal-dictionary', {phase:'completed', step:16, completedAt:300});
+  apply('personal-dictionary', {phase:'intro', step:0, updatedAt:900});
+  assert.equal(profile.onboardingProgress.treasure.status, 'completed');
+  assert.equal(profile.onboardingProgress.quiz.status, 'completed');
+  assert.equal(profile.onboardingProgress['personal-dictionary'].phase, 'completed');
+  assert.equal(profile.userXP, 42); assert.equal(profile.runnerCoins, 7);
+  assert.equal(mergeOnboardingProgress('quiz', {status:'in-progress',step:4}, {status:'in-progress',step:1,updatedAt:900}).step, 4);
+});
+
+test('account onboarding imports local completion and restores it to another device', async () => {
+  const db = database({userXP:42}); const a = client(db);
+  const key = 'lootlingua:feature-discovery:v1:user:A';
+  a.localStorage.setItem(key, JSON.stringify({version:1,features:{treasure:{status:'completed',completedAt:100,updatedAt:100}}}));
+  a.localStorage.setItem('lootlingua:personal-dictionary-onboarding:v1:user:A', JSON.stringify({version:1,phase:'completed',step:16,completedAt:100}));
+  await a.root.loadProfileFromCloud({uid:'A'});
+  await a.root.flushProfileIntents();
+  assert.equal(db.profile().onboardingProgress.treasure.status, 'completed');
+  const b = client(db); await b.root.loadProfileFromCloud({uid:'A'});
+  assert.equal(JSON.parse(b.localStorage.getItem(key)).features.treasure.status, 'completed');
+  assert.equal(JSON.parse(b.localStorage.getItem('lootlingua:personal-dictionary-onboarding:v1:user:A')).phase, 'completed');
+  b.switchTo('B');
+  assert.equal(b.localStorage.getItem('lootlingua:feature-discovery:v1:user:B'), null);
 });

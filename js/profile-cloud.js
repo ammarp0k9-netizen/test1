@@ -3,7 +3,7 @@
 import { getApps }  from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
 import { getFirestore, doc, getDoc, runTransaction, onSnapshot } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
 import { getAuth, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js";
-import { applyProfileIntent, profileOperationId, profileStorageIntents } from './profile-sync-policy.mjs?v=20261106-motivation-1';
+import { applyProfileIntent, profileOperationId, profileStorageIntents, mergeOnboardingProgress } from './profile-sync-policy.mjs?v=20261106-onboarding-sync-1';
 
 // استخدم التطبيق الموجود فقط بدون إعادة تعريف إذا كان معرف مسبقًا
 let profileApp  = getApps()[0];
@@ -153,6 +153,37 @@ function enqueueProfileTask(owner, task) {
   running.finally(() => { if (_profileTaskQueues.get(key) === running) _profileTaskQueues.delete(key); }).catch(() => {});
   return running;
 }
+function syncOnboardingProgress(data, owner) {
+  const discoveryKey = `lootlingua:feature-discovery:v1:user:${owner.uid}`;
+  const personalKey = `lootlingua:personal-dictionary-onboarding:v1:user:${owner.uid}`;
+  const read = key => { try { return JSON.parse(localStorage.getItem(key) || 'null'); } catch (_) { return null; } };
+  const discovery = read(discoveryKey) || { version: 1, features: {} };
+  const features = { ...(discovery.features || {}) };
+  let changed = false;
+  for (const tour of ['treasure', 'quiz', 'starred', 'custom-worlds', 'personal-dictionary']) {
+    const personal = tour === 'personal-dictionary';
+    const local = personal ? read(personalKey) : features[tour];
+    const remote = data.onboardingProgress?.[tour];
+    const merged = mergeOnboardingProgress(tour, remote, local);
+    if (!merged) continue;
+    if (JSON.stringify(local) !== JSON.stringify(merged)) {
+      changed = true;
+      if (personal) localStorage.setItem(personalKey, JSON.stringify(merged));
+      else features[tour] = merged;
+    }
+    if (JSON.stringify(remote) !== JSON.stringify(merged)) {
+      // Hydration suppresses intents. Import the account's local checkpoints
+      // after hydration, guarded against sign-out/account switching.
+      queueMicrotask(() => {
+        if (isProfileOwnerCurrent(owner)) window.queueProfileIntent?.({ type: 'onboarding', tour, state: merged });
+      });
+    }
+  }
+  if (changed) {
+    localStorage.setItem(discoveryKey, JSON.stringify({ version: 1, features }));
+    window.dispatchEvent(new CustomEvent('lootlingua:onboarding-cloud-change', { detail: { uid: owner.uid } }));
+  }
+}
 function applyCanonicalProfile(data, owner) {
   if (!isProfileOwnerCurrent(owner)) return;
   const known = window.__lootlinguaProfileSnapshot;
@@ -163,7 +194,7 @@ function applyCanonicalProfile(data, owner) {
     // A lost acknowledgement may already be present in this snapshot; replaying
     // an additive counter or wallet locally would display it twice.
     for (const command of operation.commands) {
-      if (['max', 'titles', 'union', 'appearance', 'quest', 'exposure', 'loot-progress'].includes(command.type)) {
+      if (['max', 'titles', 'union', 'appearance', 'quest', 'exposure', 'loot-progress', 'onboarding'].includes(command.type)) {
         projected = applyProfileIntent(projected, command).profile;
       }
     }
@@ -173,6 +204,7 @@ function applyCanonicalProfile(data, owner) {
   try {
     if (typeof window.applyCanonicalLootlinguaProfile === 'function') window.applyCanonicalLootlinguaProfile(projected);
     else window.mergeLootlinguaProfileFromCloud?.(projected, { canonical: true });
+    syncOnboardingProgress(projected, owner);
     _profileLocalBaselines.set(owner.uid, window.getLootlinguaProfilePayload?.() || projected);
     try { window.LootLinguaMotivation?.acceptProfile?.(data, owner.uid); }
     catch (error) { console.warn('[Motivation] Profile presentation deferred.', error); }

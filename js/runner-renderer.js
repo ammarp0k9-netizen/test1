@@ -263,13 +263,17 @@
       context.save(); context.translate(p.x, p.y - elevation + sway);
       if (Number(state.invulnerableUntil) > Number(state.elapsed) && Math.floor(activeTime / 80) % 2) context.globalAlpha = .58;
       if (sliding) {
-        limb(-h * .03, -h * .19, -h * .24, -h * .08, -h * .31, 0, '#173d51', h * .12);
-        limb(h * .08, -h * .19, h * .24, -h * .09, h * .34, -h * .02, '#244d5e', h * .12);
-        context.fillStyle = '#317e80'; rounded(context, -h * .24, -h * .4, h * .44, h * .23, h * .09); context.fill();
-        limb(-h * .15, -h * .31, -h * .3, -h * .27, -h * .35, -h * .15, '#d2a077', h * .08);
-        context.fillStyle = '#dcae7b'; context.beginPath(); context.arc(h * .15, -h * .38, h * .115, 0, Math.PI * 2); context.fill();
-        context.fillStyle = '#162e3c'; context.beginPath(); context.arc(h * .15, -h * .41, h * .115, Math.PI, Math.PI * 2); context.fill();
-        line(context, -h * .08, -h * .35, h * .02, -h * .35, '#f4ca7a', h * .05);
+        // A compact feet-first slide, viewed from behind, rather than a split.
+        limb(-h * .07, -h * .15, -h * .12, -h * .07, -h * .1, 0, '#173d51', h * .12);
+        limb(h * .07, -h * .15, h * .12, -h * .1, h * .13, -h * .025, '#244d5e', h * .12);
+        line(context, -h * .15, 0, -h * .05, 0, '#dbbe85', h * .055);
+        line(context, h * .08, -h * .025, h * .18, -h * .025, '#dbbe85', h * .055);
+        context.fillStyle = '#317e80'; rounded(context, -h * .18, -h * .31, h * .36, h * .19, h * .07); context.fill();
+        context.fillStyle = '#143d4c'; rounded(context, -h * .09, -h * .29, h * .18, h * .14, h * .035); context.fill();
+        for (const side of [-1, 1]) limb(side * h * .16, -h * .25, side * h * .22, -h * .15, side * h * .19, -h * .08, '#d2a077', h * .07);
+        context.fillStyle = '#dcae7b'; context.beginPath(); context.arc(0, -h * .33, h * .095, 0, Math.PI * 2); context.fill();
+        context.fillStyle = '#162e3c'; context.beginPath(); context.arc(0, -h * .35, h * .095, Math.PI, Math.PI * 2); context.fill();
+        line(context, -h * .085, -h * .33, h * .085, -h * .33, '#f4ca7a', h * .03);
       } else {
         const stride = jumping ? .38 : Math.sin(phase);
         // Viewed from behind: feet cycle in depth/height, never sweep sideways.

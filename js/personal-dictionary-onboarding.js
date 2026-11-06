@@ -39,6 +39,7 @@
   function write(value, forOwner = owner()) {
     const next = { ...value, version: VERSION, updatedAt: Date.now() };
     localStorage.setItem(key(forOwner), JSON.stringify(next));
+    if (forOwner !== 'guest' && forOwner === owner()) root.queueProfileIntent?.({ type: 'onboarding', tour: 'personal-dictionary', state: next });
     return next;
   }
   function advance() {
@@ -163,6 +164,11 @@
   Object.defineProperty(root, 'LootLinguaPersonalDictionaryOnboarding', { value: Object.freeze(api), configurable: false });
 
   root.addEventListener('lootlingua:guided-first-journey-change', () => continueWhenReady());
+  root.addEventListener('lootlingua:onboarding-cloud-change', () => {
+    renderToken += 1;
+    root.LootLinguaPopover?.closeIf?.(COACH_ID, { silent: true });
+    continueWhenReady();
+  });
   root.addEventListener('lootlingua:dictionary-word-saved', (event) => {
     if (event.detail?.scope && event.detail.scope !== 'personal') return;
     const state = read();

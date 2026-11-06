@@ -12,7 +12,13 @@
     try { return api().normalize(JSON.parse(localStorage.getItem(api().storageKey(identityValue)))); } catch (_) { return null; }
   }
   function write(next, identityValue) {
+    const before = read(identityValue);
     localStorage.setItem(api().storageKey(identityValue), JSON.stringify(next));
+    if (identityValue.uid && identityValue.uid === user()?.uid) {
+      for (const [tour, progress] of Object.entries(next.features || {})) {
+        if (JSON.stringify(before?.features?.[tour]) !== JSON.stringify(progress)) root.queueProfileIntent?.({ type: 'onboarding', tour, state: progress });
+      }
+    }
   }
   function load() {
     if (!api()) return null;
@@ -194,6 +200,7 @@
   }
 
   root.addEventListener('lootlingua:auth-state', () => { loadedOwner = ''; load(); requestEvaluation(); });
+  root.addEventListener('lootlingua:onboarding-cloud-change', () => { loadedOwner = ''; state = null; load(); requestEvaluation(); });
   ['lootlingua:initial-data-ready', 'lootlingua:learning-data-changed', 'lootlingua:entry-state-ready', 'lootlingua:guided-first-journey-change', 'lootlingua:personal-dictionary-onboarding-change']
     .forEach((eventName) => root.addEventListener(eventName, requestEvaluation));
   if (typeof document !== 'undefined') {

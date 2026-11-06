@@ -2,7 +2,7 @@
   'use strict';
   const LANES = 3, MAX_HEARTS = 3, MAX_ENTITIES = 48, MAX_EVENTS = 16;
   const FAR = 80, SPAWN_Z = 64, BASE_SPEED = 14, MAX_SPEED = 32;
-  const JUMP_MS = 1100, SLIDE_MS = 900, INVULNERABLE_MS = 1100;
+  const JUMP_MS = 640, SLIDE_MS = 480, ACTION_RECOVERY_MS = 70, INPUT_BUFFER_MS = 140, INVULNERABLE_MS = 1100;
   const clamp = (value, low, high) => Math.max(low, Math.min(high, value));
   const clean = value => String(value ?? '').trim().replace(/\s+/g, ' ');
 
@@ -30,7 +30,7 @@
       distance: 0, speed: BASE_SPEED, elapsed: 0, running: true, paused: false, over: false,
       action: 'run', actionStartedAt: 0, actionUntil: 0, invulnerableUntil: 0,
       entities: [], gate: null, feedback: null, events: [],
-      _random: rng,
+      _random: rng, _gateLanes: [], _lastGateLane: -1, _queuedAction: null,
       _pool: Array.from({ length: MAX_ENTITIES }, () => ({})), _nextId: 1,
       _nextRowAt: 400, _nextGateAt: 30000 + Math.floor(clamp(Number(rng()) || 0, 0, 1) * 12000), _row: 0, _escapeLane: 1, _safeUntil: 0,
       _canGate: new Set(normalized.map(item => item.meaning)).size >= LANES,
@@ -48,7 +48,18 @@
     state.lane = next; return true;
   }
   function startAction(state, action, duration) {
-    if (!usable(state) || getAction(state) !== 'run') return false;
+    if (!usable(state)) return false;
+    const current = getAction(state);
+    // Jump cancels a crouch; airborne input never resets the jump arc.
+    if (current !== 'run' && !(current === 'slide' && action === 'jump')) {
+      if (state.actionUntil - state.elapsed > INPUT_BUFFER_MS || state._queuedAction) return false;
+      state._queuedAction = action; return true;
+    }
+    if (current === 'run' && state.elapsed < state.actionUntil + ACTION_RECOVERY_MS && state.actionUntil > 0) {
+      if (state._queuedAction) return false;
+      state._queuedAction = action; return true;
+    }
+    state._queuedAction = null;
     state.action = action; state.actionStartedAt = state.elapsed; state.actionUntil = state.elapsed + duration;
     return true;
   }
@@ -87,11 +98,22 @@
     const alternatives = [...meanings].filter(meaning => meaning !== prompt.meaning);
     const first = choose(state, alternatives);
     const second = choose(state, alternatives.filter(meaning => meaning !== first));
-    const options = [prompt.meaning, first, second];
+    if (!state._gateLanes.length) {
+      state._gateLanes = [0, 1, 2];
+      for (let index = 2; index > 0; index--) {
+        const other = Math.floor(random(state) * (index + 1));
+        [state._gateLanes[index], state._gateLanes[other]] = [state._gateLanes[other], state._gateLanes[index]];
+      }
+      if (state._gateLanes[0] === state._lastGateLane) [state._gateLanes[0], state._gateLanes[1]] = [state._gateLanes[1], state._gateLanes[0]];
+    }
+    const correctLane = state._gateLanes.shift();
+    state._lastGateLane = correctLane;
+    const options = [first, second];
     for (let index = options.length - 1; index > 0; index--) {
       const other = Math.floor(random(state) * (index + 1));
       [options[index], options[other]] = [options[other], options[index]];
     }
+    options.splice(correctLane, 0, prompt.meaning);
     return { kind: 'gate', lane: 1, z: SPAWN_Z, word: prompt.word,
       options, correctLane: options.indexOf(prompt.meaning), correctMeaning: prompt.meaning };
   }
@@ -114,7 +136,7 @@
   function spawnRow(state) {
     if (state.elapsed < state._nextRowAt || state.elapsed < state._safeUntil) return;
     const reading = state.gate && !state.gate.resolved;
-    const clearance = (SPAWN_Z + 24) / BASE_SPEED * 1000 + 250;
+    const clearance = SPAWN_Z / state.speed * 1000 + 350;
     // Do not queue hidden hazards behind the reading veil: returning to full
     // speed would compress their spacing and reveal them too close together.
     const draining = reading || hasGateWords(state) && state._nextGateAt - state.elapsed < clearance;
@@ -123,13 +145,19 @@
     const escape = choose(state, escapeOptions);
     const blocked = [0, 1, 2].filter(lane => lane !== escape);
     if (random(state) > .5) blocked.reverse();
-    const obstacleCount = state.distance > 120 && random(state) > .25 ? 2 : 1;
-    if (state._pool.length < obstacleCount + 6) return;
+    const difficulty = clamp((state.distance - 180) / 1600, 0, 1);
+    const fullRow = state.distance > 240 && random(state) < .15 + difficulty * .5;
+    const obstacleCount = fullRow ? 3 : state.distance > 120 && random(state) < .6 + difficulty * .35 ? 2 : 1;
+    if (fullRow) blocked.push(escape);
+    if (state._pool.length < 12) return;
     const row = ++state._row;
     for (let index = 0; index < (draining ? 0 : obstacleCount); index++) {
       const lane = blocked[index];
       if (state.entities.some(item => item.obstacleType === 'train' && item.lane === lane && item.z > -item.length)) continue;
-      const type = row > 5 && row % 7 === 0 && index === 0 ? 'train' : choose(state, ['low', 'overhead', 'wall']);
+      // Even a closed row has a reachable action route, at most one lane away
+      // from the previous route. Trucks never occupy that guaranteed route.
+      const type = lane === escape ? choose(state, ['low', 'overhead']) :
+        row > 5 && row % 7 === 0 && index === 0 ? 'train' : choose(state, ['low', 'overhead', 'wall']);
       allocate(state, { kind: 'obstacle', obstacleType: type, length: type === 'train' ? 20 : 0, lane, z: spawnZ, row });
       if (type === 'train') for (const offset of [10, 15]) allocate(state, { kind: 'coin', lane, z: spawnZ + offset, height: 1.49, row });
       if (['low', 'overhead'].includes(type) && random(state) < .65) {
@@ -137,10 +165,12 @@
           height: type === 'low' ? 1.5 : .22, requires: type === 'low' ? 'jump' : 'slide', row });
       }
     }
-    allocate(state, { kind: 'coin', lane: escape, z: spawnZ + 3, row });
-    allocate(state, { kind: 'coin', lane: escape, z: spawnZ + 6, row });
+    if (!fullRow || draining) {
+      allocate(state, { kind: 'coin', lane: escape, z: spawnZ + 3, row });
+      allocate(state, { kind: 'coin', lane: escape, z: spawnZ + 6, row });
+    }
     state._escapeLane = escape;
-    state._nextRowAt = state.elapsed + Math.max(680, 1150 - state.distance / 3) + random(state) * 240;
+    state._nextRowAt = state.elapsed + Math.max(850, 1250 - difficulty * 400) + random(state) * 180;
   }
   function damage(state, at, cause) {
     if (at < state.invulnerableUntil || state.over) return false;
@@ -194,6 +224,10 @@
     }
     for (let index = state.entities.length - 1; index >= 0; index--) if (state.entities[index].z < -((state.entities[index].length || 0) + 8)) retire(state, index);
     if (getAction(state) === 'run') state.action = 'run';
+    if (state._queuedAction && getAction(state) === 'run' && state.elapsed >= state.actionUntil + ACTION_RECOVERY_MS) {
+      const action = state._queuedAction;
+      startAction(state, action, action === 'jump' ? JUMP_MS : SLIDE_MS);
+    }
     if (!state.over) spawnRow(state);
     return state;
   }
