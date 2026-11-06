@@ -12,7 +12,14 @@
     const rect = anchor.getBoundingClientRect();
     const margin = 12;
     element.style.position = 'fixed';
-    element.style.maxWidth = `${Math.max(220, window.innerWidth - margin * 2)}px`;
+    // Coordinates below describe the box's left edge. Legacy help styles used
+    // translateX(-50%), which shifted half the measured box off a narrow screen.
+    element.style.transform = 'none';
+    element.style.boxSizing = 'border-box';
+    element.style.maxWidth = `${Math.max(0, window.innerWidth - margin * 2)}px`;
+    element.style.maxHeight = `${Math.max(0, window.innerHeight - margin * 2)}px`;
+    element.style.overflowY = 'auto';
+    element.style.overflowWrap = 'anywhere';
     const box = element.getBoundingClientRect();
     const below = rect.bottom + 10;
     const above = rect.top - box.height - 10;
