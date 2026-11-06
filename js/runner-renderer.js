@@ -91,21 +91,17 @@
       const nearLeft = project(-.54, -6), nearRight = project(2.54, -6);
       const farLeft = project(-.54, FAR), farRight = project(2.54, FAR);
       quad(context, farLeft.x, farLeft.y, farRight.x, farRight.y, nearRight.x, nearRight.y, nearLeft.x, nearLeft.y, '#183039');
-      const offset = distance % 6;
-      for (let index = 15; index >= -1; index--) {
-        const z = index * 6 - offset;
-        const a = project(-.5, z), b = project(2.5, z), c = project(2.5, z + 6), d = project(-.5, z + 6);
-        quad(context, a.x, a.y, b.x, b.y, c.x, c.y, d.x, d.y, index % 2 ? '#203a42' : '#1b333c');
-        line(context, a.x, a.y, b.x, b.y, 'rgba(114,155,151,.19)', Math.max(.5, a.scale));
-        // Offset paving joints and narrow inlays add speed cues without noise.
-        for (const boundary of [.5, 1.5]) {
-          const front = project(boundary, z), rear = project(boundary, z + 6);
-          line(context, rear.x, rear.y, front.x, front.y, 'rgba(95,207,193,.48)', Math.max(.8, front.scale * 2));
-        }
-        if (index % 2 === 0) {
-          const front = project(1, z), rear = project(1, z + 2);
-          line(context, rear.x, rear.y, front.x, front.y, 'rgba(239,197,120,.23)', Math.max(1, front.scale * 3));
-        }
+      // Continuous lane dividers and small moving inlays, no alternating tiles
+      // or phase reset that flashes the entire road at high speed.
+      for (const boundary of [.5, 1.5]) {
+        const front = project(boundary, -6), rear = project(boundary, FAR);
+        line(context, rear.x, rear.y, front.x, front.y, 'rgba(95,207,193,.4)', Math.max(.8, front.scale * 1.5));
+      }
+      const offset = distance % 12;
+      for (let index = 7; index >= -1; index--) {
+        const z = index * 12 - offset;
+        const front = project(1, z), rear = project(1, z + 2);
+        line(context, rear.x, rear.y, front.x, front.y, 'rgba(239,197,120,.2)', Math.max(1, front.scale * 2));
       }
       for (const edge of [-.53, 2.53]) {
         const a = project(edge, -6), b = project(edge, FAR);
@@ -179,7 +175,13 @@
         }
         quad(context, ramp.x - rw / 2, ry, end.x - ew / 2, ey, end.x - ew / 2, end.y - h * .05, ramp.x - rw / 2, ramp.y - h * .08, '#244c58');
         quad(context, ramp.x + rw / 2, ry, end.x + ew / 2, ey, end.x + ew / 2, end.y - h * .05, ramp.x + rw / 2, ramp.y - h * .08, '#173944');
-        quad(context, ramp.x - rw / 2, ry, end.x - ew / 2, ey, end.x + ew / 2, ey, ramp.x + rw / 2, ry, '#527d86');
+        quad(context, ramp.x - rw / 2, ry, end.x - ew / 2, ey, end.x + ew / 2, ey, ramp.x + rw / 2, ry, '#719096');
+        // Opaque roof panels with raised ventilation housings and edge rails.
+        for (const offset of [10, 15]) {
+          const vent = project(entity.lane, entity.z + offset), vw = laneWidth * .34 * vent.scale, vy = vent.y - actorHeight * 1.05 * vent.scale;
+          context.fillStyle = '#aec0ba'; context.fillRect(vent.x - vw / 2, vy - actorHeight * .045 * vent.scale, vw, actorHeight * .07 * vent.scale);
+          line(context, vent.x - vw * .4, vy, vent.x + vw * .4, vy, '#405e68', Math.max(1, vent.scale));
+        }
         for (let offset = 8; offset < entity.length - 3; offset += 2.5) {
           const rib = project(entity.lane, entity.z + offset), ribWidth = laneWidth * .76 * rib.scale, roofY = rib.y - actorHeight * 1.05 * rib.scale;
           line(context, rib.x - ribWidth * .46, roofY, rib.x + ribWidth * .46, roofY, '#355e69', Math.max(1, rib.scale * 1.5));
@@ -318,21 +320,22 @@
       }
       ordered.sort(byDepth);
       const readingGate = ordered.find(item => item.kind === 'gate' && !item.resolved);
-      // Roofs are support surfaces. Paint them before their elevated coins
-      // and the runner, regardless of where the carriage's front is located.
-      for (const train of ordered) if (train.obstacleType === 'train' && (!readingGate || train.z < readingGate.z)) { obstacle(train, project(train.lane, train.z)); metrics.drawn++; }
-      let actorDrawn = false;
       for (const entity of ordered) {
         if (readingGate && entity !== readingGate && entity.z > readingGate.z) { metrics.culled++; continue; }
-        if (entity.obstacleType === 'train') continue;
-        if (!actorDrawn && entity.z < 0) { actor(state, delta); actorDrawn = true; }
+        if (entity.kind === 'coin') continue;
         const p = project(entity.lane ?? 1, entity.z);
         if (entity.kind === 'gate' || entity.type === 'gate') gate(entity, state);
-        else if (entity.kind === 'coin' || entity.type === 'coin') coin(entity, p, elapsed);
         else obstacle(entity, p);
         metrics.drawn++;
       }
-      if (!actorDrawn) actor(state, delta);
+      // Coins on a roof are drawn above its surface. Ground coins behind a
+      // vehicle are occluded instead of making the cargo body look transparent.
+      for (const entity of ordered) {
+        if (entity.kind !== 'coin' || readingGate && entity.z > readingGate.z) continue;
+        if (ordered.some(truck => truck.obstacleType === 'train' && truck.lane === entity.lane && entity.z >= truck.z && entity.z <= truck.z + truck.length && (entity.height ?? .44) < 1.05)) continue;
+        coin(entity, project(entity.lane, entity.z), elapsed); metrics.drawn++;
+      }
+      actor(state, delta);
       // Soft foreground vignette keeps HUD text in the DOM readable.
       context.fillStyle = 'rgba(3,12,20,.12)'; context.fillRect(0, 0, width, height * .12);
       return metrics;

@@ -87,7 +87,7 @@
     content="#090c0f"
   >
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
-  <link rel="stylesheet" href="style.css?v=20261106-scroll-polish-1">
+  <link rel="stylesheet" href="style.css?v=20261106-runner-entry-1">
   <link rel="stylesheet" href="entry-experience.css?v=20261104-world-guide-4">
   <link rel="stylesheet" href="motivation.css?v=20261106-motivation-1">
   <link rel="stylesheet" href="glass-theme.css?v=20261106-materials-1">
@@ -346,6 +346,12 @@
       <h3><i class="fa-solid fa-brain" aria-hidden="true"></i> اختر وضع الاختبار</h3>
       <p class="quiz-available-count" id="quizAvailableCount">الكلمات المتاحة: 0</p>
       <div class="quiz-modes-grid" aria-label="أوضاع الاختبار">
+        <button type="button" class="quiz-mode-card quiz-mode-runner" onclick="openQuizModeSettings('runner')">
+          <canvas id="runnerModePreview" class="runner-mode-preview" width="240" height="132" aria-hidden="true"></canvas>
+          <strong>جري البوابات</strong>
+          <span>شخصيتك، ثلاثة مسارات، وبوابات من كلماتك. اقفز، انزلق واجمع العملات.</span>
+          <small id="runnerModeLock">تفتح عند 10 كلمات في قاموسك</small>
+        </button>
         <button type="button" class="quiz-mode-card quiz-mode-flashcards"  onclick="openQuizModeSettings('flashcards')">
           <span class="quiz-mode-icon"><i class="fa-solid fa-layer-group" aria-hidden="true"></i></span>
           <strong>بطاقات الذاكرة</strong>
@@ -375,6 +381,10 @@
       <button type="button" class="quiz-settings-back" onclick="showQuizModes()"><i class="fa-solid fa-arrow-right" aria-hidden="true"></i></button>
       <h3 id="quizSettingsTitle">إعدادات الاختبار</h3>
       <p id="quizSettingsDesc">اضبط التحدي قبل ما تبدأ.</p>
+      <div id="runnerSetupBrief" class="runner-setup-brief" hidden>
+        <span>٣ مسارات</span><span>↑ قفز · ↓ انزلاق</span><span>♥ ٣ فرص</span>
+        <p>اختر مجموعة كلمات الطريق. الجري مستمر حتى تنتهي فرصك؛ العدد يحدد كلمات البوابات، وليس عدد البوابات.</p>
+      </div>
       <div id="flashcardPresetOptions" class="flashcard-preset-options" style="display:none;">
         <button class="setup-btn btn-new"     onclick="startActualQuiz('recent')"><i class="fa-solid fa-sparkles" aria-hidden="true"></i> كلمات جديدة (آخر 10)</button>
         <button class="setup-btn btn-old"     onclick="startActualQuiz('old')"><i class="fa-solid fa-clock-rotate-left" aria-hidden="true"></i> مراجعة الذكريات (أقدم 10)</button>
@@ -390,7 +400,7 @@
         </div>
       </div>
       <div class="quiz-setting-group">
-        <label>عدد الأسئلة</label>
+        <label id="quizCountLabel">عدد الأسئلة</label>
         <div class="quiz-segmented" role="group" aria-label="عدد الأسئلة">
           <button type="button" data-quiz-count="5" onclick="setQuizQuestionCount('5', this)">5</button>
           <button type="button" class="active" data-quiz-count="10" onclick="setQuizQuestionCount('10', this)">10</button>
@@ -1213,13 +1223,13 @@
 <script src="js/xp-batch.js?v=20261105-integrity-1"></script>
 <script src="js/dictionary.js?v=20261106-stage2-1"></script>
 <script src="js/gate-game-migration.js?v=20261007-1"></script>
-<script src="js/gate-runner.js?v=20261106-runner-4"></script>
+<script src="js/gate-runner.js?v=20261106-runner-5"></script>
 <script src="js/worlds.js?v=20261106-motivation-1"></script>
 <script src="js/dictionary-window.js?v=20261105-render-1"></script>
 <script src="js/dictionary-render.js?v=20261105-pages-1"></script>
 <script src="js/srs.js?v=20261105-render-1"></script>
 <script src="js/popover-overrides.js?v=20260817-1"></script>
-<script src="js/quiz.js?v=20261105-pages-1"></script>
+<script src="js/quiz.js?v=20261106-runner-5"></script>
 <script src="js/srs-transitions.js"></script>
 <script src="js/srs-transition-batch.js?v=20260722-1"></script>
 <script src="js/quiz-runtime.js?v=20261106-stage2-1"></script>

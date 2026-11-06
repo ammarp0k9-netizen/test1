@@ -15,7 +15,7 @@
         "action": "run",
         "paused": false,
         "entities": 16,
-        "distance": 102.01794107143827,
+        "distance": 100.47478445071573,
         "viewportWidth": 1280,
         "dpr": 1,
         "backingPerCssPixel": 1.0020661157024793,
@@ -38,7 +38,7 @@
         "action": "slide",
         "paused": false,
         "entities": 5,
-        "distance": 24.80439295981722,
+        "distance": 20.031684545933423,
         "viewportWidth": 390,
         "dpr": 1.5,
         "backingPerCssPixel": 1.5083333333333333,
@@ -61,7 +61,7 @@
         "action": "slide",
         "paused": false,
         "entities": 5,
-        "distance": 20.079171428397157,
+        "distance": 17.91790942368023,
         "viewportWidth": 320,
         "dpr": 1.5,
         "backingPerCssPixel": 1.5103448275862068,
@@ -81,7 +81,7 @@
             "type": "wallet-delta",
             "field": "runnerCoins",
             "amount": 4,
-            "eventId": "ca5e1717-3d7e-42a5-ac84-d2d57239d524"
+            "eventId": "31ae9584-55ca-4ae3-ad09-70cfba017191"
           }
         }
       ]
@@ -89,15 +89,19 @@
     {
       "name": "account switching, word-load failure and review due before/during launch are guarded",
       "passed": true
+    },
+    {
+      "name": "real dictionary settings lock at 9, unlock at 10, select 5 words, launch without published gate calls and restore ordinary quiz settings",
+      "passed": true
     }
   ],
   "pool": {
     "simulatedSeconds": 120,
     "draws": 600,
-    "executionMs": 428.10000002384186,
-    "maxEntities": 32,
-    "pool": 39,
-    "active": 9,
+    "executionMs": 354.60000002384186,
+    "maxEntities": 30,
+    "pool": 38,
+    "active": 10,
     "total": 48,
     "maxEvents": 1,
     "dpr": 1.5,

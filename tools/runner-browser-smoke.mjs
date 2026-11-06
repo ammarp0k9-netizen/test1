@@ -182,6 +182,30 @@ try {
     assert.ok(pixels > 15, 'renderer must produce a nonblank scene');
     await evaluate(`fixtureVisual.destroy();fixtureVisualUI.remove()`);
   }
+  // Exercise the actual quiz entry/settings/start functions against local-only
+  // source adapters. No Firebase requests or user progress writes.
+  const entry = read('index.html'), quizCode = read('js/quiz.js');
+  const setup = entry.slice(entry.indexOf('<div id="quizViewSetup"'), entry.indexOf('<!-- Quiz Flashcard -->'));
+  await send('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 2, mobile: true });
+  await evaluate(`document.getElementById('fixtureBackground').insertAdjacentHTML('afterbegin', ${JSON.stringify(setup)});currentView='quiz';var selectedQuizMode='flashcards',currentQuizSource='personal',quizQuestionCount='10',customWorlds=[],activeQuizSession=null,currentQuizWords=[],timeAttackTimer=null;var SCRAMBLE_DIRECTION_COPY={'ar-to-en':'رتب الكلمة'},scrambleDirection='ar-to-en';`);
+  await evaluate(`await new Promise((resolve,reject)=>{const script=document.createElement('script');script.src='/js/quiz-core.js';script.onload=resolve;script.onerror=reject;document.head.append(script)});`);
+  await evaluate(quizCode);
+  await evaluate(`window.fixtureDictionary=Array.from({length:12},(_,i)=>({word:'word'+i,meaning:'معنى '+i}));getQuizSourceWords=()=>fixtureDictionary;getQuizSourceResolutionStatus=()=> 'ready';ensureQuizSourceReady=async()=>({});getConfiguredQuizWords=()=>fixtureDictionary.slice(0,Number(quizQuestionCount)||12);syncQuizSourceOptions=()=>{};refreshQuizAvailableCount=()=>LootLinguaGateRunner.mountPreview(document.getElementById('runnerModePreview'));refreshQuizAvailableCount();document.querySelector('.quiz-mode-runner').scrollIntoView();`);
+  await wait(`document.getElementById('runnerModePreview').width>0`, 'runner preview');
+  await screenshot('dictionary-runner-entry');
+  await evaluate(`fixtureDictionary=fixtureDictionary.slice(0,9);openQuizModeSettings('runner')`);
+  assert.equal(await evaluate(`document.getElementById('quizStartButton').disabled`), true);
+  await evaluate(`fixtureDictionary.push({word:'tenth',meaning:'العاشر'});refreshQuizSettingsSummary();setQuizQuestionCount('5',document.querySelector('[data-quiz-count="5"]'));document.getElementById('quizSettingsPanel').scrollIntoView();`);
+  assert.equal(await evaluate(`document.getElementById('quizStartButton').disabled`), false);
+  assert.equal(await evaluate(`document.getElementById('runnerSetupBrief').hidden`), false);
+  await screenshot('dictionary-runner-settings');
+  await evaluate(`fixtureRejectWords=true;await startConfiguredQuiz()`);
+  await wait(`!!document.querySelector('.llr-overlay')`, 'dictionary run');
+  await key('Escape');
+  assert.equal(await evaluate(`document.getElementById('quizSettingsPanel').classList.contains('runner-setup')`), true);
+  await evaluate(`openQuizModeSettings('flashcards')`);
+  assert.equal(await evaluate(`document.getElementById('runnerSetupBrief').hidden`), true);
+  report.checks.push({ name: 'real dictionary settings lock at 9, unlock at 10, select 5 words, launch without published gate calls and restore ordinary quiz settings', passed: true });
   report.assets = requests.filter(item => /runner-engine|runner-renderer|runner\.css/.test(item));
   report.runtimeExceptions = exceptions; assert.deepEqual(exceptions, []);
   fs.writeFileSync(path.join(output, 'browser-smoke.json'), JSON.stringify(report, null, 2) + '\n');

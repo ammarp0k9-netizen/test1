@@ -99,7 +99,7 @@ test('spawn rows always provide a traversable route and recycle a fixed pool dur
     const byRow = new Map();
     for (const item of state.entities) if (item.kind === 'obstacle') { if (!byRow.has(item.row)) byRow.set(item.row, []); byRow.get(item.row).push(item); }
     for (const blocked of byRow.values()) if (blocked.length === 3) {
-      assert.ok(blocked.some(item => ['low', 'overhead'].includes(item.obstacleType)));
+      assert.ok(blocked.some(item => ['low', 'overhead', 'train'].includes(item.obstacleType)));
       closedRows++;
     }
     rows = Math.max(rows, state._row);

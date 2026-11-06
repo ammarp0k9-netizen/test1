@@ -53,7 +53,10 @@
     if (due) card.append(node('p', 'gate-runner-review-lock', 'حان وقت مراجعة البوابة. أكمل المراجعة الموثّقة أولًا، ثم ارجع للجري.'));
     return card;
   }
-  async function getWords(context) { const api = window.LootLinguaPublishedContent; return api?.listAllPublishedGateWords ? normalizeWords(await api.listAllPublishedGateWords(context.worldId, context.rankId, context.gateId)) : []; }
+  async function getWords(context) {
+    if (context?.source === 'dictionary') return normalizeWords(context.words);
+    const api = window.LootLinguaPublishedContent; return api?.listAllPublishedGateWords ? normalizeWords(await api.listAllPublishedGateWords(context.worldId, context.rankId, context.gateId)) : [];
+  }
 
   let activeRun = null, launchPending = null, resources = null;
   const engine = () => window.LootLinguaRunnerEngine;
@@ -67,11 +70,11 @@
     });
     const css = document.querySelector('link[data-runner-style]');
     const styles = css ? Promise.resolve() : new Promise((resolve, reject) => {
-      const link = document.createElement('link'); link.rel = 'stylesheet'; link.href = 'runner.css?v=20261106-runner-4';
+      const link = document.createElement('link'); link.rel = 'stylesheet'; link.href = 'runner.css?v=20261106-runner-5';
       link.dataset.runnerStyle = ''; link.onload = resolve; link.onerror = () => { link.remove(); reject(new Error('Runner styles unavailable')); };
       document.head.append(link);
     });
-    resources = Promise.all([styles, module('LootLinguaRunnerEngine', 'js/runner-engine.js?v=20261106-runner-4'), module('LootLinguaRunnerRenderer', 'js/runner-renderer.js?v=20261106-runner-4')]).catch(error => { resources = null; throw error; });
+    resources = Promise.all([styles, module('LootLinguaRunnerEngine', 'js/runner-engine.js?v=20261106-runner-5'), module('LootLinguaRunnerRenderer', 'js/runner-renderer.js?v=20261106-runner-5')]).catch(error => { resources = null; throw error; });
     return resources;
   }
   function button(label, cls, action) {
@@ -97,18 +100,19 @@
         if (master) master.gain.setTargetAtTime(enabled ? 1 : 0, context.currentTime, .008);
         if (enabled) unlock();
       },
-      play() {
-        if (!enabled || closed || context?.state !== 'running' || context.currentTime - lastNote < .065) return;
+      play(kind = 'coin') {
+        if (!enabled || closed || context?.state !== 'running' || kind === 'coin' && context.currentTime - lastNote < .065) return;
         try {
           const now = context.currentTime; lastNote = now;
-          for (const [pitch, delay] of [[1174.66, 0], [1760, .035]]) {
+          const gate = kind === 'gate', duration = gate ? .24 : .13;
+          for (const [pitch, delay] of gate ? [[523.25, 0], [659.25, .07], [1046.5, .14]] : [[1174.66, 0], [1760, .035]]) {
             const note = context.createOscillator(), gain = context.createGain(), at = now + delay;
-            note.type = 'sine'; note.frequency.setValueAtTime(pitch, at);
-            gain.gain.setValueAtTime(.0001, at); gain.gain.exponentialRampToValueAtTime(.035, at + .006);
-            gain.gain.exponentialRampToValueAtTime(.0001, at + .13);
+            note.type = gate ? 'triangle' : 'sine'; note.frequency.setValueAtTime(pitch, at);
+            gain.gain.setValueAtTime(.0001, at); gain.gain.exponentialRampToValueAtTime(gate ? .022 : .035, at + .006);
+            gain.gain.exponentialRampToValueAtTime(.0001, at + duration);
             note.connect(gain); gain.connect(master);
             note.onended = () => { note.disconnect(); gain.disconnect(); };
-            note.start(at); note.stop(at + .14);
+            note.start(at); note.stop(at + duration + .01);
           }
         } catch { /* Unsupported or interrupted audio stays silent. */ }
       },
@@ -126,6 +130,7 @@
     catch (error) { if (runnerOwnerCurrent(owner)) window.showToast?.('تعذّر تحميل اللعبة أو كلمات البوابة. حاول مجددًا.', 'warning'); return false; }
     finally { if (launchPending === operation) launchPending = null; }
     if (!runnerOwnerCurrent(owner) || reviewIsDue(context?.progress) || activeRun) return false;
+    if (context?.source === 'dictionary' && context.isCurrent && !context.isCurrent()) return false;
 
     const E = engine(), state = E.createState(words); state.running = false;
     const runId = window.crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(36).slice(2)}`;
@@ -136,7 +141,7 @@
     brand.append(node('small', '', 'LOOT RUNNER'), node('strong', '', 'جري البوابات'));
     const audio = createCoinAudio();
     const sound = button('', 'llr-icon-button llr-sound', () => { audio.toggle(); syncSound(); });
-    function syncSound() { sound.textContent = audio.enabled ? 'صوت ✓' : 'صوت ×'; sound.setAttribute('aria-label', audio.enabled ? 'كتم صوت العملات' : 'تشغيل صوت العملات'); sound.setAttribute('aria-pressed', String(audio.enabled)); }
+    function syncSound() { sound.textContent = audio.enabled ? 'صوت ✓' : 'صوت ×'; sound.setAttribute('aria-label', audio.enabled ? 'كتم أصوات اللعبة' : 'تشغيل أصوات اللعبة'); sound.setAttribute('aria-pressed', String(audio.enabled)); }
     syncSound();
     const pause = button('إيقاف', 'llr-icon-button', () => setPaused(!state.paused)), exit = button('خروج', 'llr-icon-button', () => cleanup());
     header.append(brand, sound, pause, exit);
@@ -157,7 +162,7 @@
       ['يسار', () => move(state.lane - 1), '←'], ['وسط', () => move(1), '•'], ['يمين', () => move(state.lane + 1), '→'],
       ['قفز', () => E.jump(state), '↑'], ['انزلاق', () => E.slide(state), '↓'],
     ]) { const b = button('', 'llr-control', action); b.append(node('b', '', icon), node('span', '', label)); controls.append(b); }
-    const hint = node('p', 'llr-hint', 'اسحب للحركة والقفز والانزلاق · العملات للتسلية ولا تغيّر تقدّم البوابة');
+    const hint = node('p', 'llr-hint', 'اسحب للحركة والقفز والانزلاق · تدريب يجمع العملات دون تغيير الإتقان أو XP');
     game.append(header, viewport, controls, hint); overlay.append(game); document.body.append(overlay);
     document.body.classList.add('runner-input-active'); window.__lootlinguaRunnerInputActive = true;
     window.dispatchEvent(new CustomEvent('lootlingua:runner-input-active'));
@@ -199,7 +204,7 @@
     function finish(reason) {
       state.running = false; cancelAnimationFrame(raf); saveRun(); challenge.hidden = options.hidden = true;
       showScreen(reason, `${Math.floor(state.distance)} متر · ${state.coins} عملة${state.distance > startingBest ? ' · رقم قياسي جديد!' : ''}`, 'جولة جديدة', () => { cleanup(); void launch(context); });
-      screen.append(button('العودة إلى البوابة', 'llr-secondary', cleanup));
+      screen.append(button(context?.source === 'dictionary' ? 'العودة إلى إعدادات اللعبة' : 'العودة إلى البوابة', 'llr-secondary', cleanup));
       pause.disabled = true;
     }
     function syncHUD() {
@@ -230,7 +235,8 @@
       if (now - lastDueCheck > 1000) { lastDueCheck = now; if (reviewIsDue(context?.progress)) { finish('حان وقت المراجعة الموثّقة'); return; } }
       const delta = Math.min(50, Math.max(0, now - previous)); previous = now;
       E.update(state, delta);
-      if (state.events.some(event => event.type === 'coin')) audio.play();
+      if (state.events.some(event => event.type === 'gate' && event.correct)) audio.play('gate');
+      else if (state.events.some(event => event.type === 'coin')) audio.play();
       renderer.draw(state); syncHUD();
       if (state.over) finish('رحلة جميلة! حاول تحطيم رقمك');
       else if (!state.paused && state.running) raf = requestAnimationFrame(frame);
@@ -281,8 +287,49 @@
       return true;
     } catch (error) { cleanup(); window.showToast?.('تعذّر تشغيل الرسومات. حاول مجددًا.', 'warning'); return false; }
   }
+  const previews = new WeakSet();
+  function mountPreview(canvas) {
+    if (!canvas || previews.has(canvas) || !canvas.getClientRects().length) return;
+    previews.add(canvas);
+    let renderer, state, raf = 0, visible = false, previous = 0, loading = false;
+    const reduced = window.matchMedia?.('(prefers-reduced-motion: reduce)');
+    const allowed = () => visible && !document.hidden && !window.__lootlinguaRunnerInputActive && canvas.isConnected;
+    function draw(now) {
+      raf = 0;
+      if (!allowed()) return;
+      if (now - previous >= 33) {
+        const delta = previous ? Math.min(now - previous, 80) : 0;
+        previous = now; state.elapsed += delta; state.distance += delta * .014;
+        renderer.draw(state);
+      }
+      if (!reduced?.matches) raf = requestAnimationFrame(draw);
+    }
+    async function resume() {
+      cancelAnimationFrame(raf); raf = 0; previous = 0;
+      if (!allowed() || loading) return;
+      if (!renderer) {
+        loading = true;
+        try {
+          await ensureResources();
+          if (!canvas.isConnected) return;
+          state = engine().createState([]); state.running = false;
+          renderer = window.LootLinguaRunnerRenderer.createRenderer(canvas, { width: 240, height: 132, dprCap: 1 });
+        } catch { previews.delete(canvas); return; }
+        finally { loading = false; }
+      }
+      if (allowed()) { renderer.draw(state); if (!reduced?.matches) raf = requestAnimationFrame(draw); }
+    }
+    if (typeof IntersectionObserver === 'function') {
+      const observer = new IntersectionObserver(entries => { visible = entries[0].isIntersecting; void resume(); });
+      observer.observe(canvas);
+    } else { visible = true; void resume(); }
+    document.addEventListener('visibilitychange', resume);
+    window.addEventListener('lootlingua:runner-input-active', resume);
+    window.addEventListener('lootlingua:runner-input-inactive', resume);
+    reduced?.addEventListener?.('change', resume);
+  }
   window.LootLinguaGateRunner = {
-    render, launch, reviewIsDue, normalizeWords, RunnerCoinWallet, RunnerBestDistance, MAX_HEARTS,
+    render, launch, mountPreview, reviewIsDue, normalizeWords, RunnerCoinWallet, RunnerBestDistance, MAX_HEARTS,
     createState: (...args) => engine().createState(...args), step: (...args) => engine().update(...args), chooseLane: (...args) => engine().move(...args),
     getDiagnostics: () => activeRun ? { lane: activeRun.state.lane, action: activeRun.state.action, paused: activeRun.state.paused, entities: activeRun.state.entities.filter(e => e.active !== false).length, distance: activeRun.state.distance } : null,
   };

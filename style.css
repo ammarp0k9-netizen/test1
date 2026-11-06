@@ -14577,3 +14577,14 @@ html[data-theme="glass"] body.low-end-device :where(.legend-dock, .treasure-dock
 .runner-game.debug-hitboxes .runner-player { outline: 2px solid #6ff; outline-offset: -2px; }
 .runner-game.debug-hitboxes .runner-object.is-obstacle { outline: 2px solid #ff6677; }
 .runner-game.debug-hitboxes .runner-object.is-coin { outline: 2px solid #ffd45a; }
+
+
+/* Runner entry: the actual canvas character, with a game-specific briefing. */
+.quiz-mode-runner { position: relative; border-color: var(--accent); overflow: hidden; }
+.quiz-mode-runner .runner-mode-preview { display:block; width:100%; max-width:240px; height:132px; margin-inline:auto; border-radius:14px; background:#071722; }
+.quiz-mode-runner small { display:block; color:var(--accent); font-weight:700; margin-top:8px; }
+.runner-setup { border:1px solid var(--accent); }
+.runner-setup-brief { margin:16px 0; padding:16px; border-radius:16px; background:var(--card-bg); border:1px solid var(--accent); }
+.runner-setup-brief[hidden] { display:none; }
+.runner-setup-brief span { display:inline-block; padding:6px 10px; margin:3px; border-radius:20px; border:1px solid var(--accent); font-weight:700; }
+.runner-setup-brief p { margin:10px 0 0; line-height:1.8; color:var(--text-gray); }

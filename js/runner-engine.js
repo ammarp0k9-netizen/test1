@@ -151,13 +151,26 @@
     if (fullRow) blocked.push(escape);
     if (state._pool.length < 12) return;
     const row = ++state._row;
+    if (!draining && row > 5 && row % 7 === 0) {
+      const lanes = [escape, ...blocked.filter(lane => lane !== escape)];
+      const count = state.distance > 500 && random(state) < .4 ? 3 : 2;
+      for (let index = 0; index < count; index++) {
+        const lane = lanes[index];
+        if (state.entities.some(item => item.obstacleType === 'train' && item.lane === lane && item.z > -item.length)) continue;
+        const z = spawnZ + (random(state) < .5 ? index * 4 : 0);
+        allocate(state, { kind: 'obstacle', obstacleType: 'train', length: 20, lane, z, row });
+        for (const offset of [10, 15]) allocate(state, { kind: 'coin', lane, z: z + offset, height: 1.49, row });
+      }
+      state._escapeLane = escape;
+      state._nextRowAt = state.elapsed + 1250;
+      return;
+    }
     for (let index = 0; index < (draining ? 0 : obstacleCount); index++) {
       const lane = blocked[index];
       if (state.entities.some(item => item.obstacleType === 'train' && item.lane === lane && item.z > -item.length)) continue;
       // Even a closed row has a reachable action route, at most one lane away
       // from the previous route. Trucks never occupy that guaranteed route.
-      const type = lane === escape ? choose(state, ['low', 'overhead']) :
-        row > 5 && row % 7 === 0 && index === 0 ? 'train' : choose(state, ['low', 'overhead', 'wall']);
+      const type = lane === escape ? choose(state, ['low', 'overhead']) : choose(state, ['low', 'overhead', 'wall']);
       allocate(state, { kind: 'obstacle', obstacleType: type, length: type === 'train' ? 20 : 0, lane, z: spawnZ, row });
       if (type === 'train') for (const offset of [10, 15]) allocate(state, { kind: 'coin', lane, z: spawnZ + offset, height: 1.49, row });
       if (['low', 'overhead'].includes(type) && random(state) < .65) {
