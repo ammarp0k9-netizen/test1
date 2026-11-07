@@ -44,7 +44,7 @@
       action: 'run', actionStartedAt: 0, actionUntil: 0, invulnerableUntil: 0,
       autoRecovery: options.autoRecovery !== false, impact: null, _sideBumpUntil: 0,
       entities: [], gate: null, feedback: null, events: [],
-      _random: rng, _gateLanes: [], _lastGateLane: -1, _queuedAction: null, _formationBag: [],
+      _random: rng, _gateLanes: [], _lastGateLane: -1, _queuedAction: null, _formationBag: [], _tunnelLengths: [],
       _pool: Array.from({ length: MAX_ENTITIES }, () => ({})), _nextId: 1,
       _nextRowAt: 400, _nextGateAt: 30000 + Math.floor(clamp(Number(rng()) || 0, 0, 1) * 12000), _row: 0, _escapeLane: 1, _safeUntil: 0,
       _canGate: new Set(normalized.map(item => item.meaning)).size >= LANES,
@@ -97,9 +97,15 @@
     const direction = Math.sign(lane - state.lane);
     if (!direction) return true;
     for (let step = state.lane + direction; direction > 0 ? step <= lane : step >= lane; step += direction) {
-      if (state.entities.some(entity => entity.obstacleType === 'train' && entity.lane === step && entity.z <= 0 && entity.z + entity.length + VEHICLE_EXIT > 0)) return false;
+      if (state.entities.some(entity => entity.kind === 'obstacle' && entity.lane === step && sideOccupied(entity, entity.z) &&
+        (entity.obstacleType === 'train' || !clearsObstacle(entity.obstacleType, getPose(state))))) return false;
     }
     return true;
+  }
+  function sideOccupied(entity, z) {
+    // Keep the body and a small shoulder clearance solid after the crossing.
+    // Resolved means scored, not that the physical obstacle has disappeared.
+    return entity.obstacleType === 'train' ? z <= 0 && z + entity.length + VEHICLE_EXIT > 0 : z <= .7 && z >= -3.2;
   }
   function clearsObstacle(type, pose) {
     return type === 'train' || type === 'duckwall' && pose.action === 'slide' && pose.top <= .55 ||
@@ -178,7 +184,14 @@
       [options[index], options[other]] = [options[other], options[index]];
     }
     options.splice(correctLane, 0, prompt.meaning);
-    const length = random(state) < .45 ? TUNNEL_LENGTH : choose(state, [256, 288, 320]);
+    if (!state._tunnelLengths.length) {
+      state._tunnelLengths = [TUNNEL_LENGTH, 64, 256, 320, 384, 448];
+      for (let i = state._tunnelLengths.length - 1; i > 0; i--) {
+        const other = Math.floor(random(state) * (i + 1));
+        [state._tunnelLengths[i], state._tunnelLengths[other]] = [state._tunnelLengths[other], state._tunnelLengths[i]];
+      }
+    }
+    const length = state._tunnelLengths.pop();
     return { kind: 'gate', lane: 1, z: GATE_SPAWN_Z, length, word: prompt.word,
       options, correctLane: options.indexOf(prompt.meaning), correctMeaning: prompt.meaning };
   }
@@ -214,7 +227,7 @@
     const passage = state.gate, insideTunnel = passage && spawnZ >= passage.z && spawnZ <= passage.z + passage.length;
     const tunnelSafe = !insideTunnel || passage.length >= LONG_TUNNEL_MIN && spawnZ - passage.z >= 40;
     const draining = reading || !tunnelSafe || !seeded && hasGateWords(state) && state._nextGateAt - state.elapsed < clearance;
-    const escapeOptions = [0, 1, 2].filter(lane => Math.abs(lane - state._escapeLane) <= 1 && (lane === state._escapeLane || !state.entities.some(item => item.obstacleType === 'train' && item.lane === lane && item.z < spawnZ && item.z + item.length + VEHICLE_EXIT > spawnZ)));
+    const escapeOptions = [0, 1, 2].filter(lane => Math.abs(lane - state._escapeLane) <= 1 && (lane === state._escapeLane || !state.entities.some(item => item.kind === 'obstacle' && item.lane === lane && sideOccupied(item, item.z - spawnZ))));
     const escape = choose(state, escapeOptions);
     const blocked = [0, 1, 2].filter(lane => lane !== escape);
     if (random(state) > .5) blocked.reverse();

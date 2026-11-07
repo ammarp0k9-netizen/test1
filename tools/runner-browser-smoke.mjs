@@ -147,6 +147,11 @@ try {
     } else assert.equal(await evaluate(`document.querySelector('.llr-sound').getAttribute('aria-pressed')`), 'false', 'mute preference survives reopening');
     await evaluate(`document.querySelector('.llr-settings-button').click()`);
     await wait(`document.querySelector('.llr-settings').contains(document.activeElement)`, 'settings focus');
+    assert.equal(await evaluate(`document.querySelector('.llr-hints-toggle').getAttribute('aria-pressed')`), width === 1280 ? 'true' : 'false', 'obstacle hint preference persists across runs');
+    if (width === 1280) {
+      await evaluate(`document.querySelector('.llr-hints-toggle').click()`);
+      assert.equal(await evaluate(`localStorage.getItem('lootlingua.runner.hints.v1')`), 'off');
+    }
     const settingsDistance = (await evaluate('LootLinguaGateRunner.getDiagnostics()')).distance;
     await delay(300);
     assert.equal((await evaluate('LootLinguaGateRunner.getDiagnostics()')).distance, settingsDistance, 'the live run pauses behind the demonstration');
@@ -217,6 +222,11 @@ try {
         if (imageName === 'coins-occluded') assert.equal(difference,0,'wall hides the entire coin');
         else assert.ok(difference>50,'roof coin is visible above its supporting vehicle');
         report.checks.push({name:imageName,changedPixels:difference});
+        if (imageName === 'roof-coins') {
+          const orderDifference = await evaluate(`(()=>{const c=document.querySelector('.llr-canvas'),ctx=c.getContext('2d');fixtureVisualState.entities.push({id:10,active:true,kind:'coin',lane:1,z:16.2,height:1.49});fixtureVisual.draw(fixtureVisualState);const before=ctx.getImageData(0,0,c.width,c.height).data;fixtureVisualState.entities.reverse();fixtureVisual.draw(fixtureVisualState);const after=ctx.getImageData(0,0,c.width,c.height).data;let n=0;for(let i=0;i<before.length;i+=4)if(before[i]!==after[i]||before[i+1]!==after[i+1]||before[i+2]!==after[i+2])n++;return n})()`);
+          assert.equal(orderDifference, 0, 'overlapping roof coins keep physical depth regardless of allocation order');
+          report.checks.push({name:'roof coin depth order',changedPixels:orderDifference});
+        }
       }
     }
     if (imageName === 'long-tunnel-hazards') {

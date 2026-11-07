@@ -23,7 +23,7 @@
       }
       return entity.z;
     }
-    const byDepth = (a, b) => paintDepth(b) - paintDepth(a);
+    const byDepth = (a, b) => paintDepth(b) - paintDepth(a) || b.z - a.z || (a.id || 0) - (b.id || 0);
 
     function rounded(ctx, x, y, w, h, radius) {
       const r = Math.min(radius, w / 2, h / 2);
@@ -39,6 +39,28 @@
     }
     function line(ctx, ax, ay, bx, by, color, size = 1) {
       ctx.strokeStyle = color; ctx.lineWidth = size; ctx.beginPath(); ctx.moveTo(ax, ay); ctx.lineTo(bx, by); ctx.stroke();
+    }
+    function clipWorld(vertices, closed) {
+      const result = [];
+      for (let i = 0; i < vertices.length; i++) {
+        const a = vertices[i], b = vertices[(i + 1) % vertices.length];
+        if (a[1] >= NEAR) result.push(a);
+        if ((!closed && i === vertices.length - 1) || (a[1] >= NEAR) === (b[1] >= NEAR)) continue;
+        const t = (NEAR - a[1]) / (b[1] - a[1]);
+        result.push([a[0] + (b[0] - a[0]) * t, NEAR, a[2] + (b[2] - a[2]) * t]);
+      }
+      return result;
+    }
+    function mesh(vertices, color, stroke = 0) {
+      const clipped = clipWorld(vertices, !stroke);
+      if (clipped.length < (stroke ? 2 : 3)) return;
+      context.beginPath();
+      clipped.forEach((v, i) => {
+        const p = project(v[0], v[1]), y = p.y - actorHeight * v[2] * p.scale;
+        if (i) context.lineTo(p.x, y); else context.moveTo(p.x, y);
+      });
+      if (stroke) { context.strokeStyle = color; context.lineWidth = stroke; context.stroke(); }
+      else { context.closePath(); context.fillStyle = color; context.fill(); }
     }
     function project(lane, z) {
       const depth = Number(z) || 0, scale = 17 / Math.max(2, 17 + depth);
@@ -209,21 +231,15 @@
     function obstacle(entity, p, foreground = false) {
       const type = entity.obstacleType || entity.type;
       const w = laneWidth * .72 * p.scale, h = actorHeight * p.scale;
-      if (!foreground) shadow(p.x, p.y, w * .58, h * .1, .36);
+      if (!foreground && (type !== 'train' || entity.z >= NEAR)) shadow(p.x, p.y, w * .58, h * .1, .36);
       if (type === 'train') {
-        const point = position => {
-          // Clip the mesh in world space. Clamping each rear vertex's depth
-          // separately used to stretch the loading ramp over the roof.
-          const clipped = Math.min(entity.length + VEHICLE_EXIT, Math.max(position, NEAR - entity.z));
-          const p = project(entity.lane, entity.z + clipped);
-          const level = root.LootLinguaRunnerEngine.vehicleSurface(entity, -clipped);
-          return { ...p, w: laneWidth * .76 * p.scale, top: p.y - actorHeight * level * p.scale };
-        };
-        const rear = point(0), ramp = point(VEHICLE_RAMP), end = point(entity.length), exit = point(entity.length + VEHICLE_EXIT), cab = point(entity.length - 3);
-        // The front descent begins AFTER the complete golden cab. Every top
-        // vertex uses the same support function as the runner's feet.
-        quad(context, end.x - end.w / 2, end.top, end.x + end.w / 2, end.top, exit.x + exit.w / 2, exit.y, exit.x - exit.w / 2, exit.y, '#526768');
-        line(context, end.x, end.top, exit.x, exit.y, '#829594', Math.max(1, end.scale * 2));
+        // Fixed world vertices; clip faces at the camera instead of sliding
+        // individual roof/ramp vertices along the truck as it passes.
+        const vertex = (offset, side, level = root.LootLinguaRunnerEngine.vehicleSurface(entity, -offset)) => [entity.lane + side * .38, entity.z + offset, level];
+        const face = (from, to, color) => mesh([vertex(from, -1), vertex(to, -1), vertex(to, 1), vertex(from, 1)], color);
+        const edge = (from, to, side, color, size = 1) => mesh([vertex(from, side), vertex(to, side)], color, size);
+        const end = entity.length, cab = end - 3;
+        face(end, end + VEHICLE_EXIT, '#526768');
         for (const offset of [7.5, entity.length - 3]) {
           if (entity.z + offset < NEAR) continue;
           const axle = project(entity.lane, entity.z + offset), aw = laneWidth * .76 * axle.scale;
@@ -234,40 +250,28 @@
           }
         }
         for (const side of [-1, 1]) {
-          quad(context, ramp.x + side * ramp.w / 2, ramp.top, end.x + side * end.w / 2, end.top,
-            end.x + side * end.w / 2, end.y - actorHeight * .09 * end.scale,
-            ramp.x + side * ramp.w / 2, ramp.y - actorHeight * .09 * ramp.scale, side < 0 ? '#325b64' : '#23444e');
+          mesh([vertex(VEHICLE_RAMP, side), vertex(end, side), vertex(end, side, .09), vertex(VEHICLE_RAMP, side, .09)], side < 0 ? '#325b64' : '#23444e');
         }
-        quad(context, end.x - end.w / 2, end.top, end.x + end.w / 2, end.top, end.x + end.w / 2, end.y - actorHeight * .1 * end.scale, end.x - end.w / 2, end.y - actorHeight * .1 * end.scale, '#907443');
-        quad(context, ramp.x - ramp.w / 2, ramp.top, end.x - end.w / 2, end.top, end.x + end.w / 2, end.top, ramp.x + ramp.w / 2, ramp.top, '#719096');
+        mesh([vertex(end, -1), vertex(end, 1), vertex(end, 1, .1), vertex(end, -1, .1)], '#907443');
+        face(VEHICLE_RAMP, end, '#719096');
         for (const offset of [10, 15]) {
-          if (entity.z + offset < NEAR) continue;
-          const vent = point(offset), vw = vent.w * .4;
-          context.fillStyle = '#aec0ba'; context.fillRect(vent.x - vw / 2, vent.top - actorHeight * .04 * vent.scale, vw, actorHeight * .06 * vent.scale);
-          line(context, vent.x - vw * .4, vent.top, vent.x + vw * .4, vent.top, '#405e68', Math.max(1, vent.scale));
+          mesh([vertex(offset, -.4), vertex(offset + .65, -.4), vertex(offset + .65, .4), vertex(offset, .4)], '#aec0ba');
         }
         for (let offset = 8; offset < entity.length - 3; offset += 2.5) {
-          if (entity.z + offset < NEAR) continue;
-          const rib = point(offset);
-          line(context, rib.x - rib.w * .46, rib.top, rib.x + rib.w * .46, rib.top, '#4b6e76', Math.max(1, rib.scale));
-          for (const side of [-1, 1]) line(context, rib.x + side * rib.w * .5, rib.top, rib.x + side * rib.w * .5, rib.y - actorHeight * .2 * rib.scale, '#719095', Math.max(1, rib.scale));
+          mesh([vertex(offset, -.92), vertex(offset, .92)], '#4b6e76', Math.max(1, project(1, entity.z + offset).scale));
+          for (const side of [-1, 1]) mesh([vertex(offset, side), vertex(offset, side, .2)], '#719095', 1);
         }
-        quad(context, cab.x - cab.w / 2, cab.top, end.x - end.w / 2, end.top, end.x + end.w / 2, end.top, cab.x + cab.w / 2, cab.top, '#c09d61');
-        line(context, cab.x - cab.w * .38, cab.top + actorHeight * .12 * cab.scale, cab.x + cab.w * .38, cab.top + actorHeight * .12 * cab.scale, '#203d48', Math.max(2, actorHeight * .12 * cab.scale));
-        quad(context, rear.x - rear.w / 2, rear.top, rear.x + rear.w / 2, rear.top, ramp.x + ramp.w / 2, ramp.top, ramp.x - ramp.w / 2, ramp.top, '#a88e59');
+        face(cab, end, '#c09d61');
+        mesh([vertex(cab + .3, -.76), vertex(cab + 1.1, -.76), vertex(cab + 1.1, .76), vertex(cab + .3, .76)], '#203d48');
+        face(0, VEHICLE_RAMP, '#a88e59');
         for (let offset = 1; offset < VEHICLE_RAMP; offset++) {
-          if (entity.z + offset < NEAR) continue;
-          const tread = point(offset);
-          line(context, tread.x - tread.w * .47, tread.top, tread.x + tread.w * .47, tread.top, '#4b5a55', Math.max(1, tread.scale * 1.5));
+          mesh([vertex(offset, -.94), vertex(offset, .94)], '#4b5a55', Math.max(1, project(1, entity.z + offset).scale * 1.5));
         }
         for (const side of [-1, 1]) {
-          // Vehicle edges have their own metal trim, distinct from road lines.
-          line(context, rear.x + side * rear.w / 2, rear.top, ramp.x + side * ramp.w / 2, ramp.top, '#d1b579', Math.max(1, ramp.scale * 2));
-          line(context, ramp.x + side * ramp.w / 2, ramp.top, end.x + side * end.w / 2, end.top, '#294b55', Math.max(2, ramp.scale * 3));
+          edge(0, VEHICLE_RAMP, side, '#d1b579', 2);
+          edge(VEHICLE_RAMP, end, side, '#294b55', 2);
           for (const offset of [8, 13, 18]) {
-            if (entity.z + offset < NEAR) continue;
-            const cap = point(offset);
-            line(context, cap.x + side * cap.w * .46, cap.top, cap.x + side * cap.w * .5, cap.top, '#c8ae75', Math.max(1, cap.scale * 2));
+            mesh([vertex(offset, side * .92), vertex(offset, side)], '#c8ae75', 2);
           }
         }
         return;
@@ -342,8 +346,9 @@
       const a = project(-.62, front), b = project(2.62, front), c = project(2.62, end), d = project(-.62, end);
       quad(context, a.x, a.y, b.x, b.y, c.x, c.y, d.x, d.y, '#10232d');
       for (const lane of [.5, 1.5]) {
-        const near = project(lane, front), far = project(lane, end);
-        line(context, near.x, near.y, far.x, far.y, '#406a70', Math.max(1, near.scale));
+        const a = project(lane - .006, front), b = project(lane + .006, front);
+        const c = project(lane + .006, end), d = project(lane - .006, end);
+        quad(context, a.x, a.y, b.x, b.y, c.x, c.y, d.x, d.y, '#406a70');
       }
     }
     function tunnelRing(z) {

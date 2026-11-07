@@ -95,11 +95,11 @@
     });
     const css = document.querySelector('link[data-runner-style]');
     const styles = css ? Promise.resolve() : new Promise((resolve, reject) => {
-      const link = document.createElement('link'); link.rel = 'stylesheet'; link.href = 'runner.css?v=20261107-runner-recovery-2';
+      const link = document.createElement('link'); link.rel = 'stylesheet'; link.href = 'runner.css?v=20261107-runner-solid-1';
       link.dataset.runnerStyle = ''; link.onload = resolve; link.onerror = () => { link.remove(); reject(new Error('Runner styles unavailable')); };
       document.head.append(link);
     });
-    resources = Promise.all([styles, module('LootLinguaRunnerEngine', 'js/runner-engine.js?v=20261107-runner-recovery-2'), module('LootLinguaRunnerRenderer', 'js/runner-renderer.js?v=20261107-runner-recovery-2')]).catch(error => { resources = null; throw error; });
+    resources = Promise.all([styles, module('LootLinguaRunnerEngine', 'js/runner-engine.js?v=20261107-runner-solid-1'), module('LootLinguaRunnerRenderer', 'js/runner-renderer.js?v=20261107-runner-solid-1')]).catch(error => { resources = null; throw error; });
     return resources;
   }
   function button(label, cls, action) {
@@ -159,7 +159,10 @@
 
     const E = engine(), state = E.createState(words); state.running = false;
     const recoveryKey = 'lootlingua.runner.recovery.v1';
+    const hintsKey = 'lootlingua.runner.hints.v1';
+    let showObstacleHints = true;
     try { state.autoRecovery = localStorage.getItem(recoveryKey) !== 'off'; } catch {}
+    try { showObstacleHints = localStorage.getItem(hintsKey) !== 'off'; } catch {}
     const runId = window.crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(36).slice(2)}`;
     const returnFocus = document.activeElement;
     const overlay = node('div', 'runner-overlay llr-overlay'), game = node('section', 'llr-game');
@@ -252,7 +255,14 @@
     const demoPlay = button(demoPlaying ? 'إيقاف العرض' : 'تشغيل العرض', 'llr-icon-button', () => { demoPlaying = !demoPlaying; demoPlay.textContent = demoPlaying ? 'إيقاف العرض' : 'تشغيل العرض'; resumeDemo(); });
     demoControls.append(demoPlay);
     demo.append(node('small', '', 'عرض توضيحي — لا يغيّر تقدمك'), demoTitle, demoCanvas, demoDescription, demoControls);
-    const settingActions = node('div', 'llr-settings-actions'); settingActions.append(sound, recovery);
+    const hintsToggle = button('', 'llr-secondary llr-hints-toggle', () => {
+      showObstacleHints = !showObstacleHints;
+      try { localStorage.setItem(hintsKey, showObstacleHints ? 'on' : 'off'); } catch {}
+      syncHints(); syncHUD();
+    });
+    function syncHints() { hintsToggle.textContent = `تلميحات العوائق: ${showObstacleHints ? 'ظاهرة' : 'مخفية'}`; hintsToggle.setAttribute('aria-pressed', String(showObstacleHints)); }
+    syncHints();
+    const settingActions = node('div', 'llr-settings-actions'); settingActions.append(sound, hintsToggle, recovery);
     settings.append(node('h2', '', 'إعدادات الجري'), closeSettingsButton, settingActions,
       modeDescription, node('p', '', 'الاصطدام بجانب الشاحنة يصدّك عن جانبها دون خسارة قلب.'), demo);
     syncRecovery();
@@ -337,7 +347,7 @@
         status.dataset.tone = state.feedback.correct ? 'correct' : 'wrong';
       } else if (!state.feedback) {
         const nearby = state.entities.find(item => item.kind === 'obstacle' && item.lane === state.lane && item.z > 0 && item.z / state.speed < (item.obstacleType === 'low' ? .48 : ['overhead', 'duckwall'].includes(item.obstacleType) ? .4 : 1.1));
-        const text = nearby ? ({ low: '↑ اقفز فوق الحاجز', overhead: '↓ انزلق تحت العارضة', duckwall: '↓ انزلق تحت اللوح — القفز لا يتجاوزه', wall: '← غيّر المسار →', train: 'منحدر أمامك — اصعد إلى سطح العربة' }[nearby.obstacleType] || '') : '';
+        const text = showObstacleHints && nearby ? ({ low: '↑ اقفز فوق الحاجز', overhead: '↓ انزلق تحت العارضة', duckwall: '↓ انزلق تحت اللوح — القفز لا يتجاوزه', wall: '← غيّر المسار →', train: 'منحدر أمامك — اصعد إلى سطح العربة' }[nearby.obstacleType] || '') : '';
         if (status.textContent !== text) status.textContent = text;
         status.dataset.tone = 'hint';
       }

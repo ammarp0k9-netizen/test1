@@ -8,18 +8,18 @@
         "inside": true,
         "locked": true,
         "inert": true,
-        "dom": 60
+        "dom": 61
       },
       "measured": {
         "lane": 1,
         "action": "run",
         "paused": false,
-        "entities": 24,
-        "distance": 239.95703450714484,
+        "entities": 18,
+        "distance": 114.4718583259977,
         "viewportWidth": 1280,
         "dpr": 1,
         "backingPerCssPixel": 1.0020661157024793,
-        "dom": 59,
+        "dom": 60,
         "overflow": false,
         "insideViewport": true
       }
@@ -31,18 +31,18 @@
         "inside": true,
         "locked": true,
         "inert": true,
-        "dom": 60
+        "dom": 61
       },
       "measured": {
         "lane": 1,
         "action": "run",
         "paused": false,
-        "entities": 12,
-        "distance": 61.01807349955084,
+        "entities": 9,
+        "distance": 53.4889023859472,
         "viewportWidth": 390,
         "dpr": 1.5,
         "backingPerCssPixel": 1.5083333333333333,
-        "dom": 59,
+        "dom": 60,
         "overflow": false,
         "insideViewport": true
       }
@@ -54,18 +54,18 @@
         "inside": true,
         "locked": true,
         "inert": true,
-        "dom": 60
+        "dom": 61
       },
       "measured": {
         "lane": 1,
         "action": "run",
         "paused": false,
-        "entities": 9,
-        "distance": 54.70802866372855,
+        "entities": 6,
+        "distance": 38.04626018026111,
         "viewportWidth": 320,
         "dpr": 1.5,
         "backingPerCssPixel": 1.5103448275862068,
-        "dom": 59,
+        "dom": 60,
         "overflow": false,
         "insideViewport": true
       }
@@ -80,8 +80,8 @@
           "intent": {
             "type": "wallet-delta",
             "field": "runnerCoins",
-            "amount": 16,
-            "eventId": "aea86be7-3aa5-49e1-ab93-0f03413ea1a2"
+            "amount": 2,
+            "eventId": "401c9854-13a8-447a-a69f-56602716aa26"
           }
         }
       ]
@@ -99,6 +99,10 @@
       "changedPixels": 1423
     },
     {
+      "name": "roof coin depth order",
+      "changedPixels": 0
+    },
+    {
       "name": "distance-driven fog reveal",
       "atSpawn": 0,
       "approaching": 987
@@ -111,7 +115,7 @@
   "pool": {
     "simulatedSeconds": 120,
     "draws": 600,
-    "executionMs": 1042,
+    "executionMs": 1062.7000000011176,
     "maxEntities": 28,
     "pool": 24,
     "active": 24,

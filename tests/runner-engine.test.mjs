@@ -331,3 +331,39 @@ test('long tunnel exits do not reserve an empty obstacle-free zone', () => {
   assert.ok(obstacles.length > 0);
   assert.ok(obstacles.some(item => item.tunnelId === state.gate.id && state.gate.z + state.gate.length - item.z < 24));
 });
+
+test('recently passed obstacle bodies reject lateral entry without damage, then release after shoulder clearance', () => {
+  for (const obstacleType of ['wall', 'low', 'overhead', 'duckwall']) {
+    const state = make(); const item = entity(state, { kind: 'obstacle', obstacleType, lane: 2, z: -1.5, resolved: true });
+    assert.equal(engine.move(state, 2), false, obstacleType); assert.equal(state.hearts, 3); assert.equal(state.lane, 1);
+    assert.equal(state.impact.kind, 'side');
+    for (let i = 0; i < 6; i++) engine.update(state, 50);
+    assert.ok(item.z < -3.2); assert.equal(engine.move(state, 2), true);
+  }
+  const state = make(); state.lane = 0;
+  entity(state, { kind: 'obstacle', obstacleType: 'wall', lane: 1, z: -1, resolved: true });
+  assert.equal(engine.move(state, 2), false, 'cannot skip a solid intermediate lane');
+});
+
+test('formation routes do not require lateral entry into a still occupied preceding body', () => {
+  const state = engine.createState([], { random: seeded(91) }); state.invulnerableUntil = Infinity;
+  for (let frame = 0; frame < 5000; frame++) {
+    const row = state._row, previous = state._escapeLane;
+    engine.update(state, 50);
+    if (state._row === row || state._escapeLane === previous) continue;
+    for (const item of state.entities) {
+      if (item.kind !== 'obstacle' || item.row === state._row || item.lane !== state._escapeLane) continue;
+      const z = item.z - engine.constants.SPAWN_Z;
+      const blocks = item.obstacleType === 'train' ? z <= 0 && z + item.length + engine.constants.VEHICLE_EXIT > 0 : z <= .7 && z >= -3.2;
+      assert.equal(blocks, false, `row ${state._row} route enters ${item.obstacleType}`);
+    }
+  }
+});
+
+test('tunnel lengths include shuffled short and extended passages, including long first tunnels', () => {
+  const firsts = new Set();
+  for (let seed = 1; seed < 30; seed++) firsts.add(engine.createWordGate(engine.createState(words, { random: seeded(seed) })).length);
+  assert.ok([...firsts].some(length => length >= 384)); assert.ok([...firsts].some(length => length < 240));
+  const state = make(), lengths = new Set(Array.from({ length: 6 }, () => engine.createWordGate(state).length));
+  assert.equal(lengths.size, 6);
+});
