@@ -44,12 +44,13 @@ function getDictionaryListSnapshot(query, searchType) {
   const scope = getStorageUserId() + ':' + getActiveDictionaryStorageScope();
   const key = JSON.stringify([scope, query, searchType, currentFilter, dictionarySortMode, dictionarySortCategory, isReorderMode]);
   const source = window.words;
+  const privateScope = isCustomWorldView();
   if (dictionaryListCache && dictionaryListCache.key === key &&
       dictionaryListCache.source === source && dictionaryListCache.revision === dictionaryRenderRevision && renderLimit > 20) {
     return dictionaryListCache;
   }
   let filtered = source.filter(word => {
-    if (!word.word || window.LootLinguaWordLifecycle?.isVisibleInDictionaryList(word) === false) return false;
+    if (!word.word || (!privateScope && window.LootLinguaWordLifecycle?.isVisibleInDictionaryList(word) === false)) return false;
     if (currentFilter !== 'all' && !word.starred) return false;
     if (!query) return true;
     const matchesWord = String(word.word).toLowerCase().includes(query);

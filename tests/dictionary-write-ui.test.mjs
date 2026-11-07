@@ -52,6 +52,8 @@ function harness({ guest = false, custom = false } = {}) {
     setAddFormExpanded() {},
   });
   vm.runInContext(section('async function saveActiveWordToCloud', 'async function deleteActiveWordFromCloud'), context);
+  vm.runInContext(section('function isDictionaryWordHidden', 'function getActiveDictionaryMessageLabel'), context);
+  vm.runInContext(section('async function restoreExistingDictionaryWord', 'window.restoreDictionaryWordById'), context);
   vm.runInContext(section('window.addWord = async function', 'window.editWord ='), context);
   vm.runInContext(section('window.toggleStar =', 'window.playSound ='), context);
   vm.runInContext(section('async function addAiMeaningCore', 'window.addAiMeaningToPersonal ='), context);
@@ -63,6 +65,16 @@ for (const custom of [false, true]) test(`null acknowledgement cannot save or an
   assert.equal(await h.root.addWord(), false);
   assert.equal(h.root.words.length, 0); assert.equal(h.calls.persists, 0); assert.equal(h.calls.clears, 0); assert.equal(h.calls.events.length, 0);
   assert.equal(h.nodes.wordInput.value, 'Apple'); assert.equal(h.nodes.addBtn.disabled, false);
+});
+
+test('re-adding a moved personal word restores its visible state instead of reporting an invisible duplicate', async () => {
+  const h = harness(); h.root.words = [{id:'moved-id',word:'Apple',meaning:'تفاحة',personalDictionaryState:'moved-to-private-world',hiddenFromDictionary:false}];
+  h.context.persistDictionary = () => { h.calls.persists++; };
+  h.root.upsertUserWordWithSource = async input => {
+    assert.equal(input.personalDictionaryState, 'active'); assert.equal(input.restoreHidden, true); return {wordId:'moved-id',restored:true};
+  };
+  assert.equal(await h.root.addWord(), true);
+  assert.equal(h.root.words.length, 1); assert.equal(h.root.words[0].personalDictionaryState, 'active'); assert.equal(h.root.words[0].hiddenFromDictionary, false);
 });
 
 test('rejected additions retain inputs, while a real acknowledgement emits exactly one saved event', async () => {

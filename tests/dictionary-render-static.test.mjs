@@ -114,3 +114,22 @@ test('page-status events stay harmless in private worlds and other views while p
     assert.equal(status.hidden, currentView !== 'personal');
   }
 });
+
+test('private memberships remain visible and searchable despite personal-only hidden or moved flags', () => {
+  const start = renderSource.indexOf('function getDictionaryListSnapshot');
+  const code = renderSource.slice(start, renderSource.indexOf('function wordDetailText', start));
+  for (const privateScope of [true, false]) for (const query of ['', 'apple']) {
+    const words = [
+      { id: 'moved', word: 'Apple', meaning: 'تفاحة', personalDictionaryState: 'moved-to-private-world' },
+      { id: 'hidden', word: 'Apple hidden', meaning: 'تفاحة', hiddenFromDictionary: true },
+      { id: 'visible', word: 'Apple active', meaning: 'تفاحة', personalDictionaryState: 'active' },
+    ];
+    const root = { words, LootLinguaWordLifecycle: { isVisibleInDictionaryList: word => !word.hiddenFromDictionary && word.personalDictionaryState !== 'moved-to-private-world' }, LootLinguaDictionaryWindow: { createHeightIndex: () => ({ measure() {} }) } };
+    const context = vm.createContext({ window: root, Map, WORD_DOM_WINDOW_SIZE: 60, renderLimit: 20, dictionaryListCache: null, dictionaryRenderRevision: 0, dictionaryMeasurementScope: '', dictionaryMeasurements: new Map(),
+      getStorageUserId: () => 'a', getActiveDictionaryStorageScope: () => privateScope ? 'custom-a' : 'personal', isCustomWorldView: () => privateScope,
+      currentFilter: 'all', dictionarySortMode: 'auto', dictionarySortCategory: 'all', isReorderMode: false, sortDictionaryWords: rows => rows,
+    });
+    vm.runInContext(code, context);
+    assert.deepEqual([...context.getDictionaryListSnapshot(query, 'all').filtered].map(word => word.id).sort(), privateScope ? ['hidden','moved','visible'] : ['visible']);
+  }
+});

@@ -22,7 +22,11 @@ function findActiveDictionaryWord(text) {
     : getActiveDictionaryWords().find(w => normalizeWord(w.word || w.text) === normalizeWord(text)) || null;
 }
 function isDictionaryWordHidden(word) {
-  return getWordLifecycleContract()?.isHiddenFromDictionary?.(word) === true;
+  // In the personal add flow a moved word is restorable, not an already
+  // visible duplicate. Its membership remains visible inside its own world.
+  if (isCustomWorldView()) return false;
+  return word?.hiddenFromDictionary === true || getWordLifecycleContract()?.isHiddenFromDictionary?.(word) === true ||
+    word?.personalDictionaryState === 'moved-to-private-world';
 }
 function getActiveDictionaryMessageLabel() {
   return isCustomWorldView() ? 'هذا العالم' : 'قاموسك الشخصي';
@@ -157,6 +161,7 @@ function wordsSnapshotNeedsFullRender(prev, next) {
     if ((a?.pronunciation || '') !== (b?.pronunciation || '')) return true;
     if ((a?.notes || '') !== (b?.notes || '')) return true;
     if (Boolean(a?.hiddenFromDictionary) !== Boolean(b?.hiddenFromDictionary)) return true;
+    if ((a?.personalDictionaryState || 'active') !== (b?.personalDictionaryState || 'active')) return true;
     if ((a?.hiddenFromDictionaryAt || null) !== (b?.hiddenFromDictionaryAt || null)) return true;
     if ((a?.order ?? null) !== (b?.order ?? null)) return true;
     if ((a?.createdAt || '') !== (b?.createdAt || '')) return true;
@@ -312,6 +317,7 @@ async function restoreExistingDictionaryWord(existingWord, incomingWord, sourceT
       existingWordId: existingWord.id,
       source: { type: sourceType },
       restoreHidden: true,
+      personalDictionaryState: 'active',
       operationId: `${sourceType}:restore`,
     });
     if (!isDictionaryWriteContextCurrent(context)) throw Object.assign(new Error('Dictionary context changed.'), { code: 'dictionary/context-changed' });
@@ -330,6 +336,7 @@ async function restoreExistingDictionaryWord(existingWord, incomingWord, sourceT
       ...word,
       hiddenFromDictionary: false,
       hiddenFromDictionaryAt: null,
+      personalDictionaryState: 'active',
       meaning: word.meaning || incomingWord.meaning || '',
       example: word.example || incomingWord.example || '',
       category: word.category && word.category !== 'عام'
