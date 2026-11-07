@@ -8,18 +8,18 @@
         "inside": true,
         "locked": true,
         "inert": true,
-        "dom": 63
+        "dom": 60
       },
       "measured": {
         "lane": 1,
         "action": "run",
         "paused": false,
-        "entities": 18,
-        "distance": 114.38721646461916,
+        "entities": 24,
+        "distance": 239.95703450714484,
         "viewportWidth": 1280,
         "dpr": 1,
         "backingPerCssPixel": 1.0020661157024793,
-        "dom": 62,
+        "dom": 59,
         "overflow": false,
         "insideViewport": true
       }
@@ -31,18 +31,18 @@
         "inside": true,
         "locked": true,
         "inert": true,
-        "dom": 63
+        "dom": 60
       },
       "measured": {
         "lane": 1,
-        "action": "slide",
+        "action": "run",
         "paused": false,
-        "entities": 6,
-        "distance": 24.930854919919756,
+        "entities": 12,
+        "distance": 61.01807349955084,
         "viewportWidth": 390,
         "dpr": 1.5,
         "backingPerCssPixel": 1.5083333333333333,
-        "dom": 62,
+        "dom": 59,
         "overflow": false,
         "insideViewport": true
       }
@@ -54,18 +54,18 @@
         "inside": true,
         "locked": true,
         "inert": true,
-        "dom": 63
+        "dom": 60
       },
       "measured": {
         "lane": 1,
-        "action": "slide",
+        "action": "run",
         "paused": false,
-        "entities": 3,
-        "distance": 22.41465423548142,
+        "entities": 9,
+        "distance": 54.70802866372855,
         "viewportWidth": 320,
         "dpr": 1.5,
         "backingPerCssPixel": 1.5103448275862068,
-        "dom": 62,
+        "dom": 59,
         "overflow": false,
         "insideViewport": true
       }
@@ -80,8 +80,8 @@
           "intent": {
             "type": "wallet-delta",
             "field": "runnerCoins",
-            "amount": 2,
-            "eventId": "93328b23-c0dd-40ed-b8a4-9e9a1b4b0b9f"
+            "amount": 16,
+            "eventId": "aea86be7-3aa5-49e1-ab93-0f03413ea1a2"
           }
         }
       ]
@@ -99,6 +99,11 @@
       "changedPixels": 1423
     },
     {
+      "name": "distance-driven fog reveal",
+      "atSpawn": 0,
+      "approaching": 987
+    },
+    {
       "name": "real dictionary settings lock at 9, unlock at 10, select 5 words, launch without published gate calls and restore ordinary quiz settings",
       "passed": true
     }
@@ -106,7 +111,7 @@
   "pool": {
     "simulatedSeconds": 120,
     "draws": 600,
-    "executionMs": 984.5,
+    "executionMs": 1042,
     "maxEntities": 28,
     "pool": 24,
     "active": 24,

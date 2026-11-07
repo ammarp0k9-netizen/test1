@@ -104,8 +104,8 @@
       actorHeight = clamp(Math.min(height * .2, laneWidth * .85), 57, 128);
       metrics.dpr = dpr; cacheBackground();
       horizonFog = context.createLinearGradient(0, horizon - height * .05, 0, horizon + height * .16);
-      horizonFog.addColorStop(0, 'rgba(53,91,96,0)'); horizonFog.addColorStop(.35, 'rgba(53,91,96,.9)');
-      horizonFog.addColorStop(.65, 'rgba(53,91,96,.76)'); horizonFog.addColorStop(1, 'rgba(53,91,96,0)');
+      horizonFog.addColorStop(0, 'rgba(53,91,96,0)'); horizonFog.addColorStop(.35, 'rgba(53,91,96,.97)');
+      horizonFog.addColorStop(.65, 'rgba(53,91,96,.82)'); horizonFog.addColorStop(1, 'rgba(53,91,96,0)');
     }
     function road(distance) {
       const nearLeft = project(-.54, -6), nearRight = project(2.54, -6);
@@ -346,16 +346,33 @@
         line(context, near.x, near.y, far.x, far.y, '#406a70', Math.max(1, near.scale));
       }
     }
-    function gate(entity, state) {
-      const length = entity.length || 42, front = Math.max(NEAR, entity.z), end = entity.z + length;
+    function tunnelRing(z) {
       const headroom = Math.max(2.4, (ground - horizon) / actorHeight + .7);
-      if (end < NEAR) return;
-      context.save();
-      if (entity.z > NEAR) { context.beginPath(); portalPath(entity.z); context.clip(); }
-      const ring = z => [0, .25, .5, .75, 1].map((t, index) => {
+      return [0, .25, .5, .75, 1].map((t, index) => {
         const p = project(-.62 + 3.24 * t, z), h = headroom + [0, .55, .75, .55, 0][index];
         return { x: p.x, y: p.y - actorHeight * h * p.scale, ground: p.y, scale: p.scale };
       });
+    }
+    function clipToTunnel(entity, passage) {
+      if (!passage || entity.z < passage.z) return;
+      context.beginPath();
+      if (passage.z >= 0) portalPath(passage.z);
+      else {
+        // Bound each depth slice to the same ceiling and walls as the shell.
+        // Beyond the exit, the visible world is framed by the exit aperture.
+        const arch = tunnelRing(Math.max(NEAR, Math.min(entity.z, passage.z + passage.length)));
+        context.moveTo(arch[0].x, arch[0].ground);
+        for (const point of arch) context.lineTo(point.x, point.y);
+        context.lineTo(arch[4].x, arch[4].ground); context.closePath();
+      }
+      context.clip();
+    }
+    function tunnelInterior(entity) {
+      const length = entity.length || 42, front = Math.max(NEAR, entity.z), end = entity.z + length;
+      if (end < NEAR) return;
+      context.save();
+      if (entity.z > NEAR) { context.beginPath(); portalPath(entity.z); context.clip(); }
+      const ring = tunnelRing;
       const near = ring(front), far = ring(end);
       quad(context, near[0].x, near[0].ground, far[0].x, far[0].ground, far[0].x, far[0].y, near[0].x, near[0].y, '#203d46');
       quad(context, near[4].x, near[4].ground, far[4].x, far[4].ground, far[4].x, far[4].y, near[4].x, near[4].y, '#132c38');
@@ -378,7 +395,10 @@
         }
       }
       context.restore();
+    }
+    function gate(entity, state) {
       if (entity.z <= NEAR) return;
+      const headroom = Math.max(2.4, (ground - horizon) / actorHeight + .7);
       if (!entity.resolved) {
         context.beginPath(); portalPath(entity.z); context.fillStyle = '#030a12'; context.fill();
       }
@@ -493,7 +513,12 @@
     function opacity(entity, elapsed) {
       const span = (entity.length || 0) + (entity.obstacleType === 'train' ? VEHICLE_EXIT : 0);
       const birth = Number.isFinite(entity.bornAt) ? clamp((elapsed - entity.bornAt) / 260, 0, 1) : 1;
-      return birth * clamp((FAR - entity.z) / 10, 0, 1) * clamp((entity.z + span - NEAR) / 3, 0, 1);
+      const spawn = root.LootLinguaRunnerEngine.constants.SPAWN_Z;
+      const progress = clamp((spawn - entity.z) / 34, 0, 1);
+      // Zero visibility at allocation, with a zero-slope reveal driven by
+      // distance, not an observable timed fade at the spawn plane.
+      const reveal = entity.kind === 'gate' ? clamp((FAR - entity.z) / 10, 0, 1) : progress * progress * (3 - 2 * progress);
+      return birth * reveal * clamp((entity.z + span - NEAR) / 3, 0, 1);
     }
     function inViewport(entity) {
       const vehicle = entity.obstacleType === 'train';
@@ -525,16 +550,18 @@
       ordered.sort(byDepth);
       const readingGate = ordered.find(item => item.kind === 'gate' && !item.resolved);
       const passage = ordered.find(item => item.kind === 'gate');
-      if (passage) { context.globalAlpha = opacity(passage, elapsed); tunnelFloor(passage); context.globalAlpha = 1; }
+      if (passage) { context.globalAlpha = opacity(passage, elapsed); tunnelFloor(passage); tunnelInterior(passage); context.globalAlpha = 1; }
       const pose = root.LootLinguaRunnerEngine.getPose(state);
       const inFront = entity => entity.kind === 'obstacle' && entity.obstacleType !== 'train' && entity.z < 0 && (entity.obstacleType !== 'overhead' || pose.floor < .88);
       for (const entity of ordered) {
         if (readingGate && entity !== readingGate && entity.z > readingGate.z) { metrics.culled++; continue; }
         if (entity.kind === 'gate' || inFront(entity)) continue;
+        context.save(); clipToTunnel(entity, passage);
         context.globalAlpha = opacity(entity, elapsed);
         const p = project(entity.lane ?? 1, entity.z);
         if (entity.kind === 'coin') coin(entity, p, elapsed);
         else obstacle(entity, p);
+        context.restore();
         metrics.drawn++;
       }
       context.globalAlpha = 1;
@@ -548,8 +575,10 @@
       // already passed by the feet is in front of the crouched body instead.
       for (const entity of ordered) {
         if (!inFront(entity)) continue;
+        context.save(); clipToTunnel(entity, passage);
         context.globalAlpha = opacity(entity, elapsed);
         obstacle(entity, project(entity.lane, entity.z), true); metrics.drawn++; metrics.foreground++;
+        context.restore();
       }
       context.globalAlpha = 1;
       // Soft foreground vignette keeps HUD text in the DOM readable.

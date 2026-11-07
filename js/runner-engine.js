@@ -212,7 +212,7 @@
     // speed would compress their spacing and reveal them too close together.
     const spawnZ = seeded ? seededZ : SPAWN_Z;
     const passage = state.gate, insideTunnel = passage && spawnZ >= passage.z && spawnZ <= passage.z + passage.length;
-    const tunnelSafe = !insideTunnel || passage.length >= LONG_TUNNEL_MIN && spawnZ - passage.z >= 40 && passage.z + passage.length - spawnZ >= 24;
+    const tunnelSafe = !insideTunnel || passage.length >= LONG_TUNNEL_MIN && spawnZ - passage.z >= 40;
     const draining = reading || !tunnelSafe || !seeded && hasGateWords(state) && state._nextGateAt - state.elapsed < clearance;
     const escapeOptions = [0, 1, 2].filter(lane => Math.abs(lane - state._escapeLane) <= 1 && (lane === state._escapeLane || !state.entities.some(item => item.obstacleType === 'train' && item.lane === lane && item.z < spawnZ && item.z + item.length + VEHICLE_EXIT > spawnZ)));
     const escape = choose(state, escapeOptions);

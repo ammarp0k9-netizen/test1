@@ -95,11 +95,11 @@
     });
     const css = document.querySelector('link[data-runner-style]');
     const styles = css ? Promise.resolve() : new Promise((resolve, reject) => {
-      const link = document.createElement('link'); link.rel = 'stylesheet'; link.href = 'runner.css?v=20261107-runner-recovery-1';
+      const link = document.createElement('link'); link.rel = 'stylesheet'; link.href = 'runner.css?v=20261107-runner-recovery-2';
       link.dataset.runnerStyle = ''; link.onload = resolve; link.onerror = () => { link.remove(); reject(new Error('Runner styles unavailable')); };
       document.head.append(link);
     });
-    resources = Promise.all([styles, module('LootLinguaRunnerEngine', 'js/runner-engine.js?v=20261107-runner-recovery-1'), module('LootLinguaRunnerRenderer', 'js/runner-renderer.js?v=20261107-runner-recovery-1')]).catch(error => { resources = null; throw error; });
+    resources = Promise.all([styles, module('LootLinguaRunnerEngine', 'js/runner-engine.js?v=20261107-runner-recovery-2'), module('LootLinguaRunnerRenderer', 'js/runner-renderer.js?v=20261107-runner-recovery-2')]).catch(error => { resources = null; throw error; });
     return resources;
   }
   function button(label, cls, action) {
@@ -207,9 +207,17 @@
       try { localStorage.setItem(recoveryKey, state.autoRecovery ? 'on' : 'off'); } catch {}
       syncRecovery();
     });
-    function syncRecovery() { recovery.textContent = `مساعدة بعد الاصطدام: ${state.autoRecovery ? 'مفعّلة' : 'متوقفة'}`; recovery.setAttribute('aria-pressed', String(state.autoRecovery)); }
-    syncRecovery();
-    const demo = node('div', 'llr-recovery-demo'); demo.hidden = true;
+    function syncRecovery() {
+      recovery.textContent = `مساعدة بعد الاصطدام: ${state.autoRecovery ? 'مفعّلة' : 'متوقفة'}`;
+      recovery.setAttribute('aria-pressed', String(state.autoRecovery));
+      modeDescription.textContent = state.autoRecovery
+        ? 'بعد الاصطدام تخسر قلبًا وتتوقف الحركة للحظة، ثم تختار المساعدة حركة تجاوز واحدة آمنة ويعود التحكم إليك. إذا لم تجد مسارًا آمنًا تمر الشخصية مع الوميض.'
+        : 'المساعدة متوقفة: بعد الاصطدام تخسر قلبًا وتتوقف الحركة للحظة، ثم تمر الشخصية عبر العائق وهي تومض. لا تغيّر المسار ولا تقفز ولا تنزلق تلقائيًا؛ تبقى الحركة مسؤوليتك.';
+      demoIndex = 0;
+      if (demoRenderer) resetDemo();
+    }
+    const modeDescription = node('p', 'llr-recovery-description');
+    const demo = node('div', 'llr-recovery-demo');
     const demoTitle = node('strong'), demoCanvas = node('canvas'); demoCanvas.setAttribute('aria-hidden', 'true');
     const demoDescription = node('p'), demoControls = node('div', 'llr-settings-actions');
     const demoScenarios = [
@@ -219,9 +227,11 @@
       { title: 'عارضة: اختيار الانزلاق', description: 'العارضة تسمح بالقفز أو الانزلاق؛ هنا تختار المساعدة الانزلاق الآمن.', types: ['wall', 'overhead', 'wall'] },
     ];
     function resetDemo() {
-      demoState = E.createState([], { random: () => .5, autoRecovery: true });
+      demoState = E.createState([], { random: () => .5, autoRecovery: state.autoRecovery });
       demoState._nextRowAt = demoState._nextGateAt = Infinity;
-      const scenario = demoScenarios[demoIndex]; demoTitle.textContent = scenario.title; demoDescription.textContent = scenario.description;
+      const scenario = demoScenarios[demoIndex];
+      demoTitle.textContent = state.autoRecovery ? scenario.title : `دون مساعدة · ${['الصندوق', 'لوح الانزلاق', 'الحاجز القصير', 'العارضة'][demoIndex]}`;
+      demoDescription.textContent = state.autoRecovery ? scenario.description : 'لاحظ الضربة والتوقّف، ثم الوميض والمرور عبر العائق في المسار نفسه، دون أي حركة تجاوز تلقائية.';
       scenario.types.forEach((type, lane) => {
         const item = demoState._pool.pop(); Object.assign(item, { id: lane + 1, kind: 'obstacle', obstacleType: type, lane, z: 17, length: 0, active: true, bornAt: -1000, resolved: false }); demoState.entities.push(item);
       });
@@ -234,25 +244,18 @@
       if (now - demoPrevious >= 32) {
         E.update(demoState, Math.min(50, now - demoPrevious)); demoPrevious = now;
         demoRenderer.draw(demoState);
-        if (demoState.elapsed > 3600) resetDemo();
+        if (demoState.elapsed > 3600) { demoIndex = (demoIndex + 1) % demoScenarios.length; resetDemo(); }
       }
       demoRaf = requestAnimationFrame(demoFrame);
     }
     function resumeDemo() { cancelAnimationFrame(demoRaf); demoPrevious = 0; if (settingsOpen && !demo.hidden && !document.hidden && demoPlaying) demoRaf = requestAnimationFrame(demoFrame); }
     const demoPlay = button(demoPlaying ? 'إيقاف العرض' : 'تشغيل العرض', 'llr-icon-button', () => { demoPlaying = !demoPlaying; demoPlay.textContent = demoPlaying ? 'إيقاف العرض' : 'تشغيل العرض'; resumeDemo(); });
-    demoControls.append(button('المثال السابق', 'llr-icon-button', () => { demoIndex = (demoIndex + 3) % 4; resetDemo(); }), demoPlay,
-      button('المثال التالي', 'llr-icon-button', () => { demoIndex = (demoIndex + 1) % 4; resetDemo(); }));
+    demoControls.append(demoPlay);
     demo.append(node('small', '', 'عرض توضيحي — لا يغيّر تقدمك'), demoTitle, demoCanvas, demoDescription, demoControls);
-    const help = button('ⓘ كيف تعمل المساعدة؟', 'llr-secondary llr-recovery-help', () => {
-      demo.hidden = !demo.hidden; help.setAttribute('aria-expanded', String(!demo.hidden));
-      if (!demo.hidden && !demoRenderer) { demoRenderer = window.LootLinguaRunnerRenderer.createRenderer(demoCanvas, { width: Math.max(240, Math.min(520, settings.clientWidth - 40)), height: 240, dprCap: 1 }); resetDemo(); }
-      resumeDemo();
-    });
-    help.setAttribute('aria-expanded', 'false');
-    const settingActions = node('div', 'llr-settings-actions'); settingActions.append(sound, recovery, help);
+    const settingActions = node('div', 'llr-settings-actions'); settingActions.append(sound, recovery);
     settings.append(node('h2', '', 'إعدادات الجري'), closeSettingsButton, settingActions,
-      node('p', '', 'المساعدة لا تمنع خسارة القلب: بعد الاصطدام تتوقف الحركة للحظة، ثم تختار حركة تجاوز واحدة آمنة ويعود التحكم إليك. إذا لم تجد مسارًا آمنًا تمر الشخصية مع الوميض.'),
-      node('p', '', 'عند إيقافها: ضربة وتوقّف قصير ثم وميض ومرور عبر العائق، دون تغيير المسار أو قفز أو انزلاق تلقائي. الاصطدام بجانب الشاحنة يصدّك عن جانبها دون خسارة قلب.'), demo);
+      modeDescription, node('p', '', 'الاصطدام بجانب الشاحنة يصدّك عن جانبها دون خسارة قلب.'), demo);
+    syncRecovery();
     game.append(settings);
     function setFocusSurface(dialog, onEscape) {
       window.LootLinguaModalFocus?.close(overlay, { restoreFocus: false });
@@ -263,6 +266,10 @@
       resumeAfterSettings = state.running && !state.paused && !state.over;
       if (resumeAfterSettings) setPaused(true);
       settingsOpen = true; settings.hidden = false; gesture = null;
+      if (!demoRenderer) {
+        demoRenderer = window.LootLinguaRunnerRenderer.createRenderer(demoCanvas, { width: Math.max(240, Math.min(520, settings.clientWidth - 40)), height: 240, dprCap: 1 });
+        resetDemo();
+      }
       for (const el of [header, viewport, controls, hint]) el.inert = true;
       setFocusSurface(settings, closeSettings); closeSettingsButton.focus({ preventScroll: true }); resumeDemo();
     }

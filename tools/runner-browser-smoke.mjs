@@ -145,7 +145,7 @@ try {
       assert.equal(await evaluate(`document.querySelector('.llr-sound').getAttribute('aria-pressed')`), 'false');
       await delay(240); assert.equal(await evaluate('fixtureNotes'), notes, 'muting stops new notes');
     } else assert.equal(await evaluate(`document.querySelector('.llr-sound').getAttribute('aria-pressed')`), 'false', 'mute preference survives reopening');
-    await evaluate(`document.querySelector('.llr-settings-button').click();document.querySelector('.llr-recovery-help').click()`);
+    await evaluate(`document.querySelector('.llr-settings-button').click()`);
     await wait(`document.querySelector('.llr-settings').contains(document.activeElement)`, 'settings focus');
     const settingsDistance = (await evaluate('LootLinguaGateRunner.getDiagnostics()')).distance;
     await delay(300);
@@ -153,6 +153,13 @@ try {
     assert.equal(await evaluate(`(()=>{const p=document.querySelector('.llr-settings'),r=p.getBoundingClientRect();return document.elementFromPoint(r.left+10,r.top+10)?.closest('.llr-settings')===p&&document.querySelector('.llr-viewport').inert&&document.documentElement.scrollWidth<=innerWidth})()`), true);
     await evaluate(`document.querySelector('.llr-recovery').click()`);
     assert.equal(await evaluate(`localStorage.getItem('lootlingua.runner.recovery.v1')`), 'off');
+    assert.ok(await evaluate(`document.querySelector('.llr-recovery-description').textContent.includes('المساعدة متوقفة')&&document.querySelector('.llr-recovery-demo strong').textContent.includes('دون مساعدة')`));
+    assert.equal(await evaluate(`document.querySelectorAll('.llr-recovery-demo button').length`), 1, 'only play/pause remains, without previous/next controls');
+    if (width === 1280) {
+      const firstTitle = await evaluate(`document.querySelector('.llr-recovery-demo strong').textContent`);
+      await wait(`document.querySelector('.llr-recovery-demo strong').textContent!==${JSON.stringify(firstTitle)}`, 'automatic scenario progression', 6500);
+      await screenshot('recovery-off');
+    }
     await evaluate(`document.querySelector('.llr-recovery').click()`);
     await screenshot(`recovery-help-${width}`);
     await key('Escape');
@@ -182,7 +189,7 @@ try {
   report.pool = await evaluate(`(()=>{const E=fixtureEngine,s=E.createState(fixtureWords,{random:()=>.5});let max=0,events=0,metrics,dom=document.querySelectorAll('*').length;const started=performance.now();for(let frame=0;frame<2400;frame++){if(s.gate&&!s.gate.resolved){E.move(s,s.gate.correctLane)}else{const ahead=s.entities.filter(e=>e.kind==='obstacle'&&!e.resolved&&e.z>0).sort((a,b)=>a.z-b.z);if(ahead.length){const row=ahead.filter(e=>e.row===ahead[0].row);const open=[0,1,2].find(lane=>!row.some(e=>e.lane===lane));const route=open===undefined?row.find(e=>['low','overhead','duckwall'].includes(e.obstacleType))||row.find(e=>e.obstacleType==='train'):null;E.move(s,open===undefined?route.lane:open);if(route&&route.z/s.speed<.18){if(route.obstacleType==='low')E.jump(s);if(['overhead','duckwall'].includes(route.obstacleType))E.slide(s)}}}E.update(s,50);if(frame%4===0)metrics=fixtureRenderer.draw(s);max=Math.max(max,s.entities.length);events=Math.max(events,s.events.length);if(s.over)throw Error('action-aware route died')}return{simulatedSeconds:120,draws:600,executionMs:performance.now()-started,maxEntities:max,pool:s._pool.length,active:s.entities.length,total:s._pool.length+s.entities.length,maxEvents:events,dpr:metrics.dpr,domBefore:dom,domAfter:document.querySelectorAll('*').length}})()`);
   assert.equal(report.pool.total, 48); assert.ok(report.pool.maxEntities <= 48 && report.pool.maxEvents <= 16 && report.pool.dpr <= 1.5); assert.equal(report.pool.domBefore, report.pool.domAfter);
   await evaluate('fixtureRenderer.destroy();fixtureCanvas.remove()');
-  for (const [width, action, imageName] of [[390, 'jump', 'mobile-gate-jump'], [320, 'slide', 'small-mobile-slide'], [1280, 'run', 'train-rooftop'], [1280, 'slide', 'under-beam-depth'], [1280, 'run', 'mixed-vehicles'], [1280, 'run', 'truck-cab-support'], [1280, 'run', 'near-edge-crate'], [1280, 'run', 'coins-occluded'], [1280, 'run', 'roof-coins'], [1280, 'slide', 'duckwall'], [1280, 'run', 'tunnel-approach'], [1280, 'run', 'tunnel-inside'], [1280, 'run', 'tunnel-exit']]) {
+  for (const [width, action, imageName] of [[390, 'jump', 'mobile-gate-jump'], [320, 'slide', 'small-mobile-slide'], [1280, 'run', 'train-rooftop'], [1280, 'slide', 'under-beam-depth'], [1280, 'run', 'mixed-vehicles'], [1280, 'run', 'truck-cab-support'], [1280, 'run', 'near-edge-crate'], [1280, 'run', 'coins-occluded'], [1280, 'run', 'roof-coins'], [1280, 'slide', 'duckwall'], [1280, 'run', 'tunnel-approach'], [1280, 'run', 'tunnel-inside'], [1280, 'run', 'tunnel-exit'], [1280, 'run', 'long-tunnel-hazards'], [390, 'run', 'fog-reveal']]) {
     await send('Emulation.setDeviceMetricsOverride', { width, height: 844, deviceScaleFactor: 3, mobile: true });
     await evaluate(`fixtureContext.progress={readinessNextAt:0};await LootLinguaGateRunner.launch(fixtureContext);window.fixtureVisualUI=document.querySelector('.llr-overlay').cloneNode(true)`);
     await key('Escape');
@@ -211,6 +218,15 @@ try {
         else assert.ok(difference>50,'roof coin is visible above its supporting vehicle');
         report.checks.push({name:imageName,changedPixels:difference});
       }
+    }
+    if (imageName === 'long-tunnel-hazards') {
+      await evaluate(`fixtureVisualState.entities=[{id:1,active:true,kind:'gate',lane:1,z:-22,length:256,resolved:true},{id:2,active:true,kind:'obstacle',obstacleType:'train',lane:0,z:16,length:20},{id:3,active:true,kind:'obstacle',obstacleType:'duckwall',lane:1,z:16},{id:4,active:true,kind:'obstacle',obstacleType:'wall',lane:2,z:16},{id:5,active:true,kind:'obstacle',obstacleType:'low',lane:1,z:48}];fixtureVisualState.gate=fixtureVisualState.entities[0];document.querySelector('.llr-challenge').hidden=true;document.querySelector('.llr-gate-labels').hidden=true;fixtureVisual.draw(fixtureVisualState);`);
+    }
+    if (imageName === 'fog-reveal') {
+      const reveal = await evaluate(`(()=>{const c=document.querySelector('.llr-canvas'),ctx=c.getContext('2d');fixtureVisualState.entities=[];fixtureVisualState.gate=null;fixtureVisual.draw(fixtureVisualState);const before=ctx.getImageData(0,0,c.width,c.height).data;const differences=z=>{fixtureVisualState.entities=[{id:9,kind:'obstacle',obstacleType:'wall',lane:1,z,active:true,bornAt:0}];fixtureVisual.draw(fixtureVisualState);const after=ctx.getImageData(0,0,c.width,c.height).data;let n=0;for(let i=0;i<before.length;i+=4)if(before[i]!==after[i]||before[i+1]!==after[i+1]||before[i+2]!==after[i+2])n++;return n};return{atSpawn:differences(fixtureEngine.constants.SPAWN_Z),approaching:differences(82)}})()`);
+      assert.equal(reveal.atSpawn, 0, 'allocation behind fog produces no visible pixel change');
+      assert.ok(reveal.approaching > 0, 'the existing obstacle gradually emerges while approaching');
+      report.checks.push({name:'distance-driven fog reveal',...reveal});
     }
     await screenshot(imageName);
     const pixels = await evaluate(`(()=>{const c=document.querySelector('.llr-canvas'),data=c.getContext('2d').getImageData(0,0,c.width,c.height).data;const colors=new Set();for(let i=0;i<data.length;i+=400)colors.add(data[i]+','+data[i+1]+','+data[i+2]);return colors.size})()`);

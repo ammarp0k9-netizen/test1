@@ -311,7 +311,7 @@ test('normal hazards spawn in the distant fog range within the fixed pool', () =
   assert.equal(state.entities.length + state._pool.length, 48);
 });
 
-test('short tunnels contain no hazards; long tunnels seed hazards behind a safe entry and before the exit', () => {
+test('short tunnels contain no hazards; long tunnels seed hazards behind a safe entry', () => {
   let shorts = 0, longs = 0;
   for (let seed = 1; seed <= 30; seed++) {
     const state = engine.createState(words, { random: seeded(seed) }); state.distance = 1500; state._nextGateAt = 0;
@@ -321,4 +321,13 @@ test('short tunnels contain no hazards; long tunnels seed hazards behind a safe 
     else { longs++; assert.ok(hazards.length > 0); for (const item of hazards) { assert.ok(item.z - gate.z >= 40); assert.ok(gate.z + gate.length - item.z >= 24); } }
   }
   assert.ok(shorts && longs);
+});
+
+test('long tunnel exits do not reserve an empty obstacle-free zone', () => {
+  const state = make([]); state.distance = 1500; state._nextRowAt = 0;
+  state.gate = entity(state, { kind: 'gate', z: -158, length: 256, resolved: true });
+  engine.update(state, 50);
+  const obstacles = state.entities.filter(item => item.kind === 'obstacle');
+  assert.ok(obstacles.length > 0);
+  assert.ok(obstacles.some(item => item.tunnelId === state.gate.id && state.gate.z + state.gate.length - item.z < 24));
 });

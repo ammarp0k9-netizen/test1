@@ -5,6 +5,7 @@
 .llr-settings p { margin: 0; font-size: 13px; line-height: 1.8; color: #d3e4df; }
 .llr-settings-actions { display: flex; flex-wrap: wrap; gap: 8px; }
 .llr-settings-actions button { flex: 1 1 130px; }
+.llr-settings-actions .llr-recovery { flex-basis: 100%; }
 .llr-recovery-demo { display: grid; gap: 10px; padding: 12px; border: 1px solid #45656b; border-radius: 12px; background: #06131e; }
 .llr-recovery-demo small { color: #a7c5c3; }
 .llr-recovery-demo strong { color: #f5d58e; }
