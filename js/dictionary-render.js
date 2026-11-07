@@ -314,7 +314,8 @@ function renderDictionaryWindow(options = {}) {
   if (!search || !list) return;
   const query = search.value.toLowerCase().trim();
   const pages = !isCustomWorldView() && window.LootLinguaDictionaryPages?.current();
-  const fullDataKey = pages && (query || currentFilter !== 'all' || dictionarySortMode !== 'auto')
+  const serverSorted = pages?.state().queryMode === dictionarySortMode && ['auto', 'newest', 'oldest'].includes(dictionarySortMode);
+  const fullDataKey = pages && (query || currentFilter !== 'all' || dictionarySortMode !== 'auto' && !serverSorted)
     ? JSON.stringify([pages.ownerId, query, currentFilter, dictionarySortMode, dictionarySortCategory]) : '';
   if (dictionaryFullDataRequest?.key !== fullDataKey) window.cancelDictionaryFullDataRequest();
   if (fullDataKey && !dictionaryFullDataRequest && !pages.state().complete && !pages.state().error) {

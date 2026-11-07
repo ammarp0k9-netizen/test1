@@ -226,6 +226,11 @@
   window.confirmLogout = async function() {
     if (window.__lootlinguaLogoutPending) return;
     window.__lootlinguaLogoutPending = true;
+    const logoutButtons = [...document.querySelectorAll('#logoutModal button')];
+    const confirmButton = document.querySelector('#logoutModal .btn-confirm');
+    const originalLabel = confirmButton?.textContent;
+    logoutButtons.forEach(button => { button.disabled = true; });
+    if (confirmButton) { confirmButton.textContent = 'جارٍ تسجيل الخروج…'; confirmButton.setAttribute('aria-busy', 'true'); }
     let authStateHandler = null;
     const waitForAccountCleanup = () => new Promise((resolve) => {
       if (window.__lootlinguaAuthResolved && !window.__lootlinguaAuthUser) {
@@ -265,14 +270,27 @@
       if (authStateHandler) window.removeEventListener('lootlingua:auth-state', authStateHandler);
       console.error(error?.code || 'auth/logout-error', error?.message || error);
       window.showToast?.('تعذر تسجيل الخروج الآن. جرّب مرة أخرى.', 'danger', 4200, { critical: true });
-    } finally { window.__lootlinguaLogoutPending = false; }
+    } finally {
+      window.__lootlinguaLogoutPending = false;
+      logoutButtons.forEach(button => { button.disabled = false; });
+      if (confirmButton) { confirmButton.textContent = originalLabel; confirmButton.removeAttribute('aria-busy'); }
+    }
   };
 
-  function loadWordsFromCloud(user) {
+  function loadWordsFromCloud(user, requestedMode = window.getPersonalDictionaryQueryMode?.() || 'auto') {
     const listenerUid = user.uid;
     const reference = collection(db, 'users', listenerUid, 'words');
     let lastRows = null;
-    let headIds = new Set(), visibleKey = '', visibleTimer = null, visibleStops = [];
+    const queryMode = ['newest', 'oldest'].includes(requestedMode) ? requestedMode : 'auto';
+    const chronological = queryMode !== 'auto', direction = queryMode === 'oldest' ? 'asc' : 'desc';
+    const dateBounds = [
+      [where('createdAt', '>=', ''), where('createdAt', '<=', '\uf8ff')],
+      [where('createdAt', '>=', new Date(0)), where('createdAt', '<=', new Date('9999-12-31T23:59:59Z'))],
+    ];
+    const headPages = new Map(), dateStreams = [], dateSeen = new Set();
+    const stamp = item => { const value = item.data().createdAt; return value?.toMillis?.() ?? (Date.parse(value || '') || 0); };
+    const dated = item => typeof item.createdAt === 'string' || typeof item.createdAt?.toMillis === 'function' || item.createdAt instanceof Date;
+    let headIds = new Set(), visibleKey = '', visibleTimer = null, visibleStops = new Map();
     let resolveHead, rejectHead, useInitialHead = true;
     const initialHead = new Promise((resolve, reject) => { resolveHead = resolve; rejectHead = reject; });
     initialHead.catch(() => {});
@@ -285,9 +303,45 @@
     const store = window.LootLinguaDictionaryPages.activate({
       ownerId: listenerUid,
       pageSize: 80,
+      queryMode,
       async fetchPage(cursor, size, counts) {
+        if (!current()) throw Object.assign(new Error('Dictionary owner changed.'), { code: 'dictionary/stale' });
+        window.LootLinguaCloudBackoff?.assertAvailable();
         const phase = cursor?.phase || 'ordered';
-        const constraints = [orderBy(phase === 'ordered' ? 'order' : documentId(), 'asc')];
+        if (chronological && phase !== 'legacy') {
+          if (!dateStreams.length) {
+            const heads = headPages.size === dateBounds.length ? { pages: dateBounds.map((_, index) => headPages.get(index)) } : await initialHead;
+            heads.pages.forEach((page, type) => dateStreams.push({ type, buffer: [...page.docs], last: page.docs.at(-1), done: page.size < size }));
+          }
+          const working = dateStreams.map(stream => ({ ...stream, buffer: [...stream.buffer] }));
+          const seen = new Set(dateSeen);
+          const selected = [];
+          while (selected.length < size) {
+            await Promise.all(working.filter(stream => !stream.buffer.length && !stream.done).map(async stream => {
+              if (!current()) throw Object.assign(new Error('Dictionary owner changed.'), { code: 'dictionary/stale' });
+              const constraints = [...dateBounds[stream.type], orderBy('createdAt', direction)];
+              if (stream.last) constraints.push(startAfter(stream.last));
+              constraints.push(limit(size));
+              const page = await getDocs(query(reference, ...constraints));
+              if (!current()) throw Object.assign(new Error('Dictionary owner changed.'), { code: 'dictionary/stale' });
+              if (page.metadata.fromCache) throw Object.assign(new Error('Dictionary offline.'), { code: 'dictionary/offline' });
+              stream.buffer = [...page.docs]; stream.last = page.docs.at(-1) || stream.last; stream.done = page.size < size;
+            }));
+            const available = working.filter(stream => stream.buffer.length).sort((a, b) => {
+              const delta = stamp(a.buffer[0]) - stamp(b.buffer[0]);
+              return (direction === 'asc' ? delta : -delta) || a.buffer[0].id.localeCompare(b.buffer[0].id);
+            });
+            if (!available.length) break;
+            const item = available[0].buffer.shift();
+            if (!seen.has(item.id)) { seen.add(item.id); selected.push(mapWordDoc(item)); }
+          }
+          dateStreams.splice(0, dateStreams.length, ...working);
+          seen.forEach(id => dateSeen.add(id));
+          const exhausted = dateStreams.every(stream => stream.done && !stream.buffer.length);
+          const legacy = exhausted && (!counts || counts.total > dateSeen.size);
+          return { words: selected, cursor: { phase: legacy ? 'legacy' : 'ordered' }, done: exhausted && !legacy, fromCache: false };
+        }
+        const constraints = [orderBy(phase === 'ordered' ? 'order' : documentId(), chronological ? direction : 'asc')];
         if (cursor?.last) constraints.push(startAfter(cursor.last));
         constraints.push(limit(size));
         let page;
@@ -296,7 +350,7 @@
         const hasUnindexed = !counts || counts.total > counts.indexed;
         const exhausted = page.size < size;
         return {
-          words: page.docs.filter(item => phase === 'ordered' || !Object.hasOwn(item.data(), 'order')).map(mapWordDoc),
+          words: page.docs.filter(item => phase === 'ordered' || (chronological ? !dated(item.data()) : !Object.hasOwn(item.data(), 'order'))).map(mapWordDoc),
           cursor: exhausted && phase === 'ordered' && hasUnindexed
             ? { phase: 'legacy', last: null }
             : { phase, last: page.docs.at(-1) || cursor?.last || null },
@@ -305,6 +359,7 @@
         };
       },
       async fetchCounts() {
+        if (!current()) throw Object.assign(new Error('Dictionary owner changed.'), { code: 'dictionary/stale' });
         window.LootLinguaCloudBackoff?.assertAvailable();
         const results = await Promise.all([
           getCountFromServer(reference),
@@ -331,19 +386,25 @@
       if (key === visibleKey) return;
       visibleKey = key;
       clearTimeout(visibleTimer);
-      visibleStops.forEach(stop => stop()); visibleStops = [];
+      const wantedIds = new Set(wanted);
+      visibleStops.forEach((entry, chunkKey) => {
+        if (!entry.ids.every(id => wantedIds.has(id))) { entry.stop(); visibleStops.delete(chunkKey); }
+      });
       if (!wanted.length) return;
       visibleTimer = setTimeout(() => {
         if (!current() || visibleKey !== key) return;
-        for (let offset = 0; offset < wanted.length; offset += 30) {
-          const idsChunk = wanted.slice(offset, offset + 30);
-          visibleStops.push(onSnapshot(query(reference, where(documentId(), 'in', idsChunk), limit(30)), snapshot => {
+        const retained = new Set([...visibleStops.values()].flatMap(entry => entry.ids));
+        const missing = wanted.filter(id => !retained.has(id));
+        for (let offset = 0; offset < missing.length; offset += 30) {
+          const idsChunk = missing.slice(offset, offset + 30), chunkKey = idsChunk.join('|');
+          const stop = onSnapshot(query(reference, where(documentId(), 'in', idsChunk), limit(30)), snapshot => {
             if (!current() || visibleKey !== key || window.__suppressCloudWordsSnapshot) return;
             const changes = snapshot.docChanges();
             if (!changes.length) return;
             store.merge(changes.filter(change => change.type !== 'removed').map(change => mapWordDoc(change.doc)),
               changes.filter(change => change.type === 'removed').map(change => change.doc.id));
-          }, error => console.warn('[Dictionary] Visible page listener:', error.code)));
+          }, error => console.warn('[Dictionary] Visible page listener:', error.code));
+          visibleStops.set(chunkKey, { ids: idsChunk, stop });
         }
       }, 250);
     };
@@ -362,21 +423,25 @@
     // entire dictionary, and only merges into the page cache for this owner.
     let firstHead = true;
     const initialWaitTimer = setTimeout(() => rejectHead(Object.assign(new Error('Dictionary connection timed out.'), { code: 'dictionary/offline' })), 10000);
-    const stopHead = onSnapshot(query(reference, orderBy('order', 'asc'), limit(80)), { includeMetadataChanges: true }, snapshot => {
+    const headConstraints = chronological ? dateBounds.map(bounds => [...bounds, orderBy('createdAt', direction), limit(80)]) : [[orderBy('order', 'asc'), limit(80)]];
+    const stopHeads = headConstraints.map((constraints, type) => onSnapshot(query(reference, ...constraints), { includeMetadataChanges: true }, snapshot => {
       if (!current() || window.__suppressCloudWordsSnapshot) return;
       if (firstHead) {
         if (snapshot.metadata.fromCache) return;
+        headPages.set(type, snapshot);
+        if (headPages.size < headConstraints.length) return;
         firstHead = false;
-        headIds = new Set(snapshot.docs.map(item => item.id));
+        headIds = new Set([...headPages.values()].flatMap(page => page.docs.map(item => item.id)));
         clearTimeout(initialWaitTimer);
-        resolveHead(snapshot);
+        resolveHead(chronological ? { pages: headConstraints.map((_, index) => headPages.get(index)) } : snapshot);
         if (store.state().offline) { store.reset(); store.refreshCounts().catch(() => {}); store.next().catch(() => {}); }
         else if (store.state().error?.code === 'dictionary/offline') store.next().catch(() => {});
         return;
       }
       if (!snapshot.docChanges().length) return;
-      if (snapshot.docs) headIds = new Set(snapshot.docs.map(item => item.id));
+      if (snapshot.docs) { headPages.set(type, snapshot); headIds = new Set([...headPages.values()].flatMap(page => page.docs.map(item => item.id))); }
       const changed = snapshot.docChanges().filter(change => change.type !== 'removed').map(change => mapWordDoc(change.doc));
+      if (chronological) changed.forEach(word => dateSeen.add(word.id));
       if (changed.length) store.merge(changed);
       snapshot.docChanges().filter(change => change.type === 'removed').forEach(async change => {
         try {
@@ -385,12 +450,22 @@
         } catch (_) { /* The next explicit refresh retries; do not infer deletion offline. */ }
       });
       store.refreshCounts().catch(() => {});
-    }, error => { clearTimeout(initialWaitTimer); rejectHead(error); window.LootLinguaCloudBackoff?.pause(error); console.warn('[Dictionary] Head listener:', error.code); });
+    }, error => { clearTimeout(initialWaitTimer); rejectHead(error); window.LootLinguaCloudBackoff?.pause(error); console.warn('[Dictionary] Head listener:', error.code); }));
     wordsUnsubscribe = () => {
-      clearTimeout(initialWaitTimer); clearTimeout(visibleTimer); visibleStops.forEach(stop => stop()); stopHead();
+      clearTimeout(initialWaitTimer); clearTimeout(visibleTimer); visibleStops.forEach(entry => entry.stop()); stopHeads.forEach(stop => stop());
       rejectHead(Object.assign(new Error('Dictionary owner changed.'), { code: 'dictionary/stale' })); store.dispose();
     };
   }
+
+  window.setPersonalDictionaryCloudSort = function(mode) {
+    const user = auth.currentUser;
+    if (!user) return false;
+    if (window.LootLinguaDictionaryPages.current(user.uid)?.state().queryMode === mode) return true;
+    window.cancelDictionaryFullDataRequest?.();
+    wordsUnsubscribe?.();
+    loadWordsFromCloud(user, mode);
+    return true;
+  };
 
   function mapWordDoc(d) {
     const data = d.data() || {};

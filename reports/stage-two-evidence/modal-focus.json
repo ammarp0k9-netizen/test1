@@ -20,6 +20,10 @@
       "passed": true
     },
     {
+      "name": "logout confirmation accepts a real pointer click above profile and returns focus on cancel",
+      "passed": true
+    },
+    {
       "name": "closing restores the trigger and preserves pre-existing isolation",
       "passed": true
     },

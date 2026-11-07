@@ -46,6 +46,13 @@ function saveDictionarySortPrefs() {
   }));
 }
 
+window.getPersonalDictionaryQueryMode = function() {
+  try {
+    const saved = JSON.parse(localStorage.getItem('lootlinguaDictSort_' + getStorageUserId() + '_personal') || '{}');
+    return ['newest', 'oldest'].includes(saved.mode) ? saved.mode : 'auto';
+  } catch { return 'auto'; }
+};
+
 function reindexWordOrder(words = window.words) {
   if (!Array.isArray(words)) return [];
   words.forEach((word, index) => { word.order = index; });
@@ -413,8 +420,10 @@ window.toggleDictionarySortMenu = function() {
 };
 
 window.setDictionarySortMode = async function(mode, category) {
-  if (await window.LootLinguaDictionaryPages?.requireComplete({ personal: !isCustomWorldView() }) === false) return;
   const validModes = ['auto', 'newest', 'oldest', 'alpha', 'category'];
+  const pagingStore = !isCustomWorldView() && window.LootLinguaDictionaryPages?.current();
+  const paged = pagingStore && !pagingStore.state().complete && ['auto', 'newest', 'oldest'].includes(mode) && window.setPersonalDictionaryCloudSort;
+  if (!paged && await window.LootLinguaDictionaryPages?.requireComplete({ personal: !isCustomWorldView() }) === false) return;
   dictionarySortMode = validModes.includes(mode) ? mode : 'auto';
   if (mode === 'category') {
     dictionarySortCategory = category || 'all';
@@ -423,7 +432,8 @@ window.setDictionarySortMode = async function(mode, category) {
   }
   window.words = sortDictionaryWords(window.words);
   saveDictionarySortPrefs();
-  if (dictionarySortMode === 'auto') {
+  if (paged) window.setPersonalDictionaryCloudSort(dictionarySortMode);
+  if (dictionarySortMode === 'auto' && !paged) {
     persistDictionary();
   }
   document.getElementById('dictionarySortMenu')?.classList.remove('open');
@@ -1592,6 +1602,11 @@ function showModal(id) {
   activeModalFocusContext = { modal, returnFocus, trap };
   modal.style.display = 'flex';
   modal.setAttribute('aria-hidden', 'false');
+  modal.setAttribute('role', 'dialog');
+  modal.setAttribute('aria-modal', 'true');
+  // Register nested confirmations so the profile dialog releases their
+  // inert state and focus can enter the confirmation buttons.
+  window.LootLinguaModalFocus?.open(modal, { dialog: modal.querySelector('.modal-content') || modal, onEscape: () => hideModal(id) });
   if (!modal.hasAttribute('tabindex')) modal.tabIndex = -1;
   requestAnimationFrame(() => {
     const focusable = getModalFocusableElements(modal);

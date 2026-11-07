@@ -17,6 +17,7 @@ const db = getFirestore(app);
 const auth = getAuth(app);
 let unsubscribeNotifications = null;
 let subscriptionGeneration = 0;
+let trustedQuizCache = null;
 
 function timeValue(value) {
   if (!value) return 0;
@@ -34,6 +35,7 @@ function cleanMap(value) {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
   return Object.fromEntries(Object.entries(value)
     .filter(([, item]) => ['string', 'number', 'boolean'].includes(typeof item) || item === null)
+    .sort(([left], [right]) => left.localeCompare(right))
     .map(([key, item]) => [String(key).slice(0, 80), typeof item === 'string' ? item.slice(0, 500) : item]));
 }
 
@@ -79,14 +81,16 @@ function serialize(record, uid) {
 async function writeOne(record, expectedUid) {
   const user = auth.currentUser;
   if (!user || user.uid !== expectedUid) return false;
+  window.LootLinguaCloudBackoff?.assertAvailable();
   const target = doc(db, 'users', user.uid, 'notifications', String(record.id));
   await runTransaction(db, async (transaction) => {
     const snapshot = await transaction.get(target);
     const merged = snapshot.exists()
       ? window.LootLinguaNotificationStore.mergePair(snapshot.data(), record, user.uid)
       : window.LootLinguaNotificationStore.normalizeRecord(record, user.uid);
-    transaction.set(target, serialize(merged, user.uid));
-  });
+    const payload = serialize(merged, user.uid);
+    if (!snapshot.exists() || JSON.stringify(payload) !== JSON.stringify(serialize(snapshot.data(), user.uid))) transaction.set(target, payload);
+  }).catch(error => { window.LootLinguaCloudBackoff?.pause(error); throw error; });
   return true;
 }
 
@@ -108,13 +112,25 @@ async function migrateRecords(values) {
 async function latestTrustedQuizAt() {
   const user = auth.currentUser;
   if (!user) return 0;
-  const snapshot = await getDocs(query(
+  if (trustedQuizCache?.uid === user.uid && trustedQuizCache.until > Date.now()) {
+    if (trustedQuizCache.error) throw trustedQuizCache.error;
+    return trustedQuizCache.pending || trustedQuizCache.value;
+  }
+  const entry = { uid: user.uid, until: Date.now() + 300000 };
+  trustedQuizCache = entry;
+  entry.pending = Promise.resolve().then(() => {
+    window.LootLinguaCloudBackoff?.assertAvailable();
+    return getDocs(query(
     collection(db, 'users', user.uid, 'quizEvidenceSessions'),
     orderBy('completedAt', 'desc'),
     limit(1)
-  ));
-  return snapshot.empty ? 0 : timeValue(snapshot.docs[0].data()?.completedAt);
+    ));
+  }).then(snapshot => { entry.value = snapshot.empty ? 0 : timeValue(snapshot.docs[0].data()?.completedAt); return entry.value; })
+    .catch(error => { entry.error = error; entry.until = Date.now() + (window.LootLinguaCloudBackoff?.pause(error) || 30000); throw error; })
+    .finally(() => { entry.pending = null; });
+  return entry.pending;
 }
+window.addEventListener('lootlingua:trusted-quiz-completed', () => { trustedQuizCache = null; });
 
 function stopSubscription() {
   subscriptionGeneration += 1;
@@ -135,16 +151,23 @@ function subscribeForUser(user) {
   let receivedFirstSnapshot = false;
   unsubscribeNotifications = onSnapshot(target, (snapshot) => {
     if (generation !== subscriptionGeneration || auth.currentUser?.uid !== ownerId) return;
-    window.LootLinguaNotificationStore?.mergeCloud(snapshot.docs.map((item) => ({
+    const cloudRecords = snapshot.docs.map((item) => ({
       ...(item.data() || {}),
       id: item.id,
       ownerId,
-    })));
+    }));
+    const store = window.LootLinguaNotificationStore;
+    const cloudById = new Map(cloudRecords.map(record => [record.id, record]));
+    const pending = !receivedFirstSnapshot ? (store?.getAll?.() || []).filter(record => {
+      const cloud = cloudById.get(record.id);
+      return !cloud || JSON.stringify(serialize(store.mergePair(cloud, record, ownerId), ownerId)) !== JSON.stringify(serialize(cloud, ownerId));
+    }) : [];
+    store?.mergeCloud(cloudRecords);
     if (!receivedFirstSnapshot) {
       receivedFirstSnapshot = true;
       // Upload local account-cache records that were created offline. Every
       // transaction performs a monotonic merge before writing.
-      writeRecords(window.LootLinguaNotificationStore?.getAll?.() || []).catch((error) => {
+      writeRecords(pending).catch((error) => {
         console.warn('[NotificationCloud] Offline cache upload deferred.', error?.message || error);
       });
     }
@@ -172,6 +195,7 @@ Object.defineProperty(window, 'LootLinguaNotificationCloud', {
 });
 
 onAuthStateChanged(auth, (user) => {
+  trustedQuizCache = null;
   const ownerId = user?.uid || 'guest';
   window.LootLinguaNotificationStore?.switchOwner(ownerId);
   subscribeForUser(user);

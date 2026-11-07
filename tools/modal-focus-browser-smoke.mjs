@@ -11,6 +11,7 @@ const core = read('js/core.js'), dictionary = read('js/dictionary.js'), script =
 const profileCode = core.slice(core.indexOf('window.toggleProfileModal ='), core.indexOf('const backgroundScrollLocks'));
 const statsCode = dictionary.slice(dictionary.indexOf('let statsPanelRequest'), dictionary.indexOf('function renderHeatmap'));
 const routeCode = script.slice(script.indexOf('function closeRouteOverlays()'), script.indexOf('function openRouteOverlay'));
+const modalCode = script.slice(script.indexOf('let activeModalFocusContext'), script.indexOf('function findInFlightToast'));
 const browserPath = ['C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe', 'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe'].find(fs.existsSync);
 if (!browserPath) throw Error('Chrome/Edge not found');
 const port = 19500 + process.pid % 2000;
@@ -71,7 +72,7 @@ try {
   await evaluate(`document.head.append(Object.assign(document.createElement('style'),{textContent:${JSON.stringify(read('style.css'))}}));
     const parsed = new DOMParser().parseFromString(${JSON.stringify(read('index.html'))},'text/html');
     document.body.innerHTML='<main id="background"><button id="trigger">الملف الشخصي</button><button id="backgroundSecond">خلفية</button></main><div id="alreadyInert" inert><button>معزول مسبقًا</button></div>' +
-      ['profileModal','statsPanel','appAuthDialogShell','customWorldModal'].map(id=>parsed.getElementById(id).outerHTML).join('');
+      ['profileModal','statsPanel','appAuthDialogShell','customWorldModal','logoutModal'].map(id=>parsed.getElementById(id).outerHTML).join('');
     window.auth={currentUser:null}; window.__lootlinguaAuthGeneration=1;
     window.closeRouteEntry=(_kind,_key,callback)=>callback(); window.setAppRoute=()=>{};
     for (const name of ['lockBackgroundScroll','unlockBackgroundScroll','syncHeroAvatar','renderProfileModalStats','renderXPBar','refreshFeatureUnlockUI','closeSidebarIfOpen','renderHeatmap','renderStatsNumbers'])window[name]=()=>{};
@@ -79,6 +80,8 @@ try {
     ${profileCode}
     ${statsCode}
     ${routeCode}
+    window.APP_MODAL_ROUTES={logoutModal:'logout'};
+    ${modalCode}
     window.fixtureFrame=()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)));
     document.getElementById('trigger').focus();toggleProfileModal();`);
   await waitForDOM(`document.getElementById('profileModal').contains(document.activeElement)&&document.getElementById('background').inert`, 'profile focus and isolation');
@@ -116,6 +119,15 @@ try {
   await evaluate(`document.getElementById('customWorldModal').style.display='none';`);
   await waitForDOM(`document.getElementById('profileModal').contains(document.activeElement)&&!document.getElementById('profileModal').inert`, 'profile focus returns after custom modal');
   report.checks.push({ name: 'existing auth and custom layers suspend the underlying focus trap', passed: true });
+  await evaluate(`window.fixtureLogoutClicks=0;window.confirmLogout=()=>fixtureLogoutClicks++;showModal('logoutModal')`);
+  await waitForDOM(`!document.getElementById('logoutModal').inert&&document.getElementById('logoutModal').contains(document.activeElement)&&document.getElementById('profileModal').inert`, 'logout confirmation can receive focus over profile');
+  const logoutButton = await evaluate(`(()=>{const r=document.querySelector('#logoutModal .btn-confirm').getBoundingClientRect();return{x:r.x+r.width/2,y:r.y+r.height/2}})()`);
+  await send('Input.dispatchMouseEvent',{type:'mousePressed',button:'left',clickCount:1,...logoutButton});
+  await send('Input.dispatchMouseEvent',{type:'mouseReleased',button:'left',clickCount:1,...logoutButton});
+  assert.equal(await evaluate('fixtureLogoutClicks'),1,'a physical click reaches the logout confirmation');
+  await key('Escape');
+  await waitForDOM(`document.getElementById('profileModal').contains(document.activeElement)&&!document.getElementById('profileModal').inert`, 'closing logout restores profile focus');
+  report.checks.push({name:'logout confirmation accepts a real pointer click above profile and returns focus on cancel',passed:true});
   await key('Escape'); await delay(100);
   assert.equal(await evaluate(`document.activeElement.id==='trigger'&&!document.getElementById('background').inert&&document.getElementById('alreadyInert').inert`), true);
   report.checks.push({ name: 'closing restores the trigger and preserves pre-existing isolation', passed: true });

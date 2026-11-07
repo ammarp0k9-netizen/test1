@@ -101,18 +101,23 @@ test('a full offline backup is explicitly marked, and reconnect resets its pagin
   pages.reset(); await pages.next(); assert.equal(pages.words().length, 80); assert.equal(pages.state().offline, false); assert.equal(pages.state().complete, false);
 });
 
-function cloudHarness(t, source = words(2000)) {
+function cloudHarness(t, source = words(2000), mode = 'auto') {
   const reads = [], listeners = [], stops = [];
   const root = { auth: { currentUser: { uid: 'a' } }, dispatchEvent() {}, markInitialFeatureLoadPartDone() {}, applyCloudWordsFromSnapshot(rows) { root.words = rows; } };
   api(root);
+  root.getPersonalDictionaryQueryMode = () => mode;
   function records(q) {
     let rows = source;
     const order = q.constraints.find(item => item.kind === 'order') || { field: '__name__' };
     if (order && order.field !== '__name__') rows = rows.filter(word => Object.hasOwn(word, order.field));
-    rows = [...rows].sort((a, b) => (order?.field === '__name__' ? 0 : ((a[order.field] ?? -1) - (b[order.field] ?? -1))) || a.id.localeCompare(b.id));
+    const value = input => input instanceof Date ? input.getTime() : input?.toMillis ? input.toMillis() : input;
+    const compare = (a,b) => value(a) < value(b) ? -1 : value(a) > value(b) ? 1 : 0;
+    rows = [...rows].sort((a, b) => (order.direction === 'desc' ? -1 : 1) * ((order?.field === '__name__' ? 0 : compare(a[order.field], b[order.field])) || a.id.localeCompare(b.id)));
     for (const constraint of q.constraints.filter(item => item.kind !== 'limit')) {
       if (constraint.kind === 'where') rows = rows.filter(word => constraint.operator === 'in'
-        ? constraint.value.includes(word.id) : word[constraint.field] === constraint.value);
+        ? constraint.value.includes(word.id) : constraint.operator === '>=' ? compare(word[constraint.field], constraint.value) >= 0 && typeof value(word[constraint.field]) === typeof value(constraint.value)
+          : constraint.operator === '<=' ? compare(word[constraint.field], constraint.value) <= 0 && typeof value(word[constraint.field]) === typeof value(constraint.value)
+            : word[constraint.field] === constraint.value);
       if (constraint.kind === 'after') { const index = rows.findIndex(word => word.id === constraint.doc.id); rows = rows.slice(index + 1); }
     }
     const maxRows = q.constraints.find(item => item.kind === 'limit')?.size;
@@ -123,7 +128,7 @@ function cloudHarness(t, source = words(2000)) {
   const context = vm.createContext({ window: root, auth: root.auth, db: {}, console, setTimeout, clearTimeout,
     CustomEvent: class { constructor(type, init) { this.type = type; this.detail = init?.detail; } },
     collection: () => ({ constraints: [] }), query: (_reference, ...constraints) => ({ constraints }),
-    orderBy: field => ({ kind: 'order', field }), documentId: () => '__name__', startAfter: doc => ({ kind: 'after', doc }),
+    Date, orderBy: (field, direction = 'asc') => ({ kind: 'order', field, direction }), documentId: () => '__name__', startAfter: doc => ({ kind: 'after', doc }),
     where: (field, operator, value) => ({ kind: 'where', field, operator, value }), limit: size => ({ kind: 'limit', size }),
     getCountFromServer: async q => ({ data: () => ({ count: records(q).size }) }),
     getDocs: async q => { const page = records(q); reads.push({ type: 'get', limit: q.constraints.find(item => item.kind === 'limit')?.size, count: page.size }); return page; },
@@ -245,7 +250,51 @@ test('quiz readiness awaits the complete personal source and retains its request
 test('head updates share cached aggregation counts rather than querying on each change',async()=>{
   let now=0,calls=0;const pages=api().create({ownerId:'A',clock:()=>now,fetchPage:async()=>({words:[],done:true}),fetchCounts:async()=>{calls++;return{total:2000,indexed:2000,starred:20}}});
   for(let i=0;i<30;i++)await pages.refreshCounts();assert.equal(calls,1);
-  now=60001;await pages.refreshCounts();assert.equal(calls,2);
+  now=60001;await pages.refreshCounts();assert.equal(calls,1);
+  now=300001;await pages.refreshCounts();assert.equal(calls,2);
+});
+
+test('newest and oldest merge mixed timestamp/string pages without downloading all 2000 words at startup', async t => {
+  const source = words(2000).map((word, index) => ({ ...word, createdAt: index % 2 ? new Date(1700000000000 + index * 1000) : new Date(1700000000000 + index * 1000).toISOString() }));
+  for (const mode of ['newest', 'oldest']) {
+    const h = cloudHarness(t, source, mode); await settle();
+    assert.equal(h.store().state().queryMode, mode); assert.equal(h.store().words().length, 80);
+    assert.equal(h.reads.reduce((total, read) => total + read.count, 0), 160);
+    const first = h.store().words().map(word => word.id);
+    const expected = source.map(word => word.id);
+    if (mode === 'newest') expected.reverse();
+    assert.deepEqual([...first], expected.slice(0, 80));
+    await h.store().ensureComplete();
+    assert.equal(h.store().words().length, 2000); assert.equal(new Set(h.store().words().map(word => word.id)).size, 2000);
+    assert.ok(h.reads.every(read => read.limit === 80 && read.count <= 80));
+  }
+});
+
+test('chronological fallback retains legacy records without createdAt', async t => {
+  const source = words(207).map((word, index) => index < 190 ? { ...word, createdAt: new Date(1700000000000 + index * 1000).toISOString() } : word);
+  const h = cloudHarness(t, source, 'newest'); await settle(); await h.store().ensureComplete();
+  assert.equal(h.store().words().length, 207); assert.equal(new Set(h.store().words().map(word => word.id)).size, 207);
+});
+
+test('a failed chronological refill retries without losing documents already selected within the page', async t => {
+  const source = words(400).map((word, index) => ({ ...word, createdAt: index % 10 ? new Date(1700000000000 + index * 1000) : new Date(1700000000000 + index * 1000).toISOString() }));
+  const h = cloudHarness(t, source, 'newest'); await settle();
+  const get = h.context.getDocs; let fail = true;
+  h.context.getDocs = async query => { if (fail) { fail = false; throw Error('offline'); } return get(query); };
+  await assert.rejects(h.store().next()); assert.equal(h.store().words().length, 80);
+  await h.store().ensureComplete();
+  assert.equal(h.store().words().length, 400); assert.equal(new Set(h.store().words().map(word => word.id)).size, 400);
+});
+
+test('visible listeners retain unchanged chunks when an overlapping page enters the viewport', async t => {
+  const h = cloudHarness(t); await settle(); await h.store().next(); await h.store().next();
+  const loaded = h.store().words();
+  h.root.watchPersonalDictionaryRows(loaded.slice(80,160).map(word => word.id));
+  await new Promise(resolve => setTimeout(resolve, 280));
+  assert.equal(h.listeners.length, 4);
+  h.root.watchPersonalDictionaryRows(loaded.slice(80,240).map(word => word.id));
+  await new Promise(resolve => setTimeout(resolve, 280));
+  assert.equal(h.listeners.length, 7); assert.equal(h.stops.length, 0);
 });
 
 test('exhausted count queries back off without preventing bounded word loading',async()=>{
