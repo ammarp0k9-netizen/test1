@@ -157,9 +157,21 @@
           const h = height * (.29 + ((worldIndex % 3 + 3) % 3) * .025), nearTop = p.y - h * p.scale, farTop = far.y - h * far.scale;
           quad(context, p.x, p.y, far.x, far.y, far.x, farTop, p.x, nearTop, worldIndex % 2 ? '#193640' : '#1c3c44');
           line(context, p.x, nearTop, far.x, farTop, '#466567', Math.max(1, p.scale * 1.4));
-          const niche = project(wallLane, z + 6), nw = laneWidth * .24 * niche.scale, nh = h * .26 * niche.scale;
-          context.fillStyle = '#102832'; context.fillRect(niche.x - nw / 2, niche.y - h * niche.scale * .68, nw, nh);
-          context.fillStyle = '#a88e5a'; context.fillRect(niche.x - nw * .15, niche.y - h * niche.scale * .63, nw * .3, nh * .38);
+          const a = project(wallLane, z + 3.5), b = project(wallLane, z + 8.5);
+          const ay = a.y - h * .72 * a.scale, by = b.y - h * .72 * b.scale;
+          const ab = a.y - h * .34 * a.scale, bb = b.y - h * .34 * b.scale;
+          // Recessed bays follow the wall's perspective instead of floating
+          // flat rectangles. Fine bevels are omitted at the horizon.
+          quad(context, a.x, ay, b.x, by, b.x, bb, a.x, ab, '#102630');
+          if (p.scale > .28) {
+            const lip = Math.max(1, 3 * a.scale);
+            quad(context, a.x, ay, b.x, by, b.x, by + lip, a.x + side * lip, ay + lip, '#587477');
+            line(context, a.x, ay + lip, a.x, ab, '#091c27', Math.max(1, a.scale * 3));
+            line(context, a.x, ab, b.x, bb, '#3c5c63', Math.max(1, a.scale * 2));
+            line(context, p.x, p.y - h * .18 * p.scale, far.x, far.y - h * .18 * far.scale, '#102c36', Math.max(1, p.scale));
+          }
+          const niche = project(wallLane, z + 6), nw = laneWidth * .035 * niche.scale;
+          context.fillStyle = '#a88e5a'; context.fillRect(niche.x - nw / 2, niche.y - h * .58 * niche.scale, nw, h * .11 * niche.scale);
           if (z >= NEAR) column(lane, z, (worldIndex % 3 + 3) % 3);
         }
       }
@@ -242,10 +254,15 @@
       if (type === 'overhead') {
         const left = p.x - w / 2, right = p.x + w / 2, beamY = p.y - h * .72, thickness = h * .14;
         context.fillStyle = '#344c57'; context.fillRect(left, beamY, w * .08, h * .72); context.fillRect(right - w * .08, beamY, w * .08, h * .72);
+        for (const post of [left, right - w * .08]) {
+          quad(context, post + w * .08, beamY, post + w * .08 + h * .04, beamY - h * .06, post + w * .08 + h * .04, p.y - h * .06, post + w * .08, p.y, '#1b313d');
+          line(context, post, beamY, post, p.y, '#718780', Math.max(.7, p.scale));
+        }
         quad(context, left, beamY, right, beamY, right + h * .05, beamY - h * .07, left + h * .05, beamY - h * .07, '#c58a48');
         context.fillStyle = '#dbac5e'; context.fillRect(left, beamY, w, thickness);
         for (let part = 0; part < 5; part++) quad(context, left + part * w / 5, beamY, left + (part + .5) * w / 5, beamY, left + (part + 1) * w / 5, beamY + thickness, left + (part + .5) * w / 5, beamY + thickness, '#453c38');
         line(context, left, beamY + thickness, right, beamY + thickness, '#f7d38b', Math.max(.7, p.scale * 2));
+        line(context, left + h * .025, beamY + thickness + h * .025, right, beamY + thickness + h * .025, '#233943', Math.max(1, p.scale * 2));
         return;
       }
       const low = type === 'low' || type === 'lowbar';
@@ -253,10 +270,16 @@
       quad(context, x, y, x + depth, y - depth, x + w + depth, y - depth, x + w, y, low ? '#e0b86d' : '#94724b');
       quad(context, x + w, y, x + w + depth, y - depth, x + w + depth, p.y - depth, x + w, p.y, low ? '#7c663b' : '#5b4a37');
       context.fillStyle = low ? '#b88d48' : '#6e593e'; context.fillRect(x, y, w, blockHeight);
+      line(context, x, y, x + w, y, low ? '#f4d28b' : '#c4a06a', Math.max(1, h * .025));
+      line(context, x + w, y, x + w, p.y, '#3d3629', Math.max(1, h * .03));
       context.strokeStyle = low ? '#ffcf70' : '#b28d57'; context.lineWidth = Math.max(1, h * .035); context.strokeRect(x + w * .07, y + blockHeight * .08, w * .86, blockHeight * .82);
       if (low) {
         for (let part = 0; part < 4; part++) quad(context, x + part * w / 4, y, x + (part + .5) * w / 4, y, x + (part + 1) * w / 4, p.y, x + (part + .5) * w / 4, p.y, '#30444a');
       } else {
+        if (p.scale > .28) {
+          context.fillStyle = '#3e362b'; context.fillRect(x + w * .1, y + blockHeight * .13, w * .8, blockHeight * .74);
+          context.fillStyle = '#715c40'; context.fillRect(x + w * .12, y + blockHeight * .16, w * .76, blockHeight * .68);
+        }
         line(context, x + w * .08, y + blockHeight * .1, x + w * .92, y + blockHeight * .9, '#b38c57', Math.max(1, h * .05));
         line(context, x + w * .92, y + blockHeight * .1, x + w * .08, y + blockHeight * .9, '#b38c57', Math.max(1, h * .05));
       }
@@ -288,6 +311,17 @@
     function limb(ax, ay, bx, by, cx, cy, color, thickness) {
       context.strokeStyle = color; context.lineWidth = thickness; context.lineCap = 'round'; context.lineJoin = 'round';
       context.beginPath(); context.moveTo(ax, ay); context.lineTo(bx, by); context.lineTo(cx, cy); context.stroke();
+      // A narrow lit face gives limbs volume without meshes or blur passes.
+      const alpha = context.globalAlpha, offset = thickness * .17;
+      context.globalAlpha = alpha * .16; context.strokeStyle = '#d3e8d6'; context.lineWidth = thickness * .24;
+      context.beginPath(); context.moveTo(ax - offset, ay); context.lineTo(bx - offset, by); context.lineTo(cx - offset, cy); context.stroke();
+      context.globalAlpha = alpha;
+    }
+    function head(x, y, radius) {
+      context.fillStyle = '#d8a579'; context.beginPath(); context.arc(x, y, radius, 0, Math.PI * 2); context.fill();
+      context.fillStyle = '#b88059'; context.beginPath(); context.arc(x, y, radius, -Math.PI / 2, Math.PI / 2);
+      context.quadraticCurveTo(x + radius * .24, y, x, y - radius); context.fill();
+      context.fillStyle = '#edbf8b'; context.beginPath(); context.ellipse(x - radius * .44, y - radius * .08, radius * .2, radius * .58, -.12, 0, Math.PI * 2); context.fill();
     }
     function actor(state, delta) {
       visualLane += (clamp(Number(state.lane) || 0, 0, 2) - visualLane) * (1 - Math.exp(-delta / 72));
@@ -300,17 +334,26 @@
       context.save(); context.translate(p.x, p.y - elevation + sway);
       if (Number(state.invulnerableUntil) > Number(state.elapsed) && Math.floor(activeTime / 80) % 2) context.globalAlpha = .58;
       if (sliding) {
-        // A compact feet-first slide, viewed from behind, rather than a split.
-        limb(-h * .07, -h * .15, -h * .12, -h * .07, -h * .1, 0, '#173d51', h * .12);
-        limb(h * .07, -h * .15, h * .12, -h * .1, h * .13, -h * .025, '#244d5e', h * .12);
-        line(context, -h * .15, 0, -h * .05, 0, '#dbbe85', h * .055);
-        line(context, h * .08, -h * .025, h * .18, -h * .025, '#dbbe85', h * .055);
-        context.fillStyle = '#317e80'; rounded(context, -h * .18, -h * .31, h * .36, h * .19, h * .07); context.fill();
-        context.fillStyle = '#143d4c'; rounded(context, -h * .09, -h * .29, h * .18, h * .14, h * .035); context.fill();
-        for (const side of [-1, 1]) limb(side * h * .16, -h * .25, side * h * .22, -h * .15, side * h * .19, -h * .08, '#d2a077', h * .07);
-        context.fillStyle = '#dcae7b'; context.beginPath(); context.arc(0, -h * .33, h * .095, 0, Math.PI * 2); context.fill();
-        context.fillStyle = '#162e3c'; context.beginPath(); context.arc(0, -h * .35, h * .095, Math.PI, Math.PI * 2); context.fill();
-        line(context, -h * .085, -h * .33, h * .085, -h * .33, '#f4ca7a', h * .03);
+        // One leg extends toward the camera while the other stays folded.
+        // All visual points remain within the shared .43-body crouch height.
+        const settle = Math.min(1, Math.max(0, (state.elapsed - state.actionStartedAt) / 100));
+        const tuck = h * (.025 + settle * .025);
+        limb(-h * .06, -h * .15, -h * .11, -h * .075, -h * .12, 0, '#173d51', h * .12);
+        limb(h * .065, -h * .15, h * .12, -h * .11, h * .13, -tuck, '#244d5e', h * .12);
+        line(context, -h * .17, 0, -h * .07, 0, '#dbbe85', h * .055);
+        line(context, h * .08, -tuck, h * .18, -tuck, '#dbbe85', h * .055);
+        quad(context, -h * .17, -h * .27, h * .13, -h * .29, h * .18, -h * .13, -h * .15, -h * .12, '#317e80');
+        quad(context, -h * .17, -h * .27, -h * .11, -h * .29, -h * .08, -h * .13, -h * .15, -h * .12, '#4a9390');
+        quad(context, h * .13, -h * .29, h * .18, -h * .13, h * .12, -h * .12, h * .08, -h * .28, '#20565f');
+        quad(context, -h * .09, -h * .29, h * .065, -h * .31, h * .11, -h * .17, -h * .07, -h * .15, '#0e2c3a');
+        context.fillStyle = '#234b58'; rounded(context, -h * .085, -h * .28, h * .16, h * .12, h * .025); context.fill();
+        line(context, -h * .07, -h * .27, h * .055, -h * .27, '#c5a46d', h * .016);
+        quad(context, -h * .005, -h * .255, h * .025, -h * .22, -h * .005, -h * .19, -h * .035, -h * .22, '#f1c879');
+        for (const side of [-1, 1]) limb(side * h * .16, -h * .24, side * h * .22, -h * .135, side * h * .2, -h * .065, '#d2a077', h * .07);
+        head(h * .015, -h * .325, h * .095);
+        context.fillStyle = '#284551'; context.beginPath(); context.arc(h * .015, -h * .335, h * .09, Math.PI, Math.PI * 2); context.fill();
+        context.fillStyle = '#3f5c65'; context.beginPath(); context.ellipse(0, -h * .38, h * .055, h * .025, -.1, 0, Math.PI * 2); context.fill();
+        line(context, -h * .07, -h * .325, h * .1, -h * .325, '#f4ca7a', h * .03);
       } else {
         const stride = jumping ? .38 : Math.sin(phase);
         // Viewed from behind: feet cycle in depth/height, never sweep sideways.
@@ -325,12 +368,17 @@
         limb(h * .19, -h * .68, h * .27, -h * (.47 - stride * .08), h * .2, -h * (.35 - stride * .1), '#d9ab7c', h * .09);
         // Teal explorer jacket, brass belt and a small geometric loot backpack.
         context.fillStyle = '#2b7478'; rounded(context, -h * .2, -h * .76, h * .4, h * .45, h * .08); context.fill();
+        quad(context, -h * .19, -h * .69, -h * .11, -h * .75, -h * .1, -h * .34, -h * .19, -h * .38, '#448f8d');
+        quad(context, h * .12, -h * .75, h * .2, -h * .68, h * .19, -h * .36, h * .12, -h * .33, '#20555e');
+        quad(context, -h * .12, -h * .68, -h * .085, -h * .715, h * .155, -h * .715, h * .12, -h * .68, '#3c6570');
+        quad(context, h * .12, -h * .68, h * .155, -h * .715, h * .155, -h * .445, h * .12, -h * .41, '#0d2b39');
         context.fillStyle = '#143d4c'; rounded(context, -h * .12, -h * .68, h * .24, h * .27, h * .04); context.fill();
         context.strokeStyle = '#c5a46d'; context.lineWidth = h * .025; context.stroke();
         context.fillStyle = '#f1c879'; context.beginPath(); context.moveTo(0, -h * .62); context.lineTo(h * .055, -h * .55); context.lineTo(0, -h * .48); context.lineTo(-h * .055, -h * .55); context.fill();
         line(context, -h * .18, -h * .34, h * .18, -h * .34, '#cfa76a', h * .045);
-        context.fillStyle = '#d8a579'; context.beginPath(); context.arc(0, -h * .875, h * .12, 0, Math.PI * 2); context.fill();
-        context.fillStyle = '#172d39'; context.beginPath(); context.arc(0, -h * .9, h * .122, Math.PI * .86, Math.PI * 2.14); context.fill();
+        head(0, -h * .875, h * .12);
+        context.fillStyle = '#284551'; context.beginPath(); context.arc(0, -h * .9, h * .122, Math.PI * .86, Math.PI * 2.14); context.fill();
+        context.fillStyle = '#3f5c65'; context.beginPath(); context.ellipse(-h * .025, -h * .95, h * .075, h * .035, -.12, 0, Math.PI * 2); context.fill();
         line(context, -h * .11, -h * .87, h * .11, -h * .87, '#e6bd6c', h * .035);
         // A short scarf trails toward the camera; its flap never obscures lanes.
         quad(context, -h * .11, -h * .76, -h * .03, -h * .74, -h * (.12 + .035 * Math.sin(phase * .7)), -h * .58, -h * .18, -h * .62, '#edbd65');

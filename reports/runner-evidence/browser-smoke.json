@@ -14,8 +14,8 @@
         "lane": 1,
         "action": "run",
         "paused": false,
-        "entities": 20,
-        "distance": 104.33922701861431,
+        "entities": 21,
+        "distance": 109.77444864672039,
         "viewportWidth": 1280,
         "dpr": 1,
         "backingPerCssPixel": 1.0020661157024793,
@@ -35,10 +35,10 @@
       },
       "measured": {
         "lane": 1,
-        "action": "run",
+        "action": "slide",
         "paused": false,
-        "entities": 10,
-        "distance": 31.41500613548665,
+        "entities": 15,
+        "distance": 51.21597144566498,
         "viewportWidth": 390,
         "dpr": 1.5,
         "backingPerCssPixel": 1.5083333333333333,
@@ -60,8 +60,8 @@
         "lane": 1,
         "action": "slide",
         "paused": false,
-        "entities": 10,
-        "distance": 33.00971004208199,
+        "entities": 15,
+        "distance": 47.05156637133639,
         "viewportWidth": 320,
         "dpr": 1.5,
         "backingPerCssPixel": 1.5103448275862068,
@@ -81,7 +81,7 @@
             "type": "wallet-delta",
             "field": "runnerCoins",
             "amount": 4,
-            "eventId": "f6c7c031-802f-40bd-a232-3d6eaf8ce3ec"
+            "eventId": "23f70c74-b8bb-4e1f-8cfd-d323c98b65bc"
           }
         }
       ]
@@ -98,7 +98,7 @@
   "pool": {
     "simulatedSeconds": 120,
     "draws": 600,
-    "executionMs": 796.7999999998137,
+    "executionMs": 1061,
     "maxEntities": 32,
     "pool": 38,
     "active": 10,
