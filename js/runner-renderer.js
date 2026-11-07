@@ -7,6 +7,7 @@
   const palette = Object.freeze({ sky: '#071722', dark: '#061019', stone: '#24414b', edge: '#4d7272', gold: '#efc578', teal: '#5be6d1' });
 
   function createRenderer(canvas, options = {}) {
+    const { NEAR, VEHICLE_HEIGHT, VEHICLE_RAMP, VEHICLE_EXIT } = root.LootLinguaRunnerEngine.constants;
     const context = canvas?.getContext?.('2d', { alpha: false });
     if (!context) throw new Error('Runner needs a 2D canvas.');
     const document = canvas.ownerDocument || root.document;
@@ -14,7 +15,7 @@
     const back = background.getContext('2d', { alpha: false });
     let width = 1, height = 1, dpr = 1, laneWidth = 1, horizon = 1, ground = 1, actorHeight = 1;
     let destroyed = false, visualLane = 1, lastElapsed = null, activeTime = 0;
-    const ordered = [];
+    const ordered = [], vehicles = [];
     const metrics = { drawn: 0, culled: 0, dpr: 1 };
     const byDepth = (a, b) => b.z - a.z;
 
@@ -34,10 +35,10 @@
       ctx.strokeStyle = color; ctx.lineWidth = size; ctx.beginPath(); ctx.moveTo(ax, ay); ctx.lineTo(bx, by); ctx.stroke();
     }
     function project(lane, z) {
-      const depth = Number(z) || 0, scale = 17 / Math.max(5, 17 + depth);
+      const depth = Number(z) || 0, scale = 17 / Math.max(2, 17 + depth);
       return { x: width / 2 + ((Number(lane) || 0) - 1) * laneWidth * scale,
         y: horizon + (ground - horizon) * scale, scale, laneWidth: laneWidth * scale,
-        visible: depth >= -6 && depth <= FAR,
+        visible: depth >= NEAR && depth <= FAR,
         gateTop: horizon + (ground - horizon) * scale - actorHeight * 1.48 * scale,
         labelY: horizon + (ground - horizon) * scale - actorHeight * 1.16 * scale };
     }
@@ -68,6 +69,16 @@
       const floor = back.createLinearGradient(0, horizon, 0, height);
       floor.addColorStop(0, '#17333b'); floor.addColorStop(1, '#07151f');
       back.fillStyle = floor; back.fillRect(0, horizon, width, height - horizon);
+      // Cached outer masonry fills wide desktop margins without adding more
+      // moving entities, textures, or per-frame gradients.
+      for (const side of [-1, 1]) {
+        const inner = width / 2 + side * laneWidth * 2.2, outer = side < 0 ? 0 : width;
+        quad(back, inner, horizon, outer, horizon * .65, outer, height, inner, height, '#112a33');
+        for (let band = 0; band < 8; band++) {
+          const y = horizon + band * (height - horizon) / 7;
+          line(back, outer, y, inner, y, '#1e3941', 1);
+        }
+      }
       // The sky arch is architecture, not an option gate: no text or symbols.
       const radius = width * .23;
       back.strokeStyle = '#294950'; back.lineWidth = Math.max(8, width * .025);
@@ -127,17 +138,32 @@
     }
     function environment(distance) {
       const offset = distance % 12;
-      for (let index = 8; index >= 0; index--) {
+      const segment = Math.floor(distance / 12);
+      // Continuous shoulders meet the road; the buildings behind them remain
+      // depth-based geometry rather than a sparse row floating over a void.
+      for (const side of [-1, 1]) {
+        const lane = side < 0 ? -.56 : 2.56, outer = lane + side * 3.5;
+        const a = project(lane, NEAR), b = project(outer, NEAR), c = project(outer, FAR), d = project(lane, FAR);
+        quad(context, a.x, a.y, b.x, b.y, c.x, c.y, d.x, d.y, '#203a40');
+      }
+      for (let index = 8; index >= -1; index--) {
         const z = index * 12 - offset;
-        if (z < -6 || z > FAR) continue;
+        if (z + 12 < NEAR || z > FAR) continue;
+        const worldIndex = segment + index;
+        context.globalAlpha = clamp((FAR - z) / 10, 0, 1) * clamp((z + 12 - NEAR) / 4, 0, 1);
         for (const lane of [-.97, 2.97]) {
-          const p = project(lane, z), edge = lane < 1 ? -1 : 1, h = height * .37 * p.scale;
-          const far = project(lane + edge * 1.45, z + 9);
-          quad(context, p.x, p.y, far.x, far.y, far.x, far.y - h * .82, p.x, p.y - h, index % 2 ? '#152f3a' : '#1a3640');
-          line(context, p.x, p.y - h, far.x, far.y - h * .82, '#3c5c60', Math.max(1, p.scale * 2));
-          column(lane, z, index);
+          const side = lane < 1 ? -1 : 1, wallLane = lane + side * .14;
+          const p = project(wallLane, z), far = project(wallLane, z + 12);
+          const h = height * (.29 + ((worldIndex % 3 + 3) % 3) * .025), nearTop = p.y - h * p.scale, farTop = far.y - h * far.scale;
+          quad(context, p.x, p.y, far.x, far.y, far.x, farTop, p.x, nearTop, worldIndex % 2 ? '#193640' : '#1c3c44');
+          line(context, p.x, nearTop, far.x, farTop, '#466567', Math.max(1, p.scale * 1.4));
+          const niche = project(wallLane, z + 6), nw = laneWidth * .24 * niche.scale, nh = h * .26 * niche.scale;
+          context.fillStyle = '#102832'; context.fillRect(niche.x - nw / 2, niche.y - h * niche.scale * .68, nw, nh);
+          context.fillStyle = '#a88e5a'; context.fillRect(niche.x - nw * .15, niche.y - h * niche.scale * .63, nw * .3, nh * .38);
+          if (z >= NEAR) column(lane, z, (worldIndex % 3 + 3) % 3);
         }
       }
+      context.globalAlpha = 1;
     }
     function shadow(x, y, w, h, alpha = .3) {
       context.fillStyle = `rgba(0,7,12,${alpha})`; context.beginPath(); context.ellipse(x, y, w, h, 0, 0, Math.PI * 2); context.fill();
@@ -155,17 +181,22 @@
       context.beginPath(); context.arc(0, 0, radius * .65, 0, Math.PI * 2); context.stroke();
       context.fillStyle = '#fff0a6'; context.beginPath(); context.moveTo(0, -radius * .45); context.lineTo(radius * .3, 0); context.lineTo(0, radius * .45); context.lineTo(-radius * .3, 0); context.fill(); context.restore();
     }
-    function obstacle(entity, p) {
+    function obstacle(entity, p, foreground = false) {
       const type = entity.obstacleType || entity.type;
       const w = laneWidth * .72 * p.scale, h = actorHeight * p.scale;
-      shadow(p.x, p.y, w * .58, h * .1, .36);
+      if (!foreground) shadow(p.x, p.y, w * .58, h * .1, .36);
       if (type === 'train') {
-        const ramp = project(entity.lane, entity.z + 6), end = project(entity.lane, entity.z + entity.length);
-        const rw = laneWidth * .76 * ramp.scale, ew = laneWidth * .76 * end.scale;
-        const ry = ramp.y - actorHeight * 1.05 * ramp.scale, ey = end.y - actorHeight * 1.05 * end.scale;
-        // A parked cargo truck: rubber tyres, chassis, ribbed cargo roof,
-        // cab and rear loading ramp. All geometry shares the roof support height.
-        for (const offset of [7.5, entity.length - 4]) {
+        const point = position => {
+          const p = project(entity.lane, entity.z + position);
+          const level = root.LootLinguaRunnerEngine.vehicleSurface(entity, -position);
+          return { ...p, w: laneWidth * .76 * p.scale, top: p.y - actorHeight * level * p.scale };
+        };
+        const rear = point(0), ramp = point(VEHICLE_RAMP), end = point(entity.length), exit = point(entity.length + VEHICLE_EXIT), cab = point(entity.length - 3);
+        // The front descent begins AFTER the complete golden cab. Every top
+        // vertex uses the same support function as the runner's feet.
+        quad(context, end.x - end.w / 2, end.top, end.x + end.w / 2, end.top, exit.x + exit.w / 2, exit.y, exit.x - exit.w / 2, exit.y, '#526768');
+        line(context, end.x, end.top, exit.x, exit.y, '#829594', Math.max(1, end.scale * 2));
+        for (const offset of [7.5, entity.length - 3]) {
           const axle = project(entity.lane, entity.z + offset), aw = laneWidth * .76 * axle.scale;
           for (const side of [-1, 1]) {
             const x = axle.x + side * aw * .48, y = axle.y - actorHeight * .08 * axle.scale;
@@ -173,35 +204,39 @@
             context.fillStyle = '#7b8d91'; context.beginPath(); context.ellipse(x, y, aw * .04, actorHeight * .075 * axle.scale, 0, 0, Math.PI * 2); context.fill();
           }
         }
-        quad(context, ramp.x - rw / 2, ry, end.x - ew / 2, ey, end.x - ew / 2, end.y - h * .05, ramp.x - rw / 2, ramp.y - h * .08, '#244c58');
-        quad(context, ramp.x + rw / 2, ry, end.x + ew / 2, ey, end.x + ew / 2, end.y - h * .05, ramp.x + rw / 2, ramp.y - h * .08, '#173944');
-        quad(context, ramp.x - rw / 2, ry, end.x - ew / 2, ey, end.x + ew / 2, ey, ramp.x + rw / 2, ry, '#719096');
-        // Opaque roof panels with raised ventilation housings and edge rails.
+        for (const side of [-1, 1]) {
+          quad(context, ramp.x + side * ramp.w / 2, ramp.top, end.x + side * end.w / 2, end.top,
+            end.x + side * end.w / 2, end.y - actorHeight * .09 * end.scale,
+            ramp.x + side * ramp.w / 2, ramp.y - actorHeight * .09 * ramp.scale, side < 0 ? '#325b64' : '#23444e');
+        }
+        quad(context, end.x - end.w / 2, end.top, end.x + end.w / 2, end.top, end.x + end.w / 2, end.y - actorHeight * .1 * end.scale, end.x - end.w / 2, end.y - actorHeight * .1 * end.scale, '#907443');
+        quad(context, ramp.x - ramp.w / 2, ramp.top, end.x - end.w / 2, end.top, end.x + end.w / 2, end.top, ramp.x + ramp.w / 2, ramp.top, '#719096');
         for (const offset of [10, 15]) {
-          const vent = project(entity.lane, entity.z + offset), vw = laneWidth * .34 * vent.scale, vy = vent.y - actorHeight * 1.05 * vent.scale;
-          context.fillStyle = '#aec0ba'; context.fillRect(vent.x - vw / 2, vy - actorHeight * .045 * vent.scale, vw, actorHeight * .07 * vent.scale);
-          line(context, vent.x - vw * .4, vy, vent.x + vw * .4, vy, '#405e68', Math.max(1, vent.scale));
+          const vent = point(offset), vw = vent.w * .4;
+          context.fillStyle = '#aec0ba'; context.fillRect(vent.x - vw / 2, vent.top - actorHeight * .04 * vent.scale, vw, actorHeight * .06 * vent.scale);
+          line(context, vent.x - vw * .4, vent.top, vent.x + vw * .4, vent.top, '#405e68', Math.max(1, vent.scale));
         }
         for (let offset = 8; offset < entity.length - 3; offset += 2.5) {
-          const rib = project(entity.lane, entity.z + offset), ribWidth = laneWidth * .76 * rib.scale, roofY = rib.y - actorHeight * 1.05 * rib.scale;
-          line(context, rib.x - ribWidth * .46, roofY, rib.x + ribWidth * .46, roofY, '#355e69', Math.max(1, rib.scale * 1.5));
-          for (const side of [-1, 1]) line(context, rib.x + side * ribWidth * .5, roofY, rib.x + side * ribWidth * .5, rib.y - actorHeight * .23 * rib.scale, '#739498', Math.max(1, rib.scale));
+          const rib = point(offset);
+          line(context, rib.x - rib.w * .46, rib.top, rib.x + rib.w * .46, rib.top, '#4b6e76', Math.max(1, rib.scale));
+          for (const side of [-1, 1]) line(context, rib.x + side * rib.w * .5, rib.top, rib.x + side * rib.w * .5, rib.y - actorHeight * .2 * rib.scale, '#719095', Math.max(1, rib.scale));
         }
-        const cab = project(entity.lane, entity.z + entity.length - 3), cw = laneWidth * .76 * cab.scale, cy = cab.y - actorHeight * .82 * cab.scale;
-        quad(context, cab.x - cw / 2, cy, end.x - ew / 2, ey, end.x + ew / 2, ey, cab.x + cw / 2, cy, '#bd975c');
-        context.fillStyle = '#17303e'; context.fillRect(cab.x - cw * .38, cy + actorHeight * .06 * cab.scale, cw * .76, actorHeight * .2 * cab.scale);
-        line(context, cab.x, cy + actorHeight * .06 * cab.scale, cab.x, cy + actorHeight * .26 * cab.scale, '#b7c8c6', Math.max(1, cab.scale));
-        context.fillStyle = '#263943'; context.fillRect(ramp.x - rw * .5, ramp.y - h * .17, rw, h * .12);
-        for (const side of [-1, 1]) { context.fillStyle = '#eb6b51'; context.fillRect(ramp.x + side * rw * .4 - rw * .04, ramp.y - h * .16, rw * .08, h * .07); }
-        quad(context, p.x - w / 2, p.y, p.x + w / 2, p.y, ramp.x + rw / 2, ry, ramp.x - rw / 2, ry, '#bc9b61');
-        for (let i = 1; i < 6; i++) {
-          const t = i / 6;
-          line(context, p.x - w / 2 + (ramp.x - rw / 2 - p.x + w / 2) * t, p.y + (ry - p.y) * t,
-            p.x + w / 2 + (ramp.x + rw / 2 - p.x - w / 2) * t, p.y + (ry - p.y) * t, '#4b5a55', Math.max(1, p.scale * 2));
+        quad(context, cab.x - cab.w / 2, cab.top, end.x - end.w / 2, end.top, end.x + end.w / 2, end.top, cab.x + cab.w / 2, cab.top, '#c09d61');
+        line(context, cab.x - cab.w * .38, cab.top + actorHeight * .12 * cab.scale, cab.x + cab.w * .38, cab.top + actorHeight * .12 * cab.scale, '#203d48', Math.max(2, actorHeight * .12 * cab.scale));
+        quad(context, rear.x - rear.w / 2, rear.y, rear.x + rear.w / 2, rear.y, ramp.x + ramp.w / 2, ramp.top, ramp.x - ramp.w / 2, ramp.top, '#a88e59');
+        for (let offset = 1; offset < VEHICLE_RAMP; offset++) {
+          const tread = point(offset);
+          line(context, tread.x - tread.w * .47, tread.top, tread.x + tread.w * .47, tread.top, '#4b5a55', Math.max(1, tread.scale * 1.5));
         }
-        line(context, p.x - w / 2, p.y, ramp.x - rw / 2, ry, '#efce80', Math.max(1, p.scale * 2));
-        line(context, p.x + w / 2, p.y, ramp.x + rw / 2, ry, '#efce80', Math.max(1, p.scale * 2));
-        line(context, ramp.x - rw * .43, ry, end.x - ew * .43, ey, '#e7c77c', Math.max(1, ramp.scale * 2));
+        for (const side of [-1, 1]) {
+          // Vehicle edges have their own metal trim, distinct from road lines.
+          line(context, rear.x + side * rear.w / 2, rear.y, ramp.x + side * ramp.w / 2, ramp.top, '#d1b579', Math.max(1, ramp.scale * 2));
+          line(context, ramp.x + side * ramp.w / 2, ramp.top, end.x + side * end.w / 2, end.top, '#294b55', Math.max(2, ramp.scale * 3));
+          for (const offset of [8, 13, 18]) {
+            const cap = point(offset);
+            line(context, cap.x + side * cap.w * .46, cap.top, cap.x + side * cap.w * .5, cap.top, '#c8ae75', Math.max(1, cap.scale * 2));
+          }
+        }
         return;
       }
       if (type === 'overhead') {
@@ -302,6 +337,21 @@
       }
       context.restore();
     }
+    function opacity(entity, elapsed) {
+      const span = (entity.length || 0) + (entity.obstacleType === 'train' ? VEHICLE_EXIT : 0);
+      const birth = Number.isFinite(entity.bornAt) ? clamp((elapsed - entity.bornAt) / 260, 0, 1) : 1;
+      return birth * clamp((FAR - entity.z) / 10, 0, 1) * clamp((entity.z + span - NEAR) / 3, 0, 1);
+    }
+    function inViewport(entity) {
+      const vehicle = entity.obstacleType === 'train';
+      const span = (entity.length || 0) + (vehicle ? VEHICLE_EXIT : 0);
+      const a = project(entity.lane ?? 1, entity.z), b = project(entity.lane ?? 1, entity.z + span);
+      const half = laneWidth * (entity.kind === 'gate' ? 1.65 : .65);
+      const body = actorHeight * (entity.kind === 'gate' ? 1.65 : entity.kind === 'coin' ? (entity.height ?? .44) + .2 : 1.6);
+      return Math.max(a.x + half * a.scale, b.x + half * b.scale) >= 0 &&
+        Math.min(a.x - half * a.scale, b.x - half * b.scale) <= width &&
+        Math.min(a.y - body * a.scale, b.y - body * b.scale) <= height && Math.max(a.y, b.y) >= 0;
+    }
     function draw(input = {}) {
       if (destroyed) return metrics;
       const state = input.engine || input;
@@ -313,16 +363,20 @@
       context.drawImage(background, 0, 0, background.width, background.height, 0, 0, width, height);
       const distance = Math.max(0, Number(state.distance) || 0);
       road(distance); environment(distance);
-      ordered.length = 0; metrics.drawn = 0; metrics.culled = 0;
+      ordered.length = vehicles.length = 0; metrics.drawn = 0; metrics.culled = 0; metrics.foreground = 0;
       for (const entity of state.entities || []) {
-        if (!entity || entity.active === false || entity.z + (entity.length || 0) < -6 || entity.z > FAR || entity.collected || entity.hit) { metrics.culled++; continue; }
+        if (!entity || entity.active === false || entity.z + (entity.length || 0) + (entity.obstacleType === 'train' ? VEHICLE_EXIT : 0) < NEAR || entity.z > FAR || entity.collected || entity.hit || !inViewport(entity)) { metrics.culled++; continue; }
         ordered.push(entity);
+        if (entity.obstacleType === 'train') vehicles.push(entity);
       }
       ordered.sort(byDepth);
       const readingGate = ordered.find(item => item.kind === 'gate' && !item.resolved);
+      const pose = root.LootLinguaRunnerEngine.getPose(state);
+      const inFront = entity => entity.kind === 'obstacle' && entity.obstacleType !== 'train' && entity.z < 0 && (entity.obstacleType !== 'overhead' || pose.floor < .88);
       for (const entity of ordered) {
         if (readingGate && entity !== readingGate && entity.z > readingGate.z) { metrics.culled++; continue; }
-        if (entity.kind === 'coin') continue;
+        if (entity.kind === 'coin' || inFront(entity)) continue;
+        context.globalAlpha = opacity(entity, elapsed);
         const p = project(entity.lane ?? 1, entity.z);
         if (entity.kind === 'gate' || entity.type === 'gate') gate(entity, state);
         else obstacle(entity, p);
@@ -332,10 +386,20 @@
       // vehicle are occluded instead of making the cargo body look transparent.
       for (const entity of ordered) {
         if (entity.kind !== 'coin' || readingGate && entity.z > readingGate.z) continue;
-        if (ordered.some(truck => truck.obstacleType === 'train' && truck.lane === entity.lane && entity.z >= truck.z && entity.z <= truck.z + truck.length && (entity.height ?? .44) < 1.05)) continue;
+        if (vehicles.some(truck => truck.lane === entity.lane && entity.z >= truck.z && truck.z + truck.length + VEHICLE_EXIT > 0 && (entity.height ?? .44) < VEHICLE_HEIGHT)) continue;
+        context.globalAlpha = opacity(entity, elapsed);
         coin(entity, project(entity.lane, entity.z), elapsed); metrics.drawn++;
       }
+      context.globalAlpha = 1;
       actor(state, delta);
+      // The vehicle supports the feet, so it stays behind the actor. A beam
+      // already passed by the feet is in front of the crouched body instead.
+      for (const entity of ordered) {
+        if (!inFront(entity)) continue;
+        context.globalAlpha = opacity(entity, elapsed);
+        obstacle(entity, project(entity.lane, entity.z), true); metrics.drawn++; metrics.foreground++;
+      }
+      context.globalAlpha = 1;
       // Soft foreground vignette keeps HUD text in the DOM readable.
       context.fillStyle = 'rgba(3,12,20,.12)'; context.fillRect(0, 0, width, height * .12);
       return metrics;

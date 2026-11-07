@@ -91,7 +91,7 @@ test('reading gates keep obstacles behind them and coins collect once in the pla
 });
 
 test('spawn rows always provide a traversable route and recycle a fixed pool during a long run', () => {
-  const state = engine.createState([], { random: seeded() }); let rows = 0, fastest = 0, closedRows = 0;
+  const state = engine.createState([], { random: seeded() }); let rows = 0, fastest = 0, closedRows = 0; const formations = new Set();
   for (let index = 0; index < 20000; index++) {
     state.invulnerableUntil = Infinity; engine.update(state, 50); fastest = Math.max(fastest, state.speed);
     assert.ok(state.entities.length <= 48); assert.equal(state.entities.length + state._pool.length, 48);
@@ -102,9 +102,16 @@ test('spawn rows always provide a traversable route and recycle a fixed pool dur
       assert.ok(blocked.some(item => ['low', 'overhead', 'train'].includes(item.obstacleType)));
       closedRows++;
     }
+    if (state._row > rows) {
+      const spawned = state.entities.filter(item => item.kind === 'obstacle' && item.row === state._row);
+      if (spawned.length) formations.add(spawned.map(item => item.obstacleType).sort().join(','));
+      const route = spawned.find(item => item.safeRoute);
+      if (route) assert.notEqual(route.obstacleType, 'wall');
+    }
     rows = Math.max(rows, state._row);
   }
   assert.ok(rows > 200); assert.equal(fastest, engine.constants.MAX_SPEED); assert.ok(closedRows > 0);
+  for (const pattern of ['train,wall,wall', 'train,train,wall', 'low,train,train', 'low,overhead,train', 'train,train,train']) assert.ok(formations.has(pattern), pattern);
 });
 
 test('gate answer lanes use balanced shuffled bags without immediate repeats', () => {
@@ -205,4 +212,24 @@ test('bonus coins require the matching safe body pose', () => {
     entity(state, { kind: 'coin', requires, height: requires === 'jump' ? 1.5 : .22 });
     engine.update(state, 50); assert.equal(state.coins, expected, `${requires}/${action}`);
   }
+});
+
+
+test('vehicle support includes the full golden cab, with an exit only after the visible roof ends', () => {
+  const state = make(); const truck = entity(state, {kind:'obstacle',obstacleType:'train',length:20,z:-17,resolved:true});
+  for(const position of [6,10,17,18.5,19.99,20]) {
+    truck.z=-position;assert.equal(engine.getPose(state).floor,1.05);
+    assert.equal(engine.vehicleSurface(truck),1.05);
+  }
+  truck.z=-21.5;assert.equal(engine.getPose(state).floor,.525);
+  truck.z=-23;assert.equal(engine.getPose(state).floor,0);
+});
+
+test('near-camera objects remain alive until their complete geometry passes the near plane',()=>{
+  const state=make();const wall=entity(state,{kind:'obstacle',obstacleType:'wall',z:-9,resolved:true});
+  engine.update(state,16);assert.ok(state.entities.includes(wall));
+  wall.z=-16.1;engine.update(state,16);assert.ok(!state.entities.includes(wall));
+  const truck=entity(state,{kind:'obstacle',obstacleType:'train',length:20,z:-33,resolved:true});
+  engine.update(state,16);assert.ok(state.entities.includes(truck));
+  truck.z=-39.1;engine.update(state,16);assert.ok(!state.entities.includes(truck));
 });

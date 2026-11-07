@@ -2,6 +2,15 @@
   'use strict';
   const LANES = 3, MAX_HEARTS = 3, MAX_ENTITIES = 48, MAX_EVENTS = 16;
   const FAR = 80, SPAWN_Z = 64, BASE_SPEED = 14, MAX_SPEED = 32;
+  const NEAR = -15, VEHICLE_HEIGHT = 1.05, VEHICLE_RAMP = 6, VEHICLE_EXIT = 3;
+  // Templates describe relationships, then lanes are shuffled. A truck can
+  // accompany any normal hazard, not just another truck.
+  const FORMATIONS = [
+    ['train', 'wall', null], ['train', 'low', null], ['train', 'overhead', null],
+    ['train', 'wall', 'wall'], ['train', 'low', 'wall'], ['train', 'overhead', 'wall'],
+    ['train', 'low', 'overhead'], ['train', 'train', null], ['train', 'train', 'low'],
+    ['train', 'train', 'overhead'], ['train', 'train', 'wall'], ['train', 'train', 'train'],
+  ];
   const JUMP_MS = 640, SLIDE_MS = 480, ACTION_RECOVERY_MS = 70, INPUT_BUFFER_MS = 140, INVULNERABLE_MS = 1100;
   const clamp = (value, low, high) => Math.max(low, Math.min(high, value));
   const clean = value => String(value ?? '').trim().replace(/\s+/g, ' ');
@@ -30,7 +39,7 @@
       distance: 0, speed: BASE_SPEED, elapsed: 0, running: true, paused: false, over: false,
       action: 'run', actionStartedAt: 0, actionUntil: 0, invulnerableUntil: 0,
       entities: [], gate: null, feedback: null, events: [],
-      _random: rng, _gateLanes: [], _lastGateLane: -1, _queuedAction: null,
+      _random: rng, _gateLanes: [], _lastGateLane: -1, _queuedAction: null, _formationBag: [],
       _pool: Array.from({ length: MAX_ENTITIES }, () => ({})), _nextId: 1,
       _nextRowAt: 400, _nextGateAt: 30000 + Math.floor(clamp(Number(rng()) || 0, 0, 1) * 12000), _row: 0, _escapeLane: 1, _safeUntil: 0,
       _canGate: new Set(normalized.map(item => item.meaning)).size >= LANES,
@@ -65,6 +74,11 @@
   }
   function jump(state) { return startAction(state, 'jump', JUMP_MS); }
   function slide(state) { return startAction(state, 'slide', SLIDE_MS); }
+  function vehicleSurface(entity, z = entity.z) {
+    const position = -z, length = Number(entity.length) || 20;
+    if (position < 0 || position > length + VEHICLE_EXIT) return 0;
+    return VEHICLE_HEIGHT * Math.max(0, Math.min(1, position / VEHICLE_RAMP, (length + VEHICLE_EXIT - position) / VEHICLE_EXIT));
+  }
   // Shared by collision and drawing: heights are measured in standing bodies.
   function getPose(state, at = state.elapsed) {
     const action = getAction(state, at);
@@ -73,7 +87,7 @@
     for (const entity of state.entities) {
       if (entity.obstacleType !== 'train' || entity.lane !== state.lane) continue;
       const z = entity.z + state.speed * (state.elapsed - at) / 1000;
-      if (z <= 0 && z >= -entity.length) floor = Math.max(floor, Math.min(1, -z / 6, (entity.length + z) / 3) * 1.05);
+      floor = Math.max(floor, vehicleSurface(entity, z));
     }
     const lift = action === 'jump' ? Math.sin(fraction * Math.PI) * 1.12 : 0;
     return { action, feet: floor + lift, top: floor + lift + (action === 'slide' ? .43 : 1), floor, lift };
@@ -82,7 +96,7 @@
     const entity = state._pool.pop();
     if (!entity) return null;
     for (const key of Object.keys(entity)) delete entity[key];
-    Object.assign(entity, { id: state._nextId++, active: true, resolved: false }, data);
+    Object.assign(entity, { id: state._nextId++, active: true, resolved: false, bornAt: state.elapsed }, data);
     state.entities.push(entity); return entity;
   }
   function retire(state, index) {
@@ -151,34 +165,43 @@
     if (fullRow) blocked.push(escape);
     if (state._pool.length < 12) return;
     const row = ++state._row;
-    if (!draining && row > 5 && row % 7 === 0) {
-      const lanes = [escape, ...blocked.filter(lane => lane !== escape)];
-      const count = state.distance > 500 && random(state) < .4 ? 3 : 2;
-      for (let index = 0; index < count; index++) {
-        const lane = lanes[index];
-        if (state.entities.some(item => item.obstacleType === 'train' && item.lane === lane && item.z > -item.length)) continue;
-        const z = spawnZ + (random(state) < .5 ? index * 4 : 0);
-        allocate(state, { kind: 'obstacle', obstacleType: 'train', length: 20, lane, z, row });
-        for (const offset of [10, 15]) allocate(state, { kind: 'coin', lane, z: z + offset, height: 1.49, row });
+    let layout = [null, null, null], route = escape;
+    const occupiedByTruck = lane => state.entities.some(item => item.obstacleType === 'train' && item.lane === lane && item.z > -(item.length + VEHICLE_EXIT));
+    if (!draining && state.distance > 160 && random(state) < .28 + difficulty * .12 && !state.entities.some(item => item.obstacleType === 'train' && item.z > -(item.length + VEHICLE_EXIT))) {
+      if (!state._formationBag.length) {
+        state._formationBag = FORMATIONS.map((_, index) => index).filter(index => state.distance > 500 || index < 8);
+        for (let i = state._formationBag.length - 1; i > 0; i--) {
+          const other = Math.floor(random(state) * (i + 1));
+          [state._formationBag[i], state._formationBag[other]] = [state._formationBag[other], state._formationBag[i]];
+        }
       }
-      state._escapeLane = escape;
-      state._nextRowAt = state.elapsed + 1250;
-      return;
+      layout = FORMATIONS[state._formationBag.pop()].slice();
+      for (let i = 2; i > 0; i--) {
+        const other = Math.floor(random(state) * (i + 1));
+        [layout[i], layout[other]] = [layout[other], layout[i]];
+      }
+      if (layout[route] === 'wall') {
+        const passable = layout.findIndex(type => type !== 'wall');
+        [layout[route], layout[passable]] = [layout[passable], layout[route]];
+      }
+    } else if (!draining) {
+      for (let index = 0; index < obstacleCount; index++) {
+        const lane = blocked[index];
+        layout[lane] = lane === escape ? choose(state, ['low', 'overhead']) : choose(state, ['low', 'overhead', 'wall']);
+      }
     }
-    for (let index = 0; index < (draining ? 0 : obstacleCount); index++) {
-      const lane = blocked[index];
-      if (state.entities.some(item => item.obstacleType === 'train' && item.lane === lane && item.z > -item.length)) continue;
-      // Even a closed row has a reachable action route, at most one lane away
-      // from the previous route. Trucks never occupy that guaranteed route.
-      const type = lane === escape ? choose(state, ['low', 'overhead']) : choose(state, ['low', 'overhead', 'wall']);
-      allocate(state, { kind: 'obstacle', obstacleType: type, length: type === 'train' ? 20 : 0, lane, z: spawnZ, row });
-      if (type === 'train') for (const offset of [10, 15]) allocate(state, { kind: 'coin', lane, z: spawnZ + offset, height: 1.49, row });
+    for (let lane = 0; lane < LANES; lane++) {
+      const type = layout[lane];
+      if (!type || occupiedByTruck(lane)) continue;
+      const z = spawnZ + (type === 'train' && random(state) < .5 ? lane * 4 : 0);
+      allocate(state, { kind: 'obstacle', obstacleType: type, length: type === 'train' ? 20 : 0, lane, z, row, safeRoute: lane === route });
+      if (type === 'train') for (const offset of [10, 15]) allocate(state, { kind: 'coin', lane, z: z + offset, height: VEHICLE_HEIGHT + .44, row });
       if (['low', 'overhead'].includes(type) && random(state) < .65) {
         for (const offset of [0, 2]) allocate(state, { kind: 'coin', lane, z: spawnZ + offset,
           height: type === 'low' ? 1.5 : .22, requires: type === 'low' ? 'jump' : 'slide', row });
       }
     }
-    if (!fullRow || draining) {
+    if ((!layout[route] || draining) && !occupiedByTruck(route)) {
       allocate(state, { kind: 'coin', lane: escape, z: spawnZ + 3, row });
       allocate(state, { kind: 'coin', lane: escape, z: spawnZ + 6, row });
     }
@@ -235,7 +258,10 @@
       if (!entity.resolved && oldZ > 0 && entity.z <= 0) cross(state, entity, before + dt * oldZ / travelled);
       if (state.over) break;
     }
-    for (let index = state.entities.length - 1; index >= 0; index--) if (state.entities[index].z < -((state.entities[index].length || 0) + 8)) retire(state, index);
+    for (let index = state.entities.length - 1; index >= 0; index--) {
+      const entity = state.entities[index], span = (entity.length || 0) + (entity.obstacleType === 'train' ? VEHICLE_EXIT : 0);
+      if (entity.z + span < NEAR - 1) retire(state, index);
+    }
     if (getAction(state) === 'run') state.action = 'run';
     if (state._queuedAction && getAction(state) === 'run' && state.elapsed >= state.actionUntil + ACTION_RECOVERY_MS) {
       const action = state._queuedAction;
@@ -244,7 +270,7 @@
     if (!state.over) spawnRow(state);
     return state;
   }
-  root.LootLinguaRunnerEngine = Object.freeze({ createState, update, move, jump, slide, getAction, getPose, normalizeWords, createWordGate,
-    constants: Object.freeze({ LANES, MAX_HEARTS, MAX_ENTITIES, MAX_EVENTS, FAR, SPAWN_Z, BASE_SPEED, MAX_SPEED, JUMP_MS, SLIDE_MS, INVULNERABLE_MS }),
+  root.LootLinguaRunnerEngine = Object.freeze({ createState, update, move, jump, slide, getAction, getPose, vehicleSurface, normalizeWords, createWordGate,
+    constants: Object.freeze({ LANES, MAX_HEARTS, MAX_ENTITIES, MAX_EVENTS, FAR, NEAR, VEHICLE_HEIGHT, VEHICLE_RAMP, VEHICLE_EXIT, SPAWN_Z, BASE_SPEED, MAX_SPEED, JUMP_MS, SLIDE_MS, INVULNERABLE_MS }),
   });
 })(window);
