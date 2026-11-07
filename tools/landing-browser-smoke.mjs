@@ -163,6 +163,9 @@ const scenarios = [
   { id: 'landing-context', width: 1440, height: 900, section: '#context' },
   { id: 'landing-journey', width: 1440, height: 900, section: '#journey' },
   { id: 'landing-review', width: 1440, height: 900, section: '#review' },
+  { id: 'landing-runner-desktop', width: 1440, height: 900, section: '#runner', runner: true },
+  { id: 'landing-runner-mobile', width: 390, height: 844, mobile: true, section: '#runner', runner: true },
+  { id: 'landing-runner-reduced', width: 320, height: 800, mobile: true, reducedMotion: true, section: '#runner', runner: true },
   { id: 'landing-final-cta', width: 1440, height: 900, section: '.final-cta' },
   { id: 'landing-tablet-834', width: 834, height: 1112 },
   { id: 'landing-mobile-390', width: 390, height: 844, mobile: true },
@@ -232,7 +235,7 @@ try {
 
   const selectedScenario = process.env.LANDING_SCENARIO;
   const scenariosToRun = selectedScenario
-    ? scenarios.filter((scenario) => scenario.id === selectedScenario)
+    ? scenarios.filter((scenario) => selectedScenario.split(',').includes(scenario.id))
     : scenarios;
   if (!scenariosToRun.length) throw new Error(`Unknown LANDING_SCENARIO: ${selectedScenario}`);
 
@@ -300,6 +303,15 @@ try {
       })()`);
     }
     await delay(350);
+    if (scenario.runner) {
+      await waitFor(`document.querySelector('[data-landing-runner]').classList.contains('is-ready')`, 'runner lazy renderer');
+      const runningLabel = await evaluate(`document.querySelector('[data-runner-preview-pause]').textContent`);
+      if (scenario.reducedMotion && runningLabel !== 'تشغيل العرض') throw Error('Reduced motion preview must start paused');
+      if (!scenario.reducedMotion) {
+        await evaluate(`document.querySelector('[data-runner-preview-pause]').click()`);
+        if (await evaluate(`document.querySelector('[data-runner-preview-pause]').getAttribute('aria-pressed')`) !== 'true') throw Error('Preview pause button failed');
+      }
+    }
 
     const audit = await evaluate(layoutAuditExpression);
     if (audit.clientWidth !== scenario.width || audit.clientHeight !== scenario.height) {
@@ -324,8 +336,8 @@ try {
     if (!scenario.app && audit.authProvider !== expectedProvider) {
       throw new Error(`${scenario.id}: expected ${expectedProvider} Auth provider ${JSON.stringify(audit)}`);
     }
-    if (!scenario.app && (audit.productPreviewCount !== 4 || audit.productPreviewImages.length)) {
-      throw new Error(`${scenario.id}: previews must be four image-free DOM compositions ${JSON.stringify(audit)}`);
+    if (!scenario.app && (audit.productPreviewCount !== 5 || audit.productPreviewImages.length)) {
+      throw new Error(`${scenario.id}: previews must be five image-free compositions ${JSON.stringify(audit)}`);
     }
     const image = await captureScreenshot(scenario.id, scenario.section);
     let authInteractions = null;

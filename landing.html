@@ -17,8 +17,9 @@
   <meta name="twitter:description" content="اهتماماتك تتحول إلى عوالم تتقدّم فيها كلمة بعد كلمة.">
   <link rel="icon" type="image/png" href="Lootlingua_LOGO_2.png">
   <title>LootLingua | تعلّم الإنجليزية من الأشياء اللي تحبها</title>
-  <link rel="stylesheet" href="landing.css?v=20260811-2">
+  <link rel="stylesheet" href="landing.css?v=20261107-runner-1">
   <script type="module" src="js/landing.js?v=20260811-2"></script>
+  <script type="module" src="js/landing-runner-preview.js?v=20261107-1"></script>
 </head>
 <body data-auth-state="pending">
   <a class="skip-link" href="#mainContent">انتقل إلى المحتوى</a>
@@ -165,6 +166,26 @@
             <div class="published-journey-progress"><span style="width:80%"></span></div>
             <div class="published-journey-actions"><button class="published-action-btn published-journey-cta" type="button">ابدأ البوابة</button></div>
           </div>
+        </div>
+      </article>
+
+      <article class="product-moment shell" id="runner" aria-labelledby="runnerTitle">
+        <div class="moment-copy reveal">
+          <p class="eyebrow">اركض، اختر، وتعلّم</p>
+          <h2 id="runnerTitle">الكلمة تفتح لك الطريق.</h2>
+          <p>ثلاثة مسارات، عوائق تقفز فوقها أو تنزلق تحتها، وشاحنات تصعد إلى سطحها. وبعد فترة تظهر كلمة إنجليزية: اختر بوابة معناها الصحيح لتكمل رحلتك.</p>
+          <p>العب بكلمات قاموسك الشخصي، أو تدرّب بالجري بين مراجعات بوابات العوالم.</p>
+          <p class="moment-note">عرض تلقائي من اللعبة؛ الشخصية تتجاوز العوائق وتختار المعنى هنا لتشاهد الفكرة.</p>
+        </div>
+        <div class="product-preview landing-runner-preview reveal" data-landing-runner>
+          <div class="preview-label"><span>عرض تلقائي</span><b>LOOT RUNNER · جري البوابات</b></div>
+          <div class="landing-runner-stage">
+            <canvas width="480" height="480" aria-hidden="true"></canvas>
+            <div class="landing-runner-fallback"><strong>جري البوابات</strong><span>اقفز، انزلق، واختر المعنى الصحيح.</span></div>
+            <div class="landing-runner-question" hidden><small>أي بوابة تحمل المعنى الصحيح؟</small><strong lang="en" dir="ltr">lantern</strong></div>
+            <div class="landing-runner-options" hidden><span>جسر</span><span class="is-selected">فانوس</span><span>نهر</span></div>
+          </div>
+          <div class="landing-runner-footer"><span>معاينة من اللعبة</span><button type="button" data-runner-preview-pause aria-pressed="false">إيقاف العرض</button></div>
         </div>
       </article>
 
