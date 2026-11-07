@@ -443,6 +443,7 @@ function readCustomWorldsFromStorage(uid) {
     return [];
   }
 }
+window.readCustomWorldsFromStorage = readCustomWorldsFromStorage;
 
 function writeCustomWorldsToStorage(worlds = customWorlds, uid) {
   const uniqueWorlds = dedupeCustomWorlds(worlds);

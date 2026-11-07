@@ -6032,6 +6032,7 @@ window.showPublishedWorldsTab = function() {
 
 window.showCustomWorldsTab = function() {
   if (window.LootLinguaGuidedFirstJourney?.shouldAllowSurface?.('custom-worlds') === false) return;
+  window.ensureCustomWorldsFromCloud?.();
   ++publishedContentState.generation;
   publishedContentState.wordPager?.invalidate();
   publishedContentState.wordPager = null;

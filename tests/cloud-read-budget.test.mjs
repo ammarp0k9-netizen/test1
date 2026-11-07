@@ -64,3 +64,22 @@ test('rendering newest/oldest pages does not trigger a complete-dictionary scan'
     assert.equal(scans, 0);
   }
 });
+
+test('private worlds show the account cache immediately and ignore an empty unconfirmed SDK cache', () => {
+  const calls = []; let listener, subscriptions = 0;
+  const auth = { currentUser: { uid: 'a' } };
+  const root = { readCustomWorldsFromStorage: uid => { assert.equal(uid, 'a'); return [{ id: 'saved', name: 'Saved world' }]; }, applyCustomWorldsFromCloud: worlds => calls.push(worlds) };
+  const source = read('cloud.js');
+  const code = source.slice(source.indexOf('  function loadCustomWorldsFromCloud'), source.indexOf('  function loadGlobalWordMasteryFromCloud'));
+  vm.runInNewContext('let customWorldsUnsubscribe=null;' + code, { window: root, auth, db: {}, console: { info() {}, warn() {} },
+    collection() {}, onSnapshot(_query, callback) { subscriptions++; listener = callback; return () => {}; },
+  });
+  root.ensureCustomWorldsFromCloud(); root.ensureCustomWorldsFromCloud();
+  assert.equal(subscriptions, 1); assert.equal(calls.length, 1); assert.equal(calls[0][0].id, 'saved');
+  listener({ docs: [], metadata: { fromCache: true, hasPendingWrites: false } });
+  assert.equal(calls.length, 1);
+  listener({ docs: [], metadata: { fromCache: false, hasPendingWrites: false } });
+  assert.equal(calls.length, 2); assert.equal(calls[1].length, 0, 'a confirmed server deletion still clears the list');
+  auth.currentUser = { uid: 'b' }; listener({ docs: [], metadata: { fromCache: false } });
+  assert.equal(calls.length, 2, 'an old account cannot change the new account list');
+});

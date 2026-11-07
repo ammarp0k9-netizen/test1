@@ -1419,6 +1419,10 @@
     if (!user) return;
     if (customWorldsUnsubscribe) return;
     const listenerUid = user.uid;
+    const cachedWorlds = window.readCustomWorldsFromStorage?.(listenerUid) || [];
+    if (cachedWorlds.length && auth.currentUser?.uid === listenerUid) {
+      window.applyCustomWorldsFromCloud?.(cachedWorlds, { fromCache: true, hasPendingWrites: false });
+    }
     const q = collection(db, "users", user.uid, "customWorlds");
     console.info("[LootLingua customWorlds] listener starting", {
       uid: listenerUid,
@@ -1426,6 +1430,9 @@
     });
     customWorldsUnsubscribe = onSnapshot(q, (snapshot) => {
       if (auth.currentUser?.uid !== listenerUid) return;
+      // An empty SDK memory cache is not a confirmed deletion of the saved
+      // account list. Keep the instant local list until the server responds.
+      if (cachedWorlds.length && snapshot.metadata.fromCache && !snapshot.metadata.hasPendingWrites && !snapshot.docs.length) return;
       console.info("[LootLingua customWorlds] snapshot", {
         uid: listenerUid,
         count: snapshot.docs.length,
