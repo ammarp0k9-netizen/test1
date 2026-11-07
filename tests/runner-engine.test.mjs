@@ -51,7 +51,8 @@ test('a row crossing cannot charge several hearts during invulnerability and can
   const state = make(); entity(state, { kind: 'obstacle', obstacleType: 'wall' }); entity(state, { kind: 'obstacle', obstacleType: 'wall' });
   engine.update(state, 50); assert.equal(state.hearts, 2); engine.update(state, 50); assert.equal(state.hearts, 2);
   for (let index = 0; index < 25; index++) engine.update(state, 50);
-  entity(state, { kind: 'obstacle', obstacleType: 'wall' }); engine.update(state, 50); assert.equal(state.hearts, 1);
+  state.elapsed = Math.max(state.elapsed, state.invulnerableUntil + 1);
+  entity(state, { kind: 'obstacle', obstacleType: 'wall', lane: state.lane }); engine.update(state, 50); assert.equal(state.hearts, 1);
 });
 
 test('word gates resolve once at z=0; remaining in the correct lane counts without an extra action', () => {
@@ -251,10 +252,73 @@ test('row spacing gets tighter with progress but keeps a finite action recovery 
 });
 
 test('a gate remains a physical passage after answering, until its entire tunnel has passed',()=>{
-  const state=make(),gate=entity(state,{...engine.createWordGate(state),z:.1,correctLane:1});state.gate=gate;state.distance=100000;
+  const state=make(),gate=entity(state,{...engine.createWordGate(state),length:engine.constants.TUNNEL_LENGTH,z:.1,correctLane:1});state.gate=gate;state.distance=100000;
   engine.update(state,50);assert.equal(gate.resolved,true);assert.equal(gate.length,engine.constants.TUNNEL_LENGTH);
   for(let i=0;i<20;i++)engine.update(state,50);
   assert.equal(state.gate,gate);assert.ok(gate.z+gate.length>0);
   for(let i=0;i<20;i++)engine.update(state,50);
   assert.equal(state.gate,null);
+});
+
+test('assist off shows an impact freeze then passes the obstacle without steering or automatic actions', () => {
+  const state = make(); state.autoRecovery = false;
+  const box = entity(state, { kind: 'obstacle', obstacleType: 'wall' });
+  engine.update(state, 50); const z = box.z, distance = state.distance;
+  assert.equal(state.hearts, 2); assert.equal(state.impact.kind, 'hit'); assert.equal(state.impact.plan, null);
+  assert.ok(z >= 3); assert.equal(engine.move(state, 0), false);
+  for (let i = 0; i < 5; i++) engine.update(state, 50);
+  assert.equal(box.z, z); assert.equal(state.distance, distance);
+  for (let i = 0; i < 24; i++) engine.update(state, 50);
+  assert.ok(box.z < 0); assert.equal(state.lane, 1); assert.equal(state.action, 'run'); assert.equal(state.hearts, 2);
+});
+
+test('assistance selects one physically valid maneuver for jump, forced duck, and two adjacent crates', () => {
+  for (const speed of [14, 32]) for (const types of [['wall', 'low', 'wall'], ['wall', 'duckwall', 'wall'], ['wall', 'overhead', 'wall'], ['wall', 'wall', 'low']]) {
+    const state = make(); state.distance = (speed - 14) * 70;
+    types.forEach((obstacleType, lane) => entity(state, { kind: 'obstacle', obstacleType, lane }));
+    engine.update(state, 50); const plan = state.impact.plan;
+    assert.ok(plan, types.join(',')); assert.notEqual(types[plan.lane], 'wall');
+    assert.equal(plan.action, types[plan.lane] === 'low' ? 'jump' : 'slide');
+    for (let i = 0; i < 5; i++) engine.update(state, 50);
+    assert.equal(state.lane, plan.lane); assert.equal(state.action, plan.action);
+    for (let i = 0; i < 20; i++) engine.update(state, 50);
+    assert.equal(state.hearts, 2); assert.equal(state.action, 'run');
+    assert.equal(engine.move(state, state.lane === 0 ? 1 : 0), true, 'control returns to the player');
+  }
+});
+
+test('truck side entry recoils without losing a heart; the forward ramp and leaving the roof remain usable', () => {
+  const state = make(), truck = entity(state, { kind: 'obstacle', obstacleType: 'train', length: 20, lane: 2, z: -8, resolved: true });
+  assert.equal(engine.move(state, 2), false); assert.equal(state.lane, 1); assert.equal(state.hearts, 3); assert.equal(state.impact.kind, 'side');
+  for (let i = 0; i < 3; i++) engine.update(state, 50);
+  truck.z = 5; assert.equal(engine.move(state, 2), true);
+  for (let i = 0; i < 18; i++) engine.update(state, 50);
+  assert.ok(engine.getPose(state).floor > 0); assert.equal(engine.move(state, 1), true); assert.equal(engine.getPose(state).floor, 0);
+});
+
+test('assistance never mounts an adjacent truck side or chooses an impossible all-crate escape', () => {
+  const state = make();
+  entity(state, { kind: 'obstacle', obstacleType: 'wall', lane: 0 });
+  entity(state, { kind: 'obstacle', obstacleType: 'wall', lane: 1 });
+  entity(state, { kind: 'obstacle', obstacleType: 'train', lane: 2, length: 20, z: -8, resolved: true });
+  engine.update(state, 50); assert.equal(state.impact.plan, null);
+});
+
+test('normal hazards spawn in the distant fog range within the fixed pool', () => {
+  const state = make([]); state._nextRowAt = 0; engine.update(state, 50);
+  assert.ok(engine.constants.SPAWN_Z > 80); assert.ok(engine.constants.FAR > engine.constants.SPAWN_Z);
+  assert.ok(state.entities.every(item => item.z >= engine.constants.SPAWN_Z));
+  assert.equal(state.entities.length + state._pool.length, 48);
+});
+
+test('short tunnels contain no hazards; long tunnels seed hazards behind a safe entry and before the exit', () => {
+  let shorts = 0, longs = 0;
+  for (let seed = 1; seed <= 30; seed++) {
+    const state = engine.createState(words, { random: seeded(seed) }); state.distance = 1500; state._nextGateAt = 0;
+    engine.update(state, 50); const gate = state.gate;
+    const hazards = state.entities.filter(item => item.kind === 'obstacle');
+    if (gate.length < engine.constants.LONG_TUNNEL_MIN) { shorts++; assert.equal(hazards.length, 0); }
+    else { longs++; assert.ok(hazards.length > 0); for (const item of hazards) { assert.ok(item.z - gate.z >= 40); assert.ok(gate.z + gate.length - item.z >= 24); } }
+  }
+  assert.ok(shorts && longs);
 });

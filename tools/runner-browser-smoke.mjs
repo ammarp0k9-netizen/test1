@@ -139,12 +139,24 @@ try {
     await key('p'); await wait('LootLinguaGateRunner.getDiagnostics().distance>' + afterPause.distance, 'resume');
     if (width === 1280) {
       assert.equal(await evaluate('fixtureNotes'), 0, 'movement and jumping alone must not chime');
-      await delay(5400); await screenshot('desktop-running');
+      await wait('fixtureNotes>0', 'the farther spawned coins reach the runner', 12000); await screenshot('desktop-running');
       assert.ok(await evaluate('fixtureNotes>0'), 'collected coins create the chime');
       const notes = await evaluate(`document.querySelector('.llr-sound').click();window.fixtureNotes`);
       assert.equal(await evaluate(`document.querySelector('.llr-sound').getAttribute('aria-pressed')`), 'false');
       await delay(240); assert.equal(await evaluate('fixtureNotes'), notes, 'muting stops new notes');
     } else assert.equal(await evaluate(`document.querySelector('.llr-sound').getAttribute('aria-pressed')`), 'false', 'mute preference survives reopening');
+    await evaluate(`document.querySelector('.llr-settings-button').click();document.querySelector('.llr-recovery-help').click()`);
+    await wait(`document.querySelector('.llr-settings').contains(document.activeElement)`, 'settings focus');
+    const settingsDistance = (await evaluate('LootLinguaGateRunner.getDiagnostics()')).distance;
+    await delay(300);
+    assert.equal((await evaluate('LootLinguaGateRunner.getDiagnostics()')).distance, settingsDistance, 'the live run pauses behind the demonstration');
+    assert.equal(await evaluate(`(()=>{const p=document.querySelector('.llr-settings'),r=p.getBoundingClientRect();return document.elementFromPoint(r.left+10,r.top+10)?.closest('.llr-settings')===p&&document.querySelector('.llr-viewport').inert&&document.documentElement.scrollWidth<=innerWidth})()`), true);
+    await evaluate(`document.querySelector('.llr-recovery').click()`);
+    assert.equal(await evaluate(`localStorage.getItem('lootlingua.runner.recovery.v1')`), 'off');
+    await evaluate(`document.querySelector('.llr-recovery').click()`);
+    await screenshot(`recovery-help-${width}`);
+    await key('Escape');
+    await wait(`document.querySelector('.llr-settings').hidden&&!LootLinguaGateRunner.getDiagnostics().paused`, 'closing settings resumes the run');
     const state = await evaluate(`(()=>{const canvas=document.querySelector('.llr-canvas'),viewport=document.querySelector('.llr-viewport').getBoundingClientRect(),box=document.querySelector('.llr-game').getBoundingClientRect(),d=LootLinguaGateRunner.getDiagnostics();return{...d,viewportWidth:innerWidth,dpr:canvas.width/Math.round(viewport.width),backingPerCssPixel:canvas.width/canvas.clientWidth,dom:document.querySelector('.llr-overlay').querySelectorAll('*').length,overflow:document.documentElement.scrollWidth>innerWidth,insideViewport:box.left>=0&&box.right<=innerWidth&&box.top>=0&&box.bottom<=innerHeight}})()`);
     assert.ok(state.dpr <= 1.51 && state.entities <= 48 && state.dom <= intro.dom + 1 && !state.overflow && state.insideViewport, JSON.stringify(state));
     await key('Escape'); await wait('!document.querySelector(".llr-overlay")', 'exit cleanup');

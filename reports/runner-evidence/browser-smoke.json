@@ -8,18 +8,18 @@
         "inside": true,
         "locked": true,
         "inert": true,
-        "dom": 45
+        "dom": 63
       },
       "measured": {
         "lane": 1,
         "action": "run",
         "paused": false,
-        "entities": 12,
-        "distance": 110.55213716893971,
+        "entities": 18,
+        "distance": 114.38721646461916,
         "viewportWidth": 1280,
         "dpr": 1,
         "backingPerCssPixel": 1.0020661157024793,
-        "dom": 44,
+        "dom": 62,
         "overflow": false,
         "insideViewport": true
       }
@@ -31,18 +31,18 @@
         "inside": true,
         "locked": true,
         "inert": true,
-        "dom": 45
+        "dom": 63
       },
       "measured": {
         "lane": 1,
         "action": "slide",
         "paused": false,
-        "entities": 3,
-        "distance": 18.50584710717236,
+        "entities": 6,
+        "distance": 24.930854919919756,
         "viewportWidth": 390,
         "dpr": 1.5,
         "backingPerCssPixel": 1.5083333333333333,
-        "dom": 44,
+        "dom": 62,
         "overflow": false,
         "insideViewport": true
       }
@@ -54,18 +54,18 @@
         "inside": true,
         "locked": true,
         "inert": true,
-        "dom": 45
+        "dom": 63
       },
       "measured": {
         "lane": 1,
         "action": "slide",
         "paused": false,
         "entities": 3,
-        "distance": 21.460064840811505,
+        "distance": 22.41465423548142,
         "viewportWidth": 320,
         "dpr": 1.5,
         "backingPerCssPixel": 1.5103448275862068,
-        "dom": 44,
+        "dom": 62,
         "overflow": false,
         "insideViewport": true
       }
@@ -80,8 +80,8 @@
           "intent": {
             "type": "wallet-delta",
             "field": "runnerCoins",
-            "amount": 5,
-            "eventId": "22ad037d-712e-4ab1-9d26-5d7db08a3967"
+            "amount": 2,
+            "eventId": "93328b23-c0dd-40ed-b8a4-9e9a1b4b0b9f"
           }
         }
       ]
@@ -106,10 +106,10 @@
   "pool": {
     "simulatedSeconds": 120,
     "draws": 600,
-    "executionMs": 387.2000000011176,
-    "maxEntities": 18,
-    "pool": 37,
-    "active": 11,
+    "executionMs": 984.5,
+    "maxEntities": 28,
+    "pool": 24,
+    "active": 24,
     "total": 48,
     "maxEvents": 1,
     "dpr": 1.5,

@@ -1,7 +1,7 @@
 /* LootLingua Runner: visual projection only. No DOM reads, rewards or physics. */
 (function(root) {
   'use strict';
-  const FAR = 80;
+  const FAR = 112;
   const clamp = (value, low, high) => Math.max(low, Math.min(high, value));
   const laneColors = ['#53e5d2', '#f6c56a', '#82a8ff'];
   const palette = Object.freeze({ sky: '#071722', dark: '#061019', stone: '#24414b', edge: '#4d7272', gold: '#efc578', teal: '#5be6d1' });
@@ -362,16 +362,16 @@
       for (let i = 0; i < 4; i++) quad(context, near[i].x, near[i].y, near[i + 1].x, near[i + 1].y, far[i + 1].x, far[i + 1].y, far[i].x, far[i].y, i < 2 ? '#1b3541' : '#122a36');
       for (let offset = length; offset >= 0; offset -= 6) {
         const z = entity.z + offset;
-        if (z < NEAR) continue;
+        if (z < NEAR || z > FAR) continue;
         const arch = ring(z);
         context.strokeStyle = offset === length ? '#7ca7a0' : '#36575f'; context.lineWidth = Math.max(1, arch[0].scale * 4);
         context.beginPath(); context.moveTo(arch[0].x, arch[0].ground);
         for (const p of arch) context.lineTo(p.x, p.y);
         context.lineTo(arch[4].x, arch[4].ground); context.stroke();
       }
-      for (const offset of [8, 20, 32]) {
+      for (let offset = 8; offset < length; offset += 18) {
         const z = entity.z + offset;
-        if (z < NEAR) continue;
+        if (z < NEAR || z > FAR) continue;
         for (const lane of [-.6, 2.6]) {
           const p = project(lane, z), y = p.y - actorHeight * .95 * p.scale;
           context.fillStyle = '#dfbc70'; context.fillRect(p.x - p.scale * 2, y, p.scale * 4, actorHeight * .14 * p.scale);
@@ -379,6 +379,9 @@
       }
       context.restore();
       if (entity.z <= NEAR) return;
+      if (!entity.resolved) {
+        context.beginPath(); portalPath(entity.z); context.fillStyle = '#030a12'; context.fill();
+      }
       const left = project(-2.4, entity.z), right = project(4.4, entity.z), center = project(1, entity.z);
       const peak = center.y - actorHeight * (headroom + 1.8) * center.scale;
       const mountainPath = () => {
@@ -427,7 +430,14 @@
       const sway = jumping || sliding ? 0 : -Math.abs(Math.sin(phase)) * h * .025;
       shadow(p.x, p.y - pose.floor * h + h * .025, h * (sliding ? .34 : .25) * (1 - pose.lift * .18), h * .065, .4 - pose.lift * .18);
       context.save(); context.translate(p.x, p.y - elevation + sway);
-      if (Number(state.invulnerableUntil) > Number(state.elapsed) && Math.floor(activeTime / 80) % 2) context.globalAlpha = .58;
+      const impact = state.impact, age = impact ? state.elapsed - impact.startedAt : Infinity;
+      if (impact && age < 320) {
+        const kick = Math.sin(Math.PI * clamp(age / 320, 0, 1));
+        context.translate((impact.kind === 'side' ? -impact.direction : 0) * h * .14 * kick, h * .045 * kick);
+        context.rotate((impact.kind === 'side' ? -impact.direction * .2 : -.13) * kick);
+        if (impact.kind === 'hit' && age < 140) context.scale(1.07, .9);
+      }
+      if ((!impact || state.elapsed > impact.freezeUntil) && Number(state.invulnerableUntil) > Number(state.elapsed) && Math.floor(activeTime / 80) % 2) context.globalAlpha = .58;
       if (sliding) {
         // One leg extends toward the camera while the other stays folded.
         // All visual points remain within the shared .43-body crouch height.

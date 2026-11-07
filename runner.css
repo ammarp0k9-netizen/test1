@@ -1,4 +1,14 @@
 /* Loaded only when the player opens Loot Runner. */
+.llr-game { position: relative; }
+.llr-settings { position: absolute; z-index: 30; inset: 0; padding: clamp(14px, 4vw, 30px); background: #091b26; overflow-y: auto; overscroll-behavior: contain; display: flex; align-items: stretch; flex-direction: column; gap: 14px; }
+.llr-settings h2 { margin: 0; color: #f7d796; }
+.llr-settings p { margin: 0; font-size: 13px; line-height: 1.8; color: #d3e4df; }
+.llr-settings-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.llr-settings-actions button { flex: 1 1 130px; }
+.llr-recovery-demo { display: grid; gap: 10px; padding: 12px; border: 1px solid #45656b; border-radius: 12px; background: #06131e; }
+.llr-recovery-demo small { color: #a7c5c3; }
+.llr-recovery-demo strong { color: #f5d58e; }
+.llr-recovery-demo canvas { width: 100%; max-width: 520px; height: 240px; justify-self: center; border-radius: 8px; }
 .llr-overlay { z-index: 20000; padding: 12px; background: #030b13e8; backdrop-filter: none; overscroll-behavior: contain; }
 .llr-game { width: min(100%, 1000px); height: min(860px, calc(100dvh - 24px)); display: grid; grid-template-rows: auto minmax(0,1fr) auto auto; gap: 10px; padding: 14px; border: 1px solid #31555c; border-radius: 22px; background: #091b26; color: #eef8f5; box-shadow: 0 24px 70px #0008; font-family: inherit; overflow: hidden; direction: rtl; }
 .llr-game *, .llr-game *::before, .llr-game *::after { box-sizing: border-box; }

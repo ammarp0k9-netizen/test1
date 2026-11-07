@@ -95,11 +95,11 @@
     });
     const css = document.querySelector('link[data-runner-style]');
     const styles = css ? Promise.resolve() : new Promise((resolve, reject) => {
-      const link = document.createElement('link'); link.rel = 'stylesheet'; link.href = 'runner.css?v=20261107-runner-tunnel-1';
+      const link = document.createElement('link'); link.rel = 'stylesheet'; link.href = 'runner.css?v=20261107-runner-recovery-1';
       link.dataset.runnerStyle = ''; link.onload = resolve; link.onerror = () => { link.remove(); reject(new Error('Runner styles unavailable')); };
       document.head.append(link);
     });
-    resources = Promise.all([styles, module('LootLinguaRunnerEngine', 'js/runner-engine.js?v=20261107-runner-tunnel-1'), module('LootLinguaRunnerRenderer', 'js/runner-renderer.js?v=20261107-runner-tunnel-1')]).catch(error => { resources = null; throw error; });
+    resources = Promise.all([styles, module('LootLinguaRunnerEngine', 'js/runner-engine.js?v=20261107-runner-recovery-1'), module('LootLinguaRunnerRenderer', 'js/runner-renderer.js?v=20261107-runner-recovery-1')]).catch(error => { resources = null; throw error; });
     return resources;
   }
   function button(label, cls, action) {
@@ -158,6 +158,8 @@
     if (context?.source === 'dictionary' && context.isCurrent && !context.isCurrent()) return false;
 
     const E = engine(), state = E.createState(words); state.running = false;
+    const recoveryKey = 'lootlingua.runner.recovery.v1';
+    try { state.autoRecovery = localStorage.getItem(recoveryKey) !== 'off'; } catch {}
     const runId = window.crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(36).slice(2)}`;
     const returnFocus = document.activeElement;
     const overlay = node('div', 'runner-overlay llr-overlay'), game = node('section', 'llr-game');
@@ -169,7 +171,8 @@
     function syncSound() { sound.textContent = audio.enabled ? 'صوت ✓' : 'صوت ×'; sound.setAttribute('aria-label', audio.enabled ? 'كتم أصوات اللعبة' : 'تشغيل أصوات اللعبة'); sound.setAttribute('aria-pressed', String(audio.enabled)); }
     syncSound();
     const pause = button('إيقاف', 'llr-icon-button', () => setPaused(!state.paused)), exit = button('خروج', 'llr-icon-button', () => cleanup());
-    header.append(brand, sound, pause, exit);
+    const settingsButton = button('الإعدادات', 'llr-icon-button llr-settings-button', () => openSettings());
+    header.append(brand, settingsButton, pause, exit);
     const viewport = node('div', 'llr-viewport'), canvas = node('canvas', 'llr-canvas');
     canvas.setAttribute('aria-hidden', 'true'); viewport.tabIndex = 0;
     viewport.setAttribute('aria-label', 'ثلاثة مسارات. الأسهم يمين ويسار للحركة، أعلى للقفز وأسفل للانزلاق. على الهاتف اسحب في الاتجاه نفسه.');
@@ -194,6 +197,83 @@
     window.lockBackgroundScroll?.('runner');
     let renderer, resizeObserver, raf = 0, previous = 0, destroyed = false, settled = false, gateId = null, feedbackUntil = 0, hudKey = '', rect, lastDueCheck = 0, gesture = null;
     let gateZ = 0;
+    let settingsOpen = false, resumeAfterSettings = false, demoRenderer = null, demoRaf = 0, demoState = null, demoPrevious = 0, demoIndex = 0;
+    let demoPlaying = !window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+    const settings = node('section', 'llr-settings'); settings.hidden = true; settings.tabIndex = -1;
+    settings.setAttribute('role', 'dialog'); settings.setAttribute('aria-modal', 'true'); settings.setAttribute('aria-label', 'إعدادات الجري');
+    const closeSettingsButton = button('العودة إلى اللعبة', 'llr-secondary', closeSettings);
+    const recovery = button('', 'llr-secondary llr-recovery', () => {
+      state.autoRecovery = !state.autoRecovery;
+      try { localStorage.setItem(recoveryKey, state.autoRecovery ? 'on' : 'off'); } catch {}
+      syncRecovery();
+    });
+    function syncRecovery() { recovery.textContent = `مساعدة بعد الاصطدام: ${state.autoRecovery ? 'مفعّلة' : 'متوقفة'}`; recovery.setAttribute('aria-pressed', String(state.autoRecovery)); }
+    syncRecovery();
+    const demo = node('div', 'llr-recovery-demo'); demo.hidden = true;
+    const demoTitle = node('strong'), demoCanvas = node('canvas'); demoCanvas.setAttribute('aria-hidden', 'true');
+    const demoDescription = node('p'), demoControls = node('div', 'llr-settings-actions');
+    const demoScenarios = [
+      { title: 'صندوقان: اختيار ممر قابل للتجاوز', description: 'تتوقف الشخصية بعد الضربة، ثم تنتقل إلى الحاجز القابل للقفز، بعيدًا عن الصندوق الآخر.', types: ['wall', 'wall', 'low'] },
+      { title: 'لوح يفرض الانزلاق', description: 'بعد الضربة تنزلق الشخصية تحت اللوح. لا تختار القفز إلى جسمه.', types: ['wall', 'duckwall', 'wall'] },
+      { title: 'حاجز قصير: قفزة واحدة', description: 'تظهر الضربة أولًا، ثم قفزة لتجاوز الحاجز. بعدها يعود التحكم إليك.', types: ['wall', 'low', 'wall'] },
+      { title: 'عارضة: اختيار الانزلاق', description: 'العارضة تسمح بالقفز أو الانزلاق؛ هنا تختار المساعدة الانزلاق الآمن.', types: ['wall', 'overhead', 'wall'] },
+    ];
+    function resetDemo() {
+      demoState = E.createState([], { random: () => .5, autoRecovery: true });
+      demoState._nextRowAt = demoState._nextGateAt = Infinity;
+      const scenario = demoScenarios[demoIndex]; demoTitle.textContent = scenario.title; demoDescription.textContent = scenario.description;
+      scenario.types.forEach((type, lane) => {
+        const item = demoState._pool.pop(); Object.assign(item, { id: lane + 1, kind: 'obstacle', obstacleType: type, lane, z: 17, length: 0, active: true, bornAt: -1000, resolved: false }); demoState.entities.push(item);
+      });
+      demoRenderer?.draw(demoState);
+    }
+    function demoFrame(now) {
+      demoRaf = 0;
+      if (destroyed || !settingsOpen || demo.hidden || document.hidden || !demoPlaying) return;
+      if (!demoPrevious) demoPrevious = now;
+      if (now - demoPrevious >= 32) {
+        E.update(demoState, Math.min(50, now - demoPrevious)); demoPrevious = now;
+        demoRenderer.draw(demoState);
+        if (demoState.elapsed > 3600) resetDemo();
+      }
+      demoRaf = requestAnimationFrame(demoFrame);
+    }
+    function resumeDemo() { cancelAnimationFrame(demoRaf); demoPrevious = 0; if (settingsOpen && !demo.hidden && !document.hidden && demoPlaying) demoRaf = requestAnimationFrame(demoFrame); }
+    const demoPlay = button(demoPlaying ? 'إيقاف العرض' : 'تشغيل العرض', 'llr-icon-button', () => { demoPlaying = !demoPlaying; demoPlay.textContent = demoPlaying ? 'إيقاف العرض' : 'تشغيل العرض'; resumeDemo(); });
+    demoControls.append(button('المثال السابق', 'llr-icon-button', () => { demoIndex = (demoIndex + 3) % 4; resetDemo(); }), demoPlay,
+      button('المثال التالي', 'llr-icon-button', () => { demoIndex = (demoIndex + 1) % 4; resetDemo(); }));
+    demo.append(node('small', '', 'عرض توضيحي — لا يغيّر تقدمك'), demoTitle, demoCanvas, demoDescription, demoControls);
+    const help = button('ⓘ كيف تعمل المساعدة؟', 'llr-secondary llr-recovery-help', () => {
+      demo.hidden = !demo.hidden; help.setAttribute('aria-expanded', String(!demo.hidden));
+      if (!demo.hidden && !demoRenderer) { demoRenderer = window.LootLinguaRunnerRenderer.createRenderer(demoCanvas, { width: Math.max(240, Math.min(520, settings.clientWidth - 40)), height: 240, dprCap: 1 }); resetDemo(); }
+      resumeDemo();
+    });
+    help.setAttribute('aria-expanded', 'false');
+    const settingActions = node('div', 'llr-settings-actions'); settingActions.append(sound, recovery, help);
+    settings.append(node('h2', '', 'إعدادات الجري'), closeSettingsButton, settingActions,
+      node('p', '', 'المساعدة لا تمنع خسارة القلب: بعد الاصطدام تتوقف الحركة للحظة، ثم تختار حركة تجاوز واحدة آمنة ويعود التحكم إليك. إذا لم تجد مسارًا آمنًا تمر الشخصية مع الوميض.'),
+      node('p', '', 'عند إيقافها: ضربة وتوقّف قصير ثم وميض ومرور عبر العائق، دون تغيير المسار أو قفز أو انزلاق تلقائي. الاصطدام بجانب الشاحنة يصدّك عن جانبها دون خسارة قلب.'), demo);
+    game.append(settings);
+    function setFocusSurface(dialog, onEscape) {
+      window.LootLinguaModalFocus?.close(overlay, { restoreFocus: false });
+      window.LootLinguaModalFocus?.open(overlay, { dialog, onEscape });
+    }
+    function openSettings() {
+      if (settingsOpen || destroyed) return;
+      resumeAfterSettings = state.running && !state.paused && !state.over;
+      if (resumeAfterSettings) setPaused(true);
+      settingsOpen = true; settings.hidden = false; gesture = null;
+      for (const el of [header, viewport, controls, hint]) el.inert = true;
+      setFocusSurface(settings, closeSettings); closeSettingsButton.focus({ preventScroll: true }); resumeDemo();
+    }
+    function closeSettings() {
+      if (!settingsOpen) return;
+      settingsOpen = false; settings.hidden = true; cancelAnimationFrame(demoRaf);
+      for (const el of [header, viewport, controls, hint]) el.inert = false;
+      setFocusSurface(game, cleanup);
+      if (resumeAfterSettings && !document.hidden) setPaused(false);
+      else settingsButton.focus({ preventScroll: true });
+    }
     const startingBest = RunnerBestDistance.value();
     const resize = () => { rect = viewport.getBoundingClientRect(); renderer?.resize(rect.width, rect.height); if (renderer) renderer.draw(state); };
     const saveRun = () => {
@@ -203,6 +283,7 @@
     };
     function cleanup() {
       if (destroyed) return; saveRun(); destroyed = true; cancelAnimationFrame(raf);
+      cancelAnimationFrame(demoRaf); demoRenderer?.destroy();
       resizeObserver?.disconnect(); renderer?.destroy(); audio.destroy();
       window.removeEventListener('resize', resize); window.removeEventListener('keydown', keyboard, true);
       document.removeEventListener('visibilitychange', visibility);
@@ -268,13 +349,14 @@
     }
     function keyboard(event) {
       if (event.key === 'Tab') return;
+      if (settingsOpen) { if (event.key === 'Escape') { event.preventDefault(); event.stopImmediatePropagation(); closeSettings(); } return; }
       if (event.key === 'Escape') { event.preventDefault(); event.stopImmediatePropagation(); cleanup(); return; }
       if (event.target?.closest?.('button') && ['Enter', ' '].includes(event.key)) return;
       const key = event.key.toLowerCase();
       const actions = { arrowleft: () => move(state.lane - 1), a: () => move(state.lane - 1), arrowright: () => move(state.lane + 1), d: () => move(state.lane + 1), arrowup: () => E.jump(state), w: () => E.jump(state), ' ': () => E.jump(state), arrowdown: () => E.slide(state), s: () => E.slide(state), p: () => setPaused(!state.paused) };
       if (actions[key]) { event.preventDefault(); event.stopImmediatePropagation(); if (!event.repeat) actions[key](); }
     }
-    const visibility = () => { if (document.hidden) setPaused(true); };
+    const visibility = () => { if (document.hidden) setPaused(true); resumeDemo(); };
     const authChanged = () => { if (!runnerOwnerCurrent(owner)) cleanup(); };
     viewport.addEventListener('pointerdown', event => {
       if (event.target.closest('button') || (event.button != null && event.button !== 0)) return;

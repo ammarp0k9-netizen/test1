@@ -1,9 +1,10 @@
 (function(root) {
   'use strict';
   const LANES = 3, MAX_HEARTS = 3, MAX_ENTITIES = 48, MAX_EVENTS = 16;
-  const FAR = 80, SPAWN_Z = 64, BASE_SPEED = 14, MAX_SPEED = 32;
+  const FAR = 112, SPAWN_Z = 96, GATE_SPAWN_Z = 64, BASE_SPEED = 14, MAX_SPEED = 32;
   const NEAR = -15, VEHICLE_HEIGHT = 1.05, VEHICLE_RAMP = 6, VEHICLE_EXIT = 3;
-  const TUNNEL_LENGTH = 42, MIN_ROW_MS = 780;
+  const TUNNEL_LENGTH = 42, LONG_TUNNEL_MIN = 240, MIN_ROW_MS = 780;
+  const IMPACT_FREEZE_MS = 260, RECOVERY_START_MS = 140;
   // Templates describe relationships, then lanes are shuffled. A truck can
   // accompany any normal hazard, not just another truck.
   const FORMATIONS = [
@@ -41,6 +42,7 @@
       words: normalized, lane: 1, hearts: MAX_HEARTS, coins: 0,
       distance: 0, speed: BASE_SPEED, elapsed: 0, running: true, paused: false, over: false,
       action: 'run', actionStartedAt: 0, actionUntil: 0, invulnerableUntil: 0,
+      autoRecovery: options.autoRecovery !== false, impact: null, _sideBumpUntil: 0,
       entities: [], gate: null, feedback: null, events: [],
       _random: rng, _gateLanes: [], _lastGateLane: -1, _queuedAction: null, _formationBag: [],
       _pool: Array.from({ length: MAX_ENTITIES }, () => ({})), _nextId: 1,
@@ -54,13 +56,22 @@
   }
   function move(state, lane) {
     const value = Number(lane);
-    if (!usable(state) || !Number.isFinite(value)) return false;
+    if (!usable(state) || !Number.isFinite(value) || state.impact && state.elapsed < state.impact.freezeUntil) return false;
     const next = clamp(Math.round(value), 0, LANES - 1);
     if (next === state.lane) return false;
+    if (!lanePathOpen(state, next)) {
+      if (state.elapsed >= state._sideBumpUntil) {
+        state.impact = { kind: 'side', direction: Math.sign(next - state.lane), startedAt: state.elapsed, freezeUntil: state.elapsed + 90, endAt: state.elapsed + 320, applied: true };
+        state._sideBumpUntil = state.elapsed + 420;
+        state._nextRowAt += 90; state._nextGateAt += 90;
+        emit(state, { type: 'side-bump' });
+      }
+      return false;
+    }
     state.lane = next; return true;
   }
   function startAction(state, action, duration) {
-    if (!usable(state)) return false;
+    if (!usable(state) || state.impact && state.elapsed < state.impact.freezeUntil) return false;
     const current = getAction(state);
     // Jump cancels a crouch; airborne input never resets the jump arc.
     if (current !== 'run' && !(current === 'slide' && action === 'jump')) {
@@ -81,6 +92,42 @@
     const position = -z, length = Number(entity.length) || 20;
     if (position < 0 || position > length + VEHICLE_EXIT) return 0;
     return VEHICLE_HEIGHT * Math.max(0, Math.min(1, position / VEHICLE_RAMP, (length + VEHICLE_EXIT - position) / VEHICLE_EXIT));
+  }
+  function lanePathOpen(state, lane) {
+    const direction = Math.sign(lane - state.lane);
+    if (!direction) return true;
+    for (let step = state.lane + direction; direction > 0 ? step <= lane : step >= lane; step += direction) {
+      if (state.entities.some(entity => entity.obstacleType === 'train' && entity.lane === step && entity.z <= 0 && entity.z + entity.length + VEHICLE_EXIT > 0)) return false;
+    }
+    return true;
+  }
+  function clearsObstacle(type, pose) {
+    return type === 'train' || type === 'duckwall' && pose.action === 'slide' && pose.top <= .55 ||
+      type === 'low' && pose.feet >= .37 || type === 'overhead' && (pose.top <= .6 || pose.feet >= .88) || type === 'wall' && pose.feet >= 1.4;
+  }
+  function chooseRecovery(state, collided) {
+    const speed = Math.max(BASE_SPEED, state.speed), freezeEnd = state.elapsed + IMPACT_FREEZE_MS;
+    const actions = collided.obstacleType === 'overhead' || collided.obstacleType === 'duckwall' ? ['slide', 'jump', 'run'] : ['jump', 'run', 'slide'];
+    let best = null;
+    for (let lane = 0; lane < LANES; lane++) {
+      if (!lanePathOpen(state, lane)) continue;
+      for (const action of actions) {
+        const duration = action === 'jump' ? JUMP_MS : action === 'slide' ? SLIDE_MS : 0;
+        const simulated = { ...state, lane, elapsed: freezeEnd, action, actionStartedAt: state.elapsed + RECOVERY_START_MS, actionUntil: state.elapsed + RECOVERY_START_MS + duration };
+        let safe = true, risk = 0;
+        for (const entity of state.entities) {
+          if (entity.kind !== 'obstacle' || entity.lane !== lane || entity.z < -1 || entity.z > speed * .9) continue;
+          const at = freezeEnd + Math.max(0, entity.z) / speed * 1000;
+          if (!clearsObstacle(entity.obstacleType, getPose(simulated, at))) {
+            if (entity === collided || entity.obstacleType === 'wall' || entity.z <= speed * .5) { safe = false; break; }
+            risk += 4;
+          }
+        }
+        const cost = Math.abs(lane - state.lane) * 2 + (action === 'run' ? 0 : 1) + risk;
+        if (safe && (!best || cost < best.cost)) best = { lane, action, cost };
+      }
+    }
+    return best;
   }
   // Shared by collision and drawing: heights are measured in standing bodies.
   function getPose(state, at = state.elapsed) {
@@ -131,7 +178,8 @@
       [options[index], options[other]] = [options[other], options[index]];
     }
     options.splice(correctLane, 0, prompt.meaning);
-    return { kind: 'gate', lane: 1, z: SPAWN_Z, length: TUNNEL_LENGTH, word: prompt.word,
+    const length = random(state) < .45 ? TUNNEL_LENGTH : choose(state, [256, 288, 320]);
+    return { kind: 'gate', lane: 1, z: GATE_SPAWN_Z, length, word: prompt.word,
       options, correctLane: options.indexOf(prompt.meaning), correctMeaning: prompt.meaning };
   }
   function hasGateWords(state) { return state._canGate; }
@@ -147,18 +195,26 @@
       if (entity.kind === 'obstacle' && entity.z > 0) retire(state, index);
     }
     state.gate = gate;
+    if (gate.length >= LONG_TUNNEL_MIN) {
+      state._escapeLane = gate.correctLane;
+      spawnRow(state, gate.z + 48);
+      spawnRow(state, gate.z + 80);
+    }
     state._nextGateAt = state.elapsed + 30000 + random(state) * 18000;
     emit(state, { type: 'gate-approach', id: gate.id, word: gate.word });
   }
-  function spawnRow(state) {
-    if (state.elapsed < state._nextRowAt || state.elapsed < state._safeUntil) return;
-    const reading = state.gate && !state.gate.resolved;
+  function spawnRow(state, seededZ = null) {
+    const seeded = Number.isFinite(seededZ);
+    if (!seeded && (state.elapsed < state._nextRowAt || state.elapsed < state._safeUntil)) return;
+    const reading = state.gate && !state.gate.resolved && !seeded;
     const clearance = SPAWN_Z / state.speed * 1000 + 350;
     // Do not queue hidden hazards behind the reading veil: returning to full
     // speed would compress their spacing and reveal them too close together.
-    const draining = reading || hasGateWords(state) && state._nextGateAt - state.elapsed < clearance;
-    const spawnZ = SPAWN_Z;
-    const escapeOptions = [0, 1, 2].filter(lane => Math.abs(lane - state._escapeLane) <= 1);
+    const spawnZ = seeded ? seededZ : SPAWN_Z;
+    const passage = state.gate, insideTunnel = passage && spawnZ >= passage.z && spawnZ <= passage.z + passage.length;
+    const tunnelSafe = !insideTunnel || passage.length >= LONG_TUNNEL_MIN && spawnZ - passage.z >= 40 && passage.z + passage.length - spawnZ >= 24;
+    const draining = reading || !tunnelSafe || !seeded && hasGateWords(state) && state._nextGateAt - state.elapsed < clearance;
+    const escapeOptions = [0, 1, 2].filter(lane => Math.abs(lane - state._escapeLane) <= 1 && (lane === state._escapeLane || !state.entities.some(item => item.obstacleType === 'train' && item.lane === lane && item.z < spawnZ && item.z + item.length + VEHICLE_EXIT > spawnZ)));
     const escape = choose(state, escapeOptions);
     const blocked = [0, 1, 2].filter(lane => lane !== escape);
     if (random(state) > .5) blocked.reverse();
@@ -197,7 +253,7 @@
       const type = layout[lane];
       if (!type || occupiedByTruck(lane)) continue;
       const z = spawnZ + (type === 'train' && random(state) < .5 ? lane * 4 : 0);
-      allocate(state, { kind: 'obstacle', obstacleType: type, length: type === 'train' ? 20 : 0, lane, z, row, safeRoute: lane === route });
+      allocate(state, { kind: 'obstacle', obstacleType: type, length: type === 'train' ? 20 : 0, lane, z, row, safeRoute: lane === route, routeLane: route, tunnelId: insideTunnel ? passage.id : null });
       if (type === 'train') for (const offset of [10, 15]) allocate(state, { kind: 'coin', lane, z: z + offset, height: VEHICLE_HEIGHT + .44, row });
       if (['low', 'overhead', 'duckwall'].includes(type) && random(state) < .65) {
         for (const offset of [0, 2]) allocate(state, { kind: 'coin', lane, z: spawnZ + offset,
@@ -208,14 +264,26 @@
       allocate(state, { kind: 'coin', lane: escape, z: spawnZ + 3, row });
       allocate(state, { kind: 'coin', lane: escape, z: spawnZ + 6, row });
     }
-    state._escapeLane = escape;
-    state._nextRowAt = state.elapsed + Math.max(MIN_ROW_MS, 1150 - difficulty * 370) + random(state) * 160;
+    if (!draining) state._escapeLane = escape;
+    if (!seeded) state._nextRowAt = state.elapsed + Math.max(MIN_ROW_MS, 1150 - difficulty * 370) + random(state) * 160;
   }
-  function damage(state, at, cause) {
+  function damage(state, at, cause, obstacle) {
     if (at < state.invulnerableUntil || state.over) return false;
     state.hearts = Math.max(0, state.hearts - 1);
     state.invulnerableUntil = at + INVULNERABLE_MS;
     emit(state, { type: 'hit', cause, hearts: state.hearts });
+    if (obstacle && state.hearts) {
+      // Recoil the whole scene together, keeping row geometry and tunnel depth intact.
+      const recoil = Math.max(0, 3 - obstacle.z);
+      for (const item of state.entities) item.z += recoil;
+      state.distance = Math.max(0, state.distance - recoil);
+      state.action = 'run'; state.actionUntil = 0; state._queuedAction = null;
+      const plan = state.autoRecovery ? chooseRecovery(state, obstacle) : null;
+      state.impact = { kind: 'hit', startedAt: state.elapsed, recoverAt: state.elapsed + RECOVERY_START_MS,
+        freezeUntil: state.elapsed + IMPACT_FREEZE_MS, endAt: state.elapsed + 650, plan, applied: false };
+      state._nextRowAt += IMPACT_FREEZE_MS; state._nextGateAt += IMPACT_FREEZE_MS;
+      state.invulnerableUntil += IMPACT_FREEZE_MS;
+    }
     if (!state.hearts) { state.over = true; state.running = false; emit(state, { type: 'over' }); }
     return true;
   }
@@ -236,12 +304,7 @@
       }
     } else if (entity.lane === state.lane && entity.kind === 'obstacle') {
       const pose = getPose(state, at);
-      const cleared = entity.obstacleType === 'train' ||
-        entity.obstacleType === 'duckwall' && pose.action === 'slide' && pose.top <= .55 ||
-        entity.obstacleType === 'low' && pose.feet >= .37 ||
-        entity.obstacleType === 'overhead' && (pose.top <= .6 || pose.feet >= .88) ||
-        entity.obstacleType === 'wall' && pose.feet >= 1.4;
-      if (!cleared) damage(state, at, entity.obstacleType);
+      if (!clearsObstacle(entity.obstacleType, pose)) damage(state, at, entity.obstacleType, entity);
     }
   }
   function update(state, dtMs) {
@@ -251,16 +314,31 @@
     const before = state.elapsed;
     state.elapsed += dt;
     if (state.feedback && state.elapsed >= state.feedback.until) state.feedback = null;
+    const impact = state.impact;
+    if (impact) {
+      if (!impact.applied && state.elapsed >= impact.recoverAt) {
+        impact.applied = true;
+        if (impact.plan && state.autoRecovery) {
+          state.lane = impact.plan.lane;
+          state.action = impact.plan.action; state.actionStartedAt = impact.recoverAt;
+          state.actionUntil = impact.recoverAt + (state.action === 'jump' ? JUMP_MS : state.action === 'slide' ? SLIDE_MS : 0);
+          emit(state, { type: 'recovery', action: state.action, lane: state.lane });
+        }
+      }
+      if (state.elapsed <= impact.freezeUntil) return state;
+      if (state.elapsed >= impact.endAt) state.impact = null;
+    }
     maybeGate(state);
     const desired = Math.min(MAX_SPEED, BASE_SPEED + state.distance / 70);
     state.speed = state.gate && !state.gate.resolved ? 12 : desired;
-    const travelled = state.speed * dt / 1000;
+    const movingDt = impact ? Math.min(dt, Math.max(0, state.elapsed - impact.freezeUntil)) : dt;
+    const travelled = state.speed * movingDt / 1000;
     state.distance += travelled;
     for (const entity of state.entities) entity.z -= travelled;
     for (const entity of state.entities) {
       const oldZ = entity.z + travelled;
       if (!entity.resolved && oldZ > 0 && entity.z <= 0) cross(state, entity, before + dt * oldZ / travelled);
-      if (state.over) break;
+      if (state.over || state.impact && state.elapsed <= state.impact.freezeUntil) break;
     }
     for (let index = state.entities.length - 1; index >= 0; index--) {
       const entity = state.entities[index], span = (entity.length || 0) + (entity.obstacleType === 'train' ? VEHICLE_EXIT : 0);
@@ -275,6 +353,6 @@
     return state;
   }
   root.LootLinguaRunnerEngine = Object.freeze({ createState, update, move, jump, slide, getAction, getPose, vehicleSurface, normalizeWords, createWordGate,
-    constants: Object.freeze({ LANES, MAX_HEARTS, MAX_ENTITIES, MAX_EVENTS, FAR, NEAR, VEHICLE_HEIGHT, VEHICLE_RAMP, VEHICLE_EXIT, TUNNEL_LENGTH, MIN_ROW_MS, SPAWN_Z, BASE_SPEED, MAX_SPEED, JUMP_MS, SLIDE_MS, INVULNERABLE_MS }),
+    constants: Object.freeze({ LANES, MAX_HEARTS, MAX_ENTITIES, MAX_EVENTS, FAR, NEAR, VEHICLE_HEIGHT, VEHICLE_RAMP, VEHICLE_EXIT, TUNNEL_LENGTH, LONG_TUNNEL_MIN, MIN_ROW_MS, SPAWN_Z, BASE_SPEED, MAX_SPEED, JUMP_MS, SLIDE_MS, INVULNERABLE_MS }),
   });
 })(window);
