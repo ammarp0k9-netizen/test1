@@ -95,11 +95,11 @@
     });
     const css = document.querySelector('link[data-runner-style]');
     const styles = css ? Promise.resolve() : new Promise((resolve, reject) => {
-      const link = document.createElement('link'); link.rel = 'stylesheet'; link.href = 'runner.css?v=20261107-runner-speech-1';
+      const link = document.createElement('link'); link.rel = 'stylesheet'; link.href = 'runner.css?v=20261107-runner-entry-1';
       link.dataset.runnerStyle = ''; link.onload = resolve; link.onerror = () => { link.remove(); reject(new Error('Runner styles unavailable')); };
       document.head.append(link);
     });
-    resources = Promise.all([styles, module('LootLinguaRunnerEngine', 'js/runner-engine.js?v=20261107-runner-speech-1'), module('LootLinguaRunnerRenderer', 'js/runner-renderer.js?v=20261107-runner-speech-1')]).catch(error => { resources = null; throw error; });
+    resources = Promise.all([styles, module('LootLinguaRunnerEngine', 'js/runner-engine.js?v=20261107-runner-entry-1'), module('LootLinguaRunnerRenderer', 'js/runner-renderer.js?v=20261107-runner-entry-1')]).catch(error => { resources = null; throw error; });
     return resources;
   }
   function button(label, cls, action) {
@@ -387,7 +387,7 @@
       } else { challenge.hidden = options.hidden = true; gateId = null; speech.cancel(); }
       if (state.feedback && state.feedback.until !== feedbackUntil) {
         feedbackUntil = state.feedback.until;
-        status.textContent = state.feedback.correct ? 'بوابة صحيحة! أحسنت.' : `المعنى الصحيح: ${state.feedback.correctMeaning || ''}`;
+        status.textContent = state.feedback.correct ? 'بوابة صحيحة! أحسنت.' : `إجابة خاطئة — المعنى الصحيح: ${state.feedback.correctMeaning || ''}`;
         status.dataset.tone = state.feedback.correct ? 'correct' : 'wrong';
       } else if (!state.feedback) {
         const nearby = state.entities.find(item => item.kind === 'obstacle' && item.lane === state.lane && item.z > 0 && item.z / state.speed < (item.obstacleType === 'low' ? .48 : ['overhead', 'duckwall'].includes(item.obstacleType) ? .4 : 1.1));

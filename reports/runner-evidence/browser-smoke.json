@@ -15,7 +15,7 @@
         "action": "run",
         "paused": false,
         "entities": 21,
-        "distance": 116.0607143017581,
+        "distance": 116.23194366129307,
         "viewportWidth": 1280,
         "dpr": 1,
         "backingPerCssPixel": 1.0020661157024793,
@@ -38,7 +38,7 @@
         "action": "slide",
         "paused": false,
         "entities": 3,
-        "distance": 21.786017967308645,
+        "distance": 22.0881952556121,
         "viewportWidth": 390,
         "dpr": 1.5,
         "backingPerCssPixel": 1.5083333333333333,
@@ -61,7 +61,7 @@
         "action": "slide",
         "paused": false,
         "entities": 3,
-        "distance": 21.48018017347971,
+        "distance": 18.925600935842038,
         "viewportWidth": 320,
         "dpr": 1.5,
         "backingPerCssPixel": 1.5103448275862068,
@@ -81,7 +81,7 @@
             "type": "wallet-delta",
             "field": "runnerCoins",
             "amount": 2,
-            "eventId": "e1e10ebe-6dab-4d2b-a5ea-7b6d690140f8"
+            "eventId": "62af83d9-f4a4-4b28-81b7-fb29b05d8e5f"
           }
         }
       ]
@@ -108,6 +108,10 @@
       "approaching": 992
     },
     {
+      "name": "opaque distant truck",
+      "changedPixels": 0
+    },
+    {
       "name": "real dictionary settings lock at 9, unlock at 10, select 5 words, launch without published gate calls and restore ordinary quiz settings",
       "passed": true
     }
@@ -115,8 +119,8 @@
   "pool": {
     "simulatedSeconds": 120,
     "draws": 600,
-    "executionMs": 861.0999999996275,
-    "maxEntities": 28,
+    "executionMs": 756,
+    "maxEntities": 29,
     "pool": 24,
     "active": 24,
     "total": 48,

@@ -162,6 +162,8 @@ try {
       assert.equal(await evaluate(`localStorage.getItem('lootlingua.runner.hints.v1')`), 'off');
     }
     const settingsDistance = (await evaluate('LootLinguaGateRunner.getDiagnostics()')).distance;
+    const stableWallet = await evaluate(`(()=>{const el=document.querySelectorAll('.llr-hud span')[1],old=el.textContent,a=el.getBoundingClientRect();el.textContent='99999 عملة';const b=el.getBoundingClientRect();el.textContent=old;return a.x===b.x&&a.width===b.width})()`);
+    assert.equal(stableWallet, true, 'the coin HUD stays fixed when the digit count changes');
     await delay(300);
     assert.equal((await evaluate('LootLinguaGateRunner.getDiagnostics()')).distance, settingsDistance, 'the live run pauses behind the demonstration');
     assert.equal(await evaluate(`(()=>{const p=document.querySelector('.llr-settings'),r=p.getBoundingClientRect();return document.elementFromPoint(r.left+10,r.top+10)?.closest('.llr-settings')===p&&document.querySelector('.llr-viewport').inert&&document.documentElement.scrollWidth<=innerWidth})()`), true);
@@ -250,6 +252,9 @@ try {
       assert.equal(reveal.atSpawn, 0, 'allocation behind fog produces no visible pixel change');
       assert.ok(reveal.approaching > 0, 'the existing obstacle gradually emerges while approaching');
       report.checks.push({name:'distance-driven fog reveal',...reveal});
+      const opaqueTruck = await evaluate(`(()=>{const c=document.querySelector('.llr-canvas'),ctx=c.getContext('2d');fixtureVisualState.entities=[{id:1,kind:'obstacle',obstacleType:'train',lane:1,z:82,length:20,active:true,bornAt:0}];fixtureVisual.draw(fixtureVisualState);const before=ctx.getImageData(0,0,c.width,c.height).data;fixtureVisualState.entities.push({id:2,kind:'coin',lane:1,z:92,height:.44,active:true});fixtureVisual.draw(fixtureVisualState);const after=ctx.getImageData(0,0,c.width,c.height).data;let n=0;for(let i=0;i<before.length;i+=4)if(before[i]!==after[i]||before[i+1]!==after[i+1]||before[i+2]!==after[i+2])n++;return n})()`);
+      assert.equal(opaqueTruck, 0, 'a distant truck is solid and hides ground-level coins behind its body');
+      report.checks.push({name:'opaque distant truck',changedPixels:opaqueTruck});
     }
     await screenshot(imageName);
     const pixels = await evaluate(`(()=>{const c=document.querySelector('.llr-canvas'),data=c.getContext('2d').getImageData(0,0,c.width,c.height).data;const colors=new Set();for(let i=0;i<data.length;i+=400)colors.add(data[i]+','+data[i+1]+','+data[i+2]);return colors.size})()`);

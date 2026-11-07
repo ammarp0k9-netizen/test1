@@ -535,9 +535,12 @@
     }
     function opacity(entity, elapsed) {
       const span = (entity.length || 0) + (entity.obstacleType === 'train' ? VEHICLE_EXIT : 0);
-      const birth = Number.isFinite(entity.bornAt) ? clamp((elapsed - entity.bornAt) / 260, 0, 1) : 1;
+      const vehicle = entity.obstacleType === 'train';
+      const birth = !vehicle && Number.isFinite(entity.bornAt) ? clamp((elapsed - entity.bornAt) / 260, 0, 1) : 1;
       const spawn = root.LootLinguaRunnerEngine.constants.SPAWN_Z;
-      const progress = clamp((spawn - entity.z) / 34, 0, 1);
+      // Vehicle faces become fully opaque within the distant fog strip,
+      // before approaching the visible road; no see-through roof or sides.
+      const progress = clamp((spawn - entity.z) / (vehicle ? 6 : 34), 0, 1);
       // Zero visibility at allocation, with a zero-slope reveal driven by
       // distance, not an observable timed fade at the spawn plane.
       const reveal = entity.kind === 'gate' ? clamp((FAR - entity.z) / 10, 0, 1) : progress * progress * (3 - 2 * progress);

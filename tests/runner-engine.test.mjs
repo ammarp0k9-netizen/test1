@@ -68,11 +68,16 @@ test('word gates resolve once at z=0; remaining in the correct lane counts witho
   engine.update(fixed, 50); assert.equal(fixed.feedback.correct, true);
 });
 
-test('a wrong gate crossing loses one heart and supplies the correct meaning for feedback', () => {
+test('a wrong gate reports feedback first and loses a heart only on its physical crate', () => {
   const state = make(), gate = entity(state, { ...engine.createWordGate(state), z: .1, correctLane: 0 }); state.gate = gate;
-  engine.update(state, 50); assert.equal(state.hearts, 2); assert.equal(state.feedback.correct, false);
+  engine.update(state, 50); assert.equal(state.hearts, 3); assert.equal(state.feedback.correct, false);
   assert.equal(state.feedback.correctMeaning, gate.correctMeaning); assert.equal(state.feedback.chosenLane, 1);
-  engine.update(state, 50); assert.equal(state.hearts, 2);
+  assert.equal(state.entities.filter(item => item.gateBarrier).length, 2);
+  assert.equal(engine.move(state, 0), false);
+  for (let i = 0; i < 12 && state.hearts === 3; i++) engine.update(state, 50);
+  assert.equal(state.hearts, 2); assert.equal(gate.entryReleased, true); assert.equal(state.impact.kind, 'hit');
+  for (let i = 0; i < 4; i++) engine.update(state, 50);
+  assert.equal(state.lane, 0, 'recovery can reach the correct route after the crate collision');
 });
 
 test('gates have three distinct meanings and at least four seconds of reading time at maximum difficulty', () => {
@@ -86,7 +91,7 @@ test('gates have three distinct meanings and at least four seconds of reading ti
 test('reading gates keep obstacles behind them and coins collect once in the player lane only', () => {
   const state = make(); state._nextRowAt = 0; state._nextGateAt = 0;
   engine.update(state, 50); assert.ok(state.gate);
-  for (let index = 0; index < 60; index++) { engine.update(state, 50); assert.ok(state.entities.every(item => item.kind !== 'obstacle' || item.z > state.gate.z + 10)); }
+  for (let index = 0; index < 60; index++) { engine.update(state, 50); assert.ok(state.entities.every(item => item.kind !== 'obstacle' || item.gateBarrier || item.z > state.gate.z + 10)); }
   const coins = make(); entity(coins, { kind: 'coin' }); entity(coins, { kind: 'coin', lane: 0 }); engine.update(coins, 50);
   assert.equal(coins.coins, 1); engine.update(coins, 50); assert.equal(coins.coins, 1);
 });
@@ -182,12 +187,13 @@ test('even at maximum speed, crossing a gate leaves over three seconds before th
   engine.update(state, 50);
   for (let frame = 0; frame < 80; frame++) {
     engine.update(state, 50);
-    assert.ok(state.entities.every(item => item.kind !== 'obstacle'));
+    assert.ok(state.entities.every(item => item.kind !== 'obstacle' || item.gateBarrier));
   }
-  state.gate.z = .1; state.lane = state.gate.correctLane; engine.update(state, 50);
+  const shift = .1 - state.gate.z; for (const item of state.entities) item.z += shift;
+  state.lane = state.gate.correctLane; engine.update(state, 50);
   for (let frame = 0; frame < 60; frame++) {
     engine.update(state, 50);
-    assert.ok(state.entities.every(item => item.kind !== 'obstacle' || item.z > 0));
+    assert.ok(state.entities.every(item => item.kind !== 'obstacle' || item.gateBarrier || item.z > 0));
   }
   assert.equal(state.hearts, 3);
   assert.ok(state.entities.some(item => item.kind === 'obstacle'), 'hazards resume after the recovery gap');
@@ -316,7 +322,7 @@ test('short tunnels contain no hazards; long tunnels seed hazards behind a safe 
   for (let seed = 1; seed <= 30; seed++) {
     const state = engine.createState(words, { random: seeded(seed) }); state.distance = 1500; state._nextGateAt = 0;
     engine.update(state, 50); const gate = state.gate;
-    const hazards = state.entities.filter(item => item.kind === 'obstacle');
+    const hazards = state.entities.filter(item => item.kind === 'obstacle' && !item.gateBarrier);
     if (gate.length < engine.constants.LONG_TUNNEL_MIN) { shorts++; assert.equal(hazards.length, 0); }
     else { longs++; assert.ok(hazards.length > 0); for (const item of hazards) { assert.ok(item.z - gate.z >= 40); assert.ok(gate.z + gate.length - item.z >= 24); } }
   }
@@ -366,4 +372,53 @@ test('tunnel lengths include shuffled short and extended passages, including lon
   assert.ok([...firsts].some(length => length >= 384)); assert.ok([...firsts].some(length => length < 240));
   const state = make(), lengths = new Set(Array.from({ length: 6 }, () => engine.createWordGate(state).length));
   assert.equal(lengths.size, 6);
+});
+
+test('truck transfers require real source support, not a street jump or a skipped empty lane', () => {
+  const state = make();
+  entity(state, { kind: 'obstacle', obstacleType: 'train', length: 20, lane: 1, z: -10, resolved: true });
+  entity(state, { kind: 'obstacle', obstacleType: 'train', length: 20, lane: 2, z: -14, resolved: true });
+  assert.equal(engine.move(state, 2), true); assert.equal(engine.getPose(state).floor, 1.05);
+  assert.equal(engine.move(state, 1), true);
+  const street = make();
+  entity(street, { kind: 'obstacle', obstacleType: 'train', length: 20, lane: 2, z: -10, resolved: true });
+  engine.jump(street); street.elapsed = engine.constants.JUMP_MS / 2;
+  assert.ok(engine.getPose(street).feet > 1.05); assert.equal(engine.move(street, 2), false);
+  const gap = make(); gap.lane = 0;
+  for (const lane of [0, 2]) entity(gap, { kind: 'obstacle', obstacleType: 'train', length: 20, lane, z: -10, resolved: true });
+  assert.equal(engine.move(gap, 2), false, 'cannot teleport over an unsupported middle lane');
+  const slope = make();
+  entity(slope, { kind: 'obstacle', obstacleType: 'train', length: 20, lane: 1, z: -10, resolved: true });
+  entity(slope, { kind: 'obstacle', obstacleType: 'train', length: 20, lane: 2, z: -3, resolved: true });
+  assert.equal(engine.move(slope, 2), true, 'can step down onto an overlapping loading ramp');
+  assert.equal(engine.move(slope, 1), false, 'cannot climb the high roof from the low ramp side');
+});
+
+test('entry locks cannot bypass a wrong-route crate, even mid-jump or during invulnerability; assist off still passes after impact', () => {
+  for (const speed of [14, 32]) {
+    const state = make(); state.distance = (speed - 14) * 70; state.autoRecovery = false; state.invulnerableUntil = Infinity;
+    engine.jump(state);
+    state.gate = entity(state, { ...engine.createWordGate(state), correctLane: 0, z: 2.4 });
+    assert.equal(engine.move(state, 0), false); assert.equal(engine.slide(state), false);
+    let hit = false;
+    for (let frame = 0; frame < 40 && !hit; frame++) {
+      assert.equal(engine.move(state, 0), false);
+      engine.update(state, 50); hit = state.hearts < 3;
+      if (!hit && state.gate.resolved) assert.equal(state.hearts, 3, 'the answer itself does not remove a heart');
+    }
+    assert.ok(hit); assert.equal(state.hearts, 2); assert.equal(state.gate.entryReleased, true); assert.equal(state.impact.plan, null);
+    for (let frame = 0; frame < 30; frame++) engine.update(state, 50);
+    assert.equal(state.lane, 1); assert.equal(state.hearts, 2);
+    assert.equal(state.entities.length + state._pool.length, 48);
+  }
+});
+
+test('correct gates keep a clear entry, release controls beyond the blockers and never charge a heart', () => {
+  const state = make(); state.gate = entity(state, { ...engine.createWordGate(state), correctLane: 1, z: .1 });
+  engine.update(state, 50); assert.equal(state.feedback.correct, true);
+  assert.equal(engine.move(state, 0), false);
+  const blockers = state.entities.filter(item => item.gateBarrier);
+  assert.equal(blockers.length, 2); assert.ok(blockers.every(item => item.lane !== 1 && item.obstacleType === 'wall'));
+  for (let frame = 0; frame < 20; frame++) engine.update(state, 50);
+  assert.equal(state.hearts, 3); assert.equal(state.gate.entryReleased, true); assert.equal(engine.move(state, 0), true);
 });
