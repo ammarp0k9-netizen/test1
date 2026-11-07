@@ -19,6 +19,7 @@ const html = `<!doctype html><html lang="ar" dir="rtl" data-theme="lootlingua"><
 window.auth={currentUser:{uid:'runner-A'}};window.__lootlinguaAuthGeneration=1;
 window.fixtureWords=[{word:'lantern',meaning:'فانوس'},{word:'bridge',meaning:'جسر'},{word:'river',meaning:'نهر'},{word:'treasure',meaning:'كنز'}];
 window.fixtureIntents=[];window.fixtureToasts=[];window.fixtureAdds=0;window.fixtureReceipts=new Set();
+window.fixtureSpeech=[];Object.defineProperty(window,'speechSynthesis',{configurable:true,value:{getVoices:()=>[{lang:'en-US'}],speak:u=>fixtureSpeech.push({text:u.text,lang:u.lang}),cancel:()=>{}}});window.SpeechSynthesisUtterance=class{constructor(text){this.text=text}};
 window.commitProfileIntent=async intent=>{fixtureIntents.push({uid:auth.currentUser?.uid,intent:structuredClone(intent)});if(!fixtureReceipts.has(intent.eventId)){fixtureReceipts.add(intent.eventId);if(intent.type==='wallet-delta')localStorage.setItem('lootlingua.runner.coins.v1',String(Number(localStorage.getItem('lootlingua.runner.coins.v1')||0)+intent.amount));}return{saved:true,applied:true}};
 window.queueProfileIntent=intent=>{fixtureIntents.push({uid:auth.currentUser?.uid,intent:structuredClone(intent)});return'fixture-max'};
 window._saveProfileToCloudNow=async()=>true;
@@ -84,7 +85,7 @@ async function swipe(dx, dy) {
   await send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
   await delay(45);
 }
-const report = { isolation: 'Real Chrome and real lazy controller/engine/renderer/CSS; deterministic local published words and profile adapters; external HTTPS blocked', viewports: [], checks: [] };
+const report = { isolation: 'Real Chrome and real lazy controller/engine/renderer/CSS; deterministic local published words, profile adapters and synthetic speech recorder; external HTTPS blocked', viewports: [], checks: [] };
 try {
   for (let attempt = 0; ; attempt++) {
     try { await fetch('http://127.0.0.1:' + debugPort + '/json/version'); break; }
@@ -111,7 +112,7 @@ try {
   assert.equal(requests.some(item => /runner-engine|runner-renderer|runner\.css/.test(item)), false, 'expensive Runner resources must remain lazy');
   // Preload the actual engine only to supply its supported deterministic RNG;
   // the controller still loads renderer/CSS through its production loader.
-  await evaluate(`await new Promise((resolve,reject)=>{const s=document.createElement('script');s.src='js/runner-engine.js';s.onload=resolve;s.onerror=reject;document.head.append(s)});window.fixtureEngine=LootLinguaRunnerEngine;window.LootLinguaRunnerEngine=Object.freeze({...fixtureEngine,createState:(words,options)=>fixtureEngine.createState(words,{...options,random:()=>.5})});`);
+  await evaluate(`await new Promise((resolve,reject)=>{const s=document.createElement('script');s.src='js/runner-engine.js';s.onload=resolve;s.onerror=reject;document.head.append(s)});window.fixtureEngine=LootLinguaRunnerEngine;window.LootLinguaRunnerEngine=Object.freeze({...fixtureEngine,createState:(words,options)=>{const s=fixtureEngine.createState(words,{...options,random:()=>.5});if(words?.length)window.fixtureLiveState=s;return s}});`);
   for (const width of [1280, 390, 320]) {
     await send('Emulation.setDeviceMetricsOverride', { width, height: width === 1280 ? 900 : 844, deviceScaleFactor: width < 600 ? 3 : 1, mobile: width < 600 });
     await send('Emulation.setTouchEmulationEnabled', { enabled: width < 600 });
@@ -145,8 +146,16 @@ try {
       assert.equal(await evaluate(`document.querySelector('.llr-sound').getAttribute('aria-pressed')`), 'false');
       await delay(240); assert.equal(await evaluate('fixtureNotes'), notes, 'muting stops new notes');
     } else assert.equal(await evaluate(`document.querySelector('.llr-sound').getAttribute('aria-pressed')`), 'false', 'mute preference survives reopening');
+    if (width === 1280) {
+      const expected = await evaluate(`(()=>{const s=fixtureLiveState,g=s._pool.pop();Object.assign(g,fixtureEngine.createWordGate(s),{id:s._nextId++,active:true,bornAt:s.elapsed});s.entities.push(g);s.gate=g;return g.word})()`);
+      await wait('fixtureSpeech.length===1', 'automatic question narration with sound effects muted');
+      assert.equal((await evaluate('fixtureSpeech[0]')).text, expected);
+    }
     await evaluate(`document.querySelector('.llr-settings-button').click()`);
     await wait(`document.querySelector('.llr-settings').contains(document.activeElement)`, 'settings focus');
+    assert.equal(await evaluate(`document.querySelectorAll('.llr-settings-group').length`), 3);
+    assert.equal(await evaluate(`document.querySelector('.llr-speech-toggle').getAttribute('aria-pressed')`), width === 1280 ? 'true' : 'false');
+    if (width === 1280) await evaluate(`document.querySelector('.llr-speech-toggle').click()`);
     assert.equal(await evaluate(`document.querySelector('.llr-hints-toggle').getAttribute('aria-pressed')`), width === 1280 ? 'true' : 'false', 'obstacle hint preference persists across runs');
     if (width === 1280) {
       await evaluate(`document.querySelector('.llr-hints-toggle').click()`);
@@ -169,6 +178,10 @@ try {
     await screenshot(`recovery-help-${width}`);
     await key('Escape');
     await wait(`document.querySelector('.llr-settings').hidden&&!LootLinguaGateRunner.getDiagnostics().paused`, 'closing settings resumes the run');
+    if (width === 1280) {
+      await evaluate(`fixtureLiveState.gate.id=fixtureLiveState._nextId++;fixtureLiveState.gate.word='lantern'`);
+      await delay(150); assert.equal(await evaluate('fixtureSpeech.length'), 1, 'disabled narration does not read a new question');
+    }
     const state = await evaluate(`(()=>{const canvas=document.querySelector('.llr-canvas'),viewport=document.querySelector('.llr-viewport').getBoundingClientRect(),box=document.querySelector('.llr-game').getBoundingClientRect(),d=LootLinguaGateRunner.getDiagnostics();return{...d,viewportWidth:innerWidth,dpr:canvas.width/Math.round(viewport.width),backingPerCssPixel:canvas.width/canvas.clientWidth,dom:document.querySelector('.llr-overlay').querySelectorAll('*').length,overflow:document.documentElement.scrollWidth>innerWidth,insideViewport:box.left>=0&&box.right<=innerWidth&&box.top>=0&&box.bottom<=innerHeight}})()`);
     assert.ok(state.dpr <= 1.51 && state.entities <= 48 && state.dom <= intro.dom + 1 && !state.overflow && state.insideViewport, JSON.stringify(state));
     await key('Escape'); await wait('!document.querySelector(".llr-overlay")', 'exit cleanup');

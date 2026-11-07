@@ -65,3 +65,18 @@ test('correct-gate sound differs from coins and obeys the same mute switch', () 
   root.audio.toggle(); notes.length = 0; root.audio.play('gate'); root.audio.play(); assert.equal(notes.length, 0);
   root.audio.destroy();
 });
+
+test('question narration reads English once per gate, never meanings, independently of muted effects', () => {
+  const said = [], saved = new Map([['lootlingua.runner.sound.v1', '0']]); let cancelled = 0;
+  const root = { SpeechSynthesisUtterance: class { constructor(text) { this.text = text; } },
+    speechSynthesis: { getVoices: () => [{ lang: 'ar' }, { lang: 'en-US' }], speak: value => said.push(value), cancel: () => { cancelled++; } } };
+  const code = runner.slice(runner.indexOf('function createQuestionSpeech()'), runner.indexOf('function createCoinAudio()'));
+  vm.runInNewContext(code + ';window.narrator=createQuestionSpeech()', { window: root, localStorage: { getItem: key => saved.get(key), setItem: (key, value) => saved.set(key, value) } });
+  const narrator = root.narrator, gate = { id: 1, word: 'bridge', options: ['جسر', 'نهر', 'كتاب'], correctMeaning: 'جسر' };
+  narrator.read(gate); narrator.read(gate);
+  assert.equal(said.length, 1); assert.equal(said[0].text, 'bridge'); assert.equal(said[0].lang, 'en-US');
+  narrator.toggle(); assert.equal(cancelled, 1); narrator.read({ ...gate, id: 2 }); assert.equal(said.length, 1);
+  assert.equal(saved.get('lootlingua.runner.question-speech.v1'), 'off');
+  narrator.toggle(); narrator.read({ ...gate, id: 3, word: 'كتاب' }); assert.equal(said.length, 1);
+  narrator.read({ ...gate, id: 4 }); assert.equal(said.length, 2); narrator.cancel(); assert.equal(cancelled, 2);
+});

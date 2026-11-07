@@ -1,5 +1,5 @@
 {
-  "isolation": "Real Chrome and real lazy controller/engine/renderer/CSS; deterministic local published words and profile adapters; external HTTPS blocked",
+  "isolation": "Real Chrome and real lazy controller/engine/renderer/CSS; deterministic local published words, profile adapters and synthetic speech recorder; external HTTPS blocked",
   "viewports": [
     {
       "width": 1280,
@@ -8,18 +8,18 @@
         "inside": true,
         "locked": true,
         "inert": true,
-        "dom": 61
+        "dom": 73
       },
       "measured": {
         "lane": 1,
         "action": "run",
         "paused": false,
-        "entities": 18,
-        "distance": 114.4718583259977,
+        "entities": 21,
+        "distance": 116.0607143017581,
         "viewportWidth": 1280,
         "dpr": 1,
         "backingPerCssPixel": 1.0020661157024793,
-        "dom": 60,
+        "dom": 72,
         "overflow": false,
         "insideViewport": true
       }
@@ -31,18 +31,18 @@
         "inside": true,
         "locked": true,
         "inert": true,
-        "dom": 61
+        "dom": 73
       },
       "measured": {
         "lane": 1,
-        "action": "run",
+        "action": "slide",
         "paused": false,
-        "entities": 9,
-        "distance": 53.4889023859472,
+        "entities": 3,
+        "distance": 21.786017967308645,
         "viewportWidth": 390,
         "dpr": 1.5,
         "backingPerCssPixel": 1.5083333333333333,
-        "dom": 60,
+        "dom": 72,
         "overflow": false,
         "insideViewport": true
       }
@@ -54,18 +54,18 @@
         "inside": true,
         "locked": true,
         "inert": true,
-        "dom": 61
+        "dom": 73
       },
       "measured": {
         "lane": 1,
-        "action": "run",
+        "action": "slide",
         "paused": false,
-        "entities": 6,
-        "distance": 38.04626018026111,
+        "entities": 3,
+        "distance": 21.48018017347971,
         "viewportWidth": 320,
         "dpr": 1.5,
         "backingPerCssPixel": 1.5103448275862068,
-        "dom": 60,
+        "dom": 72,
         "overflow": false,
         "insideViewport": true
       }
@@ -81,7 +81,7 @@
             "type": "wallet-delta",
             "field": "runnerCoins",
             "amount": 2,
-            "eventId": "401c9854-13a8-447a-a69f-56602716aa26"
+            "eventId": "e1e10ebe-6dab-4d2b-a5ea-7b6d690140f8"
           }
         }
       ]
@@ -96,7 +96,7 @@
     },
     {
       "name": "roof-coins",
-      "changedPixels": 1423
+      "changedPixels": 1424
     },
     {
       "name": "roof coin depth order",
@@ -105,7 +105,7 @@
     {
       "name": "distance-driven fog reveal",
       "atSpawn": 0,
-      "approaching": 987
+      "approaching": 992
     },
     {
       "name": "real dictionary settings lock at 9, unlock at 10, select 5 words, launch without published gate calls and restore ordinary quiz settings",
@@ -115,7 +115,7 @@
   "pool": {
     "simulatedSeconds": 120,
     "draws": 600,
-    "executionMs": 1062.7000000011176,
+    "executionMs": 861.0999999996275,
     "maxEntities": 28,
     "pool": 24,
     "active": 24,

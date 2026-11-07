@@ -3,6 +3,11 @@
 .llr-settings { position: absolute; z-index: 30; inset: 0; padding: clamp(14px, 4vw, 30px); background: #091b26; overflow-y: auto; overscroll-behavior: contain; display: flex; align-items: stretch; flex-direction: column; gap: 14px; }
 .llr-settings h2 { margin: 0; color: #f7d796; }
 .llr-settings p { margin: 0; font-size: 13px; line-height: 1.8; color: #d3e4df; }
+.llr-settings-group { display: grid; gap: 12px; padding: 14px; border: 1px solid #35565e; border-radius: 12px; background: #0d2430; }
+.llr-settings-group h3 { margin: 0; font-size: 16px; color: #f5d58e; }
+.llr-setting-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 12px; align-items: center; }
+.llr-setting-row + .llr-setting-row { border-top: 1px solid #35565e; padding-top: 12px; }
+@media (max-width: 560px) { .llr-setting-row { grid-template-columns: minmax(0,1fr); gap: 8px; } .llr-settings-group { padding: 12px; } }
 .llr-settings-actions { display: flex; flex-wrap: wrap; gap: 8px; }
 .llr-settings-actions button { flex: 1 1 130px; }
 .llr-settings-actions .llr-recovery { flex-basis: 100%; }

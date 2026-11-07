@@ -126,8 +126,9 @@
       actorHeight = clamp(Math.min(height * .2, laneWidth * .85), 57, 128);
       metrics.dpr = dpr; cacheBackground();
       horizonFog = context.createLinearGradient(0, horizon - height * .05, 0, horizon + height * .16);
-      horizonFog.addColorStop(0, 'rgba(53,91,96,0)'); horizonFog.addColorStop(.35, 'rgba(53,91,96,.97)');
-      horizonFog.addColorStop(.65, 'rgba(53,91,96,.82)'); horizonFog.addColorStop(1, 'rgba(53,91,96,0)');
+      horizonFog.addColorStop(0, 'rgba(53,91,96,0)'); horizonFog.addColorStop(.18, 'rgba(53,91,96,.35)');
+      horizonFog.addColorStop(.34, 'rgba(53,91,96,.86)'); horizonFog.addColorStop(.53, 'rgba(53,91,96,.88)');
+      horizonFog.addColorStop(.7, 'rgba(53,91,96,.68)'); horizonFog.addColorStop(.86, 'rgba(53,91,96,.22)'); horizonFog.addColorStop(1, 'rgba(53,91,96,0)');
     }
     function road(distance) {
       const nearLeft = project(-.54, -6), nearRight = project(2.54, -6);
@@ -251,8 +252,17 @@
         }
         for (const side of [-1, 1]) {
           mesh([vertex(VEHICLE_RAMP, side), vertex(end, side), vertex(end, side, .09), vertex(VEHICLE_RAMP, side, .09)], side < 0 ? '#325b64' : '#23444e');
+          // A solid loading platform, with its sides tied to the same slope
+          // that supports the runner; no independent moving stair pieces.
+          mesh([vertex(0, side), vertex(VEHICLE_RAMP, side), vertex(VEHICLE_RAMP, side, .09)], side < 0 ? '#77603c' : '#57462e');
         }
         mesh([vertex(end, -1), vertex(end, 1), vertex(end, 1, .1), vertex(end, -1, .1)], '#907443');
+        // Paint the far cab face before its roof, preserving solid occlusion.
+        mesh([vertex(end, -.82, .92), vertex(end, .82, .92), vertex(end, .82, .59), vertex(end, -.82, .59)], '#173c49');
+        mesh([vertex(end, 0, .92), vertex(end, 0, .59)], '#d5b77a', 2);
+        mesh([vertex(end, -.55, .4), vertex(end, .55, .4), vertex(end, .55, .27), vertex(end, -.55, .27)], '#253c42');
+        for (const side of [-1, 1]) mesh([vertex(end, side * .63, .43), vertex(end, side * .88, .43), vertex(end, side * .88, .3), vertex(end, side * .63, .3)], '#ffe4a4');
+        mesh([vertex(end, -.95, .16), vertex(end, .95, .16)], '#526d75', 3);
         face(VEHICLE_RAMP, end, '#719096');
         for (const offset of [10, 15]) {
           mesh([vertex(offset, -.4), vertex(offset + .65, -.4), vertex(offset + .65, .4), vertex(offset, .4)], '#aec0ba');
@@ -262,11 +272,19 @@
           for (const side of [-1, 1]) mesh([vertex(offset, side), vertex(offset, side, .2)], '#719095', 1);
         }
         face(cab, end, '#c09d61');
-        mesh([vertex(cab + .3, -.76), vertex(cab + 1.1, -.76), vertex(cab + 1.1, .76), vertex(cab + .3, .76)], '#203d48');
-        face(0, VEHICLE_RAMP, '#a88e59');
+        mesh([vertex(cab + .6, -.45), vertex(cab + 1.3, -.45), vertex(cab + 1.3, .45), vertex(cab + .6, .45)], '#d3b47b');
+        for (const side of [-1, 1]) {
+          mesh([vertex(cab + .3, side, .91), vertex(end - .25, side, .91), vertex(end - .25, side, .52), vertex(cab + .3, side, .52)], '#173c49');
+          mesh([vertex(cab + .45, side, .85), vertex(end - .55, side, .85), vertex(cab + .45, side, .66)], '#427582');
+          mesh([vertex(cab + .2, side, .4), vertex(end - .2, side, .4)], '#e3c589', 1);
+        }
+        face(0, VEHICLE_RAMP, '#9c8558');
+        // Grip strips and a painted uphill arrow make the loading ramp clear.
+        for (const side of [-1, 1]) mesh([vertex(.3, side * .7), vertex(5.7, side * .7)], '#dfc98c', 2);
         for (let offset = 1; offset < VEHICLE_RAMP; offset++) {
           mesh([vertex(offset, -.94), vertex(offset, .94)], '#4b5a55', Math.max(1, project(1, entity.z + offset).scale * 1.5));
         }
+        mesh([vertex(1.3, -.12), vertex(3.7, -.12), vertex(3.7, -.4), vertex(5.1, 0), vertex(3.7, .4), vertex(3.7, .12), vertex(1.3, .12)], '#f3d68e');
         for (const side of [-1, 1]) {
           edge(0, VEHICLE_RAMP, side, '#d1b579', 2);
           edge(VEHICLE_RAMP, end, side, '#294b55', 2);

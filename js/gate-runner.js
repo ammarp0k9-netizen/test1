@@ -95,15 +95,45 @@
     });
     const css = document.querySelector('link[data-runner-style]');
     const styles = css ? Promise.resolve() : new Promise((resolve, reject) => {
-      const link = document.createElement('link'); link.rel = 'stylesheet'; link.href = 'runner.css?v=20261107-runner-solid-1';
+      const link = document.createElement('link'); link.rel = 'stylesheet'; link.href = 'runner.css?v=20261107-runner-speech-1';
       link.dataset.runnerStyle = ''; link.onload = resolve; link.onerror = () => { link.remove(); reject(new Error('Runner styles unavailable')); };
       document.head.append(link);
     });
-    resources = Promise.all([styles, module('LootLinguaRunnerEngine', 'js/runner-engine.js?v=20261107-runner-solid-1'), module('LootLinguaRunnerRenderer', 'js/runner-renderer.js?v=20261107-runner-solid-1')]).catch(error => { resources = null; throw error; });
+    resources = Promise.all([styles, module('LootLinguaRunnerEngine', 'js/runner-engine.js?v=20261107-runner-speech-1'), module('LootLinguaRunnerRenderer', 'js/runner-renderer.js?v=20261107-runner-speech-1')]).catch(error => { resources = null; throw error; });
     return resources;
   }
   function button(label, cls, action) {
     const result = node('button', cls, label); result.type = 'button'; result.addEventListener('click', action); return result;
+  }
+  function createQuestionSpeech() {
+    const key = 'lootlingua.runner.question-speech.v1';
+    const supported = Boolean(window.speechSynthesis && window.SpeechSynthesisUtterance);
+    let enabled = true, current = null, lastGate = null;
+    try { enabled = localStorage.getItem(key) !== 'off'; } catch {}
+    function cancel() {
+      if (!current) return;
+      current = null;
+      try { window.speechSynthesis.cancel(); } catch {}
+    }
+    return {
+      get enabled() { return enabled; }, supported, cancel,
+      toggle() { enabled = !enabled; try { localStorage.setItem(key, enabled ? 'on' : 'off'); } catch {} if (!enabled) cancel(); },
+      read(gate) {
+        if (!gate || gate.id === lastGate) return;
+        lastGate = gate.id;
+        if (!supported || !enabled || !/[a-z]/i.test(gate.word || '') || /[\u0600-\u06ff]/.test(gate.word)) return;
+        cancel();
+        try {
+          const utterance = new window.SpeechSynthesisUtterance(String(gate.word).trim());
+          utterance.lang = 'en-US'; utterance.rate = .9;
+          const voices = window.speechSynthesis.getVoices();
+          const voice = voices.find(item => /^en-US$/i.test(item.lang)) || voices.find(item => /^en\b/i.test(item.lang));
+          if (voice) utterance.voice = voice;
+          utterance.onend = utterance.onerror = () => { if (current === utterance) current = null; };
+          current = utterance; window.speechSynthesis.speak(utterance);
+        } catch { current = null; }
+      },
+    };
   }
   function createCoinAudio() {
     const key = 'lootlingua.runner.sound.v1';
@@ -170,8 +200,9 @@
     const header = node('header', 'llr-header'), brand = node('div', 'llr-brand');
     brand.append(node('small', '', 'LOOT RUNNER'), node('strong', '', 'جري البوابات'));
     const audio = createCoinAudio();
+    const speech = createQuestionSpeech();
     const sound = button('', 'llr-icon-button llr-sound', () => { audio.toggle(); syncSound(); });
-    function syncSound() { sound.textContent = audio.enabled ? 'صوت ✓' : 'صوت ×'; sound.setAttribute('aria-label', audio.enabled ? 'كتم أصوات اللعبة' : 'تشغيل أصوات اللعبة'); sound.setAttribute('aria-pressed', String(audio.enabled)); }
+    function syncSound() { sound.textContent = audio.enabled ? 'المؤثرات: مفعّلة' : 'المؤثرات: متوقفة'; sound.setAttribute('aria-label', audio.enabled ? 'كتم أصوات اللعبة' : 'تشغيل أصوات اللعبة'); sound.setAttribute('aria-pressed', String(audio.enabled)); }
     syncSound();
     const pause = button('إيقاف', 'llr-icon-button', () => setPaused(!state.paused)), exit = button('خروج', 'llr-icon-button', () => cleanup());
     const settingsButton = button('الإعدادات', 'llr-icon-button llr-settings-button', () => openSettings());
@@ -262,9 +293,20 @@
     });
     function syncHints() { hintsToggle.textContent = `تلميحات العوائق: ${showObstacleHints ? 'ظاهرة' : 'مخفية'}`; hintsToggle.setAttribute('aria-pressed', String(showObstacleHints)); }
     syncHints();
-    const settingActions = node('div', 'llr-settings-actions'); settingActions.append(sound, hintsToggle, recovery);
-    settings.append(node('h2', '', 'إعدادات الجري'), closeSettingsButton, settingActions,
-      modeDescription, node('p', '', 'الاصطدام بجانب الشاحنة يصدّك عن جانبها دون خسارة قلب.'), demo);
+    const speechToggle = button('', 'llr-secondary llr-speech-toggle', () => { speech.toggle(); syncSpeech(); });
+    function syncSpeech() { speechToggle.textContent = speech.supported ? `نطق السؤال: ${speech.enabled ? 'مفعّل' : 'متوقف'}` : 'النطق غير مدعوم على هذا المتصفح'; speechToggle.disabled = !speech.supported; speechToggle.setAttribute('aria-pressed', String(speech.enabled && speech.supported)); }
+    syncSpeech();
+    function settingRow(description, control) { const row = node('div', 'llr-setting-row'); row.append(node('p', '', description), control); return row; }
+    const audioSettings = node('section', 'llr-settings-group');
+    audioSettings.append(node('h3', '', 'الصوت والقراءة'),
+      settingRow('أصوات جمع العملات والإجابة الصحيحة.', sound),
+      settingRow('قراءة الكلمة الإنجليزية تلقائيًا عند ظهور السؤال، دون قراءة المعاني. هذا الخيار مستقل عن المؤثرات.', speechToggle));
+    const playSettings = node('section', 'llr-settings-group');
+    playSettings.append(node('h3', '', 'إرشادات اللعب'), settingRow('إظهار تعليمات القفز والانزلاق وتغيير المسار قرب العوائق.', hintsToggle));
+    const recoverySettings = node('section', 'llr-settings-group');
+    recoverySettings.append(node('h3', '', 'مساعدة بعد الاصطدام'), recovery, modeDescription,
+      node('p', '', 'الاصطدام بجانب الشاحنة يصدّك عن جانبها دون خسارة قلب.'), demo);
+    settings.append(node('h2', '', 'إعدادات الجري'), closeSettingsButton, audioSettings, playSettings, recoverySettings);
     syncRecovery();
     game.append(settings);
     function setFocusSurface(dialog, onEscape) {
@@ -301,7 +343,7 @@
     function cleanup() {
       if (destroyed) return; saveRun(); destroyed = true; cancelAnimationFrame(raf);
       cancelAnimationFrame(demoRaf); demoRenderer?.destroy();
-      resizeObserver?.disconnect(); renderer?.destroy(); audio.destroy();
+      resizeObserver?.disconnect(); renderer?.destroy(); audio.destroy(); speech.cancel();
       window.removeEventListener('resize', resize); window.removeEventListener('keydown', keyboard, true);
       document.removeEventListener('visibilitychange', visibility);
       window.removeEventListener('lootlingua:auth-state', authChanged);
@@ -321,10 +363,12 @@
     function setPaused(value) {
       if (!state.running || state.over) return;
       state.paused = value; pause.textContent = value ? 'متابعة' : 'إيقاف';
+      if (value) speech.cancel();
       if (value) { cancelAnimationFrame(raf); showScreen('استراحة قصيرة', 'خذ وقتك. الطريق ينتظرك.', 'متابعة الجري', () => setPaused(false)); }
       else { audio.unlock(); screen.hidden = true; previous = performance.now(); raf = requestAnimationFrame(frame); viewport.focus({ preventScroll: true }); }
     }
     function finish(reason) {
+      speech.cancel();
       state.running = false; cancelAnimationFrame(raf); saveRun(); challenge.hidden = options.hidden = true;
       showScreen(reason, `${Math.floor(state.distance)} متر · ${state.coins} عملة${state.distance > startingBest ? ' · رقم قياسي جديد!' : ''}`, 'جولة جديدة', () => { cleanup(); void launch(context); });
       screen.append(button(context?.source === 'dictionary' ? 'العودة إلى إعدادات اللعبة' : 'العودة إلى البوابة', 'llr-secondary', cleanup));
@@ -336,11 +380,11 @@
       const gate = state.gate;
       if (gate && !gate.resolved) {
         challenge.hidden = options.hidden = false; gateZ = gate.z;
-        if (gate.id !== gateId) { gateId = gate.id; wordLabel.textContent = gate.word; labels.forEach((label, lane) => { label.textContent = gate.options[lane]; }); }
+        if (gate.id !== gateId) { gateId = gate.id; wordLabel.textContent = gate.word; labels.forEach((label, lane) => { label.textContent = gate.options[lane]; }); if (state.running && !state.paused) speech.read(gate); }
         const near = renderer.project(1, gateZ);
         options.style.top = `${Math.max(rect.height * .31, Math.min(rect.height * .64, near.labelY || near.y - 60))}px`;
         labels.forEach((label, lane) => label.classList.toggle('is-selected', lane === state.lane));
-      } else { challenge.hidden = options.hidden = true; gateId = null; }
+      } else { challenge.hidden = options.hidden = true; gateId = null; speech.cancel(); }
       if (state.feedback && state.feedback.until !== feedbackUntil) {
         feedbackUntil = state.feedback.until;
         status.textContent = state.feedback.correct ? 'بوابة صحيحة! أحسنت.' : `المعنى الصحيح: ${state.feedback.correctMeaning || ''}`;
