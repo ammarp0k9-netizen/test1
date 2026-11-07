@@ -14,8 +14,8 @@
         "lane": 1,
         "action": "run",
         "paused": false,
-        "entities": 21,
-        "distance": 109.77444864672039,
+        "entities": 12,
+        "distance": 110.55213716893971,
         "viewportWidth": 1280,
         "dpr": 1,
         "backingPerCssPixel": 1.0020661157024793,
@@ -37,8 +37,8 @@
         "lane": 1,
         "action": "slide",
         "paused": false,
-        "entities": 15,
-        "distance": 51.21597144566498,
+        "entities": 3,
+        "distance": 18.50584710717236,
         "viewportWidth": 390,
         "dpr": 1.5,
         "backingPerCssPixel": 1.5083333333333333,
@@ -60,8 +60,8 @@
         "lane": 1,
         "action": "slide",
         "paused": false,
-        "entities": 15,
-        "distance": 47.05156637133639,
+        "entities": 3,
+        "distance": 21.460064840811505,
         "viewportWidth": 320,
         "dpr": 1.5,
         "backingPerCssPixel": 1.5103448275862068,
@@ -80,8 +80,8 @@
           "intent": {
             "type": "wallet-delta",
             "field": "runnerCoins",
-            "amount": 4,
-            "eventId": "23f70c74-b8bb-4e1f-8cfd-d323c98b65bc"
+            "amount": 5,
+            "eventId": "22ad037d-712e-4ab1-9d26-5d7db08a3967"
           }
         }
       ]
@@ -91,6 +91,14 @@
       "passed": true
     },
     {
+      "name": "coins-occluded",
+      "changedPixels": 0
+    },
+    {
+      "name": "roof-coins",
+      "changedPixels": 1423
+    },
+    {
       "name": "real dictionary settings lock at 9, unlock at 10, select 5 words, launch without published gate calls and restore ordinary quiz settings",
       "passed": true
     }
@@ -98,10 +106,10 @@
   "pool": {
     "simulatedSeconds": 120,
     "draws": 600,
-    "executionMs": 1061,
-    "maxEntities": 32,
-    "pool": 38,
-    "active": 10,
+    "executionMs": 387.2000000011176,
+    "maxEntities": 18,
+    "pool": 37,
+    "active": 11,
     "total": 48,
     "maxEvents": 1,
     "dpr": 1.5,

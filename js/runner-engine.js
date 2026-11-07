@@ -3,6 +3,7 @@
   const LANES = 3, MAX_HEARTS = 3, MAX_ENTITIES = 48, MAX_EVENTS = 16;
   const FAR = 80, SPAWN_Z = 64, BASE_SPEED = 14, MAX_SPEED = 32;
   const NEAR = -15, VEHICLE_HEIGHT = 1.05, VEHICLE_RAMP = 6, VEHICLE_EXIT = 3;
+  const TUNNEL_LENGTH = 42, MIN_ROW_MS = 780;
   // Templates describe relationships, then lanes are shuffled. A truck can
   // accompany any normal hazard, not just another truck.
   const FORMATIONS = [
@@ -10,6 +11,8 @@
     ['train', 'wall', 'wall'], ['train', 'low', 'wall'], ['train', 'overhead', 'wall'],
     ['train', 'low', 'overhead'], ['train', 'train', null], ['train', 'train', 'low'],
     ['train', 'train', 'overhead'], ['train', 'train', 'wall'], ['train', 'train', 'train'],
+    ['train', 'duckwall', null], ['train', 'duckwall', 'low'], ['train', 'train', 'duckwall'],
+    ['duckwall', 'wall', 'low'], ['duckwall', 'overhead', 'train'],
   ];
   const JUMP_MS = 640, SLIDE_MS = 480, ACTION_RECOVERY_MS = 70, INPUT_BUFFER_MS = 140, INVULNERABLE_MS = 1100;
   const clamp = (value, low, high) => Math.max(low, Math.min(high, value));
@@ -128,7 +131,7 @@
       [options[index], options[other]] = [options[other], options[index]];
     }
     options.splice(correctLane, 0, prompt.meaning);
-    return { kind: 'gate', lane: 1, z: SPAWN_Z, word: prompt.word,
+    return { kind: 'gate', lane: 1, z: SPAWN_Z, length: TUNNEL_LENGTH, word: prompt.word,
       options, correctLane: options.indexOf(prompt.meaning), correctMeaning: prompt.meaning };
   }
   function hasGateWords(state) { return state._canGate; }
@@ -187,7 +190,7 @@
     } else if (!draining) {
       for (let index = 0; index < obstacleCount; index++) {
         const lane = blocked[index];
-        layout[lane] = lane === escape ? choose(state, ['low', 'overhead']) : choose(state, ['low', 'overhead', 'wall']);
+        layout[lane] = lane === escape ? choose(state, ['low', 'overhead', 'duckwall']) : choose(state, ['low', 'overhead', 'wall', 'duckwall']);
       }
     }
     for (let lane = 0; lane < LANES; lane++) {
@@ -196,7 +199,7 @@
       const z = spawnZ + (type === 'train' && random(state) < .5 ? lane * 4 : 0);
       allocate(state, { kind: 'obstacle', obstacleType: type, length: type === 'train' ? 20 : 0, lane, z, row, safeRoute: lane === route });
       if (type === 'train') for (const offset of [10, 15]) allocate(state, { kind: 'coin', lane, z: z + offset, height: VEHICLE_HEIGHT + .44, row });
-      if (['low', 'overhead'].includes(type) && random(state) < .65) {
+      if (['low', 'overhead', 'duckwall'].includes(type) && random(state) < .65) {
         for (const offset of [0, 2]) allocate(state, { kind: 'coin', lane, z: spawnZ + offset,
           height: type === 'low' ? 1.5 : .22, requires: type === 'low' ? 'jump' : 'slide', row });
       }
@@ -206,7 +209,7 @@
       allocate(state, { kind: 'coin', lane: escape, z: spawnZ + 6, row });
     }
     state._escapeLane = escape;
-    state._nextRowAt = state.elapsed + Math.max(850, 1250 - difficulty * 400) + random(state) * 180;
+    state._nextRowAt = state.elapsed + Math.max(MIN_ROW_MS, 1150 - difficulty * 370) + random(state) * 160;
   }
   function damage(state, at, cause) {
     if (at < state.invulnerableUntil || state.over) return false;
@@ -234,6 +237,7 @@
     } else if (entity.lane === state.lane && entity.kind === 'obstacle') {
       const pose = getPose(state, at);
       const cleared = entity.obstacleType === 'train' ||
+        entity.obstacleType === 'duckwall' && pose.action === 'slide' && pose.top <= .55 ||
         entity.obstacleType === 'low' && pose.feet >= .37 ||
         entity.obstacleType === 'overhead' && (pose.top <= .6 || pose.feet >= .88) ||
         entity.obstacleType === 'wall' && pose.feet >= 1.4;
@@ -271,6 +275,6 @@
     return state;
   }
   root.LootLinguaRunnerEngine = Object.freeze({ createState, update, move, jump, slide, getAction, getPose, vehicleSurface, normalizeWords, createWordGate,
-    constants: Object.freeze({ LANES, MAX_HEARTS, MAX_ENTITIES, MAX_EVENTS, FAR, NEAR, VEHICLE_HEIGHT, VEHICLE_RAMP, VEHICLE_EXIT, SPAWN_Z, BASE_SPEED, MAX_SPEED, JUMP_MS, SLIDE_MS, INVULNERABLE_MS }),
+    constants: Object.freeze({ LANES, MAX_HEARTS, MAX_ENTITIES, MAX_EVENTS, FAR, NEAR, VEHICLE_HEIGHT, VEHICLE_RAMP, VEHICLE_EXIT, TUNNEL_LENGTH, MIN_ROW_MS, SPAWN_Z, BASE_SPEED, MAX_SPEED, JUMP_MS, SLIDE_MS, INVULNERABLE_MS }),
   });
 })(window);

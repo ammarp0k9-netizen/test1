@@ -99,7 +99,7 @@ test('spawn rows always provide a traversable route and recycle a fixed pool dur
     const byRow = new Map();
     for (const item of state.entities) if (item.kind === 'obstacle') { if (!byRow.has(item.row)) byRow.set(item.row, []); byRow.get(item.row).push(item); }
     for (const blocked of byRow.values()) if (blocked.length === 3) {
-      assert.ok(blocked.some(item => ['low', 'overhead', 'train'].includes(item.obstacleType)));
+      assert.ok(blocked.some(item => ['low', 'overhead', 'duckwall', 'train'].includes(item.obstacleType)));
       closedRows++;
     }
     if (state._row > rows) {
@@ -199,7 +199,7 @@ test('bonus coin trails accompany jumpable or slidable hazards, never tall walls
     engine.update(state, 50);
     for (const coin of state.entities.filter(item => item.requires && item.z > 0)) {
       const obstacle = state.entities.find(item => item.kind === 'obstacle' && item.row === coin.row && item.lane === coin.lane);
-      assert.equal(obstacle?.obstacleType, coin.requires === 'jump' ? 'low' : 'overhead');
+      assert.ok((coin.requires === 'jump' ? ['low'] : ['overhead', 'duckwall']).includes(obstacle?.obstacleType));
       assert.equal(coin.height, coin.requires === 'jump' ? 1.5 : .22); trails++;
     }
   }
@@ -232,4 +232,29 @@ test('near-camera objects remain alive until their complete geometry passes the 
   const truck=entity(state,{kind:'obstacle',obstacleType:'train',length:20,z:-33,resolved:true});
   engine.update(state,16);assert.ok(state.entities.includes(truck));
   truck.z=-39.1;engine.update(state,16);assert.ok(!state.entities.includes(truck));
+});
+
+
+test('the tall ducking panel requires a ground slide, not a jump',()=>{
+  for(const action of ['run','jump','slide']){
+    const state=make();if(action!=='run'){engine[action](state);state.elapsed=state.actionUntil*.4}
+    entity(state,{kind:'obstacle',obstacleType:'duckwall'});engine.update(state,50);
+    assert.equal(state.hearts,action==='slide'?3:2,action);
+  }
+});
+
+test('row spacing gets tighter with progress but keeps a finite action recovery floor',()=>{
+  const early=make([]);early._nextRowAt=0;engine.update(early,50);const start=early._nextRowAt-early.elapsed;
+  const late=make([]);late.distance=100000;late._nextRowAt=0;engine.update(late,50);const hard=late._nextRowAt-late.elapsed;
+  assert.ok(hard<start);assert.ok(hard>=engine.constants.MIN_ROW_MS);
+  assert.ok(engine.constants.MIN_ROW_MS>engine.constants.JUMP_MS+70);
+});
+
+test('a gate remains a physical passage after answering, until its entire tunnel has passed',()=>{
+  const state=make(),gate=entity(state,{...engine.createWordGate(state),z:.1,correctLane:1});state.gate=gate;state.distance=100000;
+  engine.update(state,50);assert.equal(gate.resolved,true);assert.equal(gate.length,engine.constants.TUNNEL_LENGTH);
+  for(let i=0;i<20;i++)engine.update(state,50);
+  assert.equal(state.gate,gate);assert.ok(gate.z+gate.length>0);
+  for(let i=0;i<20;i++)engine.update(state,50);
+  assert.equal(state.gate,null);
 });
