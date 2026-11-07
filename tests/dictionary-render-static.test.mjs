@@ -87,3 +87,30 @@ test('Entry no longer attaches a game-dictionary search guide to the personal di
   assert.doesNotMatch(entryControllerSource, /fetchSuggestions|fetchGamerSuggestions|targetGamerGuide|__lootlinguaEntryGamerGuideActive/);
   assert.doesNotMatch(dictionarySource, /__lootlinguaEntryGamerGuideActive/);
 });
+
+test('private-world rendering does not treat a false boolean as a personal page store', () => {
+  const start = renderSource.indexOf('function renderDictionaryWindow');
+  const prefix = renderSource.slice(start, renderSource.indexOf('  const searchType =', start));
+  vm.runInNewContext('let dictionaryFullDataRequest=null;' + prefix + '}renderDictionaryWindow()', {
+    window: { cancelDictionaryFullDataRequest() {}, LootLinguaDictionaryPages: { current() { throw Error('Private view must not use personal pagination'); } } },
+    document: { getElementById: () => ({ value: '' }) },
+    isEditableDictionaryView: () => true, isCustomWorldView: () => true,
+    dictionarySortMode: 'newest', dictionarySortCategory: 'all', currentFilter: 'all',
+  });
+});
+
+test('page-status events stay harmless in private worlds and other views while personal pages load', () => {
+  const start = renderSource.indexOf('function updateDictionaryPageStatus');
+  const code = renderSource.slice(start, renderSource.indexOf("window.addEventListener('lootlingua:dictionary-page-state'", start));
+  for (const currentView of ['customWorld', 'worlds', 'quiz', 'profile', 'personal']) {
+    const status = { hidden: false, setAttribute() {} };
+    let reads = 0;
+    const context = {
+      currentView, document: { getElementById: id => id === 'dictionaryLoadStatus' ? status : ({ value: '' }) },
+      window: { LootLinguaDictionaryPages: { current() { reads++; return { state: () => ({ loading: true, complete: false }) }; } } },
+    };
+    vm.runInNewContext(code + ';updateDictionaryPageStatus()', context);
+    assert.equal(reads, currentView === 'personal' ? 1 : 0);
+    assert.equal(status.hidden, currentView !== 'personal');
+  }
+});

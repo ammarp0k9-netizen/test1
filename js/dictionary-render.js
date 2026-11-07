@@ -313,7 +313,7 @@ function renderDictionaryWindow(options = {}) {
   const list = document.getElementById('list');
   if (!search || !list) return;
   const query = search.value.toLowerCase().trim();
-  const pages = !isCustomWorldView() && window.LootLinguaDictionaryPages?.current();
+  const pages = isCustomWorldView() ? null : window.LootLinguaDictionaryPages?.current();
   const serverSorted = pages?.state().queryMode === dictionarySortMode && ['auto', 'newest', 'oldest'].includes(dictionarySortMode);
   const fullDataKey = pages && (query || currentFilter !== 'all' || dictionarySortMode !== 'auto' && !serverSorted)
     ? JSON.stringify([pages.ownerId, query, currentFilter, dictionarySortMode, dictionarySortCategory]) : '';
@@ -503,7 +503,7 @@ function updateDictionaryPageStatus() {
       if (event.target.closest('button')) window.LootLinguaDictionaryPages?.current()?.next().catch(() => {});
     });
   }
-  const pages = currentView === 'personal' && window.LootLinguaDictionaryPages?.current();
+  const pages = currentView === 'personal' ? window.LootLinguaDictionaryPages?.current() : null;
   const state = pages?.state();
   status.hidden = !state || (state.complete && !state.offline);
   if (status.hidden) return;
