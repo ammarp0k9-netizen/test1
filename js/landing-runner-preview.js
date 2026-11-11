@@ -67,7 +67,7 @@ if (host) {
     if (!renderer) {
       loading = true;
       try {
-        await Promise.all([import('./runner-engine.js?v=20261111-runner-1'), import('./runner-renderer.js?v=20261111-jump-2')]);
+        await Promise.all([import('./runner-engine.js?v=20261111-runner-1'), import('./runner-renderer.js?v=20261111-jump-3')]);
         engine = window.LootLinguaRunnerEngine;
         renderer = window.LootLinguaRunnerRenderer.createRenderer(canvas, { width: stage.clientWidth, height: stage.clientHeight, dprCap: 1 });
         reset(); draw(); host.classList.add('is-ready');

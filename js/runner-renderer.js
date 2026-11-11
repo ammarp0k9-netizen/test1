@@ -520,14 +520,14 @@
           if (streetJump) {
             const push = Math.sin(Math.PI * Math.min(1, pose.fraction / .72));
             const balance = Math.sin(Math.PI * Math.max(0, (pose.fraction - .32) / .68));
-            const elbowX = side * h * (.28 + .13 * tuck);
-            const handX = side * h * (.22 + .15 * push + .27 * balance);
-            const handY = -h * (.37 + (.51 + side * .045) * push + .13 * balance);
-            limb(side * h * .19, -h * .68, elbowX, -h * (.50 + .16 * push),
+            const elbowX = side * h * (.27 + .035 * tuck);
+            const handX = side * h * (.22 + .04 * push + .07 * balance);
+            const handY = -h * (.37 + (.18 + side * .02) * push + .04 * balance);
+            limb(side * h * .19, -h * .68, elbowX, -h * (.50 + .065 * push),
               handX, handY, '#d9ab7c', h * .09);
             context.fillStyle = '#edc097';
             context.beginPath();
-            context.arc(handX, handY, h * .048, 0, Math.PI * 2);
+            context.arc(handX, handY, h * .038, 0, Math.PI * 2);
             context.fill();
             continue;
           }
