@@ -503,17 +503,23 @@
         context.fillStyle = '#3f5c65'; context.beginPath(); context.ellipse(0, -h * .38, h * .055, h * .025, -.1, 0, Math.PI * 2); context.fill();
         line(context, -h * .07, -h * .325, h * .1, -h * .325, '#f4ca7a', h * .03);
       } else {
-        const stride = jumping ? .38 : Math.sin(phase);
+        const stride = Math.sin(phase);
+        const tuck = jumping ? Math.sin(Math.PI * pose.fraction) : 0;
+        const armRaise = jumping ? Math.sin(Math.PI * pose.fraction ** .7) : 0;
         // Viewed from behind: feet cycle in depth/height, never sweep sideways.
         for (const side of [-1, 1]) {
           const swing = stride * side, x = side * h * .09;
-          const kneeY = -h * (.17 + Math.max(0, swing) * .08);
-          const footY = jumping ? -h * (.12 + side * .035) : -h * Math.max(0, swing) * .2;
-          limb(x, -h * .34, x + side * h * .018, kneeY, x, footY, side < 0 ? '#173747' : '#285366', h * .125);
-          line(context, x - h * .045, footY, x + h * .045, footY, '#dbbe85', h * .065);
+          const kneeY = -h * (.17 + (jumping ? tuck * (.11 + side * .035) : Math.max(0, swing) * .08));
+          const footY = -h * (jumping ? tuck * (.16 + side * .055) : Math.max(0, swing) * .2);
+          limb(x, -h * .34, x + side * h * (.018 + tuck * .045), kneeY, x - side * h * tuck * .035, footY, side < 0 ? '#173747' : '#285366', h * .125);
+          const shoeX = x - side * h * tuck * .035;
+          line(context, shoeX - h * .045, footY, shoeX + h * .045, footY, '#dbbe85', h * .065);
         }
-        limb(-h * .19, -h * .68, -h * .27, -h * (.47 + stride * .08), -h * .2, -h * (.35 + stride * .1), '#d9ab7c', h * .09);
-        limb(h * .19, -h * .68, h * .27, -h * (.47 - stride * .08), h * .2, -h * (.35 - stride * .1), '#d9ab7c', h * .09);
+        for (const side of [-1, 1]) {
+          const swing = jumping ? 0 : -side * stride;
+          limb(side * h * .19, -h * .68, side * h * (.27 + armRaise * .06), -h * (.47 + swing * .08 + armRaise * .18),
+            side * h * (.2 + armRaise * .08), -h * (.35 + swing * .1 + armRaise * .44), '#d9ab7c', h * .09);
+        }
         // Teal explorer jacket, brass belt and a small geometric loot backpack.
         context.fillStyle = '#2b7478'; rounded(context, -h * .2, -h * .76, h * .4, h * .45, h * .08); context.fill();
         quad(context, -h * .19, -h * .69, -h * .11, -h * .75, -h * .1, -h * .34, -h * .19, -h * .38, '#448f8d');

@@ -13,11 +13,11 @@ function isVerifiedQuizMode(mode) {
 const QUIZ_MODE_META = {
   runner: {
     title: 'تجهيز رحلة الجري',
-    desc: 'اختر كلمات مغامرتك، اجمع العملات واعبر بوابات المعاني. ثلاثة مسارات، قفز وانزلاق — والطريق يزداد تحديًا.'
+    desc: 'تدرّب على الكلمات واجمع العملات. لرفع الإتقان اختر مطابقة الكلمات أو الصندوق المشفّر أو الهروب من النسيان.'
   },
   flashcards: {
     title: 'بطاقات الذاكرة',
-    desc: 'اختبار هادئ: اقلب البطاقة وحدد إذا تذكرت الكلمة أو نسيتها.'
+    desc: 'اقلب البطاقة وحدد إذا تذكرت الكلمة أو نسيتها. هذا تدريب، والإتقان يرتفع في الاختبارات الموثّقة.'
   },
   timeAttack: {
     title: 'الهروب من النسيان',
@@ -1067,11 +1067,11 @@ function validateQuizDeck(deck, requestedSize) {
   }).slice(0, limit);
 }
 
-function buildBalancedQuizDeck(sourceWords, requestedCount, options = {}) {
+function createBalancedQuizPlan(sourceWords, requestedCount, options = {}) {
   const available = Array.isArray(sourceWords) ? sourceWords : [];
   const limit = Math.max(0, Math.min(Math.floor(Number(requestedCount) || 0), available.length));
   const history = Array.isArray(options.history) ? options.history : readQuizExposureHistory();
-  currentQuizSelectionPlan = quizCore.buildQuizSelectionPlan(available, limit, {
+  return quizCore.buildQuizSelectionPlan(available, limit, {
     now: options.now,
     seed: options.seed,
     history,
@@ -1079,6 +1079,12 @@ function buildBalancedQuizDeck(sourceWords, requestedCount, options = {}) {
     getState: (word) => getWordMasteryState(word),
     getDueInfo: (word, state, now) => getQuizDueInfo(word, state, now),
   });
+}
+
+window.orderRunnerGateWords = words => createBalancedQuizPlan(words, words.length, { seed: makeQuizSessionId() }).deck;
+
+function buildBalancedQuizDeck(sourceWords, requestedCount, options = {}) {
+  currentQuizSelectionPlan = createBalancedQuizPlan(sourceWords, requestedCount, options);
   window.__lootlinguaQuizSelectionReport = currentQuizSelectionPlan;
   return currentQuizSelectionPlan.deck;
 }
@@ -1194,7 +1200,10 @@ async function startDictionaryRunner() {
       const index = deck.findIndex((word, position) => deck.some((other, otherPosition) => otherPosition !== position && meaning(other) === meaning(word)));
       if (index >= 0) deck[index] = candidate;
     }
-    return await window.LootLinguaGateRunner.launch({ source: 'dictionary', words: deck, isCurrent });
+    return await window.LootLinguaGateRunner.launch({
+      source: 'dictionary', scope, words: deck, isCurrent,
+      onPractice: () => openQuizModeSettings('matching'),
+    });
   } catch (error) { showToast('تعذّر تجهيز اللعبة. حاول مجددًا.', 'warning'); return false; }
   finally { dictionaryRunnerPreparing = false; refreshQuizSettingsSummary(); }
 }

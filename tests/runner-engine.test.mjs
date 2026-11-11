@@ -181,8 +181,9 @@ test('train ramp lifts the runner, roof coins require roof height, and leaving i
   engine.move(state, 0); assert.equal(engine.getPose(state).floor, 0);
 });
 
-test('even at maximum speed, crossing a gate leaves over three seconds before the next hazard', () => {
+test('even at maximum speed, crossing a short gate leaves over three seconds before the next hazard', () => {
   const state = engine.createState(words, { random: seeded() });
+  state._tunnelLengths = [engine.constants.TUNNEL_LENGTH];
   state.distance = 100000; state._nextGateAt = 0;
   engine.update(state, 50);
   for (let frame = 0; frame < 80; frame++) {
@@ -392,6 +393,32 @@ test('truck transfers require real source support, not a street jump or a skippe
   entity(slope, { kind: 'obstacle', obstacleType: 'train', length: 20, lane: 2, z: -3, resolved: true });
   assert.equal(engine.move(slope, 2), true, 'can step down onto an overlapping loading ramp');
   assert.equal(engine.move(slope, 1), false, 'cannot climb the high roof from the low ramp side');
+});
+
+test('runner presents the planned words once per cycle and avoids a repeat at the boundary', () => {
+  const words = [{ word: 'bridge', meaning: 'جسر' }, { word: 'river', meaning: 'نهر' },
+    { word: 'lantern', meaning: 'فانوس' }, { word: 'Bridge', meaning: 'معبر' }];
+  const state = engine.createState(words, { random: () => 0, orderedPrompts: true });
+  const first = Array.from({ length: 3 }, () => engine.createWordGate(state).word);
+  const second = Array.from({ length: 3 }, () => engine.createWordGate(state).word);
+  assert.deepEqual(first, ['bridge', 'river', 'lantern']);
+  assert.equal(new Set(second).size, 3);
+  assert.notEqual(second[0], first[2]);
+});
+
+test('a timed jump can land on a truck ramp and a roof jump clears the height difference', () => {
+  const state = make();
+  entity(state, { kind: 'obstacle', obstacleType: 'train', length: 20, lane: 2, z: -3, resolved: true });
+  assert.equal(engine.jump(state), true);
+  state.elapsed = engine.constants.JUMP_MS / 2;
+  assert.equal(engine.move(state, 2), true);
+  assert.ok(engine.getPose(state).feet >= .525);
+  const roof = make();
+  entity(roof, { kind: 'obstacle', obstacleType: 'train', length: 20, lane: 1, z: -3, resolved: true });
+  entity(roof, { kind: 'obstacle', obstacleType: 'train', length: 20, lane: 2, z: -10, resolved: true });
+  assert.equal(engine.jump(roof), true);
+  roof.elapsed = engine.constants.JUMP_MS / 2;
+  assert.equal(engine.move(roof, 2), true);
 });
 
 test('entry locks cannot bypass a wrong-route crate, even mid-jump or during invulnerability; assist off still passes after impact', () => {

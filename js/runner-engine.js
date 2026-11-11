@@ -26,7 +26,7 @@
       word: clean(item?.word || item?.term),
       meaning: clean(item?.translation || item?.meaning || item?.ar || item?.definition),
     })).filter(item => {
-      const key = item.word + '\u0000' + item.meaning;
+      const key = item.word.toLowerCase() + '\u0000' + item.meaning;
       if (!item.word || !item.meaning || seen.has(key)) return false;
       seen.add(key); return true;
     });
@@ -46,6 +46,8 @@
       autoRecovery: options.autoRecovery !== false, impact: null, _sideBumpUntil: 0,
       entities: [], gate: null, feedback: null, events: [],
       _random: rng, _gateLanes: [], _lastGateLane: -1, _queuedAction: null, _formationBag: [], _tunnelLengths: [],
+      _promptDeck: [], _lastPrompt: '', _playedPromptCycle: false, _orderedPrompts: options.orderedPrompts === true,
+      jumpOrigin: 0,
       _pool: Array.from({ length: MAX_ENTITIES }, () => ({})), _nextId: 1,
       _nextRowAt: 400, _nextGateAt: 30000 + Math.floor(clamp(Number(rng()) || 0, 0, 1) * 12000), _row: 0, _escapeLane: 1, _safeUntil: 0,
       _canGate: new Set(normalized.map(item => item.meaning)).size >= LANES,
@@ -84,6 +86,7 @@
       state._queuedAction = action; return true;
     }
     state._queuedAction = null;
+    state.jumpOrigin = action === 'jump' ? getPose(state).floor : 0;
     state.action = action; state.actionStartedAt = state.elapsed; state.actionUntil = state.elapsed + duration;
     return true;
   }
@@ -104,7 +107,10 @@
     for (let step = state.lane + direction; direction > 0 ? step <= lane : step >= lane; step += direction) {
       const trucks = state.entities.filter(item => item.obstacleType === 'train' && item.lane === step && sideOccupied(item, item.z));
       const targetSupport = trucks.reduce((floor, item) => Math.max(floor, vehicleSurface(item)), 0);
-      if (trucks.length && (!support || !targetSupport || targetSupport > support + .08)) return false;
+      const roofJump = support > 0 && pose.action === 'jump' && pose.feet >= targetSupport;
+      const rampJump = step === state.lane + direction && step === lane && pose.action === 'jump' &&
+        trucks.every(item => -item.z <= VEHICLE_RAMP) && pose.feet >= targetSupport + .15;
+      if (trucks.length && (!targetSupport || ((!support || targetSupport > support + .08) && !roofJump && !rampJump))) return false;
       support = targetSupport;
       if (state.entities.some(entity => entity.kind === 'obstacle' && entity.obstacleType !== 'train' && entity.lane === step && sideOccupied(entity, entity.z) && !clearsObstacle(entity.obstacleType, pose))) return false;
     }
@@ -154,7 +160,9 @@
       floor = Math.max(floor, vehicleSurface(entity, z));
     }
     const lift = action === 'jump' ? Math.sin(fraction * Math.PI) * 1.12 : 0;
-    return { action, feet: floor + lift, top: floor + lift + (action === 'slide' ? .43 : 1), floor, lift };
+    const takeoff = Number(state.jumpOrigin) || 0;
+    const feet = action === 'jump' ? Math.max(floor, takeoff + (floor - takeoff) * fraction + lift) : floor;
+    return { action, feet, top: feet + (action === 'slide' ? .43 : 1), floor, lift: Math.max(0, feet - floor), fraction };
   }
   function allocate(state, data) {
     const entity = state._pool.pop();
@@ -172,7 +180,27 @@
   function createWordGate(state) {
     const meanings = new Set(state.words.map(item => item.meaning));
     if (meanings.size < LANES) return null;
-    const prompt = choose(state, state.words);
+    if (!state._promptDeck.length) {
+      const seen = new Set();
+      state._promptDeck = state.words.filter(item => {
+        const key = item.word.toLowerCase();
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      });
+      if (!state._orderedPrompts || state._playedPromptCycle) {
+        for (let i = state._promptDeck.length - 1; i > 0; i--) {
+          const other = Math.floor(random(state) * (i + 1));
+          [state._promptDeck[i], state._promptDeck[other]] = [state._promptDeck[other], state._promptDeck[i]];
+        }
+      }
+      if (state._promptDeck.length > 1 && state._promptDeck[0].word.toLowerCase() === state._lastPrompt) {
+        state._promptDeck.push(state._promptDeck.shift());
+      }
+      state._playedPromptCycle = true;
+    }
+    const prompt = state._promptDeck.shift();
+    state._lastPrompt = prompt.word.toLowerCase();
     const alternatives = [...meanings].filter(meaning => meaning !== prompt.meaning);
     const first = choose(state, alternatives);
     const second = choose(state, alternatives.filter(meaning => meaning !== first));
@@ -318,7 +346,7 @@
       const recoil = Math.max(0, 3 - obstacle.z);
       for (const item of state.entities) item.z += recoil;
       state.distance = Math.max(0, state.distance - recoil);
-      state.action = 'run'; state.actionUntil = 0; state._queuedAction = null;
+      state.action = 'run'; state.actionUntil = 0; state._queuedAction = null; state.jumpOrigin = 0;
       const plan = state.autoRecovery ? chooseRecovery(state, obstacle) : null;
       state.impact = { kind: 'hit', startedAt: state.elapsed, recoverAt: state.elapsed + RECOVERY_START_MS,
         freezeUntil: state.elapsed + IMPACT_FREEZE_MS, endAt: state.elapsed + 650, plan, applied: false };
@@ -364,6 +392,7 @@
         impact.applied = true;
         if (impact.plan && state.autoRecovery) {
           state.lane = impact.plan.lane;
+          state.jumpOrigin = impact.plan.action === 'jump' ? getPose(state).floor : 0;
           state.action = impact.plan.action; state.actionStartedAt = impact.recoverAt;
           state.actionUntil = impact.recoverAt + (state.action === 'jump' ? JUMP_MS : state.action === 'slide' ? SLIDE_MS : 0);
           emit(state, { type: 'recovery', action: state.action, lane: state.lane });
@@ -393,7 +422,7 @@
       const entity = state.entities[index], span = (entity.length || 0) + (entity.obstacleType === 'train' ? VEHICLE_EXIT : 0);
       if (entity.z + span < NEAR - 1) retire(state, index);
     }
-    if (getAction(state) === 'run') state.action = 'run';
+    if (getAction(state) === 'run') { state.action = 'run'; state.jumpOrigin = 0; }
     if (state._queuedAction && getAction(state) === 'run' && state.elapsed >= state.actionUntil + ACTION_RECOVERY_MS) {
       const action = state._queuedAction;
       startAction(state, action, action === 'jump' ? JUMP_MS : SLIDE_MS);
