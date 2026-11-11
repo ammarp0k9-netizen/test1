@@ -506,6 +506,7 @@
         const stride = Math.sin(phase);
         const tuck = jumping ? Math.sin(Math.PI * pose.fraction) : 0;
         const armRaise = jumping ? Math.sin(Math.PI * pose.fraction ** .7) : 0;
+        const streetJump = jumping && pose.floor === 0 && !state.jumpOrigin;
         // Viewed from behind: feet cycle in depth/height, never sweep sideways.
         for (const side of [-1, 1]) {
           const swing = stride * side, x = side * h * .09;
@@ -516,6 +517,20 @@
           line(context, shoeX - h * .045, footY, shoeX + h * .045, footY, '#dbbe85', h * .065);
         }
         for (const side of [-1, 1]) {
+          if (streetJump) {
+            const push = Math.sin(Math.PI * Math.min(1, pose.fraction / .72));
+            const balance = Math.sin(Math.PI * Math.max(0, (pose.fraction - .32) / .68));
+            const elbowX = side * h * (.28 + .13 * tuck);
+            const handX = side * h * (.22 + .15 * push + .27 * balance);
+            const handY = -h * (.37 + (.51 + side * .045) * push + .13 * balance);
+            limb(side * h * .19, -h * .68, elbowX, -h * (.50 + .16 * push),
+              handX, handY, '#d9ab7c', h * .09);
+            context.fillStyle = '#edc097';
+            context.beginPath();
+            context.arc(handX, handY, h * .048, 0, Math.PI * 2);
+            context.fill();
+            continue;
+          }
           const swing = jumping ? 0 : -side * stride;
           limb(side * h * .19, -h * .68, side * h * (.27 + armRaise * .06), -h * (.47 + swing * .08 + armRaise * .18),
             side * h * (.2 + armRaise * .08), -h * (.35 + swing * .1 + armRaise * .44), '#d9ab7c', h * .09);
