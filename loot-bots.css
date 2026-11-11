@@ -1,0 +1,68 @@
+.loot-bots {
+  --lb-gold: #f6d48b;
+  --lb-teal: #9af2dc;
+  box-sizing: border-box;
+  width: min(96vw, 660px, max(340px, calc((100dvh - 205px) * 1.185)));
+  max-height: 96dvh;
+  padding: 0;
+  border: 1px solid #36575d;
+  border-radius: 18px;
+  background: #0c1824;
+  color: #f3f8f7;
+  font-family: inherit;
+  box-shadow: 0 20px 70px #0009;
+  overscroll-behavior: contain;
+}
+.loot-bots::backdrop { background: #040912ec; }
+.loot-bots [hidden] { display: none !important; }
+.loot-bots .lb-shell { display: grid; gap: 9px; padding: 12px; }
+.loot-bots .lb-header, .loot-bots .lb-footer, .loot-bots .lb-actions { display: flex; align-items: center; gap: 8px; }
+.loot-bots .lb-header, .loot-bots .lb-footer { justify-content: space-between; }
+.loot-bots .lb-header h2 { margin: 0; text-align: right; font: 900 clamp(1.3rem, 4vw, 2rem)/1 system-ui, sans-serif; letter-spacing: -.045em; color: var(--lb-teal); }
+.loot-bots p { margin: 0; }
+.loot-bots .lb-header p, .loot-bots .lb-note { color: #b8cbd3; font-size: .76rem; }
+.loot-bots button {
+  min-height: 42px; padding: 4px 10px; border: 1px solid #466e75; border-radius: 10px;
+  background: #183544; color: #f4f8f8; font-family: inherit; font-size: .83rem; line-height: 1.3;
+  font-weight: 700; cursor: pointer; touch-action: manipulation;
+}
+.loot-bots button:focus-visible, .loot-bots .lb-arena:focus-visible { outline: 2px solid var(--lb-gold); outline-offset: 2px; }
+.loot-bots button:disabled { opacity: .55; cursor: default; }
+.loot-bots .lb-hud { display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px; }
+.loot-bots .lb-hud span { min-width: 0; text-align: center; border-radius: 8px; padding: 3px; background: #132632; font-size: .75rem; color: #bdd1d9; }
+.loot-bots .lb-hud b { display: block; direction: ltr; color: #fff; font-variant-numeric: tabular-nums; }
+.loot-bots .lb-hud span:last-child b { color: var(--lb-gold); }
+.loot-bots .lb-arena { position: relative; width: 100%; aspect-ratio: 640 / 540; border-radius: 11px; overflow: hidden; background: #101f2a; touch-action: none; user-select: none; }
+.loot-bots canvas { display: block; width: 100%; height: 100%; }
+.loot-bots .lb-panel { position: absolute; inset: 0; display: grid; place-content: center; justify-items: center; gap: 8px; padding: 14px; background: #0b1724ed; text-align: center; }
+.loot-bots .lb-panel strong { font-size: clamp(1.25rem, 4vw, 2.1rem); color: var(--lb-teal); }
+.loot-bots .lb-panel p { max-width: 30ch; font-size: .88rem; }
+.loot-bots .lb-panel small { color: #c3d4da; }
+.loot-bots [data-play], .loot-bots [data-dash]:enabled { background: var(--lb-teal); color: #0b2729; border-color: transparent; }
+.loot-bots .lb-core, .loot-bots .lb-options { position: absolute; inset: 0; pointer-events: none; }
+.loot-bots .lb-core { background: linear-gradient(#0d28375c, transparent 60%); }
+.loot-bots .lb-question { position: absolute; top: 3%; left: 18%; right: 18%; text-align: center; }
+.loot-bots .lb-question small { color: var(--lb-gold); display: block; font-size: .72rem; }
+.loot-bots .lb-question b { color: #fff; display: block; font: 800 clamp(.95rem, 3vw, 1.55rem)/1.05 system-ui, sans-serif; overflow-wrap: anywhere; }
+.loot-bots .lb-options button {
+  position: absolute; transform: translate(-50%, -42%); pointer-events: auto;
+  width: 26%; min-height: 44px; padding: 4px; display: grid; justify-items: center;
+  border: 1px solid #77d2bf; border-bottom: 4px solid #488f89; background: #173646;
+  box-shadow: 0 5px 18px #0b1a23; color: #fff8dc; overflow-wrap: anywhere;
+  font-size: clamp(.68rem, 2.5vw, .96rem);
+}
+.loot-bots .lb-options bdi { max-height: 4.5em; overflow: auto; overscroll-behavior: contain; touch-action: pan-y; }
+.loot-bots .lb-options span { color: var(--lb-teal); font-size: .66rem; }
+.loot-bots .lb-footer { min-height: 54px; }
+.loot-bots .lb-footer p { color: #e0f1ee; font-size: .8rem; }
+.loot-bots [data-dash] { flex: 0 0 84px; }
+@media (max-width: 380px) {
+  .loot-bots .lb-shell { padding: 8px; }
+  .loot-bots .lb-actions { gap: 4px; }
+}
+@media (max-height: 520px) and (orientation: landscape) {
+  .loot-bots { width: min(96vw, 820px); }
+  .loot-bots .lb-shell { grid-template-columns: minmax(0, 1fr) minmax(0, 1.6fr); align-items: center; }
+  .loot-bots .lb-arena { grid-area: 1 / 2 / 5; width: min(100%, calc((96dvh - 26px) * 1.185)); justify-self: center; }
+  .loot-bots .lb-header { flex-wrap: wrap; }
+}

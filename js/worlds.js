@@ -5028,6 +5028,18 @@ function makePublishedGateJourneyPanel(world, rank, gate) {
     }
   }
 
+  if (['learning', 'ready', 'cleared', 'mastered'].includes(state)) {
+    const generation = publishedContentState.generation;
+    const bots = window.LootLinguaBots?.renderGate({
+      worldId: world.worldId,
+      rankId: rank.rankId,
+      gateId: gate.gateId,
+      title: gate.title,
+      isSourceCurrent: () => currentView === 'worlds' && isCurrentPublishedGate(world.worldId, rank.rankId, gate.gateId, generation),
+    });
+    if (bots) panel.append(bots);
+  }
+
   const action = publishedContentState.journeyAction;
   const journeyError = currentPublishedJourneyError(world.worldId);
   const pending = Boolean(action?.pending);
