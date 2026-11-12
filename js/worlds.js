@@ -4207,6 +4207,21 @@ async function openPublishedGateQuizPicker(world, rank, gate) {
     button.addEventListener('click', () => { void choose(mode.id); });
     modes.append(button);
   });
+  if (window.LootLinguaBots?.launchGatePractice) {
+    const view = currentView;
+    const play = publishedElement('button', 'published-gate-quiz-mode');
+    play.type = 'button';
+    play.append(publishedIcon('fa-solid fa-robot'));
+    const copy = publishedElement('span');
+    copy.append(publishedElement('strong', '', 'Loot Bots'), publishedElement('small', '', 'العب بكلمات هذه البوابة. تدريب دون رفع الإتقان.'));
+    play.append(copy);
+    play.addEventListener('click', () => { void window.LootLinguaBots.launchGatePractice(play, {
+      source: `كلمات بوابة ${gate.title || ''}`.trim(),
+      words: () => words,
+      isSourceCurrent: () => shell.isConnected && currentView === view,
+    }); });
+    modes.append(play);
+  }
   shell.querySelector('.published-gate-quiz-backdrop')?.addEventListener('click', close);
   shell.querySelector('.published-gate-quiz-close')?.addEventListener('click', close);
   shell.addEventListener('keydown', (event) => { if (event.key === 'Escape') close(); });
@@ -5029,13 +5044,13 @@ function makePublishedGateJourneyPanel(world, rank, gate) {
   }
 
   if (['learning', 'ready', 'cleared', 'mastered'].includes(state)) {
-    const generation = publishedContentState.generation;
     const bots = window.LootLinguaBots?.renderGate({
       worldId: world.worldId,
       rankId: rank.rankId,
       gateId: gate.gateId,
       title: gate.title,
-      isSourceCurrent: () => currentView === 'worlds' && isCurrentPublishedGate(world.worldId, rank.rankId, gate.gateId, generation),
+      isSourceCurrent: () => currentView === 'worlds' && publishedContentState.tab === 'published' &&
+        isPublishedGateRoute(world.worldId, rank.rankId, gate.gateId),
     });
     if (bots) panel.append(bots);
   }

@@ -44,7 +44,8 @@
 .loot-bots .lb-track i { display: block; height: 100%; transform: scaleX(0); transform-origin: right; background: linear-gradient(90deg, #ffdf8b, #ce8950); }
 .loot-bots .lb-boss-meter.is-threat { border-color: #8c504b; }
 .loot-bots .lb-boss-meter.is-threat .lb-track i { background: linear-gradient(90deg, #ff977d, #e75567); }
-.loot-bots .lb-arena { position: relative; min-width: 0; min-height: 0; border-radius: 11px; overflow: hidden; background: #101f2a; touch-action: none; user-select: none; }
+.loot-bots .lb-arena { position: relative; min-width: 0; min-height: 0; border-radius: 11px; overflow: hidden; background: #101f2a; user-select: none; }
+.loot-bots .lb-arena.is-fighting { touch-action: none; }
 .loot-bots canvas { display: block; width: 100%; height: 100%; }
 .loot-bots .lb-arena.is-fighting canvas { cursor: crosshair; }
 .loot-bots .lb-panel { position: absolute; inset: 0; display: flex; flex-direction: column; justify-content: safe center; align-items: center; gap: 8px; padding: 14px; background: #0b1724ed; text-align: center; overflow: auto; touch-action: pan-y; }

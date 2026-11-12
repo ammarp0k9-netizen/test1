@@ -158,10 +158,16 @@ export function openBattle({ words, source, isCurrent, returnFocus }) {
     play.textContent = label; panel.hidden = false; showRecord(); play.focus({ preventScroll: true });
   }
   function start() {
-    if (!isCurrent()) return finish();
-    const aspect = arena.clientWidth / arena.clientHeight;
-    if (mode === 'over' || (mode === 'intro' && Math.abs(geometry.width / geometry.height - aspect) > .1)) {
-      newRound(); recorded = false; shownQuestion = null; lastEvent = null; lastPhase = null;
+    if (closed || mode === 'play') return;
+    if (!isCurrent()) { finish(); window.showToast?.('تغيّر مصدر الكلمات. افتح الساحة من جديد.', 'info'); return; }
+    try {
+      const aspect = arena.clientWidth / arena.clientHeight;
+      if (mode === 'over' || (mode === 'intro' && Math.abs(geometry.width / geometry.height - aspect) > .1)) {
+        newRound(); recorded = false; shownQuestion = null; lastEvent = null; lastPhase = null;
+      } else resize();
+    } catch {
+      status.textContent = 'تعذّر تجهيز عرض الساحة. جرّب البدء مرة ثانية.';
+      return;
     }
     audio.unlock(); audioOptions.hidden = true; sound.setAttribute('aria-expanded', 'false');
     mode = 'play'; previous = 0; accumulator = 0; panel.hidden = true; pause.hidden = false;
@@ -326,6 +332,17 @@ export function openBattle({ words, source, isCurrent, returnFocus }) {
 
   listen(find('[data-close]'), 'click', finish);
   listen(play, 'click', start);
+  let startTouch = null;
+  listen(play, 'pointerdown', event => {
+    if (event.pointerType === 'touch') startTouch = { id: event.pointerId, x: event.clientX, y: event.clientY };
+  });
+  listen(play, 'pointercancel', () => { startTouch = null; });
+  listen(play, 'pointerup', event => {
+    if (startTouch?.id !== event.pointerId) return;
+    const distance = Math.hypot(event.clientX - startTouch.x, event.clientY - startTouch.y);
+    startTouch = null;
+    if (distance < 14) start();
+  });
   listen(station, 'click', activate);
   listen(repeat, 'click', () => audio.say(battle.state.question?.word));
   listen(sound, 'click', () => {
@@ -423,8 +440,13 @@ export function openBattle({ words, source, isCurrent, returnFocus }) {
   status.textContent = coarse ? idleHint : 'IJKL للتصويب والإطلاق بلوحة المفاتيح.';
   showRecord();
   document.body.append(dialog);
-  dialog.showModal();
-  newRound(); readAudioSettings();
+  try {
+    dialog.showModal();
+    newRound(); readAudioSettings();
+  } catch (error) {
+    lifetime.abort(); audio.close(); dialog.remove();
+    throw error;
+  }
   window.lockBackgroundScroll?.('loot-bots');
   window.__lootlinguaRunnerInputActive = true;
   window.dispatchEvent(new Event('lootlingua:runner-input-active'));

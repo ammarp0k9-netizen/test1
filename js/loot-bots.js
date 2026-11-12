@@ -76,11 +76,11 @@
     if (resources) return resources;
     const link = document.createElement('link');
     const styles = new Promise((resolve, reject) => {
-      link.rel = 'stylesheet'; link.href = new URL('loot-bots.css?v=6', base);
+      link.rel = 'stylesheet'; link.href = new URL('loot-bots.css?v=7', base);
       link.onload = resolve; link.onerror = () => reject(new Error('Arena stylesheet unavailable'));
       document.head.append(link);
     });
-    resources = Promise.all([styles, import(new URL('js/loot-bots-game.mjs?v=6', base))])
+    resources = Promise.all([styles, import(new URL('js/loot-bots-game.mjs?v=7', base))])
       .then(([, game]) => game)
       .catch(error => { link.remove(); resources = null; throw error; });
     return resources;
@@ -94,14 +94,17 @@
     const heading = button.querySelector('strong') || button, label = heading.textContent;
     button.disabled = true; button.setAttribute('aria-busy', 'true'); heading.textContent = 'جارٍ تجهيز الساحة…';
     try {
-      const [game, deck] = await Promise.all([loadGame(), words()]);
+      const gameReady = loadGame().catch(error => { throw Object.assign(error, { botsAssetFailure: true }); });
+      const [game, deck] = await Promise.all([gameReady, words()]);
       if (!isCurrent() || window.__lootlinguaRunnerInputActive) return;
       button.disabled = false;
       drain(uid);
-      const result = game.openBattle({ words: deck, source, isCurrent, returnFocus: button });
+      let result;
+      try { result = game.openBattle({ words: deck, source, isCurrent, returnFocus: button }); }
+      catch (error) { throw Object.assign(error, { botsAssetFailure: true }); }
       if (result === 'small') window.showToast?.('الساحة تحتاج كلمتين على الأقل بمعنيين مختلفين من هذا المصدر.', 'info');
     } catch (error) {
-      if (isCurrent()) window.showToast?.('تعذّر تجهيز كلمات الساحة. حاول مرة ثانية.', 'warning');
+      if (isCurrent()) window.showToast?.(error?.botsAssetFailure ? 'تعذّر تشغيل الساحة. أعد المحاولة.' : 'تعذّر تجهيز كلمات الساحة. حاول مرة ثانية.', 'warning');
     } finally {
       pending = false;
       button.disabled = false; button.removeAttribute('aria-busy'); heading.textContent = label;
@@ -119,7 +122,7 @@
   }
 
   window.LootLinguaBots = {
-    launchDictionary: launch, progress, record, saveAudio, newRunId: id, refreshStats,
+    launchDictionary: launch, launchGatePractice: launch, progress, record, saveAudio, newRunId: id, refreshStats,
     guestProgress() { const data = progress(''); return hasRun(data) || Object.keys(data.audio).length ? data : null; },
     acceptProfile(profile, uid) {
       if (!uid || uid !== owner()) return;
