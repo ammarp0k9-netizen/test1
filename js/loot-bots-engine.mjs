@@ -1,5 +1,5 @@
-import { WIDTH, HEIGHT, STATION, DOCKS, DEFAULT_ARENA, CUES, makeCover, moveSolid, shotCover, isFighting, canDecode } from './loot-bots-arena.mjs?v=2';
-import { createBossDirector, bossProgress, BOSS_WARNING, BOSS_CLEAR } from './loot-bots-bosses.mjs?v=2';
+import { WIDTH, HEIGHT, STATION, DOCKS, DEFAULT_ARENA, CUES, makeCover, moveSolid, shotCover, navigationTarget, isFighting, canDecode } from './loot-bots-arena.mjs?v=3';
+import { createBossDirector, bossProgress, BOSS_WARNING, BOSS_CLEAR } from './loot-bots-bosses.mjs?v=3';
 export { WIDTH, HEIGHT, STATION, DOCKS, isFighting, canDecode, bossProgress };
 export const LIMITS = Object.freeze({ enemies: 20, shots: 32, coins: 28, sparks: 40 });
 const BOT_TYPES = {
@@ -58,7 +58,9 @@ export function createBattle(deck, random = Math.random, arena = DEFAULT_ARENA) 
   };
   let bag = [], lastWord = null, lastReward = null;
   const move = (actor, dx, dy, radius, steer = false) => moveSolid(actor, dx, dy, radius, arena, state.cover, steer);
-  const director = createBossDirector({ state, random, width, height, shoot, damage, spawn, burst, move });
+  const navigate = actor => navigationTarget(actor, state.player, arena, state.cover, state.time);
+  const visible = actor => shotCover(state.cover, actor.x, actor.y, state.player.x, state.player.y) < 0;
+  const director = createBossDirector({ state, random, width, height, shoot, damage, spawn, burst, move, navigate, visible });
 
   function activeReward(id) {
     return state.reward?.id === id && state.time < state.reward.until;
@@ -220,14 +222,20 @@ export function createBattle(deck, random = Math.random, arena = DEFAULT_ARENA) 
       if (rush) {
         move(enemy, Math.cos(enemy.angle) * 307 * dt, Math.sin(enemy.angle) * 307 * dt, enemy.radius);
       } else if (gap > 1) {
-        enemy.angle = Math.atan2(dy, dx);
-        if (state.time >= enemy.nextAttack && (striker && gap > 55 && gap < 158 || gunner && gap < 345)) {
+        const goal = navigate(enemy), flanking = goal !== player;
+        const attackRange = striker && gap > 55 && gap < 158 || gunner && gap < 345;
+        const clearShot = (gunner || attackRange) && visible(enemy);
+        const lineOpen = !flanking && (!gunner || clearShot);
+        const canAttack = attackRange && clearShot && (gunner || !flanking);
+        enemy.angle = flanking ? Math.atan2(goal.y - enemy.y, goal.x - enemy.x) : Math.atan2(dy, dx);
+        if (state.time >= enemy.nextAttack && canAttack) {
+          enemy.angle = Math.atan2(dy, dx);
           enemy.attackAt = state.time + (striker ? .48 : .59);
           enemy.nextAttack = state.time + (striker ? 2.9 : 2.6);
         } else {
-          const direction = gunner && gap < 152 ? -1 : gunner && gap < 245 ? 0 : 1;
+          const direction = !lineOpen ? 1 : gunner && gap < 152 ? -1 : gunner && gap < 245 ? 0 : 1;
           const speed = enemy.speed * (1 + Math.min(.28, (state.sector - 1) * .026));
-          move(enemy, dx / gap * speed * direction * dt, dy / gap * speed * direction * dt, enemy.radius, true);
+          move(enemy, Math.cos(enemy.angle) * speed * direction * dt, Math.sin(enemy.angle) * speed * direction * dt, enemy.radius, !flanking);
         }
       }
     }

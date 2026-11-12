@@ -1,6 +1,6 @@
-import { createBattle, prepareDeck, isFighting, canDecode, bossProgress, MAX_CELLS } from './loot-bots-engine.mjs?v=4';
-import { arenaForAspect } from './loot-bots-arena.mjs?v=2';
-import { createRenderer } from './loot-bots-renderer.mjs?v=4';
+import { createBattle, prepareDeck, isFighting, canDecode, bossProgress, MAX_CELLS } from './loot-bots-engine.mjs?v=5';
+import { arenaForAspect, shotCover } from './loot-bots-arena.mjs?v=3';
+import { createRenderer } from './loot-bots-renderer.mjs?v=5';
 import { createBotsAudio } from './loot-bots-audio.mjs?v=1';
 
 const MOVEMENT = new Set(['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'KeyW', 'KeyA', 'KeyS', 'KeyD']);
@@ -25,8 +25,8 @@ export function openBattle({ words, source, isCurrent, returnFocus }) {
         <div class="lb-actions"><button type="button" data-pause hidden>إيقاف مؤقت</button><button type="button" data-sound aria-expanded="false" aria-controls="lbAudioSettings">الصوت</button><button type="button" data-close>خروج</button></div>
       </header>
       <div class="lb-hud">
-        <span>القطاع <b data-sector>1</b></span><span>الصحة <b data-hp>5 / 5</b></span>
-        <span>السلاح <b data-tier>1</b></span><span>الشحنات <b data-cells>5 / 5</b></span><span>النقاط <b data-score>0</b></span><span>العملات <b data-coins>0</b></span>
+        <span class="lb-health">الصحة <b data-hp role="img" aria-label="5 من 5 قلوب">♥♥♥♥♥</b></span>
+        <span>القطاع <b data-sector>1</b></span><span>السلاح <b data-tier>1</b></span><span>النقاط <b data-score>0</b></span><span>العملات <b data-coins>0</b></span>
       </div>
       <div class="lb-boss-meter" data-meter>
         <span><b data-boss-label>الزعيم القادم</b><small data-boss-detail></small></span>
@@ -36,7 +36,11 @@ export function openBattle({ words, source, isCurrent, returnFocus }) {
         <canvas aria-hidden="true"></canvas>
         <div class="lb-announcement" hidden><strong></strong><small></small></div>
         <div class="lb-reward" hidden></div>
-        <button type="button" data-dash hidden disabled><span aria-hidden="true">»</span><b>اندفاع</b><small data-charge>جاهز</small></button>
+        <div class="lb-combat-controls" hidden>
+          <div class="lb-weapon"><b data-cells>5 / 5</b><small>السلاح</small></div>
+          <div><button type="button" data-dash disabled><span aria-hidden="true">»</span><b>اندفاع</b><small data-charge>جاهز</small></button>
+            <button type="button" data-fire hidden>إطلاق</button></div>
+        </div>
         <button type="button" class="lb-station" hidden>شغّل المحطة</button>
         <div class="lb-core" hidden role="group" aria-labelledby="lbCoreTitle">
           <div class="lb-question"><small id="lbCoreTitle">رمز محطة الطاقة · اختر معناه</small><b lang="en" dir="ltr" data-word></b><button type="button" data-repeat hidden>اسمع الكلمة</button></div>
@@ -67,16 +71,18 @@ export function openBattle({ words, source, isCurrent, returnFocus }) {
   const bossLabel = find('[data-boss-label]'), bossDetail = find('[data-boss-detail]');
   const announcement = find('.lb-announcement'), rewardBadge = find('.lb-reward'), charge = find('[data-charge]');
   const status = find('[data-status]'), play = find('[data-play]'), pause = find('[data-pause]'), dashButton = find('[data-dash]');
+  const combatControls = find('.lb-combat-controls'), weapon = find('.lb-weapon'), fireButton = find('[data-fire]');
   const hud = ['sector', 'hp', 'tier', 'cells', 'score', 'coins'].map(key => find(`[data-${key}]`));
   const sound = find('[data-sound]'), audioOptions = find('#lbAudioSettings'), repeat = find('[data-repeat]');
   const toggles = { effects: find('[data-effects]'), speech: find('[data-speech]') };
   const hudValues = [];
   const keyboard = new Set();
   const coarse = window.matchMedia('(pointer: coarse)').matches;
-  const controls = coarse ? 'اسحب يسار الساحة للحركة ويمينها للتصويب والإطلاق.' : 'تحرّك بالأسهم أو WASD. صوّب بالفأرة واضغط للإطلاق.';
-  const idleHint = coarse ? controls : 'الأسهم للحركة · الفأرة للإطلاق · مسافة للاندفاع.';
+  const controls = coarse ? 'اسحب يسار الساحة للحركة. اضغط إطلاق للتصويب المساعد، أو المس الهدف بيمين الساحة.' : 'تحرّك بالأسهم أو WASD. صوّب بالفأرة واضغط للإطلاق.';
+  const idleHint = coarse ? 'اسحب يسارًا للحركة · اضغط إطلاق أو المس هدفًا يمين الساحة.' : 'الأسهم للحركة · الفأرة للإطلاق · مسافة للاندفاع.';
   let mode = 'intro', frame = 0, previous = 0, accumulator = 0, runId, outcome;
-  let joystick = null, aimStick = null, mouse = null, pendingAim = null, dash = false, shownQuestion = null;
+  let joystick = null, touchAim = null, mouse = null, pendingAim = null, dash = false, shownQuestion = null;
+  let firePointer = null, assistUntil = -1;
   let lastPhase = null, lastEvent = null, lastHint = '', recorded = false, closed = false;
   let lastMeter = '', lastMeterValue = -1, lastCharge = '', lastReward = null;
   let bounds;
@@ -117,7 +123,8 @@ export function openBattle({ words, source, isCurrent, returnFocus }) {
     repeat.hidden = !audio.canSpeak || !toggles.speech.checked;
   }
   function clearInput() {
-    keyboard.clear(); joystick = null; aimStick = null; mouse = null; pendingAim = null; dash = false;
+    keyboard.clear(); joystick = null; touchAim = null; mouse = null; pendingAim = null; dash = false;
+    firePointer = null; assistUntil = -1;
   }
   function finish() {
     if (closed) return;
@@ -135,7 +142,7 @@ export function openBattle({ words, source, isCurrent, returnFocus }) {
     audio.stopSpeech();
     mode = next; clearInput(); core.hidden = true; station.hidden = true; result.hidden = true;
     arena.classList.remove('is-fighting');
-    dashButton.disabled = true; dashButton.hidden = true; pause.hidden = true;
+    dashButton.disabled = true; combatControls.hidden = true; pause.hidden = true;
     announcement.hidden = true; rewardBadge.hidden = true;
     find('[data-mission]').hidden = true;
     find('[data-heading]').textContent = title; find('[data-copy]').textContent = copy;
@@ -160,12 +167,14 @@ export function openBattle({ words, source, isCurrent, returnFocus }) {
     [s.sector, s.hp, s.tier + 1, s.cells, s.score, s.collected].forEach((value, index) => {
       if (hudValues[index] === value) return;
       hudValues[index] = value;
-      hud[index].textContent = index === 1 ? `${value} / 5` : index === 3 ? value ? `${value} / ${MAX_CELLS}` : 'تبريد' : value;
+      hud[index].textContent = index === 1 ? '♥'.repeat(value) + '♡'.repeat(5 - value) : index === 3 ? value ? `${value} / ${MAX_CELLS}` : 'السلاح يبرد…' : value;
+      if (index === 1) hud[index].setAttribute('aria-label', `${value} من 5 قلوب`);
+      if (index === 3) weapon.classList.toggle('is-cooling', !value);
     });
     const fighting = isFighting(s), remaining = Math.max(0, s.dashReady - s.time);
     const dashDisabled = !fighting || remaining > 0;
     if (dashButton.disabled !== dashDisabled) dashButton.disabled = dashDisabled;
-    if (dashButton.hidden === fighting) dashButton.hidden = !fighting;
+    if (combatControls.hidden === fighting) combatControls.hidden = !fighting;
     const chargeText = remaining ? `${(Math.ceil(remaining * 10) / 10).toFixed(1)} ث` : 'جاهز';
     if (chargeText !== lastCharge) {
       lastCharge = chargeText;
@@ -278,24 +287,45 @@ export function openBattle({ words, source, isCurrent, returnFocus }) {
       const x = joystick?.dx ?? (has('ArrowRight', 'KeyD') - has('ArrowLeft', 'KeyA'));
       const y = joystick?.dy ?? (has('ArrowDown', 'KeyS') - has('ArrowUp', 'KeyW'));
       const player = battle.state.player;
-      const target = mouse?.held ? mouse : aimStick?.dragged ? null : aimStick;
+      const target = mouse?.held ? mouse : touchAim;
       const keyX = has('KeyL') - has('KeyJ'), keyY = has('KeyK') - has('KeyI');
       while (accumulator >= STEP) {
-        let aimX = target ? target.x - player.x : aimStick?.dx ?? keyX;
-        let aimY = target ? target.y - player.y : aimStick?.dy ?? keyY;
+        let aimX = target ? target.x - player.x : keyX;
+        let aimY = target ? target.y - player.y : keyY;
         if (!aimX && !aimY) {
           if (pendingAim) ({ x: aimX, y: aimY } = pendingAim);
+          else if (firePointer !== null || assistUntil >= battle.state.time) {
+            const s = battle.state;
+            if ((s.cells || s.reloadUntil <= s.time + STEP) && s.time + STEP >= s.fireAt) {
+              const enemy = assistTarget(s);
+              aimX = enemy ? enemy.x - player.x : Math.cos(player.angle);
+              aimY = enemy ? enemy.y - player.y : Math.sin(player.angle);
+            }
+          }
           else if (keyboard.has('KeyF')) { aimX = Math.cos(player.angle); aimY = Math.sin(player.angle); }
         }
         const previousShot = battle.state.muzzleUntil;
         battle.step(STEP, x, y, dash, aimX, aimY);
+        if (battle.state.muzzleUntil !== previousShot) assistUntil = -1;
         if (pendingAim && (battle.state.muzzleUntil !== previousShot || battle.state.time >= pendingAim.until)) pendingAim = null;
         dash = false; accumulator -= STEP;
       }
-      sync(); renderer.draw(battle.state, joystick, aimStick, mouse);
+      sync(); renderer.draw(battle.state, joystick, touchAim || mouse);
       audio.play(battle.state.cues); battle.state.cues = 0;
     }
     if (mode === 'play') frame = requestAnimationFrame(tick);
+  }
+  function assistTarget(state) {
+    const p = state.player;
+    let closest = 440, target = null;
+    for (const enemy of state.enemies) {
+      if (enemy.ready > state.time) continue;
+      const gap = Math.hypot(enemy.x - p.x, enemy.y - p.y);
+      if (gap < closest && shotCover(state.cover, p.x, p.y, enemy.x, enemy.y) < 0) { closest = gap; target = enemy; }
+    }
+    const boss = state.phase === 'boss' && state.boss;
+    if (boss && Math.hypot(boss.x - p.x, boss.y - p.y) < closest && shotCover(state.cover, p.x, p.y, boss.x, boss.y) < 0) return boss;
+    return target;
   }
   function point(event) {
     bounds ||= arena.getBoundingClientRect();
@@ -322,6 +352,18 @@ export function openBattle({ words, source, isCurrent, returnFocus }) {
   function requestDash() { dash = true; arena.focus({ preventScroll: true }); }
   listen(dashButton, 'pointerdown', event => { if (event.button === 0) { event.preventDefault(); requestDash(); } });
   listen(dashButton, 'click', event => { if (event.detail === 0) requestDash(); });
+  fireButton.hidden = !coarse;
+  listen(fireButton, 'pointerdown', event => {
+    if (event.button !== 0 || firePointer !== null) return;
+    event.preventDefault(); firePointer = event.pointerId;
+    fireButton.setPointerCapture(event.pointerId);
+    assistUntil = battle.state.time + .16;
+  });
+  listen(fireButton, 'click', event => { if (event.detail === 0) assistUntil = battle.state.time + .16; });
+  for (const type of ['lostpointercapture', 'pointerup', 'pointercancel']) listen(fireButton, type, event => {
+    if (firePointer === event.pointerId) firePointer = null;
+    if (type === 'pointercancel') assistUntil = -1;
+  });
   listen(dialog, 'cancel', event => { event.preventDefault(); if (mode === 'play') pause.click(); else finish(); });
   listen(dialog, 'keydown', event => {
     if (mode !== 'play' || event.altKey || event.ctrlKey || event.metaKey) return;
@@ -345,9 +387,9 @@ export function openBattle({ words, source, isCurrent, returnFocus }) {
     const p = point(event), id = event.pointerId, player = battle.state.player;
     if (event.pointerType === 'mouse') mouse = { ...p, id, held: true };
     else if (p.x < geometry.width / 2 && !joystick) joystick = { ...p, id, dx: 0, dy: 0 };
-    else if (p.x >= geometry.width / 2 && !aimStick) aimStick = { ...p, id, dx: 0, dy: 0, dragged: false };
+    else if (!touchAim && (joystick || p.x >= geometry.width / 2)) touchAim = { ...p, id };
     else return;
-    if (mouse?.id === id || aimStick?.id === id) pendingAim = { x: p.x - player.x, y: p.y - player.y, until: battle.state.time + .16 };
+    if (mouse?.id === id || touchAim?.id === id) pendingAim = { x: p.x - player.x, y: p.y - player.y, until: battle.state.time + .16 };
     event.preventDefault(); arena.setPointerCapture(id);
     if (document.activeElement !== arena) arena.focus({ preventScroll: true });
   });
@@ -356,25 +398,25 @@ export function openBattle({ words, source, isCurrent, returnFocus }) {
       if (mode === 'play' && isFighting(battle.state)) mouse = { ...point(event), id: event.pointerId, held: mouse?.held || false };
       return;
     }
-    const stick = event.pointerId === joystick?.id ? joystick : event.pointerId === aimStick?.id ? aimStick : null;
+    if (event.pointerId === touchAim?.id) { Object.assign(touchAim, point(event)); return; }
+    const stick = event.pointerId === joystick?.id ? joystick : null;
     if (!stick) return;
     const p = point(event), x = p.x - stick.x, y = p.y - stick.y, gap = Math.hypot(x, y);
     const scale = Math.max(38, gap);
     stick.dx = x / scale; stick.dy = y / scale;
-    if (stick === aimStick && gap > 10) stick.dragged = true;
   });
   listen(arena, 'pointerleave', () => { if (!mouse?.held) mouse = null; });
   for (const event of ['lostpointercapture', 'pointerup', 'pointercancel']) {
     listen(arena, event, e => {
       if (e.pointerId === joystick?.id) joystick = null;
-      if (e.pointerId === aimStick?.id) aimStick = null;
+      if (e.pointerId === touchAim?.id) touchAim = null;
       if (e.pointerId === mouse?.id) mouse.held = false;
       if (event === 'pointercancel') pendingAim = null;
     });
   }
   find('[data-source]').textContent = source;
   find('[data-copy]').textContent = controls;
-  status.textContent = coarse ? 'يسار الساحة للحركة · يمينها للتصويب والإطلاق.' : 'IJKL للتصويب والإطلاق بلوحة المفاتيح.';
+  status.textContent = coarse ? idleHint : 'IJKL للتصويب والإطلاق بلوحة المفاتيح.';
   showRecord();
   document.body.append(dialog);
   dialog.showModal();

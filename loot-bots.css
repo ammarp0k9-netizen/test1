@@ -34,6 +34,8 @@
 .loot-bots .lb-hud span { min-width: 0; text-align: center; border-radius: 8px; padding: 3px; background: #132632; font-size: .75rem; color: #bdd1d9; }
 .loot-bots .lb-hud b { display: block; direction: ltr; color: #fff; font-variant-numeric: tabular-nums; }
 .loot-bots .lb-hud span:last-child b { color: var(--lb-gold); }
+.loot-bots .lb-hud .lb-health { grid-column: span 2; background: #38232d; color: #ffd4dc; }
+.loot-bots .lb-health b { color: #ff8fa4; font-size: clamp(.92rem, 3.75vw, 1.3rem); line-height: 1.12; letter-spacing: .025em; white-space: nowrap; }
 .loot-bots .lb-boss-meter { display: grid; gap: 4px; padding: 3px 8px 6px; border: 1px solid #35535c; border-radius: 8px; background: #152631; }
 .loot-bots .lb-boss-meter > span { display: flex; align-items: center; justify-content: space-between; color: #ffe19d; font-size: .74rem; }
 .loot-bots .lb-boss-meter b::before { content: '◆'; margin-inline-end: 6px; }
@@ -54,8 +56,15 @@
 .loot-bots #lbAudioSettings input { width: 18px; height: 18px; accent-color: #8de7d4; }
 .loot-bots [data-repeat] { min-height: 40px; margin-block-start: 6px; }
 .loot-bots [data-play] { background: var(--lb-teal); color: #0b2729; border-color: transparent; }
+.loot-bots .lb-combat-controls { position: absolute; right: 9px; bottom: 9px; z-index: 2; display: grid; gap: 5px; justify-items: end; pointer-events: none; }
+.loot-bots .lb-combat-controls > div:last-child { display: flex; align-items: end; gap: 6px; }
+.loot-bots .lb-weapon { display: flex; align-items: center; justify-content: center; gap: 6px; padding: 4px 8px; border-radius: 7px; background: #102836f2; color: #e6f6f5; border: 1px solid #6a9aa3; font-size: .77rem; }
+.loot-bots .lb-weapon.is-cooling { background: #55301c; color: #fff0c9; border-color: #ffbc69; }
+.loot-bots .lb-weapon.is-cooling small { display: none; }
+.loot-bots [data-fire] { min-width: 64px; min-height: 54px; pointer-events: auto; touch-action: none; background: #f7d48c; color: #332510; border: 1px solid #fff0cd; border-bottom: 4px solid #ae7136; box-shadow: 0 4px 12px #06101bb0; }
+.loot-bots [data-fire]:active { translate: 0 2px; background: #ffedbc; }
 .loot-bots [data-dash] {
-  position: absolute; right: 9px; bottom: 9px; z-index: 2; display: grid; grid-template-columns: auto auto;
+  pointer-events: auto; display: grid; grid-template-columns: auto auto;
   align-items: center; justify-items: center; gap: 0 5px; min-width: 76px; min-height: 49px;
   padding: 4px 7px; border: 1px solid #ddfff5; border-bottom: 4px solid #4b9c91; border-radius: 12px;
   background: #9af2dc; color: #0b2729; box-shadow: 0 4px 12px #06101bb0;
@@ -99,12 +108,11 @@
 .loot-bots .lb-footer { height: 36px; }
 .loot-bots .lb-footer p { color: #e0f1ee; font-size: .8rem; max-height: 36px; overflow: auto; overflow-wrap: anywhere; }
 @media (pointer: coarse) {
-  .loot-bots .lb-arena.is-fighting::before, .loot-bots .lb-arena.is-fighting::after {
+  .loot-bots .lb-arena.is-fighting::before {
     position: absolute; bottom: 4px; padding: 1px 6px; border-radius: 5px;
     background: #0c1b27df; color: #d6e5eb; font-size: .62rem; pointer-events: none;
   }
   .loot-bots .lb-arena.is-fighting::before { left: 4px; content: 'حركة'; }
-  .loot-bots .lb-arena.is-fighting::after { right: 94px; content: 'تصويب وإطلاق'; }
 }
 @media (max-width: 380px) {
   .loot-bots .lb-shell { padding: 8px; gap: 6px; }
@@ -116,10 +124,13 @@
 }
 @media (min-width: 720px) and (orientation: landscape), (max-height: 520px) and (orientation: landscape) {
   .loot-bots .lb-shell { grid-template-columns: clamp(155px, 22vw, 244px) minmax(0, 1fr); grid-template-rows: auto auto auto minmax(0, 1fr) auto; }
-  .loot-bots .lb-arena { grid-area: 1 / 2 / 6; }
-  .loot-bots .lb-header { align-content: start; flex-wrap: wrap; }
-  .loot-bots .lb-hud { grid-template-columns: repeat(3, minmax(0, 1fr)); }
-  .loot-bots .lb-footer { height: auto; align-self: start; }
+  .loot-bots .lb-arena { grid-area: 2 / 2 / 6; }
+  .loot-bots .lb-boss-meter { grid-area: 1 / 2; align-self: end; }
+  .loot-bots .lb-track { height: 10px; }
+  .loot-bots .lb-header { grid-area: 1 / 1 / 3 / 2; align-self: start; align-content: start; flex-wrap: wrap; }
+  .loot-bots .lb-hud { grid-area: 3 / 1; grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .loot-bots .lb-footer { grid-area: 4 / 1; height: auto; align-self: start; }
+  .loot-bots .lb-note { grid-area: 5 / 1; }
   .loot-bots .lb-footer p { max-height: 100%; }
 }
 @media (max-height: 390px) and (orientation: landscape) {

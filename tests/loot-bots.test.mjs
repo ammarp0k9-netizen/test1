@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { bossProgress, canDecode, createBattle, prepareDeck, LIMITS, MAX_CELLS, STATION } from '../js/loot-bots-engine.mjs';
-import { arenaForAspect, CUES } from '../js/loot-bots-arena.mjs';
+import { arenaForAspect, CUES, shotCover } from '../js/loot-bots-arena.mjs';
 import { BOSS_TYPES, bossHealth, createBossDirector } from '../js/loot-bots-bosses.mjs';
 
 const words = [
@@ -274,4 +274,30 @@ test('boss health increases for the opening ten and scales within a late-game ce
   for (let i = 2; i <= 12; i++) assert.ok(bossHealth(i) > bossHealth(i - 1));
   assert.ok(bossHealth(200) >= bossHealth(30));
   assert.ok(bossHealth(200) <= 54);
+});
+
+test('gunner seeks a line of fire around the station before winding up', () => {
+  const battle = createBattle(prepareDeck(words), () => .5), s = battle.state;
+  s.spawnAt = Infinity;
+  const gunner = { x: 320, y: 165, kind: 'gunner', radius: 16, ready: 0, rushUntil: 0, attackAt: 0, nextAttack: 0, speed: 66 };
+  s.enemies.push(gunner);
+  battle.step(tick);
+  assert.equal(gunner.attackAt, 0);
+  for (let i = 0; i < 270 && !gunner.attackAt; i++) battle.step(tick);
+  assert.ok(gunner.attackAt > s.time);
+  assert.equal(shotCover(s.cover, gunner.x, gunner.y, s.player.x, s.player.y), -1);
+  assert.ok(Math.abs(gunner.x - 320) > 45);
+});
+
+test('the first boss flanks solid cover before charging a sheltered player', () => {
+  const battle = createBattle(prepareDeck(words), () => .5), s = battle.state;
+  s.spawnAt = Infinity;
+  s.stationDone = true; s.bossInterval = 0.1;
+  advance(battle, 4.2, true);
+  const boss = s.boss;
+  assert.equal(s.phase, 'boss');
+  assert.equal(boss.attack, null);
+  for (let i = 0; i < 320 && !boss.attack; i++) advance(battle, tick, true);
+  assert.equal(boss.attack?.move, 'ram');
+  assert.equal(shotCover(s.cover, boss.x, boss.y, s.player.x, s.player.y), -1);
 });

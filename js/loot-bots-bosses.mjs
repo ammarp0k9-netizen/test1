@@ -26,7 +26,7 @@ export function bossHealth(ordinal) {
 }
 
 export function createBossDirector({ state, random, width, height, shoot, damage, spawn, burst,
-  move = (actor, dx, dy) => { actor.x += dx; actor.y += dy; } }) {
+  move = (actor, dx, dy) => { actor.x += dx; actor.y += dy; }, navigate = () => state.player, visible = () => true }) {
   let order = BOSS_TYPES.slice(), last;
   const line = (x, y, angle, reach, radius) => ({ kind: 'line', x, y,
     endX: x + Math.cos(angle) * reach, endY: y + Math.sin(angle) * reach, radius });
@@ -149,9 +149,15 @@ export function createBossDirector({ state, random, width, height, shoot, damage
       }
     } else if (!attack) {
       const gap = distance(boss.x, boss.y, state.player);
-      boss.angle = aim(boss.x, boss.y);
-      if (state.time >= boss.nextAt) prepareAttack(boss);
-      else {
+      const goal = navigate(boss);
+      const clearShot = visible(boss);
+      if (state.time >= boss.nextAt && clearShot && (boss.id !== 'ram' || goal === state.player)) prepareAttack(boss);
+      else if (goal !== state.player || !clearShot) {
+        boss.angle = Math.atan2(goal.y - boss.y, goal.x - boss.x);
+        move(boss, Math.cos(boss.angle) * boss.speed * 1.25 * dt,
+          Math.sin(boss.angle) * boss.speed * 1.25 * dt, boss.radius, goal === state.player);
+      } else {
+        boss.angle = aim(boss.x, boss.y);
         const desired = boss.id === 'ram' ? 143 : boss.id === 'sniper' ? 284 : 217;
         const drift = boss.id === 'orbit' || boss.id === 'mirror' ? (boss.sequence % 2 ? -.75 : .75) : .18;
         const radial = gap > desired + 25 ? 1 : gap < desired - 25 ? -.8 : 0;

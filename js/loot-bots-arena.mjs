@@ -52,16 +52,50 @@ export function moveSolid(actor, dx, dy, radius, arena, cover, steer = false) {
   actor.y = Math.max(edge, Math.min(arena.height - edge, y));
 }
 
-export function shotCover(cover, x, y, nextX, nextY) {
+export function shotCover(cover, x, y, nextX, nextY, padding = 0) {
   const dx = nextX - x, dy = nextY - y, span = dx * dx + dy * dy;
   let target = -1, nearest = Infinity;
   for (let i = 0; i < cover.length; i++) {
     const object = cover[i], px = object.x - x, py = object.y - y;
     const t = span ? Math.max(0, Math.min(1, (px * dx + py * dy) / span)) : 0;
-    if (t >= nearest || (px - t * dx) ** 2 + (py - t * dy) ** 2 > object.radius ** 2) continue;
+    if (t >= nearest || (px - t * dx) ** 2 + (py - t * dy) ** 2 > (object.radius + padding) ** 2) continue;
     target = i; nearest = t;
   }
   return target;
+}
+
+export function navigationTarget(actor, target, arena, cover, time) {
+  const route = actor.navigation ||= { nextAt: 0, waypoint: null };
+  if (time < route.nextAt && (!route.waypoint || Math.hypot(route.waypoint.x - actor.x, route.waypoint.y - actor.y) > 9)) {
+    return route.waypoint || target;
+  }
+  route.nextAt = time + .18 + (actor.radius % 6) * .012;
+  const padding = actor.radius + 3;
+  const dx = target.x - actor.x, dy = target.y - actor.y;
+  const gap = Math.hypot(dx, dy), legFraction = gap ? Math.max(0, 1 - (actor.radius + 11) / gap) : 0;
+  const visibleBlocker = shotCover(cover, actor.x, actor.y, target.x, target.y);
+  const blocked = visibleBlocker >= 0 ? visibleBlocker :
+    shotCover(cover, actor.x, actor.y, actor.x + dx * legFraction, actor.y + dy * legFraction, padding);
+  if (blocked < 0) { route.waypoint = null; return target; }
+  const object = cover[blocked], edge = actor.radius + 8;
+  if (route.waypoint?.object === object && Math.hypot(route.waypoint.x - actor.x, route.waypoint.y - actor.y) > 12 &&
+      shotCover(cover, actor.x, actor.y, route.waypoint.x, route.waypoint.y, actor.radius) < 0) return route.waypoint;
+
+  const reach = (object.radius + padding) * 1.62 + 12;
+  const angle = Math.atan2(actor.y - object.y, actor.x - object.x);
+  let best = Infinity, next = null;
+  for (let i = 0; i < 8; i++) {
+    const heading = angle + (i + 1) * Math.PI / 4;
+    const x = Math.max(edge, Math.min(arena.width - edge, object.x + Math.cos(heading) * reach));
+    const y = Math.max(edge, Math.min(arena.height - edge, object.y + Math.sin(heading) * reach));
+    const leg = Math.hypot(x - actor.x, y - actor.y);
+    if (leg < 14 || shotCover(cover, actor.x, actor.y, x, y, actor.radius - 1) >= 0) continue;
+    const onward = shotCover(cover, x, y, target.x, target.y);
+    const cost = leg + Math.hypot(x - target.x, y - target.y) + (onward === blocked ? 120 : onward >= 0 ? 35 : 0);
+    if (cost < best) { best = cost; next = { x, y, object }; }
+  }
+  route.waypoint = next;
+  return next || target;
 }
 export const isFighting = ({ phase }) => phase === 'combat' || phase === 'approach' || phase === 'boss-warning' || phase === 'boss';
 export const canDecode = state => {

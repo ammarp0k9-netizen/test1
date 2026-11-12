@@ -1,5 +1,5 @@
-import { createRenderer } from './loot-bots-renderer.mjs?v=4';
-import { DEFAULT_ARENA, makeCover } from './loot-bots-arena.mjs?v=2';
+import { createRenderer } from './loot-bots-renderer.mjs?v=5';
+import { DEFAULT_ARENA, makeCover } from './loot-bots-arena.mjs?v=3';
 
 export function mountPreview(canvas) {
   const renderer = createRenderer(canvas);
