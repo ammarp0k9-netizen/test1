@@ -3,7 +3,7 @@
 import { getApps }  from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
 import { getFirestore, doc, getDoc, runTransaction, onSnapshot } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
 import { getAuth, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js";
-import { applyProfileIntent, profileOperationId, profileStorageIntents, mergeOnboardingProgress } from './profile-sync-policy.mjs?v=20261106-onboarding-sync-1';
+import { applyProfileIntent, profileOperationId, profileStorageIntents, mergeOnboardingProgress } from './profile-sync-policy.mjs?v=20261112-bots';
 
 // استخدم التطبيق الموجود فقط بدون إعادة تعريف إذا كان معرف مسبقًا
 let profileApp  = getApps()[0];
@@ -124,6 +124,7 @@ let _profileOperationClock = 0;
 const _profileLocalBaselines = new Map();
 
 function profileOutboxPrefix(uid) { return `lootlingua:profile-outbox:v1:${uid}:`; }
+function botsOutboxPrefix(uid) { return `lootlingua:profile-outbox:bots-v1:${uid}:`; }
 function profileReceiptId(id) {
   const encoded = encodeURIComponent(id);
   if (encoded.length > 1200) throw new Error('Profile operation identifier is too long');
@@ -131,10 +132,11 @@ function profileReceiptId(id) {
 }
 function readProfileOutbox(uid) {
   const prefix = profileOutboxPrefix(uid);
+  const botsPrefix = botsOutboxPrefix(uid);
   const operations = [];
   for (let index = 0; index < localStorage.length; index++) {
     const key = localStorage.key(index);
-    if (!key?.startsWith(prefix)) continue;
+    if (!key?.startsWith(prefix) && !key?.startsWith(botsPrefix)) continue;
     try {
       const operation = JSON.parse(localStorage.getItem(key));
       if (operation?.version === 1 && operation.uid === uid && operation.id && Array.isArray(operation.commands)) operations.push({ ...operation, key });
@@ -196,7 +198,7 @@ function applyCanonicalProfile(data, owner) {
     // A lost acknowledgement may already be present in this snapshot; replaying
     // an additive counter or wallet locally would display it twice.
     for (const command of operation.commands) {
-      if (['max', 'titles', 'union', 'appearance', 'quest', 'exposure', 'loot-progress', 'onboarding'].includes(command.type)) {
+      if (['max', 'titles', 'union', 'appearance', 'quest', 'exposure', 'loot-progress', 'onboarding', 'bots-audio'].includes(command.type)) {
         projected = applyProfileIntent(projected, command).profile;
       }
     }
@@ -208,6 +210,7 @@ function applyCanonicalProfile(data, owner) {
     else window.mergeLootlinguaProfileFromCloud?.(projected, { canonical: true });
     syncOnboardingProgress(projected, owner);
     window.LootLinguaGateRunner?.acceptProfile?.(projected, owner.uid);
+    window.LootLinguaBots?.acceptProfile?.(projected, owner.uid);
     _profileLocalBaselines.set(owner.uid, window.getLootlinguaProfilePayload?.() || projected);
     try { window.LootLinguaMotivation?.acceptProfile?.(data, owner.uid); }
     catch (error) { console.warn('[Motivation] Profile presentation deferred.', error); }
@@ -250,7 +253,10 @@ function queueProfileCommands(commands, options = {}) {
   const id = options.id || (commands.length === 1 ? profileOperationId(commands[0]) : null) ||
     window.crypto?.randomUUID?.() || `${Date.now()}-${++_profileOperationSequence}-${Math.random().toString(36).slice(2)}`;
   profileReceiptId(id);
-  const key = `${profileOutboxPrefix(owner.uid)}${encodeURIComponent(id)}`;
+  // Older open tabs can still flush the ordinary outbox. Keep new commands
+  // out of their queue so they cannot receipt a game command as unsupported.
+  const prefix = commands.every(command => command.type.startsWith('bots-')) ? botsOutboxPrefix(owner.uid) : profileOutboxPrefix(owner.uid);
+  const key = `${prefix}${encodeURIComponent(id)}`;
   if (!localStorage.getItem(key)) {
     _profileOperationClock = Math.max(Date.now(), _profileOperationClock + 1);
     localStorage.setItem(key, JSON.stringify({ version: 1, uid: owner.uid, id, commands, createdAt: _profileOperationClock }));
@@ -382,7 +388,8 @@ window.commitProfileIntent = async function(intent) {
 };
 window.addEventListener?.('online', () => window.flushProfileIntents?.());
 window.addEventListener?.('storage', (event) => {
-  if (event.key?.startsWith(profileOutboxPrefix(profileAuth.currentUser?.uid || ''))) scheduleProfileFlush();
+  const uid = profileAuth.currentUser?.uid || '';
+  if (event.key?.startsWith(profileOutboxPrefix(uid)) || event.key?.startsWith(botsOutboxPrefix(uid))) scheduleProfileFlush();
 });
 
 function captureProfileOwner(user = profileAuth.currentUser) {
@@ -594,7 +601,10 @@ window.loadProfileFromCloud = async function(user, options = {}) {
     }
     if (!isCurrent()) return abandoned();
     if (cloudData) applyCanonicalProfile(cloudData, owner);
-    else window.LootLinguaGateRunner?.acceptProfile?.({}, owner.uid);
+    else {
+      window.LootLinguaGateRunner?.acceptProfile?.({}, owner.uid);
+      window.LootLinguaBots?.acceptProfile?.({}, owner.uid);
+    }
     if (!isCurrent()) return abandoned();
     const inMemoryMigration = window.__acceptedGuestProfileMigration;
     const persistedMigration = readPendingGuestProfileMigration(user);

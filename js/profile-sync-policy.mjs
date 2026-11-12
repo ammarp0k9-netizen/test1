@@ -107,6 +107,20 @@ export function applyProfileIntent(remote, intent, context = {}) {
   let reason = '';
   const effects = {};
   switch (intent.type) {
+    case 'bots-run': {
+      if (!intent.eventId || !intent.run || !['coins', 'best', 'bosses', 'seconds'].every(key => Number.isSafeInteger(intent.run[key]) && intent.run[key] >= 0)) {
+        reason = 'invalid-bots-run'; break;
+      }
+      profile.lootBots = mergeBotsProgress(profile.lootBots, intent.run);
+      break;
+    }
+    case 'bots-audio': {
+      if (!['effects', 'speech'].includes(intent.field) || typeof intent.enabled !== 'boolean' || !Number.isSafeInteger(intent.at) || intent.at <= 0) {
+        reason = 'invalid-bots-audio'; break;
+      }
+      profile.lootBots = mergeBotsProgress(profile.lootBots, { audio: { [intent.field]: { enabled: intent.enabled, at: intent.at } } });
+      break;
+    }
     case 'onboarding': {
       const merged = mergeOnboardingProgress(intent.tour, profile.onboardingProgress?.[intent.tour], intent.state);
       if (!merged) { reason = 'invalid-onboarding'; break; }
@@ -200,6 +214,7 @@ export function applyProfileIntent(remote, intent, context = {}) {
       profile.userXP = Math.max(number(profile.userXP), number(guest.userXP));
       for (const field of ['runnerCoins', 'streakFreezes']) profile[field] = number(profile[field]) + number(guest[field]);
       for (const field of ['freezeSaves', 'gameDictAdds', 'perfectQuizzes', 'maxStreak', 'runnerBestDistance']) profile[field] = Math.max(number(profile[field]), number(guest[field]));
+      if (guest.lootBots) profile.lootBots = mergeBotsProgress(profile.lootBots, guest.lootBots);
       if (String(guest.lastActivityDate || '') > String(profile.lastActivityDate || '')) {
         profile.lastActivityDate = guest.lastActivityDate;
         profile.dailyStreak = number(guest.dailyStreak);
@@ -225,6 +240,19 @@ export function applyProfileIntent(remote, intent, context = {}) {
     default: reason = 'unsupported-intent';
   }
   return { profile: reason ? copy(remote || {}) : profile, applied: !reason && JSON.stringify(profile) !== before, reason, effects: reason ? {} : effects };
+}
+
+function mergeBotsProgress(saved = {}, incoming = {}) {
+  const count = value => Number.isSafeInteger(value) && value >= 0 ? value : 0;
+  const left = saved || {}, right = incoming || {};
+  const audio = {};
+  for (const field of ['effects', 'speech']) {
+    const choices = [left.audio?.[field], right.audio?.[field]].filter(value => typeof value?.enabled === 'boolean' && count(value.at));
+    if (choices.length) audio[field] = choices.reduce((a, b) => b.at >= a.at ? b : a);
+  }
+  return { coins: Math.min(Number.MAX_SAFE_INTEGER, count(left.coins) + count(right.coins)),
+    best: Math.max(count(left.best), count(right.best)), bosses: Math.max(count(left.bosses), count(right.bosses)),
+    seconds: Math.max(count(left.seconds), count(right.seconds)), audio };
 }
 
 export function profileStorageIntents(key, beforeText, afterText) {

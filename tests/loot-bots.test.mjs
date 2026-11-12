@@ -1,12 +1,14 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { bossProgress, canDecode, createBattle, prepareDeck, LIMITS, STATION } from '../js/loot-bots-engine.mjs';
-import { BOSS_TYPES, createBossDirector } from '../js/loot-bots-bosses.mjs';
+import { bossProgress, canDecode, createBattle, prepareDeck, LIMITS, MAX_CELLS, STATION } from '../js/loot-bots-engine.mjs';
+import { arenaForAspect, CUES } from '../js/loot-bots-arena.mjs';
+import { BOSS_TYPES, bossHealth, createBossDirector } from '../js/loot-bots-bosses.mjs';
 
 const words = [
   { word: 'he', translation: 'هو' }, { word: 'she', meaning: 'هي' }, { word: 'they', meaning: 'هم' },
 ];
 const tick = 1 / 60;
+const besideStation = player => Object.assign(player, { x: STATION.x, y: STATION.y + 64 });
 
 function advance(battle, seconds, safe = false) {
   for (let i = 0; i < Math.ceil(seconds / tick); i++) {
@@ -25,7 +27,7 @@ function nextStation(battle) {
 function decode(battle) {
   if (battle.state.stationDone) winBoss(battle);
   nextStation(battle);
-  Object.assign(battle.state.player, STATION);
+  besideStation(battle.state.player);
   assert.equal(battle.activate(), true);
   return battle.state.question;
 }
@@ -58,7 +60,7 @@ test('only a deliberate aim command fires, in the indicated direction', () => {
   assert.ok(s.player.y > 389);
   assert.equal(s.shots[0].hostile, false);
   advance(battle, .25);
-  assert.equal(s.shots.length, 1);
+  assert.equal(s.cells, MAX_CELLS - 1);
 });
 
 test('station opens after combat, then needs proximity and deliberate activation', () => {
@@ -72,6 +74,8 @@ test('station opens after combat, then needs proximity and deliberate activation
   assert.equal(s.enemies.length, count);
   assert.equal(battle.activate(), false);
   Object.assign(s.player, STATION);
+  assert.equal(battle.activate(), false);
+  besideStation(s.player);
   assert.equal(canDecode(s), true);
   assert.equal(s.question, null);
   assert.equal(battle.activate(), true);
@@ -109,7 +113,6 @@ test('wrong answer reveals the meaning and resumes combat with a dodgeable attac
   const battle = createBattle(prepareDeck(words), () => .4);
   const question = decode(battle), s = battle.state, hp = s.hp;
   s.enemies.length = 0;
-  s.player.y += 64;
   assert.equal(battle.choose(question.options.findIndex(option => !option.correct)), true);
   assert.equal(battle.choose(question.options.findIndex(option => option.correct)), false);
   assert.equal(s.event.answer, question.answer);
@@ -148,7 +151,7 @@ test('late station gates the boss, reserves recovery time, and provides an inter
   advance(battle, 85, true);
   assert.equal(s.phase, 'approach');
   assert.ok(bossProgress(s) < 1);
-  Object.assign(s.player, STATION);
+  besideStation(s.player);
   assert.equal(battle.activate(), true);
   battle.choose(s.question.options.findIndex(option => !option.correct));
   advance(battle, 4.25, true);
@@ -217,12 +220,58 @@ test('dash has a cooldown and dense fights respect entity caps', () => {
   s.sector = 35;
   for (let i = 0; i < 18000; i++) {
     s.shieldUntil = s.time + 1;
-    if (s.phase === 'approach' && s.phaseTime >= 2.4) Object.assign(s.player, STATION);
+    if (s.phase === 'approach' && s.phaseTime >= 2.4) besideStation(s.player);
     if (s.question) battle.choose(s.question.options.findIndex(option => !option.correct));
     else if (canDecode(s)) battle.activate();
     const aim = s.boss ? Math.atan2(s.boss.y - s.player.y, s.boss.x - s.player.x) : i * .016;
+    if (s.phase === 'boss') { s.player.x = s.boss.x; s.player.y = Math.max(24, s.boss.y - 64); }
     battle.step(tick, 0, 0, false, Math.cos(aim), Math.sin(aim));
     for (const [entity, cap] of Object.entries(LIMITS)) assert.ok(s[entity].length <= cap);
   }
   assert.ok(s.sector >= 38 && s.bossWins >= 2);
+});
+
+test('a held trigger empties the cells, cools down, and preserves the gap between bursts', () => {
+  const battle = createBattle(prepareDeck(words), () => .5), s = battle.state;
+  s.spawnAt = Infinity;
+  const shotsAt = [];
+  for (let i = 0; i < 210; i++) {
+    s.cues = 0;
+    battle.step(tick, 0, 0, false, 0, -1);
+    if (s.cues & CUES.fire) shotsAt.push(s.time);
+  }
+  assert.ok(shotsAt.length > MAX_CELLS);
+  assert.ok(shotsAt[MAX_CELLS] - shotsAt[MAX_CELLS - 1] > 1);
+  assert.ok(shotsAt[1] - shotsAt[0] < .3);
+});
+
+test('portrait and landscape keep a solid station that can be activated from its rim', () => {
+  for (const aspect of [.65, 1.7]) {
+    const arena = arenaForAspect(aspect), battle = createBattle(prepareDeck(words), () => .5, arena), s = battle.state;
+    s.spawnAt = Infinity; s.stationAt = 0;
+    for (let i = 0; i < 210; i++) battle.step(tick, 0, -1, i === 38);
+    assert.ok(Math.abs(s.player.x - arena.station.x) < .1);
+    assert.ok(s.player.y >= arena.station.y + 53.9);
+    assert.equal(battle.activate(), true);
+  }
+});
+
+test('player shots crack and remove crates, but solid objects still stop bullets', () => {
+  const battle = createBattle(prepareDeck(words), () => .5), s = battle.state;
+  s.spawnAt = Infinity;
+  const crate = s.cover.find(item => item.kind === 'crate'), pillar = s.cover.find(item => item.kind === 'pillar');
+  function hit(object) {
+    s.shots.push({ x: object.x, y: object.y - object.radius - 5, dx: 0, dy: 1, speed: 640, life: 1, hostile: false });
+    battle.step(tick);
+    assert.equal(s.shots.length, 0);
+  }
+  hit(crate); assert.equal(crate.hp, 1);
+  hit(crate); assert.ok(!s.cover.includes(crate));
+  hit(pillar); assert.ok(s.cover.includes(pillar));
+});
+
+test('boss health increases for the opening ten and scales within a late-game ceiling', () => {
+  for (let i = 2; i <= 12; i++) assert.ok(bossHealth(i) > bossHealth(i - 1));
+  assert.ok(bossHealth(200) >= bossHealth(30));
+  assert.ok(bossHealth(200) <= 54);
 });

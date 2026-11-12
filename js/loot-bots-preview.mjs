@@ -1,4 +1,5 @@
-import { createRenderer } from './loot-bots-renderer.mjs?v=3';
+import { createRenderer } from './loot-bots-renderer.mjs?v=4';
+import { DEFAULT_ARENA, makeCover } from './loot-bots-arena.mjs?v=2';
 
 export function mountPreview(canvas) {
   const renderer = createRenderer(canvas);
@@ -9,7 +10,7 @@ export function mountPreview(canvas) {
     { x: 190, y: 188, kind: 'gunner', radius: 18, ready: 0, angle: 0, color: '#ffd47d' },
   ];
   const shots = [{}, {}, {}];
-  const state = { phase: 'combat', phaseTime: 0, time: 0, player, enemies, shots, sparks: [],
+  const state = { phase: 'combat', phaseTime: 0, time: 0, player, enemies, shots, sparks: [], cover: makeCover(DEFAULT_ARENA),
     coins: [{ x: 466, y: 327 }, { x: 437, y: 339 }, { x: 409, y: 348 }] };
   let visible = false, timer = 0, previous = 0;
 

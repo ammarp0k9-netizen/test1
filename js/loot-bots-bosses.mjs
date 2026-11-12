@@ -1,14 +1,14 @@
 export const BOSS_TYPES = [
-  { id: 'ram', name: 'الكاسر', hint: 'ابتعد عن خط الاندفاع', color: '#ff866d', form: 3, hp: 18, speed: 70, attacks: ['ram', 'ram', 'fan'] },
-  { id: 'siege', name: 'مدفع الحصار', hint: 'غادر دوائر القصف', color: '#ffbe72', form: 8, hp: 22, speed: 42, attacks: ['bombs', 'fan'] },
-  { id: 'coil', name: 'ملف الصواعق', hint: 'قف بين خطوط الكهرباء', color: '#d897ff', form: 6, hp: 21, speed: 56, attacks: ['spokes', 'spokes', 'bombs'] },
-  { id: 'brood', name: 'حارس السرب', hint: 'تخلّص من الأتباع قبل أن يحيطوا بك', color: '#f7d97e', form: 5, hp: 23, speed: 61, attacks: ['summon', 'fan', 'summon'] },
-  { id: 'bulwark', name: 'القلعة', hint: 'أطلق عندما ينفتح الدرع', color: '#7dcee9', form: 4, hp: 22, speed: 42, attacks: ['guard', 'fan'] },
-  { id: 'sniper', name: 'عين الليزر', hint: 'غيّر اتجاهك بعد تثبيت الشعاع', color: '#ff89c1', form: 4, hp: 19, speed: 67, attacks: ['laser', 'laser', 'fan'] },
-  { id: 'orbit', name: 'الدوّامة', hint: 'اعبر الفراغ بين دفعات المقذوفات', color: '#a9bcff', form: 10, hp: 23, speed: 56, attacks: ['orbit', 'fan', 'orbit'] },
-  { id: 'furnace', name: 'الفرن', hint: 'انتقل إلى ممر أرضي آمن', color: '#ff9a62', form: 6, hp: 25, speed: 43, attacks: ['lanes', 'lanes', 'bombs'] },
-  { id: 'mirror', name: 'الشبح المزدوج', hint: 'راقب خطّي إطلاق النسختين', color: '#f38af0', form: 4, hp: 22, speed: 72, attacks: ['echo', 'fan', 'echo'] },
-  { id: 'magnet', name: 'قطب الجاذبية', hint: 'ابتعد عن الحلقة المضيئة', color: '#ade591', form: 12, hp: 25, speed: 51, attacks: ['ring', 'bombs', 'ring'] },
+  { id: 'ram', name: 'الكاسر', hint: 'ابتعد عن خط الاندفاع', color: '#ff866d', form: 3, speed: 70, attacks: ['ram', 'ram', 'fan'] },
+  { id: 'siege', name: 'مدفع الحصار', hint: 'غادر دوائر القصف', color: '#ffbe72', form: 8, speed: 42, attacks: ['bombs', 'fan'] },
+  { id: 'coil', name: 'ملف الصواعق', hint: 'قف بين خطوط الكهرباء', color: '#d897ff', form: 6, speed: 56, attacks: ['spokes', 'spokes', 'bombs'] },
+  { id: 'brood', name: 'حارس السرب', hint: 'تخلّص من الأتباع قبل أن يحيطوا بك', color: '#f7d97e', form: 5, speed: 61, attacks: ['summon', 'fan', 'summon'] },
+  { id: 'bulwark', name: 'القلعة', hint: 'أطلق عندما ينفتح الدرع', color: '#7dcee9', form: 4, speed: 42, attacks: ['guard', 'fan'] },
+  { id: 'sniper', name: 'عين الليزر', hint: 'غيّر اتجاهك بعد تثبيت الشعاع', color: '#ff89c1', form: 4, speed: 67, attacks: ['laser', 'laser', 'fan'] },
+  { id: 'orbit', name: 'الدوّامة', hint: 'اعبر الفراغ بين دفعات المقذوفات', color: '#a9bcff', form: 10, speed: 56, attacks: ['orbit', 'fan', 'orbit'] },
+  { id: 'furnace', name: 'الفرن', hint: 'انتقل إلى ممر أرضي آمن', color: '#ff9a62', form: 6, speed: 43, attacks: ['lanes', 'lanes', 'bombs'] },
+  { id: 'mirror', name: 'الشبح المزدوج', hint: 'راقب خطّي إطلاق النسختين', color: '#f38af0', form: 4, speed: 72, attacks: ['echo', 'fan', 'echo'] },
+  { id: 'magnet', name: 'قطب الجاذبية', hint: 'ابتعد عن الحلقة المضيئة', color: '#ade591', form: 12, speed: 51, attacks: ['ring', 'bombs', 'ring'] },
 ];
 
 export const BOSS_WARNING = 3;
@@ -21,7 +21,12 @@ export function bossProgress(state) {
   return clamp((state.time - state.bossCycleStart) / state.bossInterval, 0, state.stationDone ? 1 : .84);
 }
 
-export function createBossDirector({ state, random, width, height, shoot, damage, spawn, burst }) {
+export function bossHealth(ordinal) {
+  return ordinal <= 10 ? 14 + ordinal * 2 : 34 + Math.round(20 * (1 - Math.exp(-(ordinal - 10) / 12)));
+}
+
+export function createBossDirector({ state, random, width, height, shoot, damage, spawn, burst,
+  move = (actor, dx, dy) => { actor.x += dx; actor.y += dy; } }) {
   let order = BOSS_TYPES.slice(), last;
   const line = (x, y, angle, reach, radius) => ({ kind: 'line', x, y,
     endX: x + Math.cos(angle) * reach, endY: y + Math.sin(angle) * reach, radius });
@@ -41,7 +46,7 @@ export function createBossDirector({ state, random, width, height, shoot, damage
     const type = order.shift();
     last = type;
     const cycle = Math.floor(state.bossWins / BOSS_TYPES.length);
-    const hp = type.hp + Math.min(7, Math.floor(state.bossWins / 3));
+    const hp = bossHealth(state.bossWins + 1);
     state.boss = { ...type, hp, maxHp: hp, cycle, x: width / 2, y: 96, angle: Math.PI / 2,
       radius: type.id === 'bulwark' || type.id === 'furnace' ? 37 : 31,
       nextAt: state.time + BOSS_WARNING + 1, sequence: 0, attack: null, hitUntil: 0, guardUntil: 0, blockedUntil: 0 };
@@ -55,7 +60,13 @@ export function createBossDirector({ state, random, width, height, shoot, damage
     const move = alternate ? EXTRA[BOSS_TYPES.findIndex(type => type.id === boss.id)] : boss.attacks[boss.sequence % boss.attacks.length];
     boss.sequence++;
     const duration = move === 'ring' || move === 'lanes' ? 1.15 : move === 'laser' || move === 'bombs' ? .95 : .78;
-    const reach = Math.min(308, Math.hypot(p.x - boss.x, p.y - boss.y) + 70);
+    let reach = Math.min(308, Math.hypot(p.x - boss.x, p.y - boss.y) + 70);
+    if (move === 'ram') for (const object of state.cover || []) {
+      const dx = object.x - boss.x, dy = object.y - boss.y;
+      const front = dx * Math.cos(angle) + dy * Math.sin(angle);
+      const side = dx * Math.sin(angle) - dy * Math.cos(angle), clearance = boss.radius + object.radius;
+      if (front > 0 && Math.abs(side) < clearance) reach = Math.min(reach, Math.max(0, front - Math.sqrt(clearance ** 2 - side ** 2)));
+    }
     const attack = { move, angle, started: state.time, fireAt: state.time + duration, endAt: state.time + duration + .27,
       regions: [], fired: false, hit: false };
     switch (move) {
@@ -128,8 +139,7 @@ export function createBossDirector({ state, random, width, height, shoot, damage
         burst(boss.x, boss.y, boss.color, 8);
       }
       if (attack.move === 'ram' && state.time < attack.endAt) {
-        boss.x += Math.cos(attack.angle) * 535 * dt;
-        boss.y += Math.sin(attack.angle) * 535 * dt;
+        move(boss, Math.cos(attack.angle) * 535 * dt, Math.sin(attack.angle) * 535 * dt, boss.radius);
       } else if (attack.move !== 'ram' && attack.move !== 'echo' && !attack.hit && attack.regions.some(region => inside(region, state.player))) {
         attack.hit = damage();
       }
@@ -145,8 +155,8 @@ export function createBossDirector({ state, random, width, height, shoot, damage
         const desired = boss.id === 'ram' ? 143 : boss.id === 'sniper' ? 284 : 217;
         const drift = boss.id === 'orbit' || boss.id === 'mirror' ? (boss.sequence % 2 ? -.75 : .75) : .18;
         const radial = gap > desired + 25 ? 1 : gap < desired - 25 ? -.8 : 0;
-        boss.x += (Math.cos(boss.angle) * radial - Math.sin(boss.angle) * drift) * boss.speed * dt;
-        boss.y += (Math.sin(boss.angle) * radial + Math.cos(boss.angle) * drift) * boss.speed * dt;
+        move(boss, (Math.cos(boss.angle) * radial - Math.sin(boss.angle) * drift) * boss.speed * dt,
+          (Math.sin(boss.angle) * radial + Math.cos(boss.angle) * drift) * boss.speed * dt, boss.radius, true);
       }
     }
     boss.x = clamp(boss.x, boss.radius, width - boss.radius);

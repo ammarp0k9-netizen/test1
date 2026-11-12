@@ -2141,9 +2141,13 @@ function getGuestProgressSnapshot() {
   // Legacy profile keys (XP, streak, titles...) are unscoped. They are safe to
   // treat as guest-owned only when a signed-out write marked that namespace as
   // dirty. Account hydration also uses these keys and is not guest evidence.
-  if (typeof hasDirtyGuestData !== 'function' || !hasDirtyGuestData()) return {};
-  return window.getLootlinguaProfilePayload ? { ...window.getLootlinguaProfilePayload(),
-    motivationRewards: window.LootLinguaMotivation?.getGuestState?.() } : {};
+  const bots = window.LootLinguaBots?.guestProgress?.();
+  const owned = typeof hasDirtyGuestData === 'function' && hasDirtyGuestData();
+  const profile = owned && window.getLootlinguaProfilePayload ? { ...window.getLootlinguaProfilePayload() } : {};
+  const motivation = owned ? window.LootLinguaMotivation?.getGuestState?.() : null;
+  if (motivation) profile.motivationRewards = motivation;
+  if (bots) profile.lootBots = bots;
+  return profile;
 }
 
 function getGuestProgressSummary(profile) {
@@ -2156,6 +2160,9 @@ function getGuestProgressSummary(profile) {
   if (chests > 0) stats.push({ label: `${chests} صناديق`, hint: 'لوت يومي' });
   if ((Number(profile?.streakFreezes) || 0) > 0) stats.push({ label: `${profile.streakFreezes} تجميد`, hint: 'حماية الستريك' });
   if ((Number(profile?.runnerCoins) || 0) > 0) stats.push({ label: `${profile.runnerCoins} عملة`, hint: 'رصيد لعبة الجري' });
+  if (Number(profile?.lootBots?.coins) > 0) stats.push({ label: `${profile.lootBots.coins} عملة`, hint: 'رصيد Loot Bots' });
+  else if (Number(profile?.lootBots?.best) > 0) stats.push({ label: `${profile.lootBots.best} نقطة`, hint: 'أفضل نتيجة في Loot Bots' });
+  else if (profile?.lootBots) stats.push({ label: 'Loot Bots', hint: 'سجل اللعب وإعدادات الصوت' });
   return stats;
 }
 

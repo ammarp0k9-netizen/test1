@@ -1,12 +1,14 @@
-import { WIDTH, HEIGHT, STATION, DOCKS, canDecode, isFighting } from './loot-bots-arena.mjs?v=1';
+import { DEFAULT_ARENA, canDecode, isFighting } from './loot-bots-arena.mjs?v=2';
 
 const TAU = Math.PI * 2;
 const COLORS = { scout: '#ff936d', striker: '#ff75a8', gunner: '#ffd47d', tank: '#bd9bff', player: '#65eddf' };
 
-export function createRenderer(canvas) {
+export function createRenderer(canvas, arena = DEFAULT_ARENA, fitted = false) {
   const ctx = canvas.getContext('2d', { alpha: false });
+  const { width: WIDTH, height: HEIGHT, station: STATION, docks: DOCKS } = arena;
   const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
   let floor, scale = 0;
+  let view = { fit: 1, left: 0, top: 0 };
   const sprites = new Map();
 
   function disk(c, x, y, r, color) {
@@ -36,11 +38,12 @@ export function createRenderer(canvas) {
 
   function makeFloor() {
     const { bitmap, c } = surface(WIDTH, HEIGHT, scale);
+    c.save(); c.scale(WIDTH / 640, HEIGHT / 540);
     const glow = c.createRadialGradient(320, 240, 25, 320, 240, 430);
     glow.addColorStop(0, '#24434d'); glow.addColorStop(.56, '#172b38'); glow.addColorStop(1, '#080e19');
-    c.fillStyle = glow; c.fillRect(0, 0, WIDTH, HEIGHT);
-    for (let x = 16; x < WIDTH; x += 32) line(c, x, 18, x, HEIGHT - 18, '#273d46');
-    for (let y = 14; y < HEIGHT; y += 32) line(c, 16, y, WIDTH - 16, y, '#273d46');
+    c.fillStyle = glow; c.fillRect(0, 0, 640, 540);
+    for (let x = 16; x < 640; x += 32) line(c, x, 18, x, 522, '#273d46');
+    for (let y = 14; y < 540; y += 32) line(c, 16, y, 624, y, '#273d46');
     path(c, [0, 0, 640, 0, 594, 44, 46, 44], '#1d3542');
     path(c, [0, 540, 640, 540, 600, 499, 40, 499], '#101e2b');
     for (const y of [30, 507]) {
@@ -57,8 +60,9 @@ export function createRenderer(canvas) {
         path(c, [x - 5, y, x + 5, y, x + 9, y + 6, x - 9, y + 6], '#365464');
       }
     }
+    c.restore();
     for (const {x, y} of DOCKS) {
-      c.save(); c.translate(x, y); if (x > 320) c.scale(-1, 1);
+      c.save(); c.translate(x, y); if (x > WIDTH / 2) c.scale(-1, 1);
       path(c, [-34, -44, 6, -44, 36, -24, 36, 24, 6, 44, -34, 44], '#101922');
       path(c, [-34, -37, 5, -37, 28, -21, 28, 21, 5, 37, -34, 37], '#294553');
       c.fillStyle = '#152432'; c.fillRect(-30, -20, 56, 40);
@@ -77,6 +81,28 @@ export function createRenderer(canvas) {
       disk(c, end, y + 66, 4, '#49717b');
     }
     return bitmap;
+  }
+
+  function drawCover(cover, time) {
+    for (const object of cover || []) {
+      if (object.kind === 'station') continue;
+      const { x, y, radius: r } = object;
+      const hit = time < object.hitUntil;
+      disk(ctx, x, y + 5, r + 3, '#091521b9');
+      if (object.kind === 'pillar') {
+        disk(ctx, x, y, r, '#406178'); ring(ctx, x, y, r - 2, '#83a0ad', 2);
+        path(ctx, [x-15,y-8,x,y-17,x+15,y-8,x+15,y+8,x,y+17,x-15,y+8], '#1e3344');
+        line(ctx, x - 7, y, x + 7, y, '#90bfcc', 3);
+      } else if (object.kind === 'cell') {
+        disk(ctx, x, y, r, hit ? '#fff0bd' : '#725f54'); ring(ctx, x, y, r - 3, '#e0ad76', 2);
+        path(ctx, [x+1,y-15,x-10,y+2,x-1,y+2,x-4,y+14,x+12,y-3,x+3,y-3], '#fff1a1');
+      } else {
+        path(ctx, [x-r,y-9,x-9,y-r,x+9,y-r,x+r,y-9,x+r,y+9,x+9,y+r,x-9,y+r,x-r,y+9], hit ? '#ffebbe' : '#947256');
+        ctx.fillStyle = '#3c4144'; ctx.fillRect(x - 11, y - 10, 22, 20);
+        line(ctx, x - 12, y + 9, x + 12, y - 9, '#d7ad76', 3);
+      }
+      if (object.hp === 1) line(ctx, x - 9, y - 13, x + 6, y + 10, '#241b21', 2);
+    }
   }
 
   function sprite(kind, hit) {
@@ -213,6 +239,7 @@ export function createRenderer(canvas) {
   function draw(s, moveStick, aimStick, mouse) {
     ctx.drawImage(floor, 0, 0, WIDTH, HEIGHT);
     station(s);
+    drawCover(s.cover, s.time);
     const fighting = isFighting(s);
     for (const coin of s.coins) {
       disk(ctx, coin.x, coin.y + 2, 7, '#936438');
@@ -286,13 +313,21 @@ export function createRenderer(canvas) {
   }
 
   function resize() {
-    const nextScale = Math.min(1.55, Math.max(.45, canvas.clientWidth * (window.devicePixelRatio || 1) / WIDTH));
-    if (floor && Math.abs(nextScale - scale) < .025) return;
-    scale = nextScale;
-    canvas.width = Math.ceil(WIDTH * scale); canvas.height = Math.ceil(HEIGHT * scale);
-    ctx.setTransform(scale, 0, 0, scale, 0, 0);
-    floor = makeFloor(); sprites.clear();
-    for (const kind of Object.keys(COLORS)) { sprite(kind, false); sprite(kind, true); }
+    const cssWidth = canvas.clientWidth || WIDTH;
+    const cssHeight = fitted ? canvas.clientHeight || HEIGHT : cssWidth * HEIGHT / WIDTH;
+    const fit = Math.min(cssWidth / WIDTH, cssHeight / HEIGHT);
+    const density = Math.min(window.devicePixelRatio || 1, 1.55, Math.sqrt(1250000 / (cssWidth * cssHeight)));
+    const pixelWidth = Math.ceil(cssWidth * density), pixelHeight = Math.ceil(cssHeight * density);
+    const nextScale = fit * density;
+    view = { fit, left: (cssWidth - WIDTH * fit) / 2, top: (cssHeight - HEIGHT * fit) / 2 };
+    if (canvas.width !== pixelWidth || canvas.height !== pixelHeight) { canvas.width = pixelWidth; canvas.height = pixelHeight; }
+    ctx.setTransform(nextScale, 0, 0, nextScale, view.left * density, view.top * density);
+    if (!floor || Math.abs(nextScale - scale) > .04) {
+      scale = nextScale;
+      floor = makeFloor(); sprites.clear();
+      for (const kind of Object.keys(COLORS)) { sprite(kind, false); sprite(kind, true); }
+    }
+    return view;
   }
 
   return { draw, resize };

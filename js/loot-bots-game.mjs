@@ -1,5 +1,7 @@
-import { createBattle, prepareDeck, isFighting, canDecode, bossProgress, WIDTH, HEIGHT } from './loot-bots-engine.mjs?v=3';
-import { createRenderer } from './loot-bots-renderer.mjs?v=3';
+import { createBattle, prepareDeck, isFighting, canDecode, bossProgress, MAX_CELLS } from './loot-bots-engine.mjs?v=4';
+import { arenaForAspect } from './loot-bots-arena.mjs?v=2';
+import { createRenderer } from './loot-bots-renderer.mjs?v=4';
+import { createBotsAudio } from './loot-bots-audio.mjs?v=1';
 
 const MOVEMENT = new Set(['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'KeyW', 'KeyA', 'KeyS', 'KeyD']);
 const AIM = new Set(['KeyI', 'KeyJ', 'KeyK', 'KeyL', 'KeyF']);
@@ -9,8 +11,9 @@ export function openBattle({ words, source, isCurrent, returnFocus }) {
   const deck = prepareDeck(words);
   if (!deck.prompts.length) return 'small';
 
-  const uid = window.auth?.currentUser?.uid;
-  const storageKey = `lootlingua.bots.v1:${uid ? `user:${encodeURIComponent(uid)}` : 'guest'}`;
+  const profile = window.LootLinguaBots;
+  const uid = window.auth?.currentUser?.uid || '';
+  const audio = createBotsAudio(profile?.progress(uid)?.audio);
   const lifetime = new AbortController();
   const listen = (target, event, fn) => target.addEventListener(event, fn, { signal: lifetime.signal });
   const dialog = document.createElement('dialog');
@@ -19,11 +22,11 @@ export function openBattle({ words, source, isCurrent, returnFocus }) {
     <section class="lb-shell">
       <header class="lb-header">
         <div><h2 id="lootBotsTitle" lang="en" dir="ltr">Loot Bots</h2><p data-source></p></div>
-        <div class="lb-actions"><button type="button" data-pause hidden>إيقاف مؤقت</button><button type="button" data-close>خروج</button></div>
+        <div class="lb-actions"><button type="button" data-pause hidden>إيقاف مؤقت</button><button type="button" data-sound aria-expanded="false" aria-controls="lbAudioSettings">الصوت</button><button type="button" data-close>خروج</button></div>
       </header>
       <div class="lb-hud">
         <span>القطاع <b data-sector>1</b></span><span>الصحة <b data-hp>5 / 5</b></span>
-        <span>السلاح <b data-tier>1</b></span><span>النقاط <b data-score>0</b></span><span>العملات <b data-coins>0</b></span>
+        <span>السلاح <b data-tier>1</b></span><span>الشحنات <b data-cells>5 / 5</b></span><span>النقاط <b data-score>0</b></span><span>العملات <b data-coins>0</b></span>
       </div>
       <div class="lb-boss-meter" data-meter>
         <span><b data-boss-label>الزعيم القادم</b><small data-boss-detail></small></span>
@@ -36,7 +39,7 @@ export function openBattle({ words, source, isCurrent, returnFocus }) {
         <button type="button" data-dash hidden disabled><span aria-hidden="true">»</span><b>اندفاع</b><small data-charge>جاهز</small></button>
         <button type="button" class="lb-station" hidden>شغّل المحطة</button>
         <div class="lb-core" hidden role="group" aria-labelledby="lbCoreTitle">
-          <div class="lb-question"><small id="lbCoreTitle">رمز محطة الطاقة · اختر معناه</small><b lang="en" dir="ltr" data-word></b></div>
+          <div class="lb-question"><small id="lbCoreTitle">رمز محطة الطاقة · اختر معناه</small><b lang="en" dir="ltr" data-word></b><button type="button" data-repeat hidden>اسمع الكلمة</button></div>
           <div class="lb-options"></div>
         </div>
         <div class="lb-result" hidden><strong></strong><span></span></div>
@@ -45,47 +48,73 @@ export function openBattle({ words, source, isCurrent, returnFocus }) {
           <p data-copy></p>
           <small data-mission>لما تفتح محطة الطاقة، فكّ رمزها لتكسب تعزيزًا وتفتح مواجهة الزعيم.</small>
           <small data-record></small>
+          <fieldset id="lbAudioSettings" hidden><legend>إعدادات الصوت</legend>
+            <label><input type="checkbox" data-effects> صوت المؤثرات</label>
+            <label><input type="checkbox" data-speech> نطق الكلمات</label>
+          </fieldset>
           <button type="button" data-play autofocus>ابدأ المعركة</button>
         </div>
       </div>
       <footer class="lb-footer"><p role="status" data-status></p></footer>
-      <p class="lb-note">تدريب بالكلمات فقط. النقاط والعملات خاصة باللعبة ولا ترفع الإتقان أو XP.</p>
+      <p class="lb-note">تدريب فقط · العملات والنقاط خارج الإتقان وXP.</p>
     </section>`;
   const find = selector => dialog.querySelector(selector);
-  const arena = find('.lb-arena'), renderer = createRenderer(find('canvas'));
+  const arena = find('.lb-arena'), canvas = find('canvas');
+  let geometry, renderer, view, battle;
   const panel = find('.lb-panel'), core = find('.lb-core'), options = find('.lb-options');
   const station = find('.lb-station'), result = find('.lb-result');
   const meter = find('[data-meter]'), track = find('.lb-track'), meterFill = track.firstElementChild;
   const bossLabel = find('[data-boss-label]'), bossDetail = find('[data-boss-detail]');
   const announcement = find('.lb-announcement'), rewardBadge = find('.lb-reward'), charge = find('[data-charge]');
   const status = find('[data-status]'), play = find('[data-play]'), pause = find('[data-pause]'), dashButton = find('[data-dash]');
-  const hud = ['sector', 'hp', 'tier', 'score', 'coins'].map(key => find(`[data-${key}]`));
+  const hud = ['sector', 'hp', 'tier', 'cells', 'score', 'coins'].map(key => find(`[data-${key}]`));
+  const sound = find('[data-sound]'), audioOptions = find('#lbAudioSettings'), repeat = find('[data-repeat]');
+  const toggles = { effects: find('[data-effects]'), speech: find('[data-speech]') };
   const hudValues = [];
   const keyboard = new Set();
   const coarse = window.matchMedia('(pointer: coarse)').matches;
   const controls = coarse ? 'اسحب يسار الساحة للحركة ويمينها للتصويب والإطلاق.' : 'تحرّك بالأسهم أو WASD. صوّب بالفأرة واضغط للإطلاق.';
   const idleHint = coarse ? controls : 'الأسهم للحركة · الفأرة للإطلاق · مسافة للاندفاع.';
-  let battle = createBattle(deck), mode = 'intro', frame = 0, previous = 0, accumulator = 0;
+  let mode = 'intro', frame = 0, previous = 0, accumulator = 0, runId, outcome;
   let joystick = null, aimStick = null, mouse = null, pendingAim = null, dash = false, shownQuestion = null;
   let lastPhase = null, lastEvent = null, lastHint = '', recorded = false, closed = false;
   let lastMeter = '', lastMeterValue = -1, lastCharge = '', lastReward = null;
   let bounds;
 
-  function readProgress() {
-    try { return JSON.parse(localStorage.getItem(storageKey)) || {}; } catch { return {}; }
+  function resize() {
+    bounds = null;
+    view = renderer.resize();
+    station.style.top = `${view.top + (geometry.station.y + 44) * view.fit}px`;
+    if (mode !== 'play') renderer.draw(battle.state);
+  }
+  function newRound() {
+    geometry = arenaForAspect(arena.clientWidth / arena.clientHeight);
+    renderer = createRenderer(canvas, geometry, true);
+    battle = createBattle(deck, Math.random, geometry);
+    runId = profile?.newRunId(); outcome = null;
+    resize();
   }
   function record() {
-    if (recorded || !isCurrent()) return;
+    if (recorded) return;
     recorded = true;
-    const old = readProgress();
-    try {
-      localStorage.setItem(storageKey, JSON.stringify({ best: Math.max(Number(old.best) || 0, battle.state.score),
-        coins: (Number(old.coins) || 0) + battle.state.collected }));
-    } catch { /* Storage availability does not affect the match. */ }
+    const s = battle.state;
+    outcome = profile?.record(uid, runId, { best: s.score, coins: s.collected, bosses: s.bossWins, seconds: Math.floor(s.time) });
   }
   function showRecord() {
-    const record = readProgress();
-    find('[data-record]').textContent = `أفضل نتيجة ${Number(record.best) || 0} · رصيد العملات ${Number(record.coins) || 0} على هذا الجهاز`;
+    const saved = profile?.progress(uid) || {};
+    const labels = { best: 'النقاط', bosses: 'الزعماء', seconds: 'الصمود' };
+    find('[data-record]').textContent = outcome?.saved === false ? 'تعذّر حفظ نتيجة الجولة.' : outcome?.records?.length ?
+      `رقم قياسي جديد في ${outcome.records.map(key => labels[key]).join(' و')}` :
+      `أفضل نتيجة ${saved.best || 0} · ${saved.coins || 0} عملة · أفضل صمود ${saved.seconds || 0} ث`;
+  }
+  function readAudioSettings() {
+    const settings = profile?.progress(uid)?.audio || {};
+    for (const [field, toggle] of Object.entries(toggles)) {
+      const enabled = settings[field]?.enabled !== false;
+      toggle.checked = enabled; audio.set(field, enabled);
+    }
+    toggles.speech.disabled = !audio.canSpeak;
+    repeat.hidden = !audio.canSpeak || !toggles.speech.checked;
   }
   function clearInput() {
     keyboard.clear(); joystick = null; aimStick = null; mouse = null; pendingAim = null; dash = false;
@@ -94,6 +123,7 @@ export function openBattle({ words, source, isCurrent, returnFocus }) {
     if (closed) return;
     if (mode !== 'intro') record();
     closed = true; cancelAnimationFrame(frame); lifetime.abort(); clearInput();
+    audio.close();
     dialog.close(); dialog.remove();
     window.unlockBackgroundScroll?.('loot-bots');
     window.__lootlinguaRunnerInputActive = false;
@@ -102,6 +132,7 @@ export function openBattle({ words, source, isCurrent, returnFocus }) {
   }
   function setPanel(next, title, copy, label) {
     cancelAnimationFrame(frame); frame = 0;
+    audio.stopSpeech();
     mode = next; clearInput(); core.hidden = true; station.hidden = true; result.hidden = true;
     arena.classList.remove('is-fighting');
     dashButton.disabled = true; dashButton.hidden = true; pause.hidden = true;
@@ -112,19 +143,24 @@ export function openBattle({ words, source, isCurrent, returnFocus }) {
   }
   function start() {
     if (!isCurrent()) return finish();
-    if (mode === 'over') { battle = createBattle(deck); recorded = false; shownQuestion = null; lastEvent = null; lastPhase = null; }
+    const aspect = arena.clientWidth / arena.clientHeight;
+    if (mode === 'over' || (mode === 'intro' && Math.abs(geometry.width / geometry.height - aspect) > .1)) {
+      newRound(); recorded = false; shownQuestion = null; lastEvent = null; lastPhase = null;
+    }
+    audio.unlock(); audioOptions.hidden = true; sound.setAttribute('aria-expanded', 'false');
     mode = 'play'; previous = 0; accumulator = 0; panel.hidden = true; pause.hidden = false;
     lastPhase = null;
     arena.focus({ preventScroll: true });
     sync();
+    if (battle.state.phase === 'decode') audio.say(battle.state.question.word);
     if (!frame && mode === 'play') frame = requestAnimationFrame(tick);
   }
   function sync() {
     const s = battle.state;
-    [s.sector, s.hp, s.tier + 1, s.score, s.collected].forEach((value, index) => {
+    [s.sector, s.hp, s.tier + 1, s.cells, s.score, s.collected].forEach((value, index) => {
       if (hudValues[index] === value) return;
       hudValues[index] = value;
-      hud[index].textContent = index === 1 ? `${value} / 5` : value;
+      hud[index].textContent = index === 1 ? `${value} / 5` : index === 3 ? value ? `${value} / ${MAX_CELLS}` : 'تبريد' : value;
     });
     const fighting = isFighting(s), remaining = Math.max(0, s.dashReady - s.time);
     const dashDisabled = !fighting || remaining > 0;
@@ -155,7 +191,7 @@ export function openBattle({ words, source, isCurrent, returnFocus }) {
       const warning = s.phase === 'boss-warning', victory = s.phase === 'boss-clear';
       announcement.hidden = !warning && !victory;
       announcement.classList.toggle('is-victory', victory);
-      announcement.classList.toggle('is-lower', warning && s.boss.y < HEIGHT / 2);
+      announcement.classList.toggle('is-lower', warning && s.boss.y < geometry.height / 2);
       if (warning) {
         announcement.firstElementChild.textContent = `احذر · ${s.boss.name}`;
         announcement.lastElementChild.textContent = s.boss.hint;
@@ -216,11 +252,12 @@ export function openBattle({ words, source, isCurrent, returnFocus }) {
     }
     if (s.phase === 'over') {
       record();
-      setPanel('over', 'انتهت المعركة', `${s.bossWins} زعيم هزمته · ${s.score} نقطة · ${s.collected} عملة`, 'العب من جديد');
+      setPanel('over', 'انتهت المعركة', `${s.bossWins} زعيم هزمته · ${s.score} نقطة · ${s.collected} عملة · ${Math.floor(s.time)} ث صمود`, 'العب من جديد');
     }
   }
   function answer(index) {
     if (mode === 'play' && battle.choose(index)) {
+      audio.stopSpeech(); audio.play(battle.state.cues); battle.state.cues = 0;
       clearInput();
       sync();
       arena.focus({ preventScroll: true });
@@ -228,7 +265,7 @@ export function openBattle({ words, source, isCurrent, returnFocus }) {
   }
   function activate() {
     if (mode !== 'play' || !battle.activate()) return;
-    clearInput(); sync();
+    clearInput(); sync(); audio.say(battle.state.question.word);
   }
   function tick(now) {
     frame = 0;
@@ -250,21 +287,37 @@ export function openBattle({ words, source, isCurrent, returnFocus }) {
           if (pendingAim) ({ x: aimX, y: aimY } = pendingAim);
           else if (keyboard.has('KeyF')) { aimX = Math.cos(player.angle); aimY = Math.sin(player.angle); }
         }
+        const previousShot = battle.state.muzzleUntil;
         battle.step(STEP, x, y, dash, aimX, aimY);
-        dash = false; pendingAim = null; accumulator -= STEP;
+        if (pendingAim && (battle.state.muzzleUntil !== previousShot || battle.state.time >= pendingAim.until)) pendingAim = null;
+        dash = false; accumulator -= STEP;
       }
       sync(); renderer.draw(battle.state, joystick, aimStick, mouse);
+      audio.play(battle.state.cues); battle.state.cues = 0;
     }
     if (mode === 'play') frame = requestAnimationFrame(tick);
   }
   function point(event) {
     bounds ||= arena.getBoundingClientRect();
-    return { x: (event.clientX - bounds.left) / bounds.width * WIDTH, y: (event.clientY - bounds.top) / bounds.height * HEIGHT };
+    return { x: (event.clientX - bounds.left - view.left) / view.fit, y: (event.clientY - bounds.top - view.top) / view.fit };
   }
 
   listen(find('[data-close]'), 'click', finish);
   listen(play, 'click', start);
   listen(station, 'click', activate);
+  listen(repeat, 'click', () => audio.say(battle.state.question?.word));
+  listen(sound, 'click', () => {
+    if (mode === 'play') pause.click();
+    audioOptions.hidden = !audioOptions.hidden;
+    sound.setAttribute('aria-expanded', String(!audioOptions.hidden));
+    if (!audioOptions.hidden) toggles.effects.focus();
+  });
+  for (const [field, toggle] of Object.entries(toggles)) listen(toggle, 'change', () => {
+    audio.set(field, toggle.checked);
+    if (field === 'effects' && toggle.checked) audio.unlock();
+    if (field === 'speech') repeat.hidden = !toggle.checked;
+    if (profile?.saveAudio(uid, field, toggle.checked) === false) status.textContent = 'تعذّر حفظ إعداد الصوت.';
+  });
   listen(pause, 'click', () => setPanel('paused', 'المعركة متوقفة', 'الساحة بانتظارك.', 'تابع اللعب'));
   function requestDash() { dash = true; arena.focus({ preventScroll: true }); }
   listen(dashButton, 'pointerdown', event => { if (event.button === 0) { event.preventDefault(); requestDash(); } });
@@ -282,17 +335,19 @@ export function openBattle({ words, source, isCurrent, returnFocus }) {
   listen(window, 'keyup', event => keyboard.delete(event.code));
   listen(window, 'blur', clearInput);
   listen(window, 'lootlingua:auth-state', () => { if (!isCurrent()) finish(); });
+  listen(window, 'lootlingua:bots-profile', () => { if (isCurrent()) { readAudioSettings(); if (mode !== 'play') showRecord(); } });
+  listen(window, 'pagehide', finish);
   listen(document, 'visibilitychange', () => { if (document.hidden && mode === 'play') pause.click(); });
-  listen(window, 'resize', () => { bounds = null; renderer.resize(); if (mode !== 'play') renderer.draw(battle.state); });
+  listen(window, 'resize', resize);
   listen(arena, 'pointerdown', event => {
     if (mode !== 'play' || !isFighting(battle.state) || event.button !== 0 || event.target.closest('button')) return;
     bounds = arena.getBoundingClientRect();
     const p = point(event), id = event.pointerId, player = battle.state.player;
     if (event.pointerType === 'mouse') mouse = { ...p, id, held: true };
-    else if (p.x < WIDTH / 2 && !joystick) joystick = { ...p, id, dx: 0, dy: 0 };
-    else if (p.x >= WIDTH / 2 && !aimStick) aimStick = { ...p, id, dx: 0, dy: 0, dragged: false };
+    else if (p.x < geometry.width / 2 && !joystick) joystick = { ...p, id, dx: 0, dy: 0 };
+    else if (p.x >= geometry.width / 2 && !aimStick) aimStick = { ...p, id, dx: 0, dy: 0, dragged: false };
     else return;
-    if (mouse?.id === id || aimStick?.id === id) pendingAim = { x: p.x - player.x, y: p.y - player.y };
+    if (mouse?.id === id || aimStick?.id === id) pendingAim = { x: p.x - player.x, y: p.y - player.y, until: battle.state.time + .16 };
     event.preventDefault(); arena.setPointerCapture(id);
     if (document.activeElement !== arena) arena.focus({ preventScroll: true });
   });
@@ -323,7 +378,7 @@ export function openBattle({ words, source, isCurrent, returnFocus }) {
   showRecord();
   document.body.append(dialog);
   dialog.showModal();
-  renderer.resize(); renderer.draw(battle.state);
+  newRound(); readAudioSettings();
   window.lockBackgroundScroll?.('loot-bots');
   window.__lootlinguaRunnerInputActive = true;
   window.dispatchEvent(new Event('lootlingua:runner-input-active'));

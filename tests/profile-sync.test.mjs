@@ -98,6 +98,34 @@ test('stale full snapshots cannot overwrite XP, spendable balances, counters or 
   assert.equal(db.profile().perfectQuizzes, 9);
 });
 
+test('Loot Bots receipts merge distinct runs across devices and acknowledge a replay once', async () => {
+  const db = database({ runnerCoins: 17, runnerBestDistance: 82, userXP: 300 });
+  const a = client(db), b = client(db);
+  const first = { type: 'bots-run', eventId: 'bots-round-a', run: { coins: 7, best: 410, bosses: 1, seconds: 90 } };
+  const second = { type: 'bots-run', eventId: 'bots-round-b', run: { coins: 16, best: 290, bosses: 2, seconds: 180 } };
+  db.controls.loseAck = true;
+  await a.root.commitProfileIntent(first);
+  await Promise.all([a.root.flushProfileIntents(), b.root.commitProfileIntent(second)]);
+  await b.root.commitProfileIntent(first);
+  assert.deepEqual(db.profile().lootBots, { coins: 23, best: 410, bosses: 2, seconds: 180, audio: {} });
+  assert.equal(db.profile().runnerCoins, 17);
+  assert.equal(db.profile().runnerBestDistance, 82);
+  assert.equal(db.profile().userXP, 300);
+});
+
+test('Loot Bots audio switches merge independently and guest transfers retain their receipts', async () => {
+  const db = database({ lootBots: { coins: 8, best: 300, bosses: 1, seconds: 92 } });
+  const a = client(db), b = client(db);
+  const set = (field, enabled, at) => ({ type: 'bots-audio', field, enabled, at, eventId: `${field}-${at}` });
+  await Promise.all([a.root.commitProfileIntent(set('effects', false, 30)), b.root.commitProfileIntent(set('speech', false, 20))]);
+  await a.root.commitProfileIntent(set('effects', true, 10));
+  const guest = { type: 'guest-import', eventId: 'guest-bots', profile: { lootBots: { coins: 4, best: 200, bosses: 2, seconds: 100 } } };
+  await b.root.commitProfileIntent(guest);
+  await a.root.commitProfileIntent(guest);
+  assert.deepEqual(db.profile().lootBots, { coins: 12, best: 300, bosses: 2, seconds: 100,
+    audio: { effects: { enabled: false, at: 30 }, speech: { enabled: false, at: 20 } } });
+});
+
 test('two devices preserve legitimate wallet deltas through transaction retries', async () => {
   const db = database({ runnerCoins: 5, streakFreezes: 2 });
   const a = client(db), b = client(db);
