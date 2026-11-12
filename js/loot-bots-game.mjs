@@ -1,7 +1,8 @@
-import { createBattle, prepareDeck, WIDTH, HEIGHT } from './loot-bots-engine.mjs?v=1';
-import { createRenderer } from './loot-bots-renderer.mjs?v=1';
+import { createBattle, prepareDeck, isFighting, canDecode, WIDTH, HEIGHT } from './loot-bots-engine.mjs?v=2';
+import { createRenderer } from './loot-bots-renderer.mjs?v=2';
 
 const MOVEMENT = new Set(['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'KeyW', 'KeyA', 'KeyS', 'KeyD']);
+const AIM = new Set(['KeyI', 'KeyJ', 'KeyK', 'KeyL', 'KeyF']);
 const STEP = 1 / 60;
 
 export function openBattle({ words, source, isCurrent, returnFocus }) {
@@ -22,33 +23,42 @@ export function openBattle({ words, source, isCurrent, returnFocus }) {
       </header>
       <div class="lb-hud">
         <span>القطاع <b data-sector>1</b></span><span>الصحة <b data-hp>5 / 5</b></span>
-        <span>النقاط <b data-score>0</b></span><span>العملات <b data-coins>0</b></span>
+        <span>السلاح <b data-tier>1</b></span><span>النقاط <b data-score>0</b></span><span>العملات <b data-coins>0</b></span>
       </div>
       <div class="lb-arena" tabindex="0" aria-label="ساحة المعركة">
         <canvas aria-hidden="true"></canvas>
-        <div class="lb-core" hidden>
-          <div class="lb-question"><small>اختر نواة المعنى الصحيح</small><b lang="en" dir="ltr" data-word></b></div>
+        <button type="button" class="lb-station" hidden>شغّل المحطة</button>
+        <div class="lb-core" hidden role="group" aria-labelledby="lbCoreTitle">
+          <div class="lb-question"><small id="lbCoreTitle">رمز محطة الطاقة · اختر معناه</small><b lang="en" dir="ltr" data-word></b></div>
           <div class="lb-options"></div>
         </div>
+        <div class="lb-result" hidden><strong></strong><span></span></div>
         <div class="lb-panel">
           <strong data-heading>ساحة الروبوتات</strong>
-          <p data-copy>تحرّك وراوغ. روبوتك يطلق النار تلقائيًا. طابق الكلمة مع معناها لشحن السلاح وفتح القطاع التالي.</p>
+          <p data-copy></p>
+          <small data-mission>لما تفتح محطة الطاقة، اقترب منها وفكّ رمزها لتقوية سلاحك.</small>
           <small data-record></small>
           <button type="button" data-play autofocus>ابدأ المعركة</button>
         </div>
       </div>
-      <footer class="lb-footer"><p role="status" data-status>اسحب داخل الساحة أو استخدم الأسهم للتحرّك.</p><button type="button" data-dash disabled>اندفاع</button></footer>
+      <footer class="lb-footer"><p role="status" data-status></p><button type="button" data-dash disabled>اندفاع</button></footer>
       <p class="lb-note">تدريب بالكلمات فقط. النقاط والعملات خاصة باللعبة ولا ترفع الإتقان أو XP.</p>
     </section>`;
   const find = selector => dialog.querySelector(selector);
   const arena = find('.lb-arena'), renderer = createRenderer(find('canvas'));
   const panel = find('.lb-panel'), core = find('.lb-core'), options = find('.lb-options');
+  const station = find('.lb-station'), result = find('.lb-result');
   const status = find('[data-status]'), play = find('[data-play]'), pause = find('[data-pause]'), dashButton = find('[data-dash]');
-  const hud = ['sector', 'hp', 'score', 'coins'].map(key => find(`[data-${key}]`));
+  const hud = ['sector', 'hp', 'tier', 'score', 'coins'].map(key => find(`[data-${key}]`));
   const hudValues = [];
   const keyboard = new Set();
+  const coarse = window.matchMedia('(pointer: coarse)').matches;
+  const controls = coarse ? 'اسحب يسار الساحة للحركة ويمينها للتصويب والإطلاق.' : 'تحرّك بالأسهم أو WASD. صوّب بالفأرة واضغط للإطلاق.';
+  const idleHint = coarse ? controls : 'الأسهم للحركة · الفأرة للإطلاق · مسافة للاندفاع.';
   let battle = createBattle(deck), mode = 'intro', frame = 0, previous = 0, accumulator = 0;
-  let joystick = null, dash = false, shownQuestion = null, lastEvent = null, recorded = false, closed = false;
+  let joystick = null, aimStick = null, mouse = null, pendingAim = null, dash = false, shownQuestion = null;
+  let lastPhase = null, lastEvent = null, lastHint = '', recorded = false, closed = false;
+  let bounds;
 
   function readProgress() {
     try { return JSON.parse(localStorage.getItem(storageKey)) || {}; } catch { return {}; }
@@ -67,7 +77,7 @@ export function openBattle({ words, source, isCurrent, returnFocus }) {
     find('[data-record]').textContent = `أفضل نتيجة ${Number(record.best) || 0} · رصيد العملات ${Number(record.coins) || 0} على هذا الجهاز`;
   }
   function clearInput() {
-    keyboard.clear(); joystick = null; dash = false;
+    keyboard.clear(); joystick = null; aimStick = null; mouse = null; pendingAim = null; dash = false;
   }
   function finish() {
     if (closed) return;
@@ -81,54 +91,73 @@ export function openBattle({ words, source, isCurrent, returnFocus }) {
   }
   function setPanel(next, title, copy, label) {
     cancelAnimationFrame(frame); frame = 0;
-    mode = next; clearInput(); core.hidden = true; dashButton.disabled = true; pause.hidden = true;
+    mode = next; clearInput(); core.hidden = true; station.hidden = true; result.hidden = true;
+    arena.classList.remove('is-fighting');
+    dashButton.disabled = true; pause.hidden = true;
+    find('[data-mission]').hidden = true;
     find('[data-heading]').textContent = title; find('[data-copy]').textContent = copy;
     play.textContent = label; panel.hidden = false; showRecord(); play.focus({ preventScroll: true });
   }
   function start() {
     if (!isCurrent()) return finish();
-    if (mode === 'over') { battle = createBattle(deck); recorded = false; shownQuestion = null; lastEvent = null; }
-    if (mode !== 'paused') status.textContent = 'اسحب للتحرّك · اندفع للمراوغة (المسافة).';
+    if (mode === 'over') { battle = createBattle(deck); recorded = false; shownQuestion = null; lastEvent = null; lastPhase = null; }
     mode = 'play'; previous = 0; accumulator = 0; panel.hidden = true; pause.hidden = false;
+    lastPhase = null;
     arena.focus({ preventScroll: true });
     sync();
     if (!frame && mode === 'play') frame = requestAnimationFrame(tick);
   }
   function sync() {
     const s = battle.state;
-    [s.sector, s.hp, s.score, s.collected].forEach((value, index) => {
+    [s.sector, s.hp, s.tier + 1, s.score, s.collected].forEach((value, index) => {
       if (hudValues[index] === value) return;
       hudValues[index] = value;
       hud[index].textContent = index === 1 ? `${value} / 5` : value;
     });
-    const dashDisabled = s.phase !== 'combat' || s.time < s.dashReady;
+    const dashDisabled = !isFighting(s) || s.time < s.dashReady;
     if (dashButton.disabled !== dashDisabled) dashButton.disabled = dashDisabled;
-    if (core.hidden !== (s.phase !== 'core')) core.hidden = s.phase !== 'core';
+    const near = canDecode(s);
+    if (station.hidden === near) {
+      if (!near && document.activeElement === station) arena.focus({ preventScroll: true });
+      station.hidden = !near;
+    }
+    if (core.hidden !== (s.phase !== 'decode')) core.hidden = s.phase !== 'decode';
+    if (result.hidden !== (s.phase !== 'result')) result.hidden = s.phase !== 'result';
+    if (s.phase !== lastPhase) {
+      lastPhase = s.phase;
+      arena.classList.toggle('is-fighting', isFighting(s));
+      lastHint = '';
+    }
+    if (isFighting(s)) {
+      let hint = idleHint;
+      if (near) hint = coarse ? 'شغّل المحطة لفكّ رمزها.' : 'شغّل المحطة لفكّ رمزها (E).';
+      else if (s.phase === 'approach') hint = 'محطة الطاقة تفتح في وسط الساحة. اقترب منها.';
+      else if (s.defense) hint = 'دفاع المحطة نشط. راوغ خطوط التصويب.';
+      else if (s.time < s.powerUntil) hint = 'سلاحك مشحون! استغل الطلقات الأقوى.';
+      if (hint !== lastHint) { lastHint = hint; status.textContent = hint; }
+    }
     if (s.question && s.question !== shownQuestion) {
       shownQuestion = s.question;
       find('[data-word]').textContent = s.question.word;
       options.replaceChildren(...s.question.options.map((option, index) => {
         const button = document.createElement('button'); button.type = 'button';
-        button.style.left = `${option.x / WIDTH * 100}%`;
-        button.style.top = `${option.y / HEIGHT * 100}%`;
         const number = document.createElement('span'); number.textContent = index + 1; number.setAttribute('aria-hidden', 'true');
         const label = document.createElement('bdi'); label.textContent = option.label;
         button.append(number, label);
         button.addEventListener('click', () => answer(index));
         return button;
       }));
-      status.textContent = `ما معنى ${s.question.word}؟ تحرّك نحو النواة، أو اخترها مباشرة.`;
+      status.textContent = `المحطة أوقفت القتال مؤقتًا. ما معنى ${s.question.word}؟`;
+      options.firstElementChild?.focus({ preventScroll: true });
     }
     if (s.event && s.event !== lastEvent) {
       lastEvent = s.event;
-      if (lastEvent.type === 'wrong') {
-        status.textContent = `نواة خاطئة. المعنى الصحيح: ${lastEvent.answer}. اختره لفتح القطاع ومواجهة التعزيز.`;
-        s.question.wrong.forEach(index => { options.children[index].disabled = true; });
-      } else {
-        status.textContent = `المعنى صحيح: ${lastEvent.answer}. السلاح مشحون!`;
-      }
+      const wrong = lastEvent.type === 'wrong';
+      result.classList.toggle('is-wrong', wrong);
+      result.firstElementChild.textContent = wrong ? 'رمز خاطئ · دفاع المحطة تفعّل' : 'رمز صحيح · السلاح مشحون';
+      result.lastElementChild.textContent = `${lastEvent.word} — ${lastEvent.answer}`;
+      status.textContent = wrong ? `المعنى الصحيح: ${lastEvent.answer}. استعد لمراوغة دفاع المحطة.` : `المعنى صحيح: ${lastEvent.answer}. شحن المحطة يقوّي طلقاتك.`;
     }
-    if (s.phase === 'combat' && options.contains(document.activeElement)) arena.focus({ preventScroll: true });
     if (s.phase === 'over') {
       record();
       setPanel('over', 'انتهت المعركة', `وصلت للقطاع ${s.sector} · ${s.score} نقطة · ${s.collected} عملة`, 'العب من جديد');
@@ -136,9 +165,14 @@ export function openBattle({ words, source, isCurrent, returnFocus }) {
   }
   function answer(index) {
     if (mode === 'play' && battle.choose(index)) {
+      clearInput();
       sync();
-      if (battle.state.phase === 'combat') arena.focus({ preventScroll: true });
+      arena.focus({ preventScroll: true });
     }
+  }
+  function activate() {
+    if (mode !== 'play' || !battle.activate()) return;
+    clearInput(); sync();
   }
   function tick(now) {
     frame = 0;
@@ -150,26 +184,40 @@ export function openBattle({ words, source, isCurrent, returnFocus }) {
       const has = (arrow, key) => Number(keyboard.has(arrow) || keyboard.has(key));
       const x = joystick?.dx ?? (has('ArrowRight', 'KeyD') - has('ArrowLeft', 'KeyA'));
       const y = joystick?.dy ?? (has('ArrowDown', 'KeyS') - has('ArrowUp', 'KeyW'));
-      while (accumulator >= STEP) { battle.step(STEP, x, y, dash); dash = false; accumulator -= STEP; }
-      sync(); renderer.draw(battle.state, joystick);
+      const player = battle.state.player;
+      const target = mouse?.held ? mouse : aimStick?.dragged ? null : aimStick;
+      const keyX = has('KeyL') - has('KeyJ'), keyY = has('KeyK') - has('KeyI');
+      while (accumulator >= STEP) {
+        let aimX = target ? target.x - player.x : aimStick?.dx ?? keyX;
+        let aimY = target ? target.y - player.y : aimStick?.dy ?? keyY;
+        if (!aimX && !aimY) {
+          if (pendingAim) ({ x: aimX, y: aimY } = pendingAim);
+          else if (keyboard.has('KeyF')) { aimX = Math.cos(player.angle); aimY = Math.sin(player.angle); }
+        }
+        battle.step(STEP, x, y, dash, aimX, aimY);
+        dash = false; pendingAim = null; accumulator -= STEP;
+      }
+      sync(); renderer.draw(battle.state, joystick, aimStick, mouse);
     }
     if (mode === 'play') frame = requestAnimationFrame(tick);
   }
   function point(event) {
-    const bounds = arena.getBoundingClientRect();
+    bounds ||= arena.getBoundingClientRect();
     return { x: (event.clientX - bounds.left) / bounds.width * WIDTH, y: (event.clientY - bounds.top) / bounds.height * HEIGHT };
   }
 
   listen(find('[data-close]'), 'click', finish);
   listen(play, 'click', start);
+  listen(station, 'click', activate);
   listen(pause, 'click', () => setPanel('paused', 'المعركة متوقفة', 'الساحة بانتظارك.', 'تابع اللعب'));
   listen(dashButton, 'click', () => { dash = true; arena.focus({ preventScroll: true }); });
   listen(dialog, 'cancel', event => { event.preventDefault(); if (mode === 'play') pause.click(); else finish(); });
   listen(dialog, 'keydown', event => {
     if (mode !== 'play' || event.altKey || event.ctrlKey || event.metaKey) return;
-    if (MOVEMENT.has(event.code)) { event.preventDefault(); keyboard.add(event.code); }
+    if (isFighting(battle.state) && (MOVEMENT.has(event.code) || AIM.has(event.code))) { event.preventDefault(); keyboard.add(event.code); }
+    if (event.code === 'KeyE' && !event.repeat) activate();
     if (event.code === 'Space' && !event.target.closest('button')) { event.preventDefault(); if (!event.repeat) dash = true; }
-    if (/^(Digit|Numpad)[1-3]$/.test(event.code) && battle.state.phase === 'core') {
+    if (/^(Digit|Numpad)[1-3]$/.test(event.code) && battle.state.phase === 'decode') {
       event.preventDefault(); if (!event.repeat) answer(Number(event.code.at(-1)) - 1);
     }
   });
@@ -177,23 +225,47 @@ export function openBattle({ words, source, isCurrent, returnFocus }) {
   listen(window, 'blur', clearInput);
   listen(window, 'lootlingua:auth-state', () => { if (!isCurrent()) finish(); });
   listen(document, 'visibilitychange', () => { if (document.hidden && mode === 'play') pause.click(); });
+  listen(window, 'resize', () => { bounds = null; renderer.resize(); if (mode !== 'play') renderer.draw(battle.state); });
   listen(arena, 'pointerdown', event => {
-    if (mode !== 'play' || joystick || event.button !== 0 || event.target.closest('button')) return;
-    event.preventDefault(); arena.setPointerCapture(event.pointerId);
-    joystick = { ...point(event), id: event.pointerId, dx: 0, dy: 0 };
+    if (mode !== 'play' || !isFighting(battle.state) || event.button !== 0 || event.target.closest('button')) return;
+    bounds = arena.getBoundingClientRect();
+    const p = point(event), id = event.pointerId, player = battle.state.player;
+    if (event.pointerType === 'mouse') mouse = { ...p, id, held: true };
+    else if (p.x < WIDTH / 2 && !joystick) joystick = { ...p, id, dx: 0, dy: 0 };
+    else if (p.x >= WIDTH / 2 && !aimStick) aimStick = { ...p, id, dx: 0, dy: 0, dragged: false };
+    else return;
+    if (mouse?.id === id || aimStick?.id === id) pendingAim = { x: p.x - player.x, y: p.y - player.y };
+    event.preventDefault(); arena.setPointerCapture(id);
+    if (document.activeElement !== arena) arena.focus({ preventScroll: true });
   });
   listen(arena, 'pointermove', event => {
-    if (event.pointerId !== joystick?.id) return;
-    const p = point(event), x = p.x - joystick.x, y = p.y - joystick.y, scale = Math.max(34, Math.hypot(x, y));
-    joystick.dx = x / scale; joystick.dy = y / scale;
+    if (event.pointerType === 'mouse') {
+      if (mode === 'play' && isFighting(battle.state)) mouse = { ...point(event), id: event.pointerId, held: mouse?.held || false };
+      return;
+    }
+    const stick = event.pointerId === joystick?.id ? joystick : event.pointerId === aimStick?.id ? aimStick : null;
+    if (!stick) return;
+    const p = point(event), x = p.x - stick.x, y = p.y - stick.y, gap = Math.hypot(x, y);
+    const scale = Math.max(38, gap);
+    stick.dx = x / scale; stick.dy = y / scale;
+    if (stick === aimStick && gap > 10) stick.dragged = true;
   });
+  listen(arena, 'pointerleave', () => { if (!mouse?.held) mouse = null; });
   for (const event of ['lostpointercapture', 'pointerup', 'pointercancel']) {
-    listen(arena, event, e => { if (e.pointerId === joystick?.id) joystick = null; });
+    listen(arena, event, e => {
+      if (e.pointerId === joystick?.id) joystick = null;
+      if (e.pointerId === aimStick?.id) aimStick = null;
+      if (e.pointerId === mouse?.id) mouse.held = false;
+      if (event === 'pointercancel') pendingAim = null;
+    });
   }
   find('[data-source]').textContent = source;
-  showRecord(); renderer.draw(battle.state);
+  find('[data-copy]').textContent = controls;
+  status.textContent = coarse ? 'يسار الساحة للحركة · يمينها للتصويب والإطلاق.' : 'IJKL للتصويب والإطلاق بلوحة المفاتيح.';
+  showRecord();
   document.body.append(dialog);
   dialog.showModal();
+  renderer.resize(); renderer.draw(battle.state);
   window.lockBackgroundScroll?.('loot-bots');
   window.__lootlinguaRunnerInputActive = true;
   window.dispatchEvent(new Event('lootlingua:runner-input-active'));
