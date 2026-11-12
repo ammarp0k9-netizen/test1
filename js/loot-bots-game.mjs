@@ -22,6 +22,7 @@ export function openBattle({ words, source, isCurrent, returnFocus }) {
   const listen = (target, event, fn) => target.addEventListener(event, fn, { signal: lifetime.signal });
   const dialog = document.createElement('dialog');
   dialog.className = 'loot-bots'; dialog.dir = 'rtl'; dialog.setAttribute('aria-labelledby', 'lootBotsTitle');
+  dialog.dataset.nativeModal = '';
   dialog.innerHTML = `
     <section class="lb-shell">
       <header class="lb-header">

@@ -13,6 +13,11 @@
     for (const frame of frames.values()) if (frame.root === dialog || frame.root.contains(dialog)) return frame.root;
     return dialog.closest('.custom-modal, .app-auth-dialog-shell, .feedback-dialog-shell, .word-hunter-modal, #entryExperienceRoot') || dialog;
   }
+  function inTopLayer(dialog) {
+    if (dialog.tagName !== 'DIALOG' || !dialog.open) return false;
+    try { return dialog.matches(':modal'); }
+    catch { return dialog.hasAttribute('data-native-modal'); }
+  }
   function layer() {
     const candidates = [];
     document.querySelectorAll('[role="dialog"][aria-modal="true"], dialog[open]').forEach(dialog => {
@@ -22,9 +27,10 @@
       for (let node = dialog; node && node !== document.body; node = node.parentElement) {
         z = Math.max(z, Number.parseInt(getComputedStyle(node).zIndex, 10) || 0);
       }
-      candidates.push({ surface, z, frame: frames.get(surface) });
+      candidates.push({ surface, z, topLayer: inTopLayer(dialog), frame: frames.get(surface) });
     });
-    candidates.sort((a, b) => a.z - b.z);
+    // showModal() puts a native dialog above every CSS stacking context.
+    candidates.sort((a, b) => Number(a.topLayer) - Number(b.topLayer) || (!a.topLayer ? a.z - b.z : 0));
     return candidates[candidates.length - 1] || null;
   }
   function restoreIsolation() {
@@ -93,7 +99,7 @@
       if (scheduled !== null) return;
       scheduled = requestAnimationFrame(() => { scheduled = null; reconcile(); });
     });
-    observer.observe(document.body, { subtree: true, childList: true, attributes: true, attributeFilter: ['class', 'style', 'hidden', 'aria-hidden'] });
+    observer.observe(document.body, { subtree: true, childList: true, attributes: true, attributeFilter: ['class', 'style', 'hidden', 'aria-hidden', 'open'] });
   }
   function stop() {
     observer?.disconnect(); observer = null;

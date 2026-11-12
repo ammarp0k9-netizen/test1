@@ -4144,7 +4144,7 @@ async function openPublishedGateQuizPicker(world, rank, gate) {
     return;
   }
   const existing = document.getElementById('publishedGateQuizPicker');
-  if (existing) existing.remove();
+  if (existing) { window.LootLinguaModalFocus?.close(existing, { restoreFocus: false }); existing.remove(); }
   const progress = publishedContentState.gateProgress;
   let words = [];
   try {
@@ -4169,6 +4169,7 @@ async function openPublishedGateQuizPicker(world, rank, gate) {
   shell.setAttribute('aria-modal', 'true');
   shell.setAttribute('aria-label', `تدريب بوابة ${gate.title || ''}`);
   const close = (returnToGate = true) => {
+    window.LootLinguaModalFocus?.close(shell, { restoreFocus: returnToGate });
     shell.remove();
     if (returnToGate) window.openPublishedGate(world.worldId, rank.rankId, gate.gateId);
   };
@@ -4227,7 +4228,8 @@ async function openPublishedGateQuizPicker(world, rank, gate) {
   shell.addEventListener('keydown', (event) => { if (event.key === 'Escape') close(); });
   document.body.append(shell);
   requestAnimationFrame(() => shell.classList.add('is-visible'));
-  shell.querySelector('.published-gate-quiz-mode')?.focus();
+  if (window.LootLinguaModalFocus) window.LootLinguaModalFocus.open(shell, { dialog: shell.querySelector('.published-gate-quiz-card'), onEscape: close });
+  else shell.querySelector('.published-gate-quiz-mode')?.focus();
 }
 
 // Smart Journey notifications use this entry point instead of the general
