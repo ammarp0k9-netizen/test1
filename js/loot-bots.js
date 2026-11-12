@@ -1,4 +1,4 @@
-/* Practice arcade entry points. Resources are only loaded on explicit launch. */
+/* Practice arcade entry points. The combat engine loads on launch. */
 (() => {
   'use strict';
   const base = new URL('../', document.currentScript.src);
@@ -8,11 +8,11 @@
     if (resources) return resources;
     const link = document.createElement('link');
     const styles = new Promise((resolve, reject) => {
-      link.rel = 'stylesheet'; link.href = new URL('loot-bots.css?v=2', base);
+      link.rel = 'stylesheet'; link.href = new URL('loot-bots.css?v=3', base);
       link.onload = resolve; link.onerror = () => reject(new Error('Arena stylesheet unavailable'));
       document.head.append(link);
     });
-    resources = Promise.all([styles, import(new URL('js/loot-bots-game.mjs?v=2', base))])
+    resources = Promise.all([styles, import(new URL('js/loot-bots-game.mjs?v=3', base))])
       .then(([, game]) => game)
       .catch(error => { link.remove(); resources = null; throw error; });
     return resources;
@@ -51,6 +51,16 @@
       },
     });
   });
+
+  const preview = document.getElementById('lootBotsPreview');
+  if (preview && typeof IntersectionObserver === 'function') {
+    const observer = new IntersectionObserver(([entry]) => {
+      if (!entry.isIntersecting) return;
+      observer.disconnect();
+      import(new URL('js/loot-bots-preview.mjs?v=1', base)).then(module => module.mountPreview(preview)).catch(() => {});
+    });
+    observer.observe(preview);
+  }
 
   window.LootLinguaBots = {
     renderGate({ worldId, rankId, gateId, title, isSourceCurrent }) {

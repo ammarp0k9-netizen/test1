@@ -1,7 +1,6 @@
-export const WIDTH = 640;
-export const HEIGHT = 540;
-export const STATION = Object.freeze({ x: 320, y: 262, reach: 86 });
-export const DOCKS = [{ x: 34, y: 108 }, { x: 606, y: 108 }, { x: 34, y: 434 }, { x: 606, y: 434 }];
+import { WIDTH, HEIGHT, STATION, DOCKS, isFighting, canDecode } from './loot-bots-arena.mjs?v=1';
+import { createBossDirector, bossProgress, BOSS_WARNING, BOSS_CLEAR } from './loot-bots-bosses.mjs?v=1';
+export { WIDTH, HEIGHT, STATION, DOCKS, isFighting, canDecode, bossProgress };
 export const LIMITS = Object.freeze({ enemies: 20, shots: 32, coins: 28, sparks: 40 });
 const BOT_TYPES = {
   scout: { speed: 75, hp: 2, radius: 14, color: '#ff936d' },
@@ -12,8 +11,13 @@ const BOT_TYPES = {
 const clamp = (value, min, max) => Math.max(min, Math.min(max, value));
 const distance = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
 const keyOf = text => text.normalize('NFKC').toLowerCase().replace(/\s+/g, ' ');
-export const isFighting = state => state.phase === 'combat' || state.phase === 'approach';
-export const canDecode = state => state.phase === 'approach' && state.phaseTime >= 2.4 && distance(state.player, STATION) <= STATION.reach;
+const REWARDS = {
+  repair: { title: 'ترميم الدرع', icon: '✚', description: 'استعادة نقطتَي صحة', color: '#99efad', duration: 3 },
+  shield: { title: 'درع طاقة', icon: '⬡', description: 'حماية من الإصابات لمدة 6 ثوانٍ', color: '#81ddff', duration: 6 },
+  power: { title: 'طلقات مشحونة', icon: '✦', description: 'ضرر مضاعف وإطلاق أسرع لمدة 14 ثانية', color: '#ffdb86', duration: 14 },
+  dash: { title: 'اندفاع سريع', icon: '»', description: 'شحن فوري ووقت انتظار أقصر لمدة 14 ثانية', color: '#92f3dd', duration: 14 },
+  magnet: { title: 'مغناطيس الغنائم', icon: '◎', description: '3 عملات وجذب من مسافة أبعد لمدة 16 ثانية', color: '#ffd075', duration: 16 },
+};
 
 export function prepareDeck(words) {
   const byWord = new Map(), meanings = new Map();
@@ -46,9 +50,27 @@ export function createBattle(deck, random = Math.random) {
     time: 0, stationAt: 32 + random() * 12, spawnAt: .8, fireAt: 0, muzzleUntil: 0,
     shieldUntil: 0, hurtUntil: 0, dashUntil: 0, dashReady: 0, powerUntil: 0,
     player: { x: 320, y: 389, angle: -Math.PI / 2, dx: 0, dy: -1 },
-    enemies: [], shots: [], coins: [], sparks: [], question: null, defense: null, event: null,
+    boss: null, bossWins: 0, bossCycleStart: 0, bossInterval: 67 + random() * 11, stationDone: false, victory: null,
+    enemies: [], shots: [], coins: [], sparks: [], question: null, defense: null, event: null, reward: null,
   };
-  let bag = [], lastWord = null;
+  let bag = [], lastWord = null, lastReward = null;
+  const director = createBossDirector({ state, random, width: WIDTH, height: HEIGHT, shoot, damage, spawn, burst });
+
+  function activeReward(id) {
+    return state.reward?.id === id && state.time < state.reward.until;
+  }
+
+  function pickReward() {
+    const choices = Object.keys(REWARDS).filter(id => id !== lastReward && (id !== 'repair' || state.hp < 5));
+    const id = state.hp <= 2 && choices.includes('repair') ? 'repair' : choices[Math.floor(random() * choices.length)];
+    lastReward = id;
+    const reward = { id, ...REWARDS[id] };
+    if (id === 'repair') {
+      reward.amount = Math.min(2, 5 - state.hp);
+      reward.description = reward.amount === 1 ? 'استعادة نقطة صحة' : REWARDS.repair.description;
+    }
+    return reward;
+  }
 
   function phase(next) {
     state.phase = next; state.phaseTime = 0;
@@ -98,30 +120,54 @@ export function createBattle(deck, random = Math.random) {
       state.correct++; state.score += 100;
       state.tier = Math.min(3, state.tier + 1);
     }
-    state.event = { type: option.correct ? 'correct' : 'wrong', word: question.word, answer: question.answer };
+    state.event = { type: option.correct ? 'correct' : 'wrong', word: question.word, answer: question.answer,
+      reward: option.correct ? pickReward() : null };
     state.question = null;
     phase('result');
     return true;
   }
 
   function resumeFight() {
-    const correct = state.event.type === 'correct';
-    if (correct) state.powerUntil = state.time + 10;
-    else state.defense = { x: STATION.x, y: STATION.y, angle: 0, aimAt: state.time + 1.1, fireAt: 0, volleys: 3 };
     state.shieldUntil = state.time + .85;
+    const reward = state.event.reward;
+    if (reward) {
+      state.reward = { ...reward, until: state.time + reward.duration };
+      if (reward.id === 'repair') state.hp += reward.amount;
+      if (reward.id === 'power') state.powerUntil = state.reward.until;
+      if (reward.id === 'dash') state.dashReady = state.time;
+      if (reward.id === 'shield') state.shieldUntil = state.reward.until;
+      if (reward.id === 'magnet') state.collected += 3;
+      burst(state.player.x, state.player.y, reward.color, 18);
+    } else state.defense = { x: STATION.x, y: STATION.y, angle: 0, aimAt: state.time + 1.1, fireAt: 0, volleys: 3 };
     state.sector++;
-    state.stationAt = state.time + 40 + random() * 17;
+    state.stationDone = true;
+    // Give the effect or the defense volley time to play out before the boss entrance.
+    state.bossInterval = Math.max(state.bossInterval, state.time - state.bossCycleStart + 9);
     state.spawnAt = state.time + 2;
     phase('combat');
   }
 
-  function shoot(origin, angle, hostile, powered = false) {
+  function shoot(origin, angle, hostile, powered = false, speed = hostile ? 255 : 635) {
     // Keep the player's shots available even during a turret volley.
     if (state.shots.length >= LIMITS.shots - (hostile ? 6 : 0)) return;
     const dx = Math.cos(angle), dy = Math.sin(angle);
     const offset = hostile ? (origin === state.defense ? 8 : origin.radius) : 22;
     state.shots.push({ x: origin.x + dx * offset, y: origin.y + dy * offset, dx, dy,
-      hostile, powered, speed: hostile ? 255 : 635, life: hostile ? 2.4 : 1.03 });
+      hostile, powered, speed, life: hostile ? 2.4 : 1.03 });
+  }
+
+  function defeatBoss() {
+    const boss = state.boss;
+    state.bossWins++;
+    const coins = 8 + Math.min(8, state.bossWins);
+    state.score += 280 + coins * 5;
+    state.collected += coins;
+    state.victory = { name: boss.name, coins, x: boss.x, y: boss.y, color: boss.color };
+    burst(boss.x, boss.y, boss.color, 26);
+    state.boss = null;
+    state.enemies.length = 0;
+    state.shots.length = 0;
+    phase('boss-clear');
   }
 
   function damage() {
@@ -219,6 +265,20 @@ export function createBattle(deck, random = Math.random) {
         }
         continue;
       }
+      const boss = state.boss;
+      if (state.phase === 'boss' && boss && distance(shot, boss) < boss.radius + 4) {
+        state.shots.splice(i, 1);
+        if (state.time < boss.guardUntil) {
+          boss.blockedUntil = state.time + .12;
+          burst(shot.x, shot.y, '#8bd8f5', 3);
+        } else {
+          boss.hp -= shot.powered ? 2 : 1;
+          boss.hitUntil = state.time + .1;
+          burst(shot.x, shot.y, boss.color, 3);
+          if (boss.hp <= 0) { defeatBoss(); return; }
+        }
+        continue;
+      }
       const hit = state.enemies.findIndex(enemy => state.time >= enemy.ready && distance(shot, enemy) <= enemy.radius + 5);
       if (hit < 0) continue;
       state.shots.splice(i, 1);
@@ -236,19 +296,28 @@ export function createBattle(deck, random = Math.random) {
     dt = Math.min(.05, dt);
     state.phaseTime += dt;
     if (state.phase === 'result' && state.phaseTime >= (state.event.type === 'wrong' ? 4.2 : 3)) resumeFight();
-    if (!isFighting(state)) return;
-    state.time += dt;
+    if (state.phase === 'boss-clear' && state.phaseTime >= BOSS_CLEAR) {
+      state.bossCycleStart = state.time;
+      state.bossInterval = 72 + random() * 15;
+      state.stationAt = state.time + 35 + random() * 13;
+      state.stationDone = false;
+      state.spawnAt = state.time + 1.5;
+      phase('combat');
+    }
+    if (!isFighting(state) && state.phase !== 'boss-clear') return;
     for (let i = state.sparks.length - 1; i >= 0; i--) {
       const spark = state.sparks[i];
       spark.life -= dt;
       if (spark.life <= 0) state.sparks.splice(i, 1);
       else { spark.x += spark.dx * dt; spark.y += spark.dy * dt; }
     }
+    if (state.phase === 'boss-clear') return;
+    state.time += dt;
 
     const player = state.player, length = Math.hypot(moveX, moveY);
     if (length > .04) { player.dx = moveX / length; player.dy = moveY / length; }
     if (dash && state.time >= state.dashReady) {
-      state.dashUntil = state.time + .2; state.dashReady = state.time + 2.3;
+      state.dashUntil = state.time + .2; state.dashReady = state.time + (activeReward('dash') ? 1.05 : 2.3);
     }
     const dashing = state.time < state.dashUntil;
     if (length > .04 || dashing) {
@@ -260,14 +329,26 @@ export function createBattle(deck, random = Math.random) {
     if (aimX || aimY) {
       player.angle = Math.atan2(aimY, aimX);
       const powered = state.time < state.powerUntil;
-      if (state.time >= state.fireAt && !dashing) {
+      if (state.time >= state.fireAt && !dashing && state.phase !== 'boss-warning') {
         shoot(player, player.angle, false, powered);
         state.muzzleUntil = state.time + .075;
         state.fireAt = state.time + (powered ? .115 : .24 - state.tier * .025);
       }
     }
 
-    if (state.phase === 'combat' && state.time >= state.stationAt) {
+    if (state.phase === 'boss-warning') {
+      if (state.phaseTime < BOSS_WARNING) return;
+      state.enemies.length = 0;
+      state.shieldUntil = Math.max(state.shieldUntil, state.time + .9);
+      phase('boss');
+    }
+    if (state.phase === 'combat' && state.stationDone && bossProgress(state) >= 1 && !state.defense) {
+      director.prepare();
+      if (distance(state.player, state.boss) < 160) state.boss.y = HEIGHT - 96;
+      phase('boss-warning');
+      return;
+    }
+    if (state.phase === 'combat' && !state.stationDone && state.time >= state.stationAt) {
       const busy = state.enemies.some(enemy => enemy.attackAt > state.time && distance(player, enemy) < 125);
       if (!busy || state.time >= state.stationAt + 5) phase('approach');
     }
@@ -277,6 +358,8 @@ export function createBattle(deck, random = Math.random) {
       state.spawnAt = state.time + Math.max(.65, 2.05 - state.sector * .13) * (.8 + random() * .4);
     }
     updateDefense();
+    if (state.phase === 'boss') director.update(dt);
+    if (state.phase === 'over') return;
     updateEnemies(dt);
     if (state.phase === 'over') return;
     updateShots(dt);
@@ -285,7 +368,7 @@ export function createBattle(deck, random = Math.random) {
       const coin = state.coins[i], gap = distance(player, coin);
       if (gap < 22) { state.collected++; state.score += 5; state.coins.splice(i, 1); burst(coin.x, coin.y, '#ffdb7c', 5); }
       else if (coin.expires < state.time) state.coins.splice(i, 1);
-      else if (gap < 63) {
+      else if (gap < (activeReward('magnet') ? 148 : 63)) {
         const pull = Math.min(1, dt * 9);
         coin.x += (player.x - coin.x) * pull; coin.y += (player.y - coin.y) * pull;
       }

@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { canDecode, createBattle, prepareDeck, LIMITS, STATION } from '../js/loot-bots-engine.mjs';
+import { bossProgress, canDecode, createBattle, prepareDeck, LIMITS, STATION } from '../js/loot-bots-engine.mjs';
+import { BOSS_TYPES, createBossDirector } from '../js/loot-bots-bosses.mjs';
 
 const words = [
   { word: 'he', translation: 'هو' }, { word: 'she', meaning: 'هي' }, { word: 'they', meaning: 'هم' },
@@ -22,10 +23,28 @@ function nextStation(battle) {
 }
 
 function decode(battle) {
+  if (battle.state.stationDone) winBoss(battle);
   nextStation(battle);
   Object.assign(battle.state.player, STATION);
   assert.equal(battle.activate(), true);
   return battle.state.question;
+}
+
+function winBoss(battle) {
+  const s = battle.state;
+  while (s.phase === 'combat' && s.time <= s.bossCycleStart + s.bossInterval + 7) advance(battle, tick, true);
+  assert.equal(s.phase, 'boss-warning');
+  advance(battle, 3.05, true);
+  assert.equal(s.phase, 'boss');
+  assert.equal(battle.activate(), false);
+  s.boss.hp = 1;
+  s.shots.push({ x: s.boss.x, y: s.boss.y, dx: 0, dy: 0, speed: 0, life: 1, hostile: false });
+  advance(battle, tick, true);
+  assert.equal(s.phase, 'boss-clear');
+  assert.ok(s.victory.coins > 0);
+  advance(battle, 3.1, true);
+  assert.equal(s.phase, 'combat');
+  assert.equal(s.stationDone, false);
 }
 
 test('only a deliberate aim command fires, in the indicated direction', () => {
@@ -108,8 +127,8 @@ test('wrong answer reveals the meaning and resumes combat with a dodgeable attac
   assert.equal(s.hp, hp);
 });
 
-test('correct answer improves the weapon and opens a longer, bounded combat interval', () => {
-  const battle = createBattle(prepareDeck(words), () => .71);
+test('a correct answer powers up the weapon when that reward is selected', () => {
+  const battle = createBattle(prepareDeck(words), () => .3);
   const question = decode(battle), s = battle.state;
   assert.equal(battle.choose(question.options.findIndex(option => option.correct)), true);
   assert.equal(s.tier, 1);
@@ -117,9 +136,74 @@ test('correct answer improves the weapon and opens a longer, bounded combat inte
   advance(battle, 3.1, true);
   assert.equal(s.phase, 'combat');
   assert.equal(s.defense, null);
-  assert.ok(s.stationAt - s.time > 40);
+  assert.equal(s.event.reward.id, 'power');
+  assert.equal(s.stationDone, true);
   battle.step(tick, 0, 0, false, 1, 0);
   assert.equal(s.shots.at(-1)?.powered, true);
+});
+
+test('late station gates the boss, reserves recovery time, and provides an interlude after the win', () => {
+  const battle = createBattle(prepareDeck(words), () => .4), s = battle.state;
+  nextStation(battle);
+  advance(battle, 85, true);
+  assert.equal(s.phase, 'approach');
+  assert.ok(bossProgress(s) < 1);
+  Object.assign(s.player, STATION);
+  assert.equal(battle.activate(), true);
+  battle.choose(s.question.options.findIndex(option => !option.correct));
+  advance(battle, 4.25, true);
+  assert.ok(s.bossInterval - (s.time - s.bossCycleStart) > 8);
+  winBoss(battle);
+  assert.equal(s.bossWins, 1);
+  assert.ok(s.stationAt - s.time > 34);
+});
+
+test('rewards respond to health, vary between stations, and grant their real effect', () => {
+  const battle = createBattle(prepareDeck(words), () => .99), s = battle.state;
+  let q = decode(battle);
+  battle.choose(q.options.findIndex(option => option.correct));
+  assert.equal(s.event.reward.id, 'magnet');
+  advance(battle, 3.1, true);
+  assert.equal(s.collected, 3);
+  s.hp = 2;
+  q = decode(battle);
+  battle.choose(q.options.findIndex(option => option.correct));
+  assert.equal(s.event.reward.id, 'repair');
+  advance(battle, 3.1, true);
+  assert.equal(s.hp, 4);
+  q = decode(battle);
+  battle.choose(q.options.findIndex(option => option.correct));
+  assert.notEqual(s.event.reward.id, 'repair');
+});
+
+test('ten bosses open with distinct attacks and the next loop adds a new pattern', () => {
+  const s = { time: 0, bossWins: 0, player: { x: 313, y: 327 }, shots: [], enemies: [] };
+  let bullets = 0, spawns = 0;
+  const director = createBossDirector({ state: s, random: () => .8, width: 640, height: 540,
+    shoot: () => bullets++, spawn: () => spawns++, damage: () => true, burst: () => {} });
+  const firstMoves = new Set(), ids = new Set();
+  for (; s.bossWins < BOSS_TYPES.length; s.bossWins++) {
+    director.prepare();
+    ids.add(s.boss.id);
+    s.time = s.boss.nextAt;
+    director.update(tick);
+    const attack = s.boss.attack;
+    firstMoves.add(attack.move);
+    assert.ok(attack.fireAt > s.time);
+    s.time = attack.fireAt;
+    director.update(tick);
+    assert.equal(attack.fired, true);
+  }
+  assert.equal(ids.size, 10);
+  assert.equal(firstMoves.size, 10);
+  assert.ok(bullets >= 19 && spawns >= 2);
+  director.prepare();
+  assert.notEqual(s.boss.id, 'magnet');
+  s.boss.sequence = 3;
+  s.time = s.boss.nextAt;
+  director.update(tick);
+  assert.equal(s.boss.cycle, 1);
+  assert.ok(!s.boss.attacks.includes(s.boss.attack.move));
 });
 
 test('dash has a cooldown and dense fights respect entity caps', () => {
@@ -136,8 +220,9 @@ test('dash has a cooldown and dense fights respect entity caps', () => {
     if (s.phase === 'approach' && s.phaseTime >= 2.4) Object.assign(s.player, STATION);
     if (s.question) battle.choose(s.question.options.findIndex(option => !option.correct));
     else if (canDecode(s)) battle.activate();
-    battle.step(tick, 0, 0, false, Math.cos(i * .016), Math.sin(i * .016));
+    const aim = s.boss ? Math.atan2(s.boss.y - s.player.y, s.boss.x - s.player.x) : i * .016;
+    battle.step(tick, 0, 0, false, Math.cos(aim), Math.sin(aim));
     for (const [entity, cap] of Object.entries(LIMITS)) assert.ok(s[entity].length <= cap);
   }
-  assert.ok(s.sector > 38);
+  assert.ok(s.sector >= 38 && s.bossWins >= 2);
 });

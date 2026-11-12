@@ -1,4 +1,4 @@
-import { WIDTH, HEIGHT, STATION, DOCKS, canDecode, isFighting } from './loot-bots-engine.mjs?v=2';
+import { WIDTH, HEIGHT, STATION, DOCKS, canDecode, isFighting } from './loot-bots-arena.mjs?v=1';
 
 const TAU = Math.PI * 2;
 const COLORS = { scout: '#ff936d', striker: '#ff75a8', gunner: '#ffd47d', tank: '#bd9bff', player: '#65eddf' };
@@ -111,12 +111,76 @@ export function createRenderer(canvas) {
     ctx.restore();
   }
 
+  function bossSprite(boss) {
+    const key = `boss-${boss.id}`;
+    if (sprites.has(key)) return sprites.get(key);
+    const { bitmap, c } = surface(104, 104, Math.max(1.25, scale));
+    c.translate(52, 52);
+    const weapon = {
+      ram: [18,-24, 48,0, 18,24, 25,0], siege: [-11,-23, 33,-23, 33,-12, 12,-12, 12,12, 33,12, 33,23, -11,23],
+      coil: [-7,-42, 8,-30, 24,-37, 25,-16, -19,-16, -20,-30], brood: [-31,-8, -46,-24, -19,-36, -13,-22, -18,0, -13,22, -19,36, -46,24],
+      bulwark: [5,-39, 27,-39, 36,-27, 36,27, 27,39, 5,39, 14,25, 14,-25], sniper: [12,-10, 49,-5, 49,5, 12,10],
+      orbit: [-34,-7, -25,-32, 2,-39, 23,-26, 11,-19, -2,-27, -22,-23, -23,0], furnace: [-33,-30, 12,-35, 26,-27, 27,27, 12,35, -33,30],
+      mirror: [-13,-31, 34,-35, 14,-12, -9,-10, -9,10, 14,12, 34,35, -13,31], magnet: [-34,-13, -29,-34, 30,-37, 39,-25, 16,-21, -12,-19, -17,-9],
+    }[boss.id];
+    const hull = [];
+    for (let i = 0; i < boss.form; i++) {
+      const angle = i * TAU / boss.form;
+      hull.push(Math.cos(angle) * 34, Math.sin(angle) * 28);
+    }
+    path(c, weapon, '#526575');
+    if (['coil', 'orbit', 'magnet'].includes(boss.id)) { c.rotate(Math.PI); path(c, weapon, '#526575'); c.rotate(-Math.PI); }
+    path(c, hull, boss.color);
+    c.scale(.72, .68); path(c, hull, '#253343'); c.scale(1 / .72, 1 / .68);
+    ring(c, 0, 0, 13, '#0d1923', 6); disk(c, 0, 0, 9, boss.color); disk(c, 2, -2, 4, '#fff5da');
+    line(c, -18, -9, -12, -9, '#d9e0e3', 2); line(c, -18, 9, -12, 9, '#d9e0e3', 2);
+    sprites.set(key, bitmap);
+    return bitmap;
+  }
+
+  function drawBoss(s) {
+    const boss = s.boss;
+    if (!boss) return;
+    const attack = boss.attack, warning = s.phase === 'boss-warning';
+    if (warning) {
+      ring(ctx, boss.x, boss.y, 38 + Math.min(1, s.phaseTime / 2.2) * 24, boss.color, 2);
+      ctx.globalAlpha = Math.min(1, .12 + s.phaseTime / 2.35);
+    }
+    if (attack) {
+      const live = s.time >= attack.fireAt && attack.move !== 'ram' && attack.move !== 'echo';
+      for (const region of attack.regions) {
+        const color = live ? '#ffd1a6c9' : '#ff776c49';
+        if (region.kind === 'line') {
+          ctx.lineCap = 'round';
+          line(ctx, region.x, region.y, region.endX, region.endY, color, region.radius * 2);
+          line(ctx, region.x, region.y, region.endX, region.endY, live ? '#fff0d6' : '#ff9a87', 1.5);
+          ctx.lineCap = 'butt';
+        } else if (region.kind === 'ring') {
+          ring(ctx, region.x, region.y, region.radius, color, region.thickness * 2);
+          ring(ctx, region.x, region.y, region.radius, '#ff9a87', 2);
+        } else {
+          disk(ctx, region.x, region.y, region.radius, color);
+          ring(ctx, region.x, region.y, region.radius, '#ff9a87', 2);
+        }
+        if (attack.move === 'echo') disk(ctx, region.x, region.y, 14, '#f490e6bb');
+      }
+      if (!attack.fired && !attack.regions.length) ring(ctx, boss.x, boss.y, boss.radius + 9, boss.color, 3);
+    }
+    disk(ctx, boss.x, boss.y + 5, boss.radius + 4, '#10101aa9');
+    if (s.time < boss.guardUntil || s.time < boss.blockedUntil) ring(ctx, boss.x, boss.y, boss.radius + 9, '#91daff', 4);
+    ctx.save(); ctx.translate(boss.x, boss.y); ctx.rotate(boss.angle);
+    ctx.drawImage(bossSprite(boss), -52, -52, 104, 104);
+    ctx.restore();
+    if (s.time < boss.hitUntil) ring(ctx, boss.x, boss.y, boss.radius + 2, '#fff0ca', 2);
+    ctx.globalAlpha = 1;
+  }
+
   function station(s) {
     const { x, y } = STATION;
     const raising = s.phase === 'approach' ? Math.min(1, s.phaseTime / 2.4) : 1;
-    const waiting = s.phase === 'combat' && !s.defense && s.time >= s.powerUntil;
+    const waiting = s.phase !== 'approach' && s.phase !== 'decode' && s.phase !== 'result' && !s.defense && !(s.reward && s.time < s.reward.until);
     const wrong = s.defense || (s.phase === 'result' && s.event.type === 'wrong');
-    const color = wrong ? '#ff765e' : s.time < s.powerUntil || s.phase === 'result' ? '#ffd477' : '#72efdb';
+    const color = wrong ? '#ff765e' : s.event?.reward?.color || '#72efdb';
     if (!waiting) {
       const r = 38 + 44 * raising;
       ring(ctx, x, y, r, wrong ? '#8f473e' : '#387b7e', 2);
@@ -156,6 +220,12 @@ export function createRenderer(canvas) {
       line(ctx, coin.x, coin.y - 3, coin.x, coin.y + 3, '#fff1bd', 2);
     }
     for (const enemy of s.enemies) {
+      if (s.phase === 'boss-warning') {
+        ctx.globalAlpha = Math.max(0, 1 - s.phaseTime / 1.2);
+        if (ctx.globalAlpha > 0) robot(enemy, enemy.kind, enemy.radius);
+        ctx.globalAlpha = 1;
+        continue;
+      }
       if (s.time < enemy.ready) {
         const progress = 1 - (enemy.ready - s.time) / 1.1;
         disk(ctx, enemy.x, enemy.y, 24, '#492d42');
@@ -176,6 +246,14 @@ export function createRenderer(canvas) {
       robot(enemy, enemy.kind, enemy.radius, s.time < enemy.hitUntil);
       ctx.globalAlpha = 1;
     }
+    drawBoss(s);
+    if (s.phase === 'boss-clear' && s.phaseTime < .85 && !reducedMotion.matches) {
+      const { x, y, color } = s.victory;
+      ctx.globalAlpha = 1 - s.phaseTime / .85;
+      ring(ctx, x, y, 22 + s.phaseTime * 140, color, 4);
+      ring(ctx, x, y, 12 + s.phaseTime * 85, '#ffe3a3', 2);
+      ctx.globalAlpha = 1;
+    }
     for (const shot of s.shots) {
       const color = shot.hostile ? '#ff846d' : shot.powered ? '#ffe599' : '#8fffe2';
       line(ctx, shot.x - shot.dx * 14, shot.y - shot.dy * 14, shot.x, shot.y, color, shot.hostile || shot.powered ? 4 : 2.5);
@@ -187,6 +265,10 @@ export function createRenderer(canvas) {
     }
     ctx.globalAlpha = 1;
     const p = s.player;
+    if (s.reward && s.time < s.reward.until) {
+      ring(ctx, p.x, p.y, s.reward.id === 'shield' ? 29 : 25, s.reward.color, 3);
+      if (s.reward.id === 'magnet') ring(ctx, p.x, p.y, 36, '#ffd07570', 1);
+    }
     if (s.time < s.hurtUntil) ring(ctx, p.x, p.y, 25, '#ff8069', 3);
     else if (s.time < s.powerUntil || s.time < s.shieldUntil) ring(ctx, p.x, p.y, 25, s.time < s.powerUntil ? '#ffd179' : '#7ee8dd');
     if (s.time < s.dashUntil && !reducedMotion.matches) {

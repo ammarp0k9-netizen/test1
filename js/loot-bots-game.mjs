@@ -1,5 +1,5 @@
-import { createBattle, prepareDeck, isFighting, canDecode, WIDTH, HEIGHT } from './loot-bots-engine.mjs?v=2';
-import { createRenderer } from './loot-bots-renderer.mjs?v=2';
+import { createBattle, prepareDeck, isFighting, canDecode, bossProgress, WIDTH, HEIGHT } from './loot-bots-engine.mjs?v=3';
+import { createRenderer } from './loot-bots-renderer.mjs?v=3';
 
 const MOVEMENT = new Set(['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'KeyW', 'KeyA', 'KeyS', 'KeyD']);
 const AIM = new Set(['KeyI', 'KeyJ', 'KeyK', 'KeyL', 'KeyF']);
@@ -25,8 +25,15 @@ export function openBattle({ words, source, isCurrent, returnFocus }) {
         <span>القطاع <b data-sector>1</b></span><span>الصحة <b data-hp>5 / 5</b></span>
         <span>السلاح <b data-tier>1</b></span><span>النقاط <b data-score>0</b></span><span>العملات <b data-coins>0</b></span>
       </div>
+      <div class="lb-boss-meter" data-meter>
+        <span><b data-boss-label>الزعيم القادم</b><small data-boss-detail></small></span>
+        <div class="lb-track" role="progressbar" aria-label="اقتراب الزعيم القادم" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><i></i></div>
+      </div>
       <div class="lb-arena" tabindex="0" aria-label="ساحة المعركة">
         <canvas aria-hidden="true"></canvas>
+        <div class="lb-announcement" hidden><strong></strong><small></small></div>
+        <div class="lb-reward" hidden></div>
+        <button type="button" data-dash hidden disabled><span aria-hidden="true">»</span><b>اندفاع</b><small data-charge>جاهز</small></button>
         <button type="button" class="lb-station" hidden>شغّل المحطة</button>
         <div class="lb-core" hidden role="group" aria-labelledby="lbCoreTitle">
           <div class="lb-question"><small id="lbCoreTitle">رمز محطة الطاقة · اختر معناه</small><b lang="en" dir="ltr" data-word></b></div>
@@ -36,18 +43,21 @@ export function openBattle({ words, source, isCurrent, returnFocus }) {
         <div class="lb-panel">
           <strong data-heading>ساحة الروبوتات</strong>
           <p data-copy></p>
-          <small data-mission>لما تفتح محطة الطاقة، اقترب منها وفكّ رمزها لتقوية سلاحك.</small>
+          <small data-mission>لما تفتح محطة الطاقة، فكّ رمزها لتكسب تعزيزًا وتفتح مواجهة الزعيم.</small>
           <small data-record></small>
           <button type="button" data-play autofocus>ابدأ المعركة</button>
         </div>
       </div>
-      <footer class="lb-footer"><p role="status" data-status></p><button type="button" data-dash disabled>اندفاع</button></footer>
+      <footer class="lb-footer"><p role="status" data-status></p></footer>
       <p class="lb-note">تدريب بالكلمات فقط. النقاط والعملات خاصة باللعبة ولا ترفع الإتقان أو XP.</p>
     </section>`;
   const find = selector => dialog.querySelector(selector);
   const arena = find('.lb-arena'), renderer = createRenderer(find('canvas'));
   const panel = find('.lb-panel'), core = find('.lb-core'), options = find('.lb-options');
   const station = find('.lb-station'), result = find('.lb-result');
+  const meter = find('[data-meter]'), track = find('.lb-track'), meterFill = track.firstElementChild;
+  const bossLabel = find('[data-boss-label]'), bossDetail = find('[data-boss-detail]');
+  const announcement = find('.lb-announcement'), rewardBadge = find('.lb-reward'), charge = find('[data-charge]');
   const status = find('[data-status]'), play = find('[data-play]'), pause = find('[data-pause]'), dashButton = find('[data-dash]');
   const hud = ['sector', 'hp', 'tier', 'score', 'coins'].map(key => find(`[data-${key}]`));
   const hudValues = [];
@@ -58,6 +68,7 @@ export function openBattle({ words, source, isCurrent, returnFocus }) {
   let battle = createBattle(deck), mode = 'intro', frame = 0, previous = 0, accumulator = 0;
   let joystick = null, aimStick = null, mouse = null, pendingAim = null, dash = false, shownQuestion = null;
   let lastPhase = null, lastEvent = null, lastHint = '', recorded = false, closed = false;
+  let lastMeter = '', lastMeterValue = -1, lastCharge = '', lastReward = null;
   let bounds;
 
   function readProgress() {
@@ -93,7 +104,8 @@ export function openBattle({ words, source, isCurrent, returnFocus }) {
     cancelAnimationFrame(frame); frame = 0;
     mode = next; clearInput(); core.hidden = true; station.hidden = true; result.hidden = true;
     arena.classList.remove('is-fighting');
-    dashButton.disabled = true; pause.hidden = true;
+    dashButton.disabled = true; dashButton.hidden = true; pause.hidden = true;
+    announcement.hidden = true; rewardBadge.hidden = true;
     find('[data-mission]').hidden = true;
     find('[data-heading]').textContent = title; find('[data-copy]').textContent = copy;
     play.textContent = label; panel.hidden = false; showRecord(); play.focus({ preventScroll: true });
@@ -114,8 +126,21 @@ export function openBattle({ words, source, isCurrent, returnFocus }) {
       hudValues[index] = value;
       hud[index].textContent = index === 1 ? `${value} / 5` : value;
     });
-    const dashDisabled = !isFighting(s) || s.time < s.dashReady;
+    const fighting = isFighting(s), remaining = Math.max(0, s.dashReady - s.time);
+    const dashDisabled = !fighting || remaining > 0;
     if (dashButton.disabled !== dashDisabled) dashButton.disabled = dashDisabled;
+    if (dashButton.hidden === fighting) dashButton.hidden = !fighting;
+    const chargeText = remaining ? `${(Math.ceil(remaining * 10) / 10).toFixed(1)} ث` : 'جاهز';
+    if (chargeText !== lastCharge) {
+      lastCharge = chargeText;
+      charge.textContent = chargeText;
+    }
+    const active = fighting && s.phase !== 'boss-warning' && s.reward && s.time < s.reward.until ? s.reward : null;
+    if (active !== lastReward || rewardBadge.hidden === Boolean(active)) {
+      lastReward = active;
+      rewardBadge.hidden = !active;
+      if (active) { rewardBadge.textContent = `${active.icon} ${active.title}`; rewardBadge.style.setProperty('--reward', active.color); }
+    }
     const near = canDecode(s);
     if (station.hidden === near) {
       if (!near && document.activeElement === station) arena.focus({ preventScroll: true });
@@ -125,15 +150,46 @@ export function openBattle({ words, source, isCurrent, returnFocus }) {
     if (result.hidden !== (s.phase !== 'result')) result.hidden = s.phase !== 'result';
     if (s.phase !== lastPhase) {
       lastPhase = s.phase;
-      arena.classList.toggle('is-fighting', isFighting(s));
+      arena.classList.toggle('is-fighting', fighting);
       lastHint = '';
+      const warning = s.phase === 'boss-warning', victory = s.phase === 'boss-clear';
+      announcement.hidden = !warning && !victory;
+      announcement.classList.toggle('is-victory', victory);
+      announcement.classList.toggle('is-lower', warning && s.boss.y < HEIGHT / 2);
+      if (warning) {
+        announcement.firstElementChild.textContent = `احذر · ${s.boss.name}`;
+        announcement.lastElementChild.textContent = s.boss.hint;
+        status.textContent = `يقترب ${s.boss.name}. ${s.boss.hint}.`;
+      } else if (victory) {
+        announcement.firstElementChild.textContent = `هزمت ${s.victory.name}`;
+        announcement.lastElementChild.textContent = `+${s.victory.coins} عملات`;
+        status.textContent = `هزمت ${s.victory.name} وربحت ${s.victory.coins} عملات.`;
+      }
     }
-    if (isFighting(s)) {
+    const label = s.boss ? s.boss.name : s.phase === 'boss-clear' ? 'انتصار' : 'الزعيم القادم';
+    const progress = bossProgress(s);
+    const detail = s.boss ? s.phase === 'boss-warning' ? 'يقترب' : `${s.boss.hp} / ${s.boss.maxHp}` :
+      s.phase === 'boss-clear' ? `+${s.victory.coins} عملات` : s.phase === 'approach' ? 'شغّل المحطة أولًا' : progress >= .76 ? 'المواجهة قريبة' : '';
+    const meterKey = `${label}|${detail}|${s.phase}`;
+    if (meterKey !== lastMeter) {
+      lastMeter = meterKey;
+      bossLabel.textContent = label; bossDetail.textContent = detail;
+      meter.classList.toggle('is-threat', Boolean(s.boss));
+      track.setAttribute('aria-label', s.boss ? `صحة ${s.boss.name}` : 'اقتراب الزعيم القادم');
+    }
+    const value = Math.round((s.boss ? s.boss.hp / s.boss.maxHp : progress) * 100);
+    if (value !== lastMeterValue) {
+      lastMeterValue = value;
+      meterFill.style.transform = `scaleX(${value / 100})`;
+      track.setAttribute('aria-valuenow', value);
+    }
+    if (s.phase === 'combat' || s.phase === 'approach' || s.phase === 'boss') {
       let hint = idleHint;
       if (near) hint = coarse ? 'شغّل المحطة لفكّ رمزها.' : 'شغّل المحطة لفكّ رمزها (E).';
       else if (s.phase === 'approach') hint = 'محطة الطاقة تفتح في وسط الساحة. اقترب منها.';
       else if (s.defense) hint = 'دفاع المحطة نشط. راوغ خطوط التصويب.';
-      else if (s.time < s.powerUntil) hint = 'سلاحك مشحون! استغل الطلقات الأقوى.';
+      else if (s.boss) hint = s.boss.hint;
+      else if (active) hint = active.description;
       if (hint !== lastHint) { lastHint = hint; status.textContent = hint; }
     }
     if (s.question && s.question !== shownQuestion) {
@@ -154,13 +210,13 @@ export function openBattle({ words, source, isCurrent, returnFocus }) {
       lastEvent = s.event;
       const wrong = lastEvent.type === 'wrong';
       result.classList.toggle('is-wrong', wrong);
-      result.firstElementChild.textContent = wrong ? 'رمز خاطئ · دفاع المحطة تفعّل' : 'رمز صحيح · السلاح مشحون';
-      result.lastElementChild.textContent = `${lastEvent.word} — ${lastEvent.answer}`;
-      status.textContent = wrong ? `المعنى الصحيح: ${lastEvent.answer}. استعد لمراوغة دفاع المحطة.` : `المعنى صحيح: ${lastEvent.answer}. شحن المحطة يقوّي طلقاتك.`;
+      result.firstElementChild.textContent = wrong ? 'رمز خاطئ · دفاع المحطة تفعّل' : `${lastEvent.reward.icon} ${lastEvent.reward.title}`;
+      result.lastElementChild.textContent = wrong ? `المعنى الصحيح: ${lastEvent.word} — ${lastEvent.answer}` : lastEvent.reward.description;
+      status.textContent = wrong ? `المعنى الصحيح: ${lastEvent.answer}. استعد لمراوغة دفاع المحطة.` : `المعنى صحيح: ${lastEvent.answer}. ${lastEvent.reward.description}.`;
     }
     if (s.phase === 'over') {
       record();
-      setPanel('over', 'انتهت المعركة', `وصلت للقطاع ${s.sector} · ${s.score} نقطة · ${s.collected} عملة`, 'العب من جديد');
+      setPanel('over', 'انتهت المعركة', `${s.bossWins} زعيم هزمته · ${s.score} نقطة · ${s.collected} عملة`, 'العب من جديد');
     }
   }
   function answer(index) {
@@ -210,7 +266,9 @@ export function openBattle({ words, source, isCurrent, returnFocus }) {
   listen(play, 'click', start);
   listen(station, 'click', activate);
   listen(pause, 'click', () => setPanel('paused', 'المعركة متوقفة', 'الساحة بانتظارك.', 'تابع اللعب'));
-  listen(dashButton, 'click', () => { dash = true; arena.focus({ preventScroll: true }); });
+  function requestDash() { dash = true; arena.focus({ preventScroll: true }); }
+  listen(dashButton, 'pointerdown', event => { if (event.button === 0) { event.preventDefault(); requestDash(); } });
+  listen(dashButton, 'click', event => { if (event.detail === 0) requestDash(); });
   listen(dialog, 'cancel', event => { event.preventDefault(); if (mode === 'play') pause.click(); else finish(); });
   listen(dialog, 'keydown', event => {
     if (mode !== 'play' || event.altKey || event.ctrlKey || event.metaKey) return;

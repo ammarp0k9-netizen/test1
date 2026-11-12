@@ -2,8 +2,8 @@
   --lb-gold: #f6d48b;
   --lb-teal: #9af2dc;
   box-sizing: border-box;
-  width: min(96vw, 740px, max(340px, calc((100dvh - 190px) * 1.185)));
-  max-height: 96dvh;
+  width: min(96vw, 740px, max(340px, calc((100dvh - 224px) * 1.185)));
+  max-height: min(96dvh, calc(100dvh - env(safe-area-inset-top) - env(safe-area-inset-bottom)));
   padding: 0;
   border: 1px solid #36575d;
   border-radius: 18px;
@@ -32,6 +32,14 @@
 .loot-bots .lb-hud span { min-width: 0; text-align: center; border-radius: 8px; padding: 3px; background: #132632; font-size: .75rem; color: #bdd1d9; }
 .loot-bots .lb-hud b { display: block; direction: ltr; color: #fff; font-variant-numeric: tabular-nums; }
 .loot-bots .lb-hud span:last-child b { color: var(--lb-gold); }
+.loot-bots .lb-boss-meter { display: grid; gap: 4px; padding: 3px 8px 6px; border: 1px solid #35535c; border-radius: 8px; background: #152631; }
+.loot-bots .lb-boss-meter > span { display: flex; align-items: center; justify-content: space-between; color: #ffe19d; font-size: .74rem; }
+.loot-bots .lb-boss-meter b::before { content: '◆'; margin-inline-end: 6px; }
+.loot-bots .lb-boss-meter small { color: #dce8ed; font-variant-numeric: tabular-nums; }
+.loot-bots .lb-track { overflow: hidden; height: 6px; border-radius: 5px; background: #0b1722; }
+.loot-bots .lb-track i { display: block; height: 100%; transform: scaleX(0); transform-origin: right; background: linear-gradient(90deg, #ffdf8b, #ce8950); }
+.loot-bots .lb-boss-meter.is-threat { border-color: #8c504b; }
+.loot-bots .lb-boss-meter.is-threat .lb-track i { background: linear-gradient(90deg, #ff977d, #e75567); }
 .loot-bots .lb-arena { position: relative; min-width: 0; width: 100%; aspect-ratio: 640 / 540; border-radius: 11px; overflow: hidden; background: #101f2a; touch-action: none; user-select: none; }
 .loot-bots canvas { display: block; width: 100%; height: 100%; }
 .loot-bots .lb-arena.is-fighting canvas { cursor: crosshair; }
@@ -39,7 +47,23 @@
 .loot-bots .lb-panel strong { font-size: clamp(1.25rem, 4vw, 2.1rem); color: var(--lb-teal); }
 .loot-bots .lb-panel p { max-width: 30ch; font-size: .88rem; }
 .loot-bots .lb-panel small { color: #c3d4da; }
-.loot-bots [data-play], .loot-bots [data-dash]:enabled { background: var(--lb-teal); color: #0b2729; border-color: transparent; }
+.loot-bots [data-play] { background: var(--lb-teal); color: #0b2729; border-color: transparent; }
+.loot-bots [data-dash] {
+  position: absolute; right: 9px; bottom: 9px; z-index: 2; display: grid; grid-template-columns: auto auto;
+  align-items: center; justify-items: center; gap: 0 5px; min-width: 76px; min-height: 49px;
+  padding: 4px 7px; border: 1px solid #ddfff5; border-bottom: 4px solid #4b9c91; border-radius: 12px;
+  background: #9af2dc; color: #0b2729; box-shadow: 0 4px 12px #06101bb0;
+}
+.loot-bots [data-dash] span { grid-row: span 2; font-size: 1.28rem; line-height: 1; }
+.loot-bots [data-dash] small { font-size: .66rem; font-variant-numeric: tabular-nums; }
+.loot-bots [data-dash]:active { translate: 0 2px; }
+.loot-bots [data-dash]:disabled { opacity: 1; background: #233949; color: #e1edf3; border-color: #71868c; }
+.loot-bots .lb-announcement, .loot-bots .lb-reward { position: absolute; pointer-events: none; z-index: 1; }
+.loot-bots .lb-announcement { inset: 9% 12% auto; display: grid; text-align: center; padding: 9px; border: 1px solid #e18c76; border-radius: 9px; background: #47252ef5; color: #fff0dd; }
+.loot-bots .lb-announcement.is-victory { background: #173f36f5; border-color: #99efad; }
+.loot-bots .lb-announcement.is-lower { inset-block-start: 58%; }
+.loot-bots .lb-announcement small { font-size: .74rem; }
+.loot-bots .lb-reward { inset: 8px 8px auto auto; border: 1px solid var(--reward); border-radius: 7px; padding: 2px 6px; background: #122435eb; color: var(--reward); font-size: .7rem; }
 .loot-bots .lb-station {
   position: absolute; top: 57%; left: 50%; transform: translateX(-50%);
   border: 2px solid #8bf4de; background: #12313d; color: #e9fffa; white-space: nowrap;
@@ -66,16 +90,15 @@
 .loot-bots .lb-result.is-wrong { border-color: #ff8268; background: #571e23; }
 .loot-bots .lb-result strong { font-size: clamp(.9rem, 3vw, 1.25rem); }
 .loot-bots .lb-result span { font-size: clamp(.85rem, 3vw, 1.2rem); overflow-wrap: anywhere; }
-.loot-bots .lb-footer { min-height: 58px; }
-.loot-bots .lb-footer p { color: #e0f1ee; font-size: .8rem; max-height: 56px; overflow: auto; overflow-wrap: anywhere; }
-.loot-bots [data-dash] { flex: 0 0 84px; }
+.loot-bots .lb-footer { height: 42px; }
+.loot-bots .lb-footer p { color: #e0f1ee; font-size: .8rem; max-height: 42px; overflow: auto; overflow-wrap: anywhere; }
 @media (pointer: coarse) {
   .loot-bots .lb-arena.is-fighting::before, .loot-bots .lb-arena.is-fighting::after {
     position: absolute; bottom: 4px; padding: 1px 6px; border-radius: 5px;
     background: #0c1b27df; color: #d6e5eb; font-size: .62rem; pointer-events: none;
   }
   .loot-bots .lb-arena.is-fighting::before { left: 4px; content: 'حركة'; }
-  .loot-bots .lb-arena.is-fighting::after { right: 4px; content: 'تصويب وإطلاق'; }
+  .loot-bots .lb-arena.is-fighting::after { right: 94px; content: 'تصويب وإطلاق'; }
 }
 @media (max-width: 380px) {
   .loot-bots .lb-shell { padding: 8px; }
@@ -84,6 +107,6 @@
 @media (max-height: 520px) and (orientation: landscape) {
   .loot-bots { width: min(96vw, 820px); }
   .loot-bots .lb-shell { grid-template-columns: minmax(0, 1fr) minmax(0, 1.6fr); align-items: center; }
-  .loot-bots .lb-arena { grid-area: 1 / 2 / 5; width: min(100%, calc((96dvh - 26px) * 1.185)); justify-self: center; }
+  .loot-bots .lb-arena { grid-area: 1 / 2 / 6; width: min(100%, calc((96dvh - 26px) * 1.185)); justify-self: center; }
   .loot-bots .lb-header { flex-wrap: wrap; }
 }
