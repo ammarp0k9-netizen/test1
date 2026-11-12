@@ -76,11 +76,11 @@
     if (resources) return resources;
     const link = document.createElement('link');
     const styles = new Promise((resolve, reject) => {
-      link.rel = 'stylesheet'; link.href = new URL('loot-bots.css?v=5', base);
+      link.rel = 'stylesheet'; link.href = new URL('loot-bots.css?v=6', base);
       link.onload = resolve; link.onerror = () => reject(new Error('Arena stylesheet unavailable'));
       document.head.append(link);
     });
-    resources = Promise.all([styles, import(new URL('js/loot-bots-game.mjs?v=5', base))])
+    resources = Promise.all([styles, import(new URL('js/loot-bots-game.mjs?v=6', base))])
       .then(([, game]) => game)
       .catch(error => { link.remove(); resources = null; throw error; });
     return resources;
@@ -113,7 +113,7 @@
     const observer = new IntersectionObserver(([entry]) => {
       if (!entry.isIntersecting) return;
       observer.disconnect();
-      import(new URL('js/loot-bots-preview.mjs?v=3', base)).then(module => module.mountPreview(preview)).catch(() => {});
+      import(new URL('js/loot-bots-preview.mjs?v=4', base)).then(module => module.mountPreview(preview)).catch(() => {});
     });
     observer.observe(preview);
   }

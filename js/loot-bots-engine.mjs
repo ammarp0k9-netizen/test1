@@ -1,5 +1,5 @@
 import { WIDTH, HEIGHT, STATION, DOCKS, DEFAULT_ARENA, CUES, makeCover, moveSolid, shotCover, navigationTarget, isFighting, canDecode } from './loot-bots-arena.mjs?v=3';
-import { createBossDirector, bossProgress, BOSS_WARNING, BOSS_CLEAR } from './loot-bots-bosses.mjs?v=3';
+import { createBossDirector, bossProgress, BOSS_WARNING, BOSS_CLEAR } from './loot-bots-bosses.mjs?v=4';
 export { WIDTH, HEIGHT, STATION, DOCKS, isFighting, canDecode, bossProgress };
 export const LIMITS = Object.freeze({ enemies: 20, shots: 32, coins: 28, sparks: 40 });
 const BOT_TYPES = {
@@ -44,7 +44,7 @@ function shuffle(items, random) {
 
 export const MAX_CELLS = 5;
 
-export function createBattle(deck, random = Math.random, arena = DEFAULT_ARENA) {
+export function createBattle(deck, random = Math.random, arena = DEFAULT_ARENA, previousBossId) {
   if (!deck.prompts.length) throw new Error('At least two distinct meanings are required.');
   const { width, height, station, docks } = arena;
   const state = {
@@ -60,7 +60,7 @@ export function createBattle(deck, random = Math.random, arena = DEFAULT_ARENA) 
   const move = (actor, dx, dy, radius, steer = false) => moveSolid(actor, dx, dy, radius, arena, state.cover, steer);
   const navigate = actor => navigationTarget(actor, state.player, arena, state.cover, state.time);
   const visible = actor => shotCover(state.cover, actor.x, actor.y, state.player.x, state.player.y) < 0;
-  const director = createBossDirector({ state, random, width, height, shoot, damage, spawn, burst, move, navigate, visible });
+  const director = createBossDirector({ state, random, width, height, shoot, damage, spawn, burst, move, navigate, visible, previousBossId });
 
   function activeReward(id) {
     return state.reward?.id === id && state.time < state.reward.until;

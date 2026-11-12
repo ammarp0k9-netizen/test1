@@ -26,8 +26,8 @@ export function bossHealth(ordinal) {
 }
 
 export function createBossDirector({ state, random, width, height, shoot, damage, spawn, burst,
-  move = (actor, dx, dy) => { actor.x += dx; actor.y += dy; }, navigate = () => state.player, visible = () => true }) {
-  let order = BOSS_TYPES.slice(), last;
+  move = (actor, dx, dy) => { actor.x += dx; actor.y += dy; }, navigate = () => state.player, visible = () => true, previousBossId }) {
+  let order = [], last = previousBossId;
   const line = (x, y, angle, reach, radius) => ({ kind: 'line', x, y,
     endX: x + Math.cos(angle) * reach, endY: y + Math.sin(angle) * reach, radius });
   const circle = (x, y, radius) => ({ kind: 'circle', x, y, radius });
@@ -41,10 +41,10 @@ export function createBossDirector({ state, random, width, height, shoot, damage
         const j = Math.floor(random() * (i + 1));
         [order[i], order[j]] = [order[j], order[i]];
       }
-      if (order[0] === last) [order[0], order[1]] = [order[1], order[0]];
+      if (order[0].id === last) [order[0], order[1]] = [order[1], order[0]];
     }
     const type = order.shift();
-    last = type;
+    last = type.id;
     const cycle = Math.floor(state.bossWins / BOSS_TYPES.length);
     const hp = bossHealth(state.bossWins + 1);
     state.boss = { ...type, hp, maxHp: hp, cycle, x: width / 2, y: 96, angle: Math.PI / 2,

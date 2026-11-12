@@ -1,4 +1,4 @@
-import { createRenderer } from './loot-bots-renderer.mjs?v=5';
+import { createRenderer } from './loot-bots-renderer.mjs?v=6';
 import { DEFAULT_ARENA, makeCover } from './loot-bots-arena.mjs?v=3';
 
 export function mountPreview(canvas) {

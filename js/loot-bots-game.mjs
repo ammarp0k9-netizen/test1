@@ -1,11 +1,15 @@
-import { createBattle, prepareDeck, isFighting, canDecode, bossProgress, MAX_CELLS } from './loot-bots-engine.mjs?v=5';
-import { arenaForAspect, shotCover } from './loot-bots-arena.mjs?v=3';
-import { createRenderer } from './loot-bots-renderer.mjs?v=5';
+import { createBattle, prepareDeck, isFighting, canDecode, bossProgress, MAX_CELLS } from './loot-bots-engine.mjs?v=6';
+import { arenaForAspect } from './loot-bots-arena.mjs?v=3';
+import { createRenderer } from './loot-bots-renderer.mjs?v=6';
 import { createBotsAudio } from './loot-bots-audio.mjs?v=1';
 
 const MOVEMENT = new Set(['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'KeyW', 'KeyA', 'KeyS', 'KeyD']);
 const AIM = new Set(['KeyI', 'KeyJ', 'KeyK', 'KeyL', 'KeyF']);
 const STEP = 1 / 60;
+const AIM_GUIDE_KEY = 'lootlingua.bots.drag-aim-seen.v1';
+const LAST_BOSS_KEY = 'lootlingua.bots.last-boss.v1';
+const readHint = key => { try { return localStorage.getItem(key); } catch { return null; } };
+const saveHint = (key, value) => { try { localStorage.setItem(key, value); } catch {} };
 
 export function openBattle({ words, source, isCurrent, returnFocus }) {
   const deck = prepareDeck(words);
@@ -36,10 +40,11 @@ export function openBattle({ words, source, isCurrent, returnFocus }) {
         <canvas aria-hidden="true"></canvas>
         <div class="lb-announcement" hidden><strong></strong><small></small></div>
         <div class="lb-reward" hidden></div>
+        <div class="lb-aim-guide" hidden><strong>اسحب من زر «إطلاق»</strong><span>وجّه السحبة نحو الخصم، وخلّي إصبعك ضاغط للإطلاق.</span></div>
         <div class="lb-combat-controls" hidden>
           <div class="lb-weapon"><b data-cells>5 / 5</b><small>السلاح</small></div>
           <div><button type="button" data-dash disabled><span aria-hidden="true">»</span><b>اندفاع</b><small data-charge>جاهز</small></button>
-            <button type="button" data-fire hidden>إطلاق</button></div>
+            <button type="button" data-fire aria-label="إطلاق، اسحب من الزر للتصويب" hidden>إطلاق</button></div>
         </div>
         <button type="button" class="lb-station" hidden>شغّل المحطة</button>
         <div class="lb-core" hidden role="group" aria-labelledby="lbCoreTitle">
@@ -72,17 +77,19 @@ export function openBattle({ words, source, isCurrent, returnFocus }) {
   const announcement = find('.lb-announcement'), rewardBadge = find('.lb-reward'), charge = find('[data-charge]');
   const status = find('[data-status]'), play = find('[data-play]'), pause = find('[data-pause]'), dashButton = find('[data-dash]');
   const combatControls = find('.lb-combat-controls'), weapon = find('.lb-weapon'), fireButton = find('[data-fire]');
+  const aimGuide = find('.lb-aim-guide');
   const hud = ['sector', 'hp', 'tier', 'cells', 'score', 'coins'].map(key => find(`[data-${key}]`));
   const sound = find('[data-sound]'), audioOptions = find('#lbAudioSettings'), repeat = find('[data-repeat]');
   const toggles = { effects: find('[data-effects]'), speech: find('[data-speech]') };
   const hudValues = [];
   const keyboard = new Set();
   const coarse = window.matchMedia('(pointer: coarse)').matches;
-  const controls = coarse ? 'اسحب يسار الساحة للحركة. اضغط إطلاق للتصويب المساعد، أو المس الهدف بيمين الساحة.' : 'تحرّك بالأسهم أو WASD. صوّب بالفأرة واضغط للإطلاق.';
-  const idleHint = coarse ? 'اسحب يسارًا للحركة · اضغط إطلاق أو المس هدفًا يمين الساحة.' : 'الأسهم للحركة · الفأرة للإطلاق · مسافة للاندفاع.';
+  const controls = coarse ? 'اسحب يسار الساحة للحركة. اسحب من زر «إطلاق» لتصوّب وتطلق. لمسة سريعة تطلق في آخر اتجاه اخترته.' : 'تحرّك بالأسهم أو WASD. صوّب بالفأرة واضغط للإطلاق.';
+  const idleHint = coarse ? 'يسار الساحة للحركة · اسحب من زر إطلاق للتصويب.' : 'الأسهم للحركة · الفأرة للإطلاق · مسافة للاندفاع.';
   let mode = 'intro', frame = 0, previous = 0, accumulator = 0, runId, outcome;
-  let joystick = null, touchAim = null, mouse = null, pendingAim = null, dash = false, shownQuestion = null;
-  let firePointer = null, assistUntil = -1;
+  let joystick = null, mouse = null, pendingAim = null, dash = false, shownQuestion = null;
+  let fireDrag = null, lastAim = { x: 0, y: -1 }, guideUntil = readHint(AIM_GUIDE_KEY) ? 0 : Infinity;
+  let lastBoss = readHint(LAST_BOSS_KEY);
   let lastPhase = null, lastEvent = null, lastHint = '', recorded = false, closed = false;
   let lastMeter = '', lastMeterValue = -1, lastCharge = '', lastReward = null;
   let bounds;
@@ -96,7 +103,9 @@ export function openBattle({ words, source, isCurrent, returnFocus }) {
   function newRound() {
     geometry = arenaForAspect(arena.clientWidth / arena.clientHeight);
     renderer = createRenderer(canvas, geometry, true);
-    battle = createBattle(deck, Math.random, geometry);
+    battle = createBattle(deck, Math.random, geometry, lastBoss);
+    lastAim = { x: 0, y: -1 };
+    if (guideUntil !== Infinity) guideUntil = 0;
     runId = profile?.newRunId(); outcome = null;
     resize();
   }
@@ -123,8 +132,7 @@ export function openBattle({ words, source, isCurrent, returnFocus }) {
     repeat.hidden = !audio.canSpeak || !toggles.speech.checked;
   }
   function clearInput() {
-    keyboard.clear(); joystick = null; touchAim = null; mouse = null; pendingAim = null; dash = false;
-    firePointer = null; assistUntil = -1;
+    keyboard.clear(); joystick = null; mouse = null; pendingAim = null; dash = false; fireDrag = null;
   }
   function finish() {
     if (closed) return;
@@ -143,6 +151,7 @@ export function openBattle({ words, source, isCurrent, returnFocus }) {
     mode = next; clearInput(); core.hidden = true; station.hidden = true; result.hidden = true;
     arena.classList.remove('is-fighting');
     dashButton.disabled = true; combatControls.hidden = true; pause.hidden = true;
+    aimGuide.hidden = true;
     announcement.hidden = true; rewardBadge.hidden = true;
     find('[data-mission]').hidden = true;
     find('[data-heading]').textContent = title; find('[data-copy]').textContent = copy;
@@ -175,6 +184,8 @@ export function openBattle({ words, source, isCurrent, returnFocus }) {
     const dashDisabled = !fighting || remaining > 0;
     if (dashButton.disabled !== dashDisabled) dashButton.disabled = dashDisabled;
     if (combatControls.hidden === fighting) combatControls.hidden = !fighting;
+    const guideVisible = coarse && s.phase === 'combat' && s.time < guideUntil;
+    if (aimGuide.hidden === guideVisible) aimGuide.hidden = !guideVisible;
     const chargeText = remaining ? `${(Math.ceil(remaining * 10) / 10).toFixed(1)} ث` : 'جاهز';
     if (chargeText !== lastCharge) {
       lastCharge = chargeText;
@@ -202,6 +213,7 @@ export function openBattle({ words, source, isCurrent, returnFocus }) {
       announcement.classList.toggle('is-victory', victory);
       announcement.classList.toggle('is-lower', warning && s.boss.y < geometry.height / 2);
       if (warning) {
+        lastBoss = s.boss.id; saveHint(LAST_BOSS_KEY, lastBoss);
         announcement.firstElementChild.textContent = `احذر · ${s.boss.name}`;
         announcement.lastElementChild.textContent = s.boss.hint;
         status.textContent = `يقترب ${s.boss.name}. ${s.boss.hint}.`;
@@ -287,45 +299,25 @@ export function openBattle({ words, source, isCurrent, returnFocus }) {
       const x = joystick?.dx ?? (has('ArrowRight', 'KeyD') - has('ArrowLeft', 'KeyA'));
       const y = joystick?.dy ?? (has('ArrowDown', 'KeyS') - has('ArrowUp', 'KeyW'));
       const player = battle.state.player;
-      const target = mouse?.held ? mouse : touchAim;
+      const target = mouse?.held ? mouse : null;
       const keyX = has('KeyL') - has('KeyJ'), keyY = has('KeyK') - has('KeyI');
       while (accumulator >= STEP) {
-        let aimX = target ? target.x - player.x : keyX;
-        let aimY = target ? target.y - player.y : keyY;
+        let aimX = target ? target.x - player.x : fireDrag?.direction?.x ?? keyX;
+        let aimY = target ? target.y - player.y : fireDrag?.direction?.y ?? keyY;
         if (!aimX && !aimY) {
           if (pendingAim) ({ x: aimX, y: aimY } = pendingAim);
-          else if (firePointer !== null || assistUntil >= battle.state.time) {
-            const s = battle.state;
-            if ((s.cells || s.reloadUntil <= s.time + STEP) && s.time + STEP >= s.fireAt) {
-              const enemy = assistTarget(s);
-              aimX = enemy ? enemy.x - player.x : Math.cos(player.angle);
-              aimY = enemy ? enemy.y - player.y : Math.sin(player.angle);
-            }
-          }
           else if (keyboard.has('KeyF')) { aimX = Math.cos(player.angle); aimY = Math.sin(player.angle); }
         }
         const previousShot = battle.state.muzzleUntil;
         battle.step(STEP, x, y, dash, aimX, aimY);
-        if (battle.state.muzzleUntil !== previousShot) assistUntil = -1;
+        if (fireDrag?.direction && battle.state.muzzleUntil !== previousShot) fireDrag.fired = true;
         if (pendingAim && (battle.state.muzzleUntil !== previousShot || battle.state.time >= pendingAim.until)) pendingAim = null;
         dash = false; accumulator -= STEP;
       }
-      sync(); renderer.draw(battle.state, joystick, touchAim || mouse);
+      sync(); renderer.draw(battle.state, joystick, mouse, fireDrag?.direction);
       audio.play(battle.state.cues); battle.state.cues = 0;
     }
     if (mode === 'play') frame = requestAnimationFrame(tick);
-  }
-  function assistTarget(state) {
-    const p = state.player;
-    let closest = 440, target = null;
-    for (const enemy of state.enemies) {
-      if (enemy.ready > state.time) continue;
-      const gap = Math.hypot(enemy.x - p.x, enemy.y - p.y);
-      if (gap < closest && shotCover(state.cover, p.x, p.y, enemy.x, enemy.y) < 0) { closest = gap; target = enemy; }
-    }
-    const boss = state.phase === 'boss' && state.boss;
-    if (boss && Math.hypot(boss.x - p.x, boss.y - p.y) < closest && shotCover(state.cover, p.x, p.y, boss.x, boss.y) < 0) return boss;
-    return target;
   }
   function point(event) {
     bounds ||= arena.getBoundingClientRect();
@@ -354,15 +346,30 @@ export function openBattle({ words, source, isCurrent, returnFocus }) {
   listen(dashButton, 'click', event => { if (event.detail === 0) requestDash(); });
   fireButton.hidden = !coarse;
   listen(fireButton, 'pointerdown', event => {
-    if (event.button !== 0 || firePointer !== null) return;
-    event.preventDefault(); firePointer = event.pointerId;
+    if (event.button !== 0 || fireDrag || !isFighting(battle.state)) return;
+    event.preventDefault();
+    fireDrag = { id: event.pointerId, x: event.clientX, y: event.clientY, direction: null, fired: false };
     fireButton.setPointerCapture(event.pointerId);
-    assistUntil = battle.state.time + .16;
   });
-  listen(fireButton, 'click', event => { if (event.detail === 0) assistUntil = battle.state.time + .16; });
+  listen(fireButton, 'pointermove', event => {
+    if (fireDrag?.id !== event.pointerId) return;
+    const x = event.clientX - fireDrag.x, y = event.clientY - fireDrag.y;
+    const gap = Math.hypot(x, y);
+    if (gap < (fireDrag.direction ? 6 : 11)) return;
+    lastAim = fireDrag.direction = { x: x / gap, y: y / gap };
+    if (guideUntil === Infinity) {
+      guideUntil = Math.max(3, battle.state.time + 2.6);
+      aimGuide.firstElementChild.textContent = 'هيك بتصوّب وتطلق';
+      aimGuide.lastElementChild.textContent = 'لمسة سريعة تطلق في آخر اتجاه اخترته.';
+      saveHint(AIM_GUIDE_KEY, '1');
+    }
+  });
+  function tapFire() { pendingAim = { ...lastAim, until: battle.state.time + .16 }; }
+  listen(fireButton, 'click', event => { if (event.detail === 0) tapFire(); });
   for (const type of ['lostpointercapture', 'pointerup', 'pointercancel']) listen(fireButton, type, event => {
-    if (firePointer === event.pointerId) firePointer = null;
-    if (type === 'pointercancel') assistUntil = -1;
+    if (fireDrag?.id !== event.pointerId) return;
+    if (type === 'pointerup' && !fireDrag.fired) tapFire();
+    fireDrag = null;
   });
   listen(dialog, 'cancel', event => { event.preventDefault(); if (mode === 'play') pause.click(); else finish(); });
   listen(dialog, 'keydown', event => {
@@ -387,9 +394,8 @@ export function openBattle({ words, source, isCurrent, returnFocus }) {
     const p = point(event), id = event.pointerId, player = battle.state.player;
     if (event.pointerType === 'mouse') mouse = { ...p, id, held: true };
     else if (p.x < geometry.width / 2 && !joystick) joystick = { ...p, id, dx: 0, dy: 0 };
-    else if (!touchAim && (joystick || p.x >= geometry.width / 2)) touchAim = { ...p, id };
     else return;
-    if (mouse?.id === id || touchAim?.id === id) pendingAim = { x: p.x - player.x, y: p.y - player.y, until: battle.state.time + .16 };
+    if (mouse?.id === id) pendingAim = { x: p.x - player.x, y: p.y - player.y, until: battle.state.time + .16 };
     event.preventDefault(); arena.setPointerCapture(id);
     if (document.activeElement !== arena) arena.focus({ preventScroll: true });
   });
@@ -398,7 +404,6 @@ export function openBattle({ words, source, isCurrent, returnFocus }) {
       if (mode === 'play' && isFighting(battle.state)) mouse = { ...point(event), id: event.pointerId, held: mouse?.held || false };
       return;
     }
-    if (event.pointerId === touchAim?.id) { Object.assign(touchAim, point(event)); return; }
     const stick = event.pointerId === joystick?.id ? joystick : null;
     if (!stick) return;
     const p = point(event), x = p.x - stick.x, y = p.y - stick.y, gap = Math.hypot(x, y);
@@ -409,7 +414,6 @@ export function openBattle({ words, source, isCurrent, returnFocus }) {
   for (const event of ['lostpointercapture', 'pointerup', 'pointercancel']) {
     listen(arena, event, e => {
       if (e.pointerId === joystick?.id) joystick = null;
-      if (e.pointerId === touchAim?.id) touchAim = null;
       if (e.pointerId === mouse?.id) mouse.held = false;
       if (event === 'pointercancel') pendingAim = null;
     });

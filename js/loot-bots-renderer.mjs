@@ -236,7 +236,7 @@ export function createRenderer(canvas, arena = DEFAULT_ARENA, fitted = false) {
     disk(ctx, control.x + control.dx * 30, control.y + control.dy * 30, 14, color);
   }
 
-  function draw(s, moveStick, reticle) {
+  function draw(s, moveStick, reticle, aimDirection) {
     ctx.drawImage(floor, 0, 0, WIDTH, HEIGHT);
     station(s);
     drawCover(s.cover, s.time);
@@ -305,6 +305,13 @@ export function createRenderer(canvas, arena = DEFAULT_ARENA, fitted = false) {
     robot(p, 'player', 18, s.time < s.hurtUntil);
     if (s.time < s.muzzleUntil) disk(ctx, p.x + Math.cos(p.angle) * 32, p.y + Math.sin(p.angle) * 32, 4, '#fff2bf');
     if (moveStick) stick(moveStick, '#91e4d7af');
+    if (aimDirection) {
+      const { x, y } = aimDirection;
+      ctx.setLineDash([5, 7]);
+      line(ctx, p.x + x * 24, p.y + y * 24, p.x + x * 175, p.y + y * 175, '#ffe49bb0', 2);
+      ctx.setLineDash([]);
+      ring(ctx, p.x + x * 175, p.y + y * 175, 5, '#ffe49b');
+    }
     if (reticle) {
       ring(ctx, reticle.x, reticle.y, 9, '#ffda8d');
       line(ctx, reticle.x - 4, reticle.y, reticle.x + 4, reticle.y, '#ffda8d');

@@ -200,8 +200,9 @@ test('ten bosses open with distinct attacks and the next loop adds a new pattern
   assert.equal(ids.size, 10);
   assert.equal(firstMoves.size, 10);
   assert.ok(bullets >= 19 && spawns >= 2);
+  const last = s.boss.id;
   director.prepare();
-  assert.notEqual(s.boss.id, 'magnet');
+  assert.notEqual(s.boss.id, last);
   s.boss.sequence = 3;
   s.time = s.boss.nextAt;
   director.update(tick);
@@ -290,7 +291,7 @@ test('gunner seeks a line of fire around the station before winding up', () => {
 });
 
 test('the first boss flanks solid cover before charging a sheltered player', () => {
-  const battle = createBattle(prepareDeck(words), () => .5), s = battle.state;
+  const battle = createBattle(prepareDeck(words), () => .99), s = battle.state;
   s.spawnAt = Infinity;
   s.stationDone = true; s.bossInterval = 0.1;
   advance(battle, 4.2, true);
@@ -300,4 +301,16 @@ test('the first boss flanks solid cover before charging a sheltered player', () 
   for (let i = 0; i < 320 && !boss.attack; i++) advance(battle, tick, true);
   assert.equal(boss.attack?.move, 'ram');
   assert.equal(shotCover(s.cover, boss.x, boss.y, s.player.x, s.player.y), -1);
+});
+
+test('boss order varies from the opening encounter and avoids the previous round’s last boss', () => {
+  function first(random, previousBossId) {
+    const state = { time: 0, bossWins: 0, shots: [] };
+    createBossDirector({ state, random, width: 640, height: 540, previousBossId }).prepare();
+    return state.boss.id;
+  }
+  const a = first(() => .99), b = first(() => 0);
+  assert.notEqual(a, b);
+  assert.notEqual(first(() => .99, a), a);
+  assert.notEqual(first(() => 0, b), b);
 });
