@@ -59,6 +59,7 @@
     const resume = state && !['completed', 'awaiting-journey'].includes(state.phase) && !root.__entryExperienceActive;
     root.LootLinguaPopover?.offerResume?.(COACH_ID, resume ? {
       label: 'تابع إرشاد قاموسك',
+      priority: 3,
       open: () => {
         pausedForOverlay = false;
         if (!onDictionary()) root.loadPersonalDictionary?.();

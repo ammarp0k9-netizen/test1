@@ -2,6 +2,31 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 const source = await readFile(new URL('../js/popover.js', import.meta.url), 'utf8');
+
+test('resume button displays the highest priority pending guide and keeps the others available', () => {
+  const label = { textContent: '' };
+  const button = { hidden: true, dataset: {}, querySelector: () => label };
+  const document = { getElementById: () => button };
+  const root = {};
+  new Function('window', 'document', source)(root, document);
+  const calls = [];
+  const { offerResume } = root.LootLinguaPopover;
+  offerResume('feature', { label: 'تابع استكشاف الكنز', open: () => calls.push('feature') });
+  offerResume('world', { label: 'تابع إرشاد رحلتك', priority: 2, open: () => calls.push('world') });
+  offerResume('dictionary', { label: 'تابع إرشاد قاموسك', priority: 3, open: () => calls.push('dictionary') });
+  assert.equal(button.hidden, false);
+  assert.equal(label.textContent, 'تابع إرشاد قاموسك');
+  button.onclick();
+  offerResume('dictionary', null);
+  assert.equal(label.textContent, 'تابع إرشاد رحلتك');
+  button.onclick();
+  offerResume('world', null);
+  assert.equal(label.textContent, 'تابع استكشاف الكنز');
+  button.onclick();
+  offerResume('feature', null);
+  assert.equal(button.hidden, true);
+  assert.deepEqual(calls, ['dictionary', 'world', 'feature']);
+});
 test('persistent guidance survives background input, highlights only its target, and clears hidden anchors', () => {
   const handlers = new Map();
   const classes = new Set();

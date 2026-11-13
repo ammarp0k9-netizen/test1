@@ -1,6 +1,7 @@
 (function attachFeatureMiniOnboarding(root) {
   'use strict';
   const COACH_ID = 'featureMiniOnboardingCoach';
+  const FEATURE_NAMES = { treasure: 'الكنز', quiz: 'الاختبار', starred: 'الكلمات الصعبة', 'custom-worlds': 'العوالم الخاصة' };
   let activeFeature = '';
   let stepIndex = 0;
   let internalClose = false;
@@ -56,6 +57,7 @@
     close();
     if (feature) controller()?.complete?.(feature);
     controller()?.evaluate?.();
+    offerResume();
   }
   function prepareStep() {
     if (activeFeature === 'custom-worlds' && stepIndex >= 3 && stepIndex <= 4) {
@@ -118,6 +120,7 @@
     run += 1;
     activeFeature = '';
     close();
+    offerResume();
   }
   function start(feature) {
     if (!STEPS[feature] || !onFeature(feature) || controller()?.isInteractiveJourneyActive?.() ||
@@ -125,6 +128,7 @@
     if (activeFeature === feature) return true;
     const currentRun = ++run;
     activeFeature = feature;
+    offerResume();
     worldSaveHandled = false;
     stepIndex = Math.min(controller()?.getState?.()?.features?.[feature]?.step || 0, STEPS[feature].length - 1);
     prepareStep();
@@ -144,12 +148,25 @@
   });
   root.addEventListener('lootlingua:auth-state', pause);
   root.addEventListener('lootlingua:dictionary-navigation', pause);
+  function interruptedFeatures() {
+    const discovery = controller();
+    if (activeFeature || discovery?.isInteractiveJourneyActive?.()) return [];
+    const features = discovery?.getState?.()?.features || {};
+    return Object.keys(STEPS).filter((key) =>
+      features[key]?.status === 'in-progress' && discovery.getStatus(key) === 'in-progress')
+      .sort((left, right) => (features[right].updatedAt || 0) - (features[left].updatedAt || 0));
+  }
+  function offerResume() {
+    const [feature] = interruptedFeatures();
+    root.LootLinguaPopover?.offerResume?.(COACH_ID, feature ? {
+      label: `تابع استكشاف ${FEATURE_NAMES[feature]}`,
+      open: () => { if (onFeature(feature)) start(feature); else controller()?.open?.(feature); },
+    } : null);
+  }
   function resume() {
-    if (activeFeature || controller()?.isInteractiveJourneyActive?.()) return;
-    const features = controller()?.getState?.()?.features || {};
-    const feature = Object.keys(STEPS).find((key) => onFeature(key) &&
-      features[key]?.status === 'in-progress' && controller()?.getStatus?.(key) === 'in-progress');
+    const feature = interruptedFeatures().find(onFeature);
     if (feature) start(feature);
+    else offerResume();
   }
   root.addEventListener('lootlingua:surface-ready', () => {
     if (activeFeature && (!onFeature(activeFeature) || controller()?.isInteractiveJourneyActive?.())) pause();
@@ -157,6 +174,7 @@
   });
   root.addEventListener('lootlingua:onboarding-cloud-change', resume);
   root.addEventListener('lootlingua:initial-data-ready', resume);
+  root.addEventListener('lootlingua:discovery-display-change', offerResume);
   root.addEventListener('lootlingua:custom-world-saved', () => {
     if (activeFeature === 'custom-worlds' && stepIndex >= 3 && stepIndex <= 4) {
       worldSaveHandled = true;

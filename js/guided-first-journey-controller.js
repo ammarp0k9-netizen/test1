@@ -191,7 +191,8 @@
     const state = runtime.state;
     const resume = canPresent() && !isPresenting() && state;
     root.LootLinguaPopover?.offerResume?.(COACH_ID, resume ? {
-      label: 'تابع إرشاد رحلتك',
+      label: state.placementStage === 'result' ? 'تابع شرح نتيجة المستوى' : 'تابع إرشاد رحلتك',
+      priority: 2,
       open: () => {
         if (!state.worldId) root.loadWorldsView?.();
         else if (state.placementStage === 'result' && state.assessmentId) {

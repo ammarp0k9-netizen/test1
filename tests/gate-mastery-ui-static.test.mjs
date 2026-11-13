@@ -7,7 +7,7 @@ const [worlds, quiz, runtime, journeyCloud, rules, journey, srs, globalCloud, fu
   readFile(new URL('../js/quiz.js', import.meta.url), 'utf8'),
   readFile(new URL('../js/quiz-runtime.js', import.meta.url), 'utf8'),
   readFile(new URL('../js/journey-cloud.js', import.meta.url), 'utf8'),
-  readFile(new URL('../firestore.rules', import.meta.url), 'utf8'),
+  readFile(new URL('../rules-candidates/firestore.production-plus-entry-matching-notifications.rules', import.meta.url), 'utf8'),
   readFile(new URL('../js/journey.js', import.meta.url), 'utf8'),
   readFile(new URL('../js/srs.js', import.meta.url), 'utf8'),
   readFile(new URL('../js/cloud.js', import.meta.url), 'utf8'),

@@ -2,6 +2,7 @@
   'use strict';
 
   let active = null;
+  const resumeOffers = new Map();
 
   function position(element, anchor) {
     if (!element || !anchor?.getBoundingClientRect) return;
@@ -73,18 +74,14 @@
   function offerResume(id, resume) {
     const banner = document.getElementById('onboardingResume');
     if (!banner) return;
-    if (!resume) {
-      if (banner.dataset.coach === id) {
-        banner.hidden = true;
-        banner.onclick = null;
-        delete banner.dataset.coach;
-      }
-      return;
-    }
-    banner.dataset.coach = id;
-    banner.hidden = false;
-    banner.textContent = resume.label;
-    banner.onclick = resume.open;
+    if (resume) resumeOffers.set(id, resume);
+    else resumeOffers.delete(id);
+    const [coach, next] = [...resumeOffers.entries()].reduce((best, entry) =>
+      (entry[1].priority || 0) > (best[1]?.priority || 0) || !best[1] ? entry : best, []);
+    banner.hidden = !next;
+    banner.dataset.coach = coach || '';
+    banner.querySelector('span').textContent = next?.label || '';
+    banner.onclick = next?.open || null;
   }
 
   function open({ id, className, anchor, content, labelledBy, onClose, persistent = false, reading }) {

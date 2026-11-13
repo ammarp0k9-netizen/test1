@@ -7,7 +7,7 @@ const [journeySource, cloudSource, worldsSource, rulesSource, functionsSource, p
   readFile(new URL('../js/journey.js', import.meta.url), 'utf8'),
   readFile(new URL('../js/journey-cloud.js', import.meta.url), 'utf8'),
   readFile(new URL('../js/worlds.js', import.meta.url), 'utf8'),
-  readFile(new URL('../firestore.rules', import.meta.url), 'utf8'),
+  readFile(new URL('../rules-candidates/firestore.production-plus-entry-matching-notifications.rules', import.meta.url), 'utf8'),
   readFile(new URL('../functions/index.js', import.meta.url), 'utf8'),
   readFile(new URL('../package.json', import.meta.url), 'utf8'),
   readdir(new URL('../functions', import.meta.url)),

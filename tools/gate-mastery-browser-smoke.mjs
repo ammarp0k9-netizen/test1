@@ -141,7 +141,10 @@ const visualFixtureProbe = `(() => {
   return true;
 })()`;
 
-const probe = `(() => {
+const probe = `(async () => {
+  window.__lootlinguaAuthResolved = false;
+  window.SmartLoadingOverlay?.forceHide?.();
+  prepareWorldsShell();
   const world = { worldId: 'smoke-world', title: 'عالم الاختبار' };
   const rank = {
     worldId: 'smoke-world', rankId: 'smoke-rank', title: 'رتبة الاختبار',
@@ -190,7 +193,7 @@ const probe = `(() => {
     derivedState: 'cleared-with-gap', gapCount: 3,
     gapWordKeys: ['one', 'two', 'three'], newContentWords: [],
   });
-  gap.querySelector('button')?.click();
+  gap.querySelector('.published-journey-cta')?.click();
   const gapResult = {
     copy: gap.textContent.includes('مكتملة — بقي 3 كلمات لإتقانها'),
     action: gap.textContent.includes('راجع الكلمات المتبقية'),
@@ -328,12 +331,14 @@ const probe = `(() => {
   const resolverCalls = [];
   window.launchConfetti = () => { confettiCount += 1; };
   window.getJourneyCloudApi = () => ({
-    resolveActiveJourneyDestination: (worldId, options) => {
-      resolverCalls.push({ worldId, options: { ...options } });
-      return Promise.resolve({ type: 'completed-current-content' });
+    resolveAccountJourneyDestination: (options) => {
+      resolverCalls.push({ ...options });
+      return Promise.resolve({ type: 'gate', worldId: world.worldId, rank: rankForProgress, gate: secondGate });
     },
   });
   window.openPublishedWorld = () => {};
+  const openedGates = [];
+  window.openPublishedGate = (...ids) => openedGates.push(ids);
   const completionBundle = {
     attempt: {
       attemptId: 'rank-smoke-attempt',
@@ -343,7 +348,7 @@ const probe = `(() => {
     result: {
       result: { passed: true },
       rankCompleted: true,
-      completedCurrentContent: true,
+      completedCurrentContent: false,
       rankCompletionVersion: 2,
     },
   };
@@ -351,13 +356,14 @@ const probe = `(() => {
   renderPublishedGateClearResult(world, rankForProgress, secondGate, completionBundle);
   const resultPanel = document.querySelector('.published-placement-result');
   resultPanel?.querySelector('.published-placement-primary')?.click();
+  await Promise.resolve();
   const rankCelebrationResult = {
     panel: Boolean(resultPanel),
     trophy: Boolean(resultPanel?.querySelector('.fa-trophy')),
     oncePerCommit: confettiCount === 1,
     resolverAuthority: resolverCalls.length === 1 &&
-      resolverCalls[0].worldId === world.worldId &&
-      resolverCalls[0].options.resumePausedLevelPlacement === true,
+      resolverCalls[0].resumePausedLevelPlacement === true &&
+      openedGates[0]?.join('/') === [world.worldId, rankForProgress.rankId, secondGate.gateId].join('/'),
   };
 
   confettiCount = 0;
@@ -367,6 +373,7 @@ const probe = `(() => {
     attempt: { ...completionBundle.attempt, attemptId: 'world-smoke-attempt' },
     result: {
       ...completionBundle.result,
+      completedCurrentContent: true,
       worldCompleted: true,
       worldCompletionRecorded: true,
       worldCompletionId: 'wc1-smoke-world',
@@ -376,6 +383,7 @@ const probe = `(() => {
   renderPublishedGateClearResult(world, rankForProgress, secondGate, worldCompletionBundle);
   const worldResultPanel = document.querySelector('.published-placement-result');
   worldResultPanel?.querySelector('.published-placement-primary')?.click();
+  await Promise.resolve();
   const worldNotification = (window.LootLinguaNotificationStore?.getAll?.() || window.__notifications || []).find((item) =>
     item.occurrenceKey === 'legacy:wc1-smoke-world' || item.meta?.dedupeKey === 'wc1-smoke-world'
   );
@@ -384,7 +392,7 @@ const probe = `(() => {
     globe: Boolean(worldResultPanel?.querySelector('.fa-earth-americas')),
     oncePerCommit: confettiCount === 1,
     permanentNotification: Boolean(worldNotification?.message || worldNotification?.msg),
-    resolverAuthority: resolverCalls.length === resolverCountBeforeWorld + 1,
+    resolverAuthority: resolverCalls.length === resolverCountBeforeWorld + 1 && openedGates.length === 2,
   };
 
   clearTimeout(window.__toastHideTimer);
@@ -438,6 +446,47 @@ const probe = `(() => {
     resultStillVisible: Boolean(document.querySelector('.published-placement-result')),
   };
 
+  const placementWorld = { worldId: 'placement-smoke', title: 'عالم اختبار المستوى' };
+  const placementJourney = { worldId: placementWorld.worldId, passedCefrLevels: [] };
+  const sample = {
+    questionId: 'q-1', contentWordId: 'word-1', rankId: 'r-a1',
+    word: 'journey', translation: 'رحلة',
+  };
+  const pausedSession = {
+    assessmentId: 'placement-smoke-attempt', status: 'paused', cefrLevel: 'A1',
+    currentQuestionIndex: 0, orderedQuestionIds: [sample.questionId], selectedWords: [sample],
+  };
+  const paused = { world: placementWorld, journey: placementJourney, session: pausedSession };
+  let resumed = 0;
+  let answered = 0;
+  window.getJourneyCloudApi = () => ({
+    continueLevelPlacement: async () => {
+      resumed += 1;
+      return { ...paused, session: { ...pausedSession, status: 'active' } };
+    },
+    answerLevelPlacementQuestion: async () => {
+      answered += 1;
+      return {
+        ...paused, journey: { ...placementJourney, passedCefrLevels: ['A1'] },
+        session: { ...pausedSession, status: 'completed', resultApplied: true, passedLevel: true,
+          nextCefrLevel: 'A2', correctCount: 1, answers: [true], saveWordChoice: 'undecided' },
+      };
+    },
+  });
+  renderPublishedLevelPlacementResumePrompt(paused);
+  document.querySelector('.published-level-placement-resume .published-placement-primary').click();
+  await Promise.resolve();
+  const option = document.querySelector('.published-level-placement-view .published-placement-option');
+  const enabledAfterResume = Boolean(option && !option.disabled);
+  option?.click();
+  await new Promise((resolve) => setTimeout(resolve, 620));
+  const placementResult = {
+    resumedOnce: resumed === 1,
+    enabledAfterResume,
+    acceptsAnswer: answered === 1,
+    optionalNextLevel: document.querySelector('[data-guide-placement-destination]')?.textContent.includes('اختبار مستوى A2') === true,
+  };
+
   return {
     gapResult,
     masteredResult,
@@ -450,6 +499,7 @@ const probe = `(() => {
     worldCompletionResult,
     toastLayerResult,
     failureIsolationResult,
+    placementResult,
   };
 })()`;
 
@@ -505,7 +555,7 @@ try {
     });
     if (readiness.result?.value !== true) throw new Error('Gate mastery UI is not ready');
   }, 80, 250);
-  const evaluation = await send('Runtime.evaluate', { expression: probe, returnByValue: true });
+  const evaluation = await send('Runtime.evaluate', { expression: probe, returnByValue: true, awaitPromise: true });
   if (evaluation.exceptionDetails) {
     throw new Error(evaluation.exceptionDetails.exception?.description || evaluation.exceptionDetails.text);
   }

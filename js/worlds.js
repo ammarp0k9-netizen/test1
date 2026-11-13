@@ -2176,9 +2176,14 @@ async function continuePublishedLevelPlacement(bundle) {
     renderPublishedLevelPlacementAssessment(bundle);
     return bundle;
   }
+  const generation = window.__dictionaryNavigationGeneration;
+  const owner = window.auth?.currentUser?.uid;
+  const isCurrent = () => generation === window.__dictionaryNavigationGeneration && owner === window.auth?.currentUser?.uid;
   publishedContentState.levelPlacementPending = true;
   try {
     const next = await getJourneyCloudApi().continueLevelPlacement(bundle.journey.worldId);
+    if (!isCurrent()) return null;
+    publishedContentState.levelPlacementPending = false;
     publishedContentState.levelPlacementBundle = next;
     publishedContentState.journey = next.journey;
     publishedContentState.activeJourney = next.journey;
@@ -2186,11 +2191,12 @@ async function continuePublishedLevelPlacement(bundle) {
     else renderPublishedLevelPlacementResult(next);
     return next;
   } catch (error) {
+    if (!isCurrent()) return null;
     showToast(publishedJourneyErrorText(error), 'danger', 5200);
     renderPublishedLevelPlacementResumePrompt(bundle);
     return null;
   } finally {
-    publishedContentState.levelPlacementPending = false;
+    if (isCurrent()) publishedContentState.levelPlacementPending = false;
   }
 }
 
@@ -4872,7 +4878,9 @@ function renderPublishedGateClearResult(world, rank, gate, bundle) {
       publishedContentState.shownGateClearCelebrations.add(celebrationKey);
       const titles = recordJourneyTitleProgress(world, rank, gate, bundle.result);
       window.LootLinguaMotivation?.observeGates?.(world, rank, [{ worldId: world.worldId, rankId: rank.rankId, gateId: gate.gateId, clearedBy: 'gate-clear', lastClearResult: 'passed', status: 'cleared' }]);
-      try { window.launchConfetti?.(); } catch (_) {}
+      if (!rankCompleted) {
+        try { window.launchConfetti?.(); } catch (_) {}
+      }
       try { navigator.vibrate?.([35, 35, 85]); } catch (_) {}
       try { window.playUnlockSound?.(); } catch (_) {}
       if (titles.length) showTitleUnlockMoment(titles);
