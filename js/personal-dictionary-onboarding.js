@@ -204,6 +204,8 @@
     if (!state || state.phase === 'completed') return;
     if (root.__entryExperienceActive) return;
     if (state.phase !== 'awaiting-journey') { renderStep(); return; }
+    const guided = root.LootLinguaGuidedFirstJourney?.getState?.();
+    if (owner() === 'guest' && guided?.guestDictionaryAvailable) { api.beginGuestDictionary(); return; }
     if (state.phase === 'awaiting-journey' && !currentJourneyCompleted()) return;
     routeToDictionary(state);
   }

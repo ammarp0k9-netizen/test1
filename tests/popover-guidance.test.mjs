@@ -28,3 +28,35 @@ test('persistent guidance survives background input, highlights only its target,
   handlers.get('pointerdown')({target:{}});
   assert.equal(api.getActiveId(),'', 'ordinary help retains outside-click dismissal');
 });
+
+test('reading time gates only this step and survives an anchor rerender without starting over', () => {
+  const handlers = new Map();
+  const classList = { contains: () => false, add() {}, remove() {} };
+  function element() {
+    return { classList, style: {}, getBoundingClientRect: () => ({ left: 20, top: 180, bottom: 210, width: 180, height: 65 }),
+      getClientRects: () => [{}], setAttribute() {}, append() {}, remove() {}, contains: () => false };
+  }
+  const root = { innerWidth: 320, innerHeight: 640, addEventListener() {}, removeEventListener() {}, dispatchEvent() {} };
+  const document = { body: { append() {} }, createElement: element,
+    addEventListener: (type, handler) => handlers.set(type, handler), removeEventListener: type => handlers.delete(type) };
+  let now = 100;
+  new Function('window', 'document', 'Node', 'CustomEvent', 'Date', 'setTimeout', 'clearTimeout', source)(
+    root, document, class {}, class {}, { now: () => now }, () => 0, () => {}
+  );
+  const api = root.LootLinguaPopover;
+  const anchor = element();
+  api.open({ id: 'guide', anchor, content: 'guide', persistent: true, reading: { step: 'one', actions: [anchor] } });
+  const unrelated = element();
+  assert.equal(api.isReadingAction(anchor), true);
+  assert.equal(api.isReadingAction(unrelated), false);
+  assert.ok(handlers.has('click'));
+  now += 2000;
+  const replacement = element();
+  api.open({ id: 'guide', anchor: replacement, content: 'guide', persistent: true, reading: { step: 'one', actions: [replacement] } });
+  assert.equal(api.isReadingAction(replacement), true);
+  now += 1001;
+  assert.equal(api.canAct('guide'), true);
+  assert.equal(api.isReadingAction(replacement), false);
+  api.close({ silent: true });
+  assert.equal(handlers.has('click'), false);
+});

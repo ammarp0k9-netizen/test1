@@ -176,7 +176,7 @@
       document.getElementById?.('appAuthDialogShell')?.hidden !== false &&
       !document.documentElement.classList.contains('journey-auth-active') &&
       (!dictionary || ['awaiting-journey', 'completed'].includes(dictionary.phase)) &&
-      !(!user() && runtime.state.guestDictionaryAvailable);
+      !(!user() && runtime.state.guestDictionaryAvailable && dictionary?.phase !== 'awaiting-journey');
   }
 
   function isPresenting() {
@@ -194,8 +194,8 @@
       label: 'تابع إرشاد رحلتك',
       open: () => {
         if (!state.worldId) root.loadWorldsView?.();
-        else if (state.placementStage === 'result' && state.assessmentId && root.openGuidedPlacementResult) {
-          root.openGuidedPlacementResult(state.worldId, state.assessmentId);
+        else if (state.placementStage === 'result' && state.assessmentId) {
+          root.openPublishedWorld?.(state.worldId, { assessmentId: state.assessmentId });
         } else if (state.gateId && state.rankId && !['offer', 'assessment'].includes(state.placementStage)) {
           root.openPublishedGate?.(state.worldId, state.rankId, state.gateId);
         } else root.openPublishedWorld?.(state.worldId);
@@ -383,7 +383,7 @@
   });
   root.addEventListener('lootlingua:entry-closed', () => {
     if (runtime.lastRoute) applyRoute(runtime.lastRoute);
-      else updateResume();
+    else updateResume();
   });
   root.addEventListener('lootlingua:auth-dialog-closed', () => {
     if (runtime.lastRoute) applyRoute(runtime.lastRoute);

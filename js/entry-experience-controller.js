@@ -1778,7 +1778,7 @@
     const guidedState = root.LootLinguaGuidedFirstJourney?.getState?.();
     const dictionaryGuide = root.LootLinguaPersonalDictionaryOnboarding?.getState?.();
     const isGuidedGuestFallback = Boolean(
-      guidedState?.worldId === intent.worldId && guidedState.phase !== 'completed' &&
+      guidedState?.worldId && guidedState.phase !== 'completed' &&
       dictionaryGuide?.phase === 'awaiting-journey' && !root.auth?.currentUser
     );
     const title = isGuidedGuestFallback
@@ -1807,9 +1807,9 @@
     document.body.classList.add('journey-auth-active');
     setBackgroundInert(true);
     prompt.querySelector('[data-journey-auth="guest"]')?.addEventListener('click', () => {
-      root.LootLinguaGuidedFirstJourney?.enableGuestDictionary?.();
+      if (isGuidedGuestFallback) root.LootLinguaGuidedFirstJourney?.enableGuestDictionary?.();
       dismissJourneyAuthPrompt();
-      root.LootLinguaPersonalDictionaryOnboarding?.beginGuestDictionary?.();
+      if (isGuidedGuestFallback) root.LootLinguaPersonalDictionaryOnboarding?.beginGuestDictionary?.();
     });
     prompt.querySelector('[data-journey-auth="login"]')?.addEventListener('click', async (event) => {
       const button = event.currentTarget;

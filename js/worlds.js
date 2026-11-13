@@ -2170,10 +2170,6 @@ async function showPublishedLevelPlacementResult(worldId, assessmentId) {
   }
 }
 
-window.openGuidedPlacementResult = async function(worldId, assessmentId) {
-  window.openPublishedWorld(worldId, { assessmentId });
-};
-
 async function continuePublishedLevelPlacement(bundle) {
   if (publishedContentState.levelPlacementPending) return null;
   if (bundle.session.status !== 'paused') {

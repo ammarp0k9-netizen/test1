@@ -74,7 +74,11 @@
     const banner = document.getElementById('onboardingResume');
     if (!banner) return;
     if (!resume) {
-      if (banner.dataset.coach === id) banner.hidden = true;
+      if (banner.dataset.coach === id) {
+        banner.hidden = true;
+        banner.onclick = null;
+        delete banner.dataset.coach;
+      }
       return;
     }
     banner.dataset.coach = id;
@@ -86,7 +90,9 @@
   function open({ id, className, anchor, content, labelledBy, onClose, persistent = false, reading }) {
     if (!anchor || anchor.isConnected === false || (anchor.getClientRects && !anchor.getClientRects().length)) return null;
     if (active?.persistent && active.id !== id) return null;
-    if (reading?.step && active?.id === id && active.anchor === anchor && active.readStep === reading.step) return active.element;
+    const sameStep = reading?.step && active?.id === id && active.readStep === reading.step;
+    if (sameStep && active.anchor === anchor) return active.element;
+    const previousReadUntil = sameStep ? active.readUntil : 0;
     close({ silent: true });
     const element = document.createElement('section');
     if (id) element.id = id;
@@ -117,19 +123,23 @@
     active = { id: id || '', element, anchor, reposition, onPointerDown, onKeydown, onClick, onClose, persistent, highlighted, reading };
     if (reading) {
       const duration = String(reading.text || '').length >= 105 ? 4000 : 3000;
-      active.readUntil = Date.now() + duration;
+      const now = Date.now();
+      active.readUntil = previousReadUntil || now + duration;
       active.readStep = reading.step;
-      element.classList.add('coach-reading');
-      const hint = document.createElement('small');
-      hint.className = 'coach-reading-hint';
-      hint.textContent = 'اقرأ الخطوة، ثم تابع.';
-      element.append(hint);
-      active.readTimer = setTimeout(() => {
-        element.classList.remove('coach-reading');
-        hint.remove();
-        reposition();
-      }, duration);
-      document.addEventListener('click', onClick, true);
+      const remaining = active.readUntil - now;
+      if (remaining > 0) {
+        element.classList.add('coach-reading');
+        const hint = document.createElement('small');
+        hint.className = 'coach-reading-hint';
+        hint.textContent = 'اقرأ الخطوة، ثم تابع.';
+        element.append(hint);
+        active.readTimer = setTimeout(() => {
+          element.classList.remove('coach-reading');
+          hint.remove();
+          reposition();
+        }, remaining);
+        document.addEventListener('click', onClick, true);
+      }
     }
     anchor.setAttribute('aria-expanded', 'true');
     reposition();
