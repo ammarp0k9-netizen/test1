@@ -37,6 +37,12 @@
     isolated.forEach((value, node) => { node.inert = value; });
     isolated.clear();
   }
+  function companion(surface) {
+    return root.LootLinguaPopover?.companionFor?.(surface);
+  }
+  function contains(surface, node) {
+    return surface.contains(node) || companion(surface)?.contains(node);
+  }
   function reconcile() {
     const previousSurface = activeSurface;
     restoreIsolation();
@@ -45,15 +51,15 @@
     if (!current || !frames.size) return current;
     for (let branch = current.surface; branch && branch !== document.body; branch = branch.parentElement) {
       for (const sibling of branch.parentElement?.children || []) {
-        if (sibling === branch || /^(SCRIPT|STYLE|LINK)$/.test(sibling.tagName)) continue;
+        if (sibling === branch || sibling === companion(current.surface) || /^(SCRIPT|STYLE|LINK)$/.test(sibling.tagName)) continue;
         if (!isolated.has(sibling)) isolated.set(sibling, sibling.inert);
         sibling.inert = true;
       }
     }
-    if (current.surface !== previousSurface && !current.surface.contains(document.activeElement)) {
+    if (current.surface !== previousSurface && !contains(current.surface, document.activeElement)) {
       requestAnimationFrame(() => {
-        if (layer()?.surface !== current.surface || current.surface.contains(document.activeElement)) return;
-        const frame = current.frame || { dialog: current.surface.querySelector('[role="dialog"]') || current.surface };
+        if (layer()?.surface !== current.surface || contains(current.surface, document.activeElement)) return;
+        const frame = current.frame || { root: current.surface, dialog: current.surface.querySelector('[role="dialog"]') || current.surface };
         if (!frame.dialog.hasAttribute('tabindex')) frame.dialog.tabIndex = -1;
         if (visible(frame.lastFocused) && !frame.lastFocused.closest('[inert]')) frame.lastFocused.focus({ preventScroll: true });
         else focusInside(frame);
@@ -62,7 +68,7 @@
     return current;
   }
   function focusable(frame) {
-    return [...frame.dialog.querySelectorAll(focusSelector)].filter(node =>
+    return [...frame.dialog.querySelectorAll(focusSelector), ...(companion(frame.root)?.querySelectorAll(focusSelector) || [])].filter(node =>
       node.tabIndex >= 0 && !node.closest('[inert]') && visible(node));
   }
   function focusInside(frame, last = false) {
@@ -73,7 +79,7 @@
   function onFocus(event) {
     const current = layer();
     if (!current?.frame) return;
-    if (current.surface.contains(event.target)) current.frame.lastFocused = event.target;
+    if (contains(current.surface, event.target)) current.frame.lastFocused = event.target;
     else focusInside(current.frame);
   }
   function onKey(event) {
@@ -86,6 +92,14 @@
     }
     if (event.key !== 'Tab') return;
     const items = focusable(frame), first = items[0], last = items[items.length - 1];
+    if (companion(frame.root) && items.length) {
+      const index = items.indexOf(document.activeElement);
+      const next = index < 0 ? (event.shiftKey ? last : first)
+        : items[(index + (event.shiftKey ? -1 : 1) + items.length) % items.length];
+      event.preventDefault();
+      next.focus({ preventScroll: true });
+      return;
+    }
     if (!items.length || document.activeElement === frame.dialog || !frame.dialog.contains(document.activeElement) ||
         (event.shiftKey && document.activeElement === first) || (!event.shiftKey && document.activeElement === last)) {
       event.preventDefault(); focusInside(frame, event.shiftKey);

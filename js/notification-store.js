@@ -265,6 +265,11 @@
 
   function isDisplayable(record) {
     if (record.status !== 'active') return false;
+    if (record.kind === 'smart' && record.notificationType === 'reminder.streak.risk' && record.cta?.id === 'review-due' &&
+        records.some((other) => other.kind === 'smart' && other.notificationType === 'reminder.review.due' && other.status === 'active')) return false;
+    if (record.cta?.id === 'resume-public-world-onboarding') {
+      return root.LootLinguaFeatureDiscovery?.isInteractiveJourneyActive?.() !== true;
+    }
     if (record.cta?.id !== 'open-feature-discovery') return true;
     return root.LootLinguaFeatureDiscovery?.canShowInvitation?.(record.cta.args?.feature) !== false;
   }

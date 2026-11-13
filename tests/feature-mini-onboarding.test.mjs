@@ -15,7 +15,8 @@ function harness(feature, step = 0) {
       skip: () => { throw new Error('Step skipping must never dismiss the whole tour'); },
       evaluate() {},
     },
-    LootLinguaPopover: { open: options => { coach = options; }, closeIf: () => { coach = null; } },
+    LootLinguaPopover: { open: options => { coach = options; return options; }, closeIf: () => { coach = null; } },
+    getOnboardingView: () => feature === 'custom-worlds' ? 'worlds' : feature,
     openCustomWorldModal: () => { panelVisible = true; },
     hideModal: () => { panelVisible = false; },
     openQuizModeSettings: () => { panelVisible = true; },
@@ -24,7 +25,8 @@ function harness(feature, step = 0) {
   const document = {
     createElement: () => ({ children: [], listeners: {}, append(...nodes) { this.children.push(...nodes); }, addEventListener(name, fn) { this.listeners[name] = fn; } }),
     querySelector: () => ({ getClientRects: () => [{}], scrollIntoView() {} }),
-    getElementById: () => ({ getClientRects: () => panelVisible ? [{}] : [] }),
+    querySelectorAll: () => [],
+    getElementById: () => ({ getClientRects: () => panelVisible ? [{}] : [], classList: { contains: name => name === 'active' } }),
     addEventListener() {},
   };
   new Function('window', 'document', 'setTimeout', 'setInterval', source)(root, document, fn => fn(), () => {});

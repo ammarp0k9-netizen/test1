@@ -1,4 +1,4 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="ar" dir="rtl">
 <head>
   <meta charset="UTF-8">
@@ -87,7 +87,7 @@
     content="#090c0f"
   >
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
-  <link rel="stylesheet" href="style.css?v=20261113-guide-resume-button">
+  <link rel="stylesheet" href="style.css?v=20261113-review-guide">
   <link rel="stylesheet" href="entry-experience.css?v=20261104-world-guide-4">
   <link rel="stylesheet" href="motivation.css?v=20261106-motivation-1">
   <link rel="stylesheet" href="glass-theme.css?v=20261106-materials-1">
@@ -349,8 +349,9 @@
     <div id="quizViewSetup" class="quiz-view-setup quiz-modes-view">
       <h3><i class="fa-solid fa-brain" aria-hidden="true"></i> اختر وضع الاختبار</h3>
       <p class="quiz-available-count" id="quizAvailableCount">الكلمات المتاحة: 0</p>
+      <p id="quizPracticeLock" class="gate-runner-review-lock" hidden></p>
       <div class="quiz-modes-grid" aria-label="أوضاع الاختبار">
-        <button type="button" class="quiz-mode-card quiz-mode-runner" onclick="openQuizModeSettings('runner')">
+        <button type="button" class="quiz-mode-card quiz-mode-runner" id="runnerDictionary" onclick="openQuizModeSettings('runner')">
           <canvas id="runnerModePreview" class="runner-mode-preview" width="240" height="132" aria-hidden="true"></canvas>
           <strong>جري البوابات</strong>
           <span>شخصيتك، ثلاثة مسارات، وبوابات من كلماتك. اقفز، انزلق واجمع العملات.</span>
@@ -574,6 +575,7 @@
     <div id="customWorldsPanel" class="worlds-tab-panel" role="tabpanel" aria-labelledby="customWorldsTab" hidden>
       <div class="worlds-grid" id="worldsGrid">
         <button type="button" class="world-card world-card-starred" data-feature="starred" onclick="return onWorldCardClick(event, 'starred', function () { loadStarredView(); });">
+          <span class="feature-discovery-callout" aria-hidden="true"><b></b><em>استكشفني</em></span>
           <span class="world-card-icon-wrap">
             <span class="world-card-icon"><i class="fas fa-star" aria-hidden="true"></i></span>
             <span class="world-card-lock-overlay" aria-hidden="true"><i class="fa-solid fa-lock"></i></span>
@@ -629,6 +631,8 @@
         <p>مكان محجوز لمكافآت أقوى لاحقاً.</p>
       </article>
     </div>
+
+    <p class="treasure-chest-schedule">يتجدد الصندوق اليومي بعد 24 ساعة من فتحه. الصناديق الإضافية قيد التخطيط، وسيكون لكل صندوق موعد فتح مستقل.</p>
 
     <div class="treasure-title-strip">
       <div>
@@ -1169,10 +1173,10 @@
   <script src="js/guided-first-journey-contract.js?v=20261113-resumable-guide"></script>
   <script src="js/feature-discovery-contract.js?v=20261104-discovery-1"></script>
 <script data-startup-critical src="js/entry-experience-controller.js?v=20261113-resumable-guide"></script>
-<script src="js/guided-first-journey-controller.js?v=20261113-guide-resume-button"></script>
-<script src="js/personal-dictionary-onboarding.js?v=20261113-guide-resume-button"></script>
-  <script src="js/feature-discovery-controller.js?v=20261113-resumable-guide"></script>
-<script src="js/feature-mini-onboarding.js?v=20261113-guide-resume-button"></script>
+<script src="js/guided-first-journey-controller.js?v=20261113-review-guide"></script>
+<script src="js/personal-dictionary-onboarding.js?v=20261113-review-guide"></script>
+  <script src="js/feature-discovery-controller.js?v=20261113-review-guide"></script>
+<script src="js/feature-mini-onboarding.js?v=20261113-review-guide"></script>
 <script data-startup-critical type="module" src="js/cloud.js?v=20261107-world-cache-1"></script>
 <script data-startup-critical type="module" src="js/entry-experience-cloud.js?v=20260808-1"></script>
 <script type="module" src="js/guided-first-journey-cloud.js?v=20260827-1"></script>
@@ -1209,21 +1213,21 @@
 </div>
 
 <!-- ══ FIREBASE PROFILE SYNC ══ -->
-  <script data-startup-critical type="module" src="js/profile-cloud.js?v=20261113-resumable-guide"></script>
+  <script data-startup-critical type="module" src="js/profile-cloud.js?v=20261113-review-guide"></script>
 <script type="module" src="js/published-content.js?v=20260722-1"></script>
-<script data-startup-critical type="module" src="js/journey-cloud.js?v=20261105-pages-1"></script>
+<script data-startup-critical type="module" src="js/journey-cloud.js?v=20261113-review-guide"></script>
 <script type="module" src="js/notification-cloud.js?v=20261107-reads-1"></script>
 <script type="module" src="js/feedback.js?v=20261105-feedback-1"></script>
   <script src="js/notification-policy.js?v=20260811-1"></script>
-  <script src="js/notification-store.js?v=20261113-resumable-guide"></script>
-<script src="js/notification-engine.js?v=20261105-pages-1"></script>
-<script src="js/popover.js?v=20261113-guide-resume-button"></script>
+  <script src="js/notification-store.js?v=20261113-review-guide"></script>
+<script src="js/notification-engine.js?v=20261113-review-guide"></script>
+<script src="js/popover.js?v=20261113-review-guide"></script>
   <script src="js/test-clock-contract.js?v=20260729-2"></script>
   <script src="js/dictionary-pages.js?v=20261107-reads-1"></script>
-  <script src="js/modal-focus.js?v=20261112-top-layer"></script>
+  <script src="js/modal-focus.js?v=20261113-review-guide"></script>
   <script data-startup-critical src="js/core.js?v=20261113-resumable-guide"></script>
 <script src="js/operation-runtime.js?v=20260811-3"></script>
-    <script data-startup-critical src="js/storage.js?v=20261112-bots"></script>
+    <script data-startup-critical src="js/storage.js?v=20261113-review-guide"></script>
   <script src="js/content-schema.js?v=20260722-1"></script>
 <script src="js/word-lifecycle.js?v=20260722-1"></script>
 <script src="js/quiz-core.js?v=20260811-1"></script>
@@ -1233,24 +1237,24 @@
 <script src="js/placement.js?v=20260720-1"></script>
 <script src="js/level-placement.js?v=20260728-1"></script>
 <script src="js/word-list-data.js?v=20261106-admin-fixes-1"></script>
-<script data-startup-critical src="js/script.js?v=20261113-resumable-guide"></script>
+<script data-startup-critical src="js/script.js?v=20261113-review-guide"></script>
 <script src="js/xp.js?v=20261106-glass-paused-1"></script>
 <script src="js/xp-batch.js?v=20261105-integrity-1"></script>
-<script src="js/dictionary.js?v=20261113-resumable-guide"></script>
+<script src="js/dictionary.js?v=20261113-review-guide"></script>
 <script src="js/gate-game-migration.js?v=20261007-1"></script>
-<script src="js/gate-runner.js?v=20261111-jump-4"></script>
-<script src="js/loot-bots.js?v=8"></script>
-<script src="js/worlds.js?v=20261113-guide-resume-button"></script>
+<script src="js/gate-runner.js?v=20261113-review-guide"></script>
+<script src="js/loot-bots.js?v=20261113-review-guide"></script>
+<script src="js/worlds.js?v=20261113-review-guide"></script>
 <script src="js/dictionary-window.js?v=20261105-render-1"></script>
 <script src="js/dictionary-render.js?v=20261107-word-visibility-1"></script>
-<script src="js/srs.js?v=20261105-render-1"></script>
+<script src="js/srs.js?v=20261113-review-guide"></script>
 <script src="js/popover-overrides.js?v=20260817-1"></script>
-<script src="js/quiz.js?v=20261112-bots"></script>
+<script src="js/quiz.js?v=20261113-review-guide"></script>
 <script src="js/srs-transitions.js"></script>
 <script src="js/srs-transition-batch.js?v=20260722-1"></script>
-<script src="js/quiz-runtime.js?v=20261106-stage2-1"></script>
-<script src="js/notification-sources.js?v=20261105-pages-1"></script>
-<script src="js/notification-runtime.js?v=20261106-motivation-1"></script>
+<script src="js/quiz-runtime.js?v=20261113-review-guide"></script>
+<script src="js/notification-sources.js?v=20261113-review-guide"></script>
+<script src="js/notification-runtime.js?v=20261113-review-guide"></script>
 <script src="js/motivation-policy.js?v=20261106-motivation-1"></script>
 <script src="js/motivation.js?v=20261106-motivation-1"></script>
 <script type="module" src="js/motivation-cloud.js?v=20261106-motivation-1"></script>

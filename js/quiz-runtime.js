@@ -291,12 +291,16 @@ function finishQuizRun() {
     });
   }
   if (fullyCompleted && commit.total > 0) {
+    const sessionSource = String(activeQuizSession?.source || '');
+    const completedAt = Date.now();
+    const personalAt = sessionSource === 'personal' && !activeQuizSession.journeyGateId ? completedAt : 0;
+    if (personalAt) window.rememberLastPersonalTrustedQuizAt?.(personalAt);
     if (hasSignedInUser()) {
       try {
         if (typeof window.queueProfileIntent !== 'function') throw new Error('Profile sync is not ready.');
         window.queueProfileIntent({
           type: 'quiz-activity', eventId: `quiz:${activeQuizSession.id}`, day: todayStr(),
-          answers: commit.total, perfect: currentQuizMistakes === 0, advanceAfterFreeze: true,
+          answers: commit.total, perfect: currentQuizMistakes === 0, advanceAfterFreeze: true, personalAt,
         });
       } catch (error) {
         console.warn('[QuizFinish] Activity sync deferred after learning commit.', error?.message || error);
@@ -314,7 +318,6 @@ function finishQuizRun() {
     // over officialReviewGate/source parsing: officialReviewGate is only present
     // when SRS review words are due, and the journey: source string was already
     // sanitized when the session started.
-    const sessionSource = String(activeQuizSession?.source || '');
     const officialGate = activeQuizSession?.officialReviewGate || null;
     const commitContext = window.getActiveVerifiedQuizCommitContext?.(activeQuizSession?.id);
     const resolvedGate = officialGate || commitContext?.officialReviewGate || null;
@@ -332,7 +335,7 @@ function finishQuizRun() {
     }
     dispatchTrustedQuizCompletedSafely({
       sessionId: String(activeQuizSession?.id || ''),
-      completedAt: Date.now(),
+      completedAt,
       correctCount: Number(commit.correctCount) || 0,
       total: Number(commit.total) || 0,
       source: sessionSource,

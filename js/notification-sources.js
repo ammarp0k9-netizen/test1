@@ -64,11 +64,14 @@
     const active = all.filter((item) => item.state.mastery_status !== 'New');
     const due = active.filter((item) => item.due.isDue);
     const oldest = due.reduce((value, item) => Math.min(value, item.due.dueAt || timestamp(item.state.last_recalled_at) || now), Infinity);
+    const threshold = active.length >= 10 ? Math.min(5, Math.max(3, Math.ceil(active.length / 5))) : 5;
+    const eligibleSince = due.map((item) => timestamp(item.due.dueAt) || now).sort((a, b) => a - b)[threshold - 1] || 0;
     return {
       activeCount: active.length,
       dueCount: due.length,
       oldestDueAt: Number.isFinite(oldest) ? oldest : 0,
       episodeKey: Number.isFinite(oldest) ? `due-${oldest}` : '',
+      eligibleSince,
       dueWordKeys: due.map((item) => item.key),
       dueKeySet: new Set(due.map((item) => item.key)),
       all,
@@ -102,7 +105,7 @@
     };
   }
 
-  function quizFacts(all, newWords, now) {
+  function quizFacts(all) {
     const history = typeof root.readQuizExposureHistory === 'function' ? root.readQuizExposureHistory() : [];
     const localVerifiedAt = (Array.isArray(history) ? history : [])
       .filter((entry) => entry?.mode === 'verified')
@@ -113,15 +116,29 @@
       latest,
       timestamp(item.state?.last_quizzed_at)
     ), 0);
-    const createdAnchor = all.reduce((latest, item) => Math.max(latest, timestamp(item.word?.createdAt)), 0);
     const verifiedCount = (Array.isArray(history) ? history : [])
       .filter((entry) => entry?.mode === 'verified').length;
     return {
       localVerifiedAt,
       verifiedCount,
       lastTrustedQuizAt: Math.max(localVerifiedAt, masteryQuizAt),
-      learningAnchorAt: Math.max(createdAnchor, timestamp(newWords.batchCreatedAt)),
     };
+  }
+
+  function personalQuizFacts(words, ownerId) {
+    const snapshot = root.__lootlinguaProfileSnapshot;
+    const lastPersonalTrustedQuizAt = Math.max(
+      root.getLastPersonalTrustedQuizAt?.(ownerId) || 0,
+      snapshot?.uid === ownerId ? timestamp(snapshot.data?.lastPersonalTrustedQuizAt) : 0
+    );
+    const datedWords = words.map((word) => timestamp(word.createdAt)).filter(Boolean).sort((a, b) => a - b);
+    // Start the clock when the dictionary first meets the existing ten-word policy.
+    const learningAnchorAt = datedWords[Math.max(0, 9 - (words.length - datedWords.length))] || 0;
+    return { lastPersonalTrustedQuizAt, learningAnchorAt };
+  }
+
+  function personalQuizDueAt(ownerId, words = visibleWords(ownerId)) {
+    return root.LootLinguaNotificationEngine?.personalQuizDueAt?.(personalQuizFacts(words, ownerId), words.length) || 0;
   }
 
   function weakFacts(review, now) {
@@ -180,6 +197,8 @@
       let trusted = null;
       try { trusted = await api.getGateNotificationFacts?.(worldId, rankId, gateId, { progress }); } catch (_) {}
       const readyAt = timestamp(progress?.readyAt);
+      const reviewAt = timestamp(progress?.readinessNextAt);
+      const reviewDue = progress?.status === 'learning' && root.LootLinguaGateRunner?.reviewIsDue?.(progress) === true;
       const unlockedAt = timestamp(progress?.unlockedAt);
       const structuralProgressAt = Math.max(
         timestamp(progress?.loadedAt),
@@ -195,7 +214,7 @@
           lastProgressAt: structuralProgressAt,
         },
         gatePractice: {
-          actionable: ['learning'].includes(String(progress?.status || '')) && Boolean(progress?.loadedAt),
+          actionable: progress?.status === 'learning' && Boolean(progress?.loadedAt),
           worldId, rankId, gateId, gateLabel,
           loadedAt: timestamp(progress?.loadedAt),
           newestLinkedAt: timestamp(trusted?.newestLinkedAt || progress?.loadedAt),
@@ -206,6 +225,13 @@
           ready: progress?.status === 'ready' && readyAt > 0,
           readyAt, worldId, rankId, gateId, gateLabel,
         },
+        gateReview: {
+          due: reviewDue,
+          dueAt: reviewDue && reviewAt <= (root.LootLinguaTestClock?.effectiveNow?.() ?? Date.now()) ? reviewAt : 0,
+          nextAt: progress?.status === 'learning' && !reviewDue ? reviewAt : 0,
+          episodeKey: `${timestamp(progress?.loadedAt)}:${progress?.runnerReviewCompletedSessionId || 'first'}`,
+          worldId, rankId, gateId, gateLabel,
+        },
         contentUnlocked: {
           available: progress?.status === 'available' && unlockedAt > 0 && Boolean(progress?.unlockedByGateId),
           unlockedAt, worldId, rankId, gateId, targetLabel: gateLabel,
@@ -215,7 +241,7 @@
       if (!['auth/missing-user', 'journey/auth-required'].includes(String(error?.code || ''))) {
         console.warn('[NotificationSources] Journey facts unavailable.', error?.message || error);
       }
-      return {};
+      return { journeyComplete: false };
     }
   }
 
@@ -227,7 +253,7 @@
       ? root.withWordMasterySnapshot(() => reviewFacts(words, now))
       : reviewFacts(words, now);
     const newWords = groupNewWords(review.all, now);
-    const quiz = quizFacts(review.all, newWords, now);
+    const quiz = { ...quizFacts(review.all), ...personalQuizFacts(words, ownerId) };
     if (ownerId !== 'guest' && root.LootLinguaNotificationCloud?.latestTrustedQuizAt) {
       try { quiz.lastTrustedQuizAt = Math.max(quiz.lastTrustedQuizAt, await root.LootLinguaNotificationCloud.latestTrustedQuizAt()); } catch (_) {}
     }
@@ -270,6 +296,7 @@
         dueCount: review.dueCount,
         activeCount: review.activeCount,
         episodeKey: review.episodeKey,
+        eligibleSince: review.eligibleSince,
       },
       newWords,
       quiz,
@@ -286,8 +313,10 @@
           : '',
       },
       journey: journey.journey || {},
+      journeyComplete: journey.journeyComplete !== false,
       gatePractice: journey.gatePractice || {},
       gateReady: journey.gateReady || {},
+      gateReview: journey.gateReview || {},
       contentUnlocked: journey.contentUnlocked || {},
     };
   }
@@ -302,7 +331,7 @@
     };
   }
 
-  const API = Object.freeze({ timestamp, collect, getActionContext });
+  const API = Object.freeze({ timestamp, collect, getActionContext, personalQuizDueAt });
   Object.defineProperty(root, 'LootLinguaNotificationSources', {
     value: API,
     configurable: false,

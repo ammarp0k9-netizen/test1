@@ -5462,7 +5462,7 @@ body.test-clock-active .toast-host {
 
 /* Quiet optional-discovery marker; it never changes a feature's lock state. */
 .feature-discovery-ready { position: relative; }
-.feature-discovery-ready::after {
+.worlds-tab.feature-discovery-ready::after {
   content: '';
   position: absolute;
   inset-block-start: 5px;
@@ -5478,7 +5478,17 @@ body.test-clock-active .toast-host {
 
 /* Explicit, touch-visible discovery callout. It is intentionally unrelated to
    hover tooltips, so a new feature is equally clear on a phone. */
-.treasure-dock-btn .feature-discovery-callout { display: none; pointer-events: none; }
+.feature-discovery-callout { display: none; pointer-events: none; }
+.world-card-starred.feature-discovery-ready .feature-discovery-callout {
+  display: inline-flex;
+  align-items: center;
+  align-self: flex-start;
+  gap: 4px;
+}
+.world-card-starred.feature-discovery-ready .feature-discovery-callout em {
+  position: static;
+  transform: none;
+}
 .treasure-dock-btn.feature-discovery-ready .feature-discovery-callout {
   display: grid;
   position: absolute;
@@ -5558,8 +5568,28 @@ body.test-clock-active .toast-host {
 }
 .dictionary-search-status {
   margin: 0;
-  padding: 10px 14px;
+  padding: 12px 14px;
+  color: var(--text-white);
+  font-size: .9rem;
+  font-weight: 700;
+  line-height: 1.65;
+}
+.dictionary-search-tip {
+  margin: 0 14px 12px;
+  padding: 9px 12px;
+  border-inline-start: 3px solid var(--accent);
+  background: color-mix(in srgb, var(--accent) 10%, var(--card-bg));
+  border-radius: 8px;
+  color: var(--text-white);
+  font-size: .875rem;
+  line-height: 1.65;
+}
+.dictionary-search-tip[hidden] { display: none; }
+.treasure-chest-schedule {
+  margin: 0;
   color: var(--text-gray);
+  font-size: .85rem;
+  line-height: 1.7;
 }
 .dictionary-search-recovery { margin: 6px 14px; }
 .guided-world-choice-label {
@@ -14618,6 +14648,16 @@ html[data-theme="glass"] body.low-end-device :where(.legend-dock, .treasure-dock
 .runner-stage .runner-player { left: calc(var(--player-x, .5) * 100%); }
 .gate-runner-launch:disabled { opacity: .48; cursor: not-allowed; filter: saturate(.55); }
 .gate-runner-review-lock { flex-basis: 100%; margin: 0; color: var(--text, #f7f8ff); font-size: .82rem; line-height: 1.45; }
+.quiz-mode-runner:disabled { opacity: .65; cursor: not-allowed; }
+#quizPracticeLock:not([hidden]) {
+  margin-block: 8px 14px;
+  padding: 10px 12px;
+  border-inline-start: 3px solid var(--accent);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--accent) 9%, var(--card-bg));
+  color: var(--text-white);
+  line-height: 1.65;
+}
 .runner-game.debug-hitboxes .runner-player { outline: 2px solid #6ff; outline-offset: -2px; }
 .runner-game.debug-hitboxes .runner-object.is-obstacle { outline: 2px solid #ff6677; }
 .runner-game.debug-hitboxes .runner-object.is-coin { outline: 2px solid #ffd45a; }

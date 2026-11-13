@@ -187,6 +187,16 @@ test('coordinator defers invitations while Entry or a public-gate journey is act
   owner.LootLinguaGuidedFirstJourneyContract = { isActive: () => true };
   controller.evaluate();
   assert.equal(records.size, 0, 'an active public-gate journey also defers discovery');
+
+  owner.LootLinguaGuidedFirstJourney = { isPresenting: () => false };
+  let dictionaryPhase = 'awaiting-first-word';
+  owner.getOnboardingView = () => 'worlds';
+  owner.LootLinguaPersonalDictionaryOnboarding = { getState: () => ({ phase: dictionaryPhase }) };
+  controller.evaluate();
+  assert.equal(records.size, 0, 'leaving the dictionary mid-guide does not show discovery');
+  dictionaryPhase = 'completed';
+  controller.evaluate();
+  assert.equal(records.has('feature-discovery:treasure'), true);
 });
 
 test('discovery notification CTA delegates to the coordinator instead of launching a quiz or gate directly', () => {

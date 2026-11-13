@@ -234,6 +234,17 @@ const probe = `(async () => {
   const readyResult = {
     clearAction: ready.textContent.includes('اختبار اجتياز البوابة'),
     noCrown: !ready.querySelector('.fa-crown'),
+    gamesLockedForClear: [...ready.querySelectorAll('.gate-runner-launch')].length === 2 &&
+      [...ready.querySelectorAll('.gate-runner-launch')].every(button => button.disabled),
+  };
+  const due = mount({ ...loaded, status: 'learning', readinessNextAt: publishedEffectiveNow() - 1000 }, null);
+  const waiting = mount({ ...loaded, status: 'learning', readinessNextAt: publishedEffectiveNow() + 60000 }, null);
+  const games = (panel) => [...panel.querySelectorAll('.gate-runner-launch')];
+  const gateReviewResult = {
+    twoGamesLocked: games(due).length === 2 && games(due).every(button => button.disabled),
+    officialReviewAction: due.querySelector('.published-gate-practice-cta')?.textContent.includes('المراجعة الرسمية') === true,
+    reasonVisible: due.querySelector('.gate-runner-review-lock')?.textContent.includes('بطاقات الذاكرة') === true,
+    gamesAvailableBeforeReview: games(waiting).length === 2 && games(waiting).every(button => !button.disabled),
   };
   const secondGate = {
     ...gate,
@@ -492,6 +503,7 @@ const probe = `(async () => {
     masteredResult,
     withoutLoadResult,
     readyResult,
+    gateReviewResult,
     rankCompletedResult,
     rankMasteredResult,
     newContentResult,

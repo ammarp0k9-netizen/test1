@@ -362,6 +362,10 @@ function closeQuizSetup() {
 }
 
 function openQuizModeSettings(mode) {
+  if (isQuizPracticeMode(mode) && isPersonalQuizDue()) {
+    refreshQuizPracticeAvailability();
+    return;
+  }
   syncQuizSourceOptions();
   selectedQuizMode = QUIZ_MODE_META[mode] ? mode : 'flashcards';
   const ownerId = getQuizSourceOwnerId();
@@ -1108,15 +1112,54 @@ function getConfiguredQuizWords(options = {}) {
   return buildSmartQuizDeck(sourceWords, count, options);
 }
 
-function refreshQuizAvailableCount() {
-  window.LootLinguaGateRunner?.refreshProgressUI?.();
-  window.LootLinguaGateRunner?.mountPreview?.(document.getElementById('runnerModePreview'));
+const personalQuizPracticeLockCopy = 'حان وقت اختبار قاموسك الشخصي. اختر المطابقة أو الصندوق المشفّر أو الهروب من النسيان، وحدّد القاموس الشخصي مصدرًا للكلمات. الاختبار الموثوق يقيس مستواك ويرفع إتقانك. الألعاب متوقفة مؤقتًا، وبطاقات الذاكرة متاحة للتدريب.';
+
+function isQuizPracticeMode(mode) {
+  return mode === 'runner' || mode === 'lootBots';
+}
+
+function personalQuizDueAt() {
+  return window.LootLinguaNotificationSources?.personalQuizDueAt?.(getQuizSourceOwnerId()) || 0;
+}
+
+function isPersonalQuizDue() {
+  const dueAt = personalQuizDueAt();
+  return dueAt > 0 && Date.now() >= dueAt;
+}
+
+function refreshQuizPracticeAvailability() {
+  if (currentView !== 'quiz') return;
+  const locked = isPersonalQuizDue();
+  const explanation = document.getElementById('quizPracticeLock');
+  if (explanation) {
+    explanation.hidden = !locked;
+    if (locked) explanation.textContent = personalQuizPracticeLockCopy;
+  }
+  for (const id of ['runnerDictionary', 'lootBotsDictionary']) {
+    const button = document.getElementById(id);
+    if (button) {
+      button.disabled = locked;
+      if (locked) button.setAttribute('aria-describedby', 'quizPracticeLock');
+      else button.removeAttribute('aria-describedby');
+    }
+  }
   const runnerLock = document.getElementById('runnerModeLock');
   if (runnerLock) {
     const ready = getQuizSourceResolutionStatus('personal') === 'ready';
     const count = getQuizSourceWords('personal', { mode: 'runner' }).length;
-    runnerLock.textContent = ready && count >= 10 ? 'الطريق مفتوح · انطلق!' : ready ? `تفتح عند 10 كلمات · ${count}/10` : 'تفتح عند 10 كلمات في قاموسك';
+    runnerLock.textContent = locked ? 'أكمل اختبار قاموسك أولًا' :
+      ready && count >= 10 ? 'الطريق مفتوح · انطلق!' : ready ? `تفتح عند 10 كلمات · ${count}/10` : 'تفتح عند 10 كلمات في قاموسك';
   }
+  if (isQuizPracticeMode(selectedQuizMode) && document.getElementById('quizSettingsPanel')?.style.display === 'block') {
+    refreshQuizSettingsSummary();
+  }
+}
+window.refreshQuizPracticeAvailability = refreshQuizPracticeAvailability;
+
+function refreshQuizAvailableCount() {
+  refreshQuizPracticeAvailability();
+  window.LootLinguaGateRunner?.refreshProgressUI?.();
+  window.LootLinguaGateRunner?.mountPreview?.(document.getElementById('runnerModePreview'));
   const quizCountEl = document.getElementById('quizAvailableCount');
   if (!quizCountEl) return;
   const pageState = window.LootLinguaDictionaryPages?.current()?.state();
@@ -1152,6 +1195,11 @@ function refreshQuizSettingsSummary() {
   const summary = document.getElementById('quizSettingsSummary');
   const sourceText = getQuizSourceLabel(currentQuizSource);
   const startButton = document.getElementById('quizStartButton');
+  if (isQuizPracticeMode(selectedQuizMode) && isPersonalQuizDue()) {
+    if (summary) summary.textContent = personalQuizPracticeLockCopy;
+    if (startButton) startButton.disabled = true;
+    return;
+  }
   if (selectedQuizMode === 'runner') {
     const personalCount = getQuizSourceWords('personal', { mode: 'runner' }).length;
     const meanings = new Set(candidates.map(word => word.meaning || word.translation));
@@ -1188,16 +1236,24 @@ function refreshQuizSettingsSummary() {
 }
 
 function startConfiguredQuiz() {
+  if (isQuizPracticeMode(selectedQuizMode) && isPersonalQuizDue()) {
+    refreshQuizSettingsSummary();
+    return false;
+  }
   if (selectedQuizMode === 'runner') return startDictionaryRunner();
   if (selectedQuizMode === 'lootBots') {
     const scope = currentQuizSource;
+    let dueAt = personalQuizDueAt();
     return window.LootLinguaBots?.launchDictionary(document.getElementById('quizStartButton'), {
       source: getQuizSourceLabel(scope),
+      practiceLocked: isPersonalQuizDue,
+      isRunLocked: () => dueAt > 0 && Date.now() >= dueAt,
       isSourceCurrent: () => currentView === 'quiz' && selectedQuizMode === 'lootBots' && currentQuizSource === scope &&
         document.getElementById('quizSettingsPanel')?.style.display !== 'none',
       words: async () => {
         const snapshot = await ensureQuizSourceReady(scope, { mode: 'lootBots' });
         if (!snapshot || snapshot.error || snapshot.stale) throw new Error('Dictionary source unavailable');
+        dueAt = personalQuizDueAt();
         return snapshot.candidates;
       },
     });
@@ -1207,7 +1263,7 @@ function startConfiguredQuiz() {
 
 let dictionaryRunnerPreparing = false;
 async function startDictionaryRunner() {
-  if (dictionaryRunnerPreparing) return false;
+  if (dictionaryRunnerPreparing || isPersonalQuizDue()) return false;
   dictionaryRunnerPreparing = true;
   const ownerId = getQuizSourceOwnerId(), scope = currentQuizSource;
   const generation = Number(window.__lootlinguaAuthGeneration) || 0;
@@ -1230,8 +1286,10 @@ async function startDictionaryRunner() {
       const index = deck.findIndex((word, position) => deck.some((other, otherPosition) => otherPosition !== position && meaning(other) === meaning(word)));
       if (index >= 0) deck[index] = candidate;
     }
+    const dueAt = personalQuizDueAt();
     return await window.LootLinguaGateRunner.launch({
       source: 'dictionary', scope, words: deck, isCurrent,
+      practiceLocked: () => dueAt > 0 && Date.now() >= dueAt,
       onPractice: () => openQuizModeSettings('matching'),
     });
   } catch (error) { showToast('تعذّر تجهيز اللعبة. حاول مجددًا.', 'warning'); return false; }

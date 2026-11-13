@@ -53,6 +53,7 @@
     }
     if (generation !== evaluationGeneration || currentOwner() !== ownerId) return null;
     lastFacts = facts;
+    root.refreshQuizPracticeAvailability?.();
     const isSessionLikeReturn = reason === 'foreground' || reason === 'visible-wake';
     const canTryUrgentReentry = sessionProminentClaimed &&
       !urgentProminentOverrideClaimed &&
@@ -132,6 +133,7 @@
     else if (action === 'open-motivation-rewards') root.LootLinguaMotivation?.openHistory?.();
     else if (action === 'open-feature-discovery') handled = root.LootLinguaFeatureDiscovery?.open?.(String(args.feature || '')) === true;
     else if (action === 'resume-public-world-onboarding') {
+      if (root.LootLinguaFeatureDiscovery?.isInteractiveJourneyActive?.()) return false;
       handled = await root.LootLinguaEntryExperienceController?.consumePendingJourneyIntent?.({ explicitDiscovery: true }) === true;
       if (handled) store.resolve(record.id, 'public-world-resumed');
       else { root.loadWorldsView?.(); handled = true; }
@@ -184,6 +186,7 @@
     'lootlingua:trusted-quiz-completed',
     'lootlingua:learning-data-changed',
     'lootlingua:dictionary-page-state',
+    'lootlingua:test-clock-changed',
   ];
   events.forEach((name) => root.addEventListener(name, () => requestEvaluation(name)));
   root.addEventListener('lootlingua:auth-state', () => {

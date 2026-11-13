@@ -51,12 +51,17 @@
   function captureRunnerOwner() { return { uid: window.auth?.currentUser?.uid || '', generation: Number(window.__lootlinguaAuthGeneration) || 0 }; }
   function runnerOwnerCurrent(owner) { return owner.uid === (window.auth?.currentUser?.uid || '') && owner.generation === (Number(window.__lootlinguaAuthGeneration) || 0); }
   const node = (tag, cls, text) => { const el = document.createElement(tag); if (cls) el.className = cls; if (text != null) el.textContent = text; return el; };
-  function reviewIsDue(progress, now = Date.now()) {
+  function reviewIsDue(progress, now = window.LootLinguaTestClock?.effectiveNow?.() ?? Date.now()) {
+    if (progress?.status && progress.status !== 'learning') return false;
     const due = Array.from(new Set((progress?.runnerReviewDueWordKeys || []).map(String).filter(Boolean)));
     const completed = new Set((progress?.runnerReviewCompletedDueWordKeys || []).map(String));
-    const nextAt = Number(progress?.readinessNextAt?.toMillis?.() ?? progress?.readinessNextAt) || 0;
+    const next = progress?.readinessNextAt;
+    const nextAt = Number(next?.toMillis?.() ?? (next?.seconds != null ? next.seconds * 1000 + (next.nanoseconds || 0) / 1e6 : next)) || 0;
     const unresolvedDue = Number(progress?.availableForReviewNowCount) > 0 && (!due.length || due.some((key) => !completed.has(key)));
     return unresolvedDue || (nextAt > 0 && nextAt <= now);
+  }
+  function practiceLocked(context) {
+    return Boolean(context?.practiceLocked ? context.practiceLocked() : context?.progress?.status === 'ready' || reviewIsDue(context?.progress));
   }
   function render(context) {
     const card = node('aside', 'gate-runner-card'), copy = node('div', 'gate-runner-card-copy');
@@ -68,14 +73,13 @@
       node('span', '', 'تفادَ العوائق واعبر بوابة المعنى الصحيح. الجري لا يزيد الإتقان أو جاهزية البوابة. لرفع الجاهزية اختر المطابقة أو الصندوق المشفّر أو الهروب من النسيان.'),
       totals);
     const play = node('button', 'gate-runner-launch', 'ابدأ الجري'); play.type = 'button';
-    const due = reviewIsDue(context?.progress); play.disabled = due; play.setAttribute('aria-disabled', String(due));
+    const due = practiceLocked(context); play.disabled = due;
     play.addEventListener('click', async () => {
       if (play.disabled) return; play.disabled = true; play.setAttribute('aria-busy', 'true'); play.textContent = 'جارٍ تجهيز الطريق…';
       try { await launch(context); }
-      finally { play.disabled = reviewIsDue(context?.progress); play.removeAttribute('aria-busy'); play.textContent = 'ابدأ الجري'; }
+      finally { play.disabled = practiceLocked(context); play.removeAttribute('aria-busy'); play.textContent = 'ابدأ الجري'; }
     });
     card.append(copy, play);
-    if (due) card.append(node('p', 'gate-runner-review-lock', 'حان وقت مراجعة البوابة. أكمل المراجعة الموثّقة أولًا، ثم ارجع للجري.'));
     return card;
   }
   async function getWords(context) {
@@ -191,14 +195,13 @@
     }
     const owner = captureRunnerOwner();
     if (launchPending && runnerOwnerCurrent(launchPending.owner)) return false;
-    if (reviewIsDue(context?.progress)) { window.showToast?.('حان وقت المراجعة الموثّقة أولًا.', 'info'); return false; }
+    if (practiceLocked(context) || (context?.isCurrent && !context.isCurrent())) return false;
     const operation = { owner }; launchPending = operation;
     let words;
     try { await ensureResources(); words = await getWords(context); }
     catch (error) { if (runnerOwnerCurrent(owner)) window.showToast?.('تعذّر تحميل اللعبة أو كلمات البوابة. حاول مجددًا.', 'warning'); return false; }
     finally { if (launchPending === operation) launchPending = null; }
-    if (!runnerOwnerCurrent(owner) || reviewIsDue(context?.progress) || activeRun) return false;
-    if (context?.source === 'dictionary' && context.isCurrent && !context.isCurrent()) return false;
+    if (!runnerOwnerCurrent(owner) || practiceLocked(context) || activeRun || (context?.isCurrent && !context.isCurrent())) return false;
 
     const scope = context?.source === 'dictionary' ? context.scope || 'personal' : JSON.stringify([context?.worldId, context?.rankId, context?.gateId]);
     const recent = recentPrompts.get(scope) || [];
@@ -433,7 +436,7 @@
     function frame(now) {
       if (destroyed) return;
       if (!runnerOwnerCurrent(owner)) { cleanup(); return; }
-      if (now - lastDueCheck > 1000) { lastDueCheck = now; if (reviewIsDue(context?.progress)) { finish('حان وقت المراجعة الموثّقة'); return; } }
+      if (now - lastDueCheck > 1000) { lastDueCheck = now; if (practiceLocked(context)) { finish('حان وقت الاختبار الموثوق'); return; } }
       const delta = Math.min(50, Math.max(0, now - previous)); previous = now;
       E.update(state, delta);
       for (const event of state.events) {

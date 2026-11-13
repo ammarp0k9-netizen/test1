@@ -294,7 +294,7 @@ function getLootAvailability() {
 
 function pickDailyLootReward() {
   const roll = Math.random();
-  if (roll < 0.04) return { type: 'freeze', freezes: 1, label: 'حماية السلسلة اليومية' };
+  if (roll < 0.10) return { type: 'freeze', freezes: 1, label: 'حماية السلسلة اليومية' };
   if (roll < 0.58) return { type: 'xp', xp: 5 + Math.floor(Math.random() * 16), label: 'XP سريع' };
   if (roll < 0.88) return { type: 'xp', xp: 21 + Math.floor(Math.random() * 20), label: 'XP محترم' };
   return { type: 'xp', xp: 41 + Math.floor(Math.random() * 10), label: 'ضربة ذهبية' };
@@ -4255,6 +4255,10 @@ async function openPublishedGateQuizPicker(world, rank, gate) {
   const existing = document.getElementById('publishedGateQuizPicker');
   if (existing) { window.LootLinguaModalFocus?.close(existing, { restoreFocus: false }); existing.remove(); }
   const progress = publishedContentState.gateProgress;
+  const origin = currentView;
+  const owner = window.__lootlinguaAuthGeneration;
+  const pickerCurrent = () => currentView === origin && window.__lootlinguaAuthGeneration === owner &&
+    (origin !== 'worlds' || isPublishedGateRoute(world.worldId, rank.rankId, gate.gateId));
   let words = [];
   try {
     words = await getJourneyCloudApi().getGateQuizWords(
@@ -4264,9 +4268,10 @@ async function openPublishedGateQuizPicker(world, rank, gate) {
       { progress, force: true }
     );
   } catch (error) {
-    showToast(publishedJourneyErrorText(error), 'danger', 4800);
+    if (pickerCurrent()) showToast(publishedJourneyErrorText(error), 'danger', 4800);
     return;
   }
+  if (!pickerCurrent() || document.getElementById('publishedGateQuizPicker')) return;
   if (!words.length) {
     showToast('لا توجد كلمات محمّلة لهذه البوابة بعد.', 'warning', 4200);
     return;
@@ -4292,7 +4297,7 @@ async function openPublishedGateQuizPicker(world, rank, gate) {
       <div class="published-gate-quiz-modes"></div>
       <small class="published-gate-quiz-note">لرفع الإتقان وجاهزية البوابة، اختر المطابقة أو الصندوق المشفّر أو الهروب من النسيان وأجب صحيحًا من المحاولة الأولى. بطاقات الذاكرة والجري وتصحيح الخطأ داخل المطابقة للتدريب فقط.</small>
     </div>`;
-  const officialReviewDueWordKeys = Number(progress?.availableForReviewNowCount) > 0 ? words.map((word) => {
+  const officialReviewDueWordKeys = window.LootLinguaGateRunner?.reviewIsDue(progress) ? words.map((word) => {
     const status = window.LootLinguaLearningEvidence?.getWordGateReadiness?.(word)?.status;
     return ['needs-first-review', 'second-review-available', 'next-day-review-available'].includes(status) ? String(window.LootLinguaWordLifecycle?.wordKeyOf?.(word) || word?.wordKey || '') : '';
   }).filter(Boolean) : [];
@@ -4317,21 +4322,6 @@ async function openPublishedGateQuizPicker(world, rank, gate) {
     button.addEventListener('click', () => { void choose(mode.id); });
     modes.append(button);
   });
-  if (window.LootLinguaBots?.launchGatePractice) {
-    const view = currentView;
-    const play = publishedElement('button', 'published-gate-quiz-mode');
-    play.type = 'button';
-    play.append(publishedIcon('fa-solid fa-robot'));
-    const copy = publishedElement('span');
-    copy.append(publishedElement('strong', '', 'Loot Bots'), publishedElement('small', '', 'العب بكلمات هذه البوابة. تدريب دون رفع الإتقان.'));
-    play.append(copy);
-    play.addEventListener('click', () => { void window.LootLinguaBots.launchGatePractice(play, {
-      source: `كلمات بوابة ${gate.title || ''}`.trim(),
-      words: () => words,
-      isSourceCurrent: () => shell.isConnected && currentView === view,
-    }); });
-    modes.append(play);
-  }
   shell.querySelector('.published-gate-quiz-backdrop')?.addEventListener('click', close);
   shell.querySelector('.published-gate-quiz-close')?.addEventListener('click', close);
   shell.addEventListener('keydown', (event) => { if (event.key === 'Escape') close(); });
@@ -4985,25 +4975,30 @@ function schedulePublishedReadinessTimer(progress, statusElement) {
   if (!statusElement || !nextAt || Number(progress?.readyWordCount) >= Number(progress?.requiredWordCount)) {
     return;
   }
+  const wasWaiting = nextAt > publishedEffectiveNow();
   const update = () => {
     if (!statusElement.isConnected) return;
     const remaining = nextAt - publishedEffectiveNow();
     if (remaining <= 0) {
-      statusElement.textContent = 'أصبحت الخطوة التالية متاحة الآن. ابدأ كويز هذه البوابة لرفع الشريط.';
+      statusElement.textContent = 'حان وقت المراجعة الرسمية. اختر اختبارًا موثوقًا لرفع جاهزية البوابة.';
       statusElement.classList.add('is-due');
       publishedContentState.readinessTimer = null;
+      if (wasWaiting) {
+        if (currentView === 'worlds' && publishedContentState.tab === 'published') rerenderPublishedRoute();
+        window.LootLinguaNotificationRuntime?.requestEvaluation?.('gate-review-due');
+      }
       return;
     }
     statusElement.textContent = `تفتح المراجعة التالية خلال ${formatPublishedReadinessWait(remaining)}.`;
     publishedContentState.readinessTimer = setTimeout(update, Math.min(remaining, 60000));
   };
-  update();
+  publishedContentState.readinessTimer = setTimeout(update, 0);
 }
 
 window.addEventListener('lootlingua:test-clock-changed', () => {
   const readinessCopy = document.querySelector('.published-gate-readiness-copy');
   if (readinessCopy && publishedContentState.gateProgress) {
-    schedulePublishedReadinessTimer(publishedContentState.gateProgress, readinessCopy);
+    rerenderPublishedRoute();
   }
 });
 
@@ -5039,6 +5034,12 @@ function makePublishedGateJourneyPanel(world, rank, gate) {
     'section',
     `published-gate-journey published-gate-journey-${state} published-gate-state-card`
   );
+  const isCurrentGate = () => currentView === 'worlds' && publishedContentState.tab === 'published' &&
+    isPublishedGateRoute(world.worldId, rank.rankId, gate.gateId);
+  const practiceLocked = () => {
+    const current = isCurrentGate() ? publishedContentState.gateProgress : progress;
+    return current?.status === 'ready' || window.LootLinguaGateRunner?.reviewIsDue(current) === true;
+  };
   const clearedWithoutLoad = Boolean(
     progress?.status === 'cleared' &&
     progress?.clearedBy === 'level-placement' &&
@@ -5136,7 +5137,7 @@ function makePublishedGateJourneyPanel(world, rank, gate) {
     const readinessCopy = publishedElement('p', 'published-gate-readiness-copy');
     if (state === 'ready') {
       readinessCopy.textContent = 'اكتمل شريط الاستعداد. أصبح اختبار اجتياز البوابة متاحًا الآن.';
-    } else if (availableToday > 0) {
+    } else if (availableToday > 0 && practiceLocked()) {
       readinessCopy.textContent = `يمكنك رفع الشريط الآن: أجب بشكل صحيح على ${availableToday} كلمات متاحة في كويز هذه البوابة.`;
     } else if (waitingToday > 0) {
       readinessCopy.textContent = 'أخذت هذه الكلمات خطوتها الأولى. يمكنك التدريب، لكن الخطوة التالية لها ستفتح بعد ساعتين على الأقل.';
@@ -5153,9 +5154,11 @@ function makePublishedGateJourneyPanel(world, rank, gate) {
       rankId: rank.rankId,
       gateId: gate.gateId,
       progress,
+      isCurrent: isCurrentGate,
+      practiceLocked,
     });
     if (runner) panel.append(runner);
-    if (state !== 'ready' && availableToday === 0 && (waitingToday > 0 || waitingTomorrow > 0)) {
+    if (state === 'learning' && publishedTimestampMillis(progress?.readinessNextAt)) {
       schedulePublishedReadinessTimer(progress, readinessCopy);
     }
   }
@@ -5166,10 +5169,15 @@ function makePublishedGateJourneyPanel(world, rank, gate) {
       rankId: rank.rankId,
       gateId: gate.gateId,
       title: gate.title,
-      isSourceCurrent: () => currentView === 'worlds' && publishedContentState.tab === 'published' &&
-        isPublishedGateRoute(world.worldId, rank.rankId, gate.gateId),
+      isSourceCurrent: isCurrentGate,
+      practiceLocked,
     });
     if (bots) panel.append(bots);
+  }
+  if (practiceLocked()) {
+    panel.append(publishedElement('p', 'gate-runner-review-lock', state === 'ready'
+      ? 'حان وقت اختبار اجتياز البوابة. أكمله لتتقدم نحو البوابات التالية. ألعاب التدريب متوقفة مؤقتًا.'
+      : 'حان وقت المراجعة الرسمية. اختر المطابقة أو الصندوق المشفّر أو الهروب من النسيان لتتقدم نحو اجتياز البوابة. بطاقات الذاكرة متاحة للتدريب.'));
   }
 
   const action = publishedContentState.journeyAction;
@@ -5230,7 +5238,7 @@ function makePublishedGateJourneyPanel(world, rank, gate) {
     actions.append(load);
   } else if (state === 'learning') {
     actions.append(publishedButton(
-      Number(progress?.availableForReviewNowCount) > 0
+      practiceLocked()
         ? 'ابدأ المراجعة الرسمية لهذه البوابة'
         : 'تدرّب على كلمات هذه البوابة — متابعة التعلم',
       'published-action-btn published-journey-btn published-journey-cta published-gate-practice-cta',
@@ -6579,6 +6587,9 @@ window.addEventListener('lootlingua:word-mastery-snapshot', scheduleCurrentGateM
 
 window.addEventListener('lootlingua:journey-changed', (event) => {
   const detail = event.detail || {};
+  // Readiness projections feed the contextual reminder. Replaying the generic
+  // progress notice here would announce the same review on every projection.
+  if (['gate-readiness', 'gate-ready'].includes(detail.type)) return;
   const message = detail.type === 'world-completed'
     ? 'أحسنت! أكملت آخر بوابة في هذا العالم.'
     : detail.nextGateId

@@ -207,14 +207,19 @@ test('the same verified quiz on two devices increments activity, perfect count a
 test('guest snapshot receipts remain permanent after recovery cleanup and later spending', async () => {
   const db = database({ userXP: 100, runnerCoins: 10, streakFreezes: 0 });
   const a = client(db), b = client(db);
-  const imported = { type: 'guest-import', eventId: 'guest-snapshot', profile: { userXP: 180, runnerCoins: 5, streakFreezes: 1 } };
+  const personalAt = Date.parse('2026-11-04T12:00:00Z');
+  const imported = { type: 'guest-import', eventId: 'guest-snapshot', profile: { userXP: 180, runnerCoins: 5, streakFreezes: 1, lastPersonalTrustedQuizAt: personalAt } };
   assert.equal((await a.root.commitProfileIntent(imported)).saved, true);
   await b.root.commitProfileIntent({ type: 'wallet-delta', field: 'runnerCoins', amount: -7, eventId: 'spent' });
   await b.root.commitProfileIntent({ type: 'learning-day', day: '2026-11-05' });
+  await b.root.commitProfileIntent({ type: 'quiz-activity', eventId: 'gate-quiz', day: '2026-11-05', answers: 4 });
+  assert.equal(db.profile().lastPersonalTrustedQuizAt, personalAt);
+  await b.root.commitProfileIntent({ type: 'quiz-activity', eventId: 'personal-quiz', day: '2026-11-05', answers: 4, personalAt: personalAt + 86400000 });
   await a.root.commitProfileIntent(imported);
   assert.equal(db.profile().runnerCoins, 8);
   assert.equal(db.profile().streakFreezes, 1);
   assert.equal(db.profile().userXP, 180);
+  assert.equal(db.profile().lastPersonalTrustedQuizAt, personalAt + 86400000);
 });
 
 test('simultaneous chest openings confirm at most one reward and spent freezes do not reappear', async () => {

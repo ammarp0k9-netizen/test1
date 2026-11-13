@@ -180,6 +180,7 @@ function guestMigrationSnapshotFingerprint(snapshot) {
       lastActivityDate: profile.lastActivityDate || '',
       activityMap: profile.activityMap || {},
       quizExposureHistory: profile.quizExposureHistory || [],
+      ...(profile.lastPersonalTrustedQuizAt ? { lastPersonalTrustedQuizAt: profile.lastPersonalTrustedQuizAt } : {}),
       addedGameWords: profile.addedGameWords || [],
       dailyLootState: profile.dailyLootState || {},
       titlesState: profile.titlesState || {},
@@ -267,6 +268,7 @@ function purgeStaleGuestLocalData() {
   localStorage.removeItem(getCustomWorldsStorageKey('guest'));
   localStorage.removeItem(getPendingCustomWorldsStorageKey('guest'));
   localStorage.removeItem('lootlinguaQuizExposureHistory_guest');
+  localStorage.removeItem('lootlinguaLastPersonalTrustedQuizAt_guest');
   localStorage.removeItem('lootlinguaWordMastery_guest');
   localStorage.removeItem('lootlinguaMotivation_v1_guest');
   localStorage.removeItem('active_quiz_session');

@@ -60,6 +60,20 @@ async function evaluate(expression) {
   return response.result?.value;
 }
 
+async function clickVisible(expression) {
+  const point = await evaluate(`(() => {
+    const element = ${expression};
+    const rect = element?.getBoundingClientRect();
+    if (!rect?.width || !rect?.height || element.closest('[inert]')) return null;
+    const x = rect.left + rect.width / 2, y = rect.top + rect.height / 2;
+    return element.contains(document.elementFromPoint(x, y)) ? { x, y } : null;
+  })()`);
+  if (!point) return false;
+  await send('Input.dispatchMouseEvent', { type: 'mousePressed', button: 'left', clickCount: 1, ...point });
+  await send('Input.dispatchMouseEvent', { type: 'mouseReleased', button: 'left', clickCount: 1, ...point });
+  return true;
+}
+
 async function waitFor(expression, label, timeoutMs = 12000) {
   const started = Date.now();
   while (Date.now() - started < timeoutMs) {
@@ -104,8 +118,8 @@ const fixture = `(() => {
       occurrenceKey: 'visual:streak', actionGroup: 'practice', priority: 95,
       severity: 'high', status: 'active', visualType: 'warning',
       title: 'حافظ على سلسلتك',
-      message: 'سلسلتك 8 أيام وما سجّلت ممارسة اليوم. راجع 5 كلمات مستحقة بخطوة قصيرة.',
-      cta: { id: 'review-due', label: 'ابدأ الممارسة', args: {} },
+      message: 'سلسلتك 8 أيام وما سجّلت ممارسة اليوم. اختبر نفسك قبل نهاية اليوم.',
+      cta: { id: 'start-quiz', label: 'ابدأ الممارسة', args: {} },
       createdAt: now - 120000, updatedAt: now - 120000,
     },
     {
@@ -318,7 +332,10 @@ try {
       top: visibleRect.top,
       visible: toast.classList.contains('show'),
     };
-    await new Promise(resolve => setTimeout(resolve, 1280));
+    const exitDeadline = performance.now() + 2200;
+    while ((toast.classList.contains('show') || toast.getBoundingClientRect().top >= firstState.top) && performance.now() < exitDeadline) {
+      await new Promise(resolve => requestAnimationFrame(resolve));
+    }
     const exitRect = toast.getBoundingClientRect();
     return {
       ...firstState,
@@ -330,6 +347,33 @@ try {
   results.assertions.toastDifferentQueuePreserved = toastProbe.queued.join('|') === 'Queued different one|Queued different two';
   results.assertions.toastCenteredFromStart = toastProbe.visible === true && toastProbe.centeredDelta <= 1;
   results.assertions.toastExitsUpward = toastProbe.exitedShowState === true && toastProbe.exitMovedUp === true;
+  const quizPractice = await evaluate(`(async () => {
+    window.__entryExperienceActive = false;
+    const now = Date.now();
+    const storedWords = readWordsFromStorage('normal', 'guest');
+    const entries = Array.from({ length: 10 }, (_, i) => ({
+      id: 'quiz-lock-' + i, word: 'term' + i, meaning: 'معنى ' + i, createdAt: new Date(now - 5 * 86400000).toISOString(),
+    }));
+    writeWordsToStorage(entries, 'normal', 'guest');
+    loadQuizView({ skipResume: true });
+    const runner = document.getElementById('runnerDictionary');
+    const bots = document.getElementById('lootBotsDictionary');
+    const flashcards = document.querySelector('.quiz-mode-flashcards');
+    const note = document.getElementById('quizPracticeLock');
+    const locked = runner.disabled && bots.disabled && !flashcards.disabled && !note.hidden;
+    runner.click();
+    bots.click();
+    const blocksLaunch = document.getElementById('quizSettingsPanel').style.display === 'none';
+    const facts = await LootLinguaNotificationSources.collect({ ownerId: 'guest', now });
+    const reminder = LootLinguaNotificationEngine.evaluate(facts, [], { now }).upserts.find(item => item.notificationType === 'reminder.quiz.inactive');
+    rememberLastPersonalTrustedQuizAt(now, 'guest');
+    refreshQuizPracticeAvailability();
+    const unlocked = !runner.disabled && !bots.disabled && note.hidden;
+    localStorage.removeItem('lootlinguaLastPersonalTrustedQuizAt_guest');
+    writeWordsToStorage(storedWords, 'normal', 'guest');
+    return { locked, blocksLaunch, correctReminder: reminder?.cta?.id === 'start-quiz', unlocked };
+  })()`);
+  Object.entries(quizPractice).forEach(([key, value]) => { results.assertions['dictionary-practice-' + key] = value; });
   // Exercise the real discovery controllers and real page DOM in this
   // isolated browser profile; no cloud/user records are written.
   for (const width of [1280, 320, 390]) {
@@ -427,7 +471,10 @@ try {
       const state = await evaluate(`LootLinguaPersonalDictionaryOnboarding.getState()`);
       if (state.phase === 'completed') break;
       await waitFor(`LootLinguaPopover.canAct('personalDictionaryOnboardingCoach')`, 'dictionary guide reading delay');
-      await evaluate(`(async () => {
+      if (state.step === 8) {
+        results.assertions['xp-continue-receives-pointer-'+width] = await clickVisible("document.querySelector('#personalDictionaryOnboardingCoach button')");
+        if (!results.assertions['xp-continue-receives-pointer-'+width]) throw new Error('XP Continue cannot receive a pointer at width ' + width);
+      } else await evaluate(`(async () => {
         const step = LootLinguaPersonalDictionaryOnboarding.getState().step || 0;
         if (step===0) document.querySelector('#legendDock [data-dock-view="personal"]').click();
         else if (step===1) {
@@ -445,15 +492,33 @@ try {
       })()`);
       if (state.step === 1) {
         await waitFor(`typeof window.__smokeFinishSearch === 'function'`, 'guest request starts');
+        if (width === 1280) {
+          await waitFor(`document.querySelector('.dictionary-search-tip')?.hidden === false`, 'slow search tip');
+          results.assertions.slowSearchShowsLearningFact = await evaluate(`document.querySelector('.dictionary-search-tip').textContent.length > 15 &&
+            !document.querySelector('.dictionary-search-status').textContent.includes('العودة')`);
+        }
         await evaluate(`loadWorldsView()`);
         await waitFor(`!document.getElementById('onboardingResume').hidden`, 'guide return action');
         results.assertions['no-dictionary-coach-on-worlds-'+width] = await evaluate(`!document.getElementById('personalDictionaryOnboardingCoach')`);
+        results.assertions['no-discovery-during-core-on-worlds-'+width] = await evaluate(`(() => {
+          LootLinguaFeatureDiscovery.evaluate();
+          return !document.querySelector('.feature-discovery-ready') &&
+            !LootLinguaNotificationStore.getDisplayRecords().some(item => item.cta?.id === 'open-feature-discovery');
+        })()`);
         await evaluate(`window.__smokeFinishSearch(); window.__smokeFinishSearch=null;`);
         await waitFor(`JSON.parse(localStorage.getItem('lootlingua:dictionary-search:v1:guest:personal')).status === 'success'`, 'result saved away from dictionary');
         await evaluate(`document.getElementById('onboardingResume').click()`);
         await waitFor(`!!document.querySelector('#suggestionsList [data-action="select-ai-meaning"]')`, 'meaning after return');
         results.assertions['one-guest-request-'+width] = await evaluate(`window.__smokeSearchStarts === ${width === 1280 ? 1 : 2} && isGuestSearchLocked('normal')`);
         results.assertions['resumed-meaning-guide-'+width] = await evaluate(`LootLinguaPersonalDictionaryOnboarding.getState().step === 2`);
+        if (width === 1280) {
+          await waitFor(`LootLinguaPopover.canAct('personalDictionaryOnboardingCoach')`, 'allow meaning controls');
+          await evaluate(`document.querySelector('#suggestionsList .dictionary-search-recovery').click()`);
+          results.assertions.hiddenMeanings = await evaluate(`!document.querySelector('#suggestionsList [data-action="select-ai-meaning"]') && document.querySelector('#suggestionsList button').textContent === 'عرض المعاني'`);
+          await waitFor(`LootLinguaPopover.canAct('personalDictionaryOnboardingCoach')`, 'allow reopen meanings');
+          await evaluate(`document.querySelector('#suggestionsList .dictionary-search-recovery').click()`);
+          results.assertions.restoredMeaningsWithoutAnotherRequest = await evaluate(`!!document.querySelector('#suggestionsList [data-action="select-ai-meaning"]') && window.__smokeSearchStarts === 1`);
+        }
       }
       await delay(250);
       if ([4,8,13,16].includes(state.step)) results.screenshots.push(await screenshot('core-'+width+'-'+state.step+'.png'));

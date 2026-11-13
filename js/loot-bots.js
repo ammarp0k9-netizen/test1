@@ -86,8 +86,8 @@
     return resources;
   }
 
-  async function launch(button, { source, words, isSourceCurrent }) {
-    if (pending || window.__lootlinguaRunnerInputActive) return;
+  async function launch(button, { source, words, isSourceCurrent, practiceLocked = () => false, isRunLocked = practiceLocked }) {
+    if (pending || window.__lootlinguaRunnerInputActive || practiceLocked() || !isSourceCurrent()) return;
     pending = true;
     const uid = window.auth?.currentUser?.uid, generation = window.__lootlinguaAuthGeneration;
     const isCurrent = () => uid === window.auth?.currentUser?.uid && generation === window.__lootlinguaAuthGeneration && isSourceCurrent();
@@ -96,18 +96,18 @@
     try {
       const gameReady = loadGame().catch(error => { throw Object.assign(error, { botsAssetFailure: true }); });
       const [game, deck] = await Promise.all([gameReady, words()]);
-      if (!isCurrent() || window.__lootlinguaRunnerInputActive) return;
+      if (!isCurrent() || practiceLocked() || window.__lootlinguaRunnerInputActive) return;
       button.disabled = false;
       drain(uid);
       let result;
-      try { result = game.openBattle({ words: deck, source, isCurrent, returnFocus: button }); }
+      try { result = game.openBattle({ words: deck, source, isCurrent: () => isCurrent() && !isRunLocked(), returnFocus: button }); }
       catch (error) { throw Object.assign(error, { botsAssetFailure: true }); }
       if (result === 'small') window.showToast?.('الساحة تحتاج كلمتين على الأقل بمعنيين مختلفين من هذا المصدر.', 'info');
     } catch (error) {
       if (isCurrent()) window.showToast?.(error?.botsAssetFailure ? 'تعذّر تشغيل الساحة. أعد المحاولة.' : 'تعذّر تجهيز كلمات الساحة. حاول مرة ثانية.', 'warning');
     } finally {
       pending = false;
-      button.disabled = false; button.removeAttribute('aria-busy'); heading.textContent = label;
+      button.disabled = practiceLocked(); button.removeAttribute('aria-busy'); heading.textContent = label;
     }
   }
 
@@ -122,7 +122,7 @@
   }
 
   window.LootLinguaBots = {
-    launchDictionary: launch, launchGatePractice: launch, progress, record, saveAudio, newRunId: id, refreshStats,
+    launchDictionary: launch, progress, record, saveAudio, newRunId: id, refreshStats,
     guestProgress() { const data = progress(''); return hasRun(data) || Object.keys(data.audio).length ? data : null; },
     acceptProfile(profile, uid) {
       if (!uid || uid !== owner()) return;
@@ -131,14 +131,15 @@
       window.dispatchEvent(new Event('lootlingua:bots-profile'));
       queueMicrotask(() => drain(uid));
     },
-    renderGate({ worldId, rankId, gateId, title, isSourceCurrent }) {
+    renderGate({ worldId, rankId, gateId, title, isSourceCurrent, practiceLocked = () => false }) {
       const card = document.createElement('aside'); card.className = 'gate-runner-card loot-bots-gate-card';
       const copy = document.createElement('div'); copy.className = 'gate-runner-card-copy';
       const heading = document.createElement('strong'); heading.textContent = 'Loot Bots'; heading.lang = 'en';
       const desc = document.createElement('span'); desc.textContent = 'صوّب وقاتل وفكّ رمز محطة الطاقة بكلمات هذه البوابة. تدريب دون رفع الإتقان.';
       const button = document.createElement('button'); button.className = 'gate-runner-launch'; button.type = 'button'; button.textContent = 'ادخل الساحة';
+      button.disabled = practiceLocked();
       button.addEventListener('click', () => { void launch(button, {
-        source: `كلمات بوابة ${title || ''}`.trim(), isSourceCurrent,
+        source: `كلمات بوابة ${title || ''}`.trim(), isSourceCurrent, practiceLocked,
         words: () => window.LootLinguaPublishedContent.listAllPublishedGateWords(worldId, rankId, gateId),
       }); });
       const summary = document.createElement('small'); summary.className = 'gate-runner-cosmetic'; summary.dataset.botsStats = '';

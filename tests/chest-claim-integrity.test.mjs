@@ -7,6 +7,15 @@ const source = fs.readFileSync(new URL('../js/worlds.js', import.meta.url), 'utf
 const section = source.slice(source.indexOf('const chestXPUnlockInFlight'), source.indexOf('function evaluateChestXPUnlock'));
 const deferred = () => { let resolve; const promise = new Promise(done => { resolve = done; }); return { promise, resolve }; };
 
+test('daily chest grants a freeze below ten percent and keeps the other reward bands', () => {
+  const picker = source.slice(source.indexOf('function pickDailyLootReward'), source.indexOf('function updateLootStreak'));
+  const draw = (roll) => vm.runInNewContext(picker + ';pickDailyLootReward()', { Math: { random: () => roll, floor: Math.floor } });
+  assert.equal(draw(0.099).type, 'freeze');
+  assert.equal(draw(0.10).type, 'xp');
+  assert.equal(draw(0.58).label, 'XP محترم');
+  assert.equal(draw(0.88).label, 'ضربة ذهبية');
+});
+
 function harness() {
   let owner = 'a', award = async metadata => { metadata.awardStatus = 'awarded'; return 20; };
   const states = new Map(['a', 'b'].map(uid => [uid, { lockedXP: 20, lockStartedAt: 100, lockMasteredWordIds: ['one', 'two'], lockHighAccuracyQuizIds: ['quiz'], streak: 5 }]));

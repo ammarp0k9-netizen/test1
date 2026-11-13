@@ -7,6 +7,7 @@
     CHEST_READY: 'reminder.chest.ready',
     STREAK_RISK: 'reminder.streak.risk',
     REVIEW_DUE: 'reminder.review.due',
+    GATE_REVIEW: 'reminder.gate.review',
     GATE_PRACTICE: 'reminder.gate.practice',
     WORDS_NEW: 'reminder.words.new',
     QUIZ_INACTIVE: 'reminder.quiz.inactive',
@@ -23,6 +24,7 @@
     [TYPE.CHEST_READY]: { priority: 28, actionGroup: 'treasure', delay: 0, maxShows: 1 },
     [TYPE.STREAK_RISK]: { priority: 95, actionGroup: 'practice', delay: 0, maxShows: 2 },
     [TYPE.REVIEW_DUE]: { priority: 78, actionGroup: 'review', delay: 4 * HOUR, maxShows: 3 },
+    [TYPE.GATE_REVIEW]: { priority: 90, actionGroup: 'gate-review', delay: 0, maxShows: 1 },
     [TYPE.GATE_PRACTICE]: { priority: 66, actionGroup: 'gate-practice', delay: 21 * HOUR, maxShows: 2 },
     [TYPE.WORDS_NEW]: { priority: 48, actionGroup: 'new-words', delay: 30 * HOUR, maxShows: 1 },
     [TYPE.QUIZ_INACTIVE]: { priority: 58, actionGroup: 'practice', delay: 4 * DAY, maxShows: 2 },
@@ -68,6 +70,11 @@
     return existing.find((record) => clean(record?.occurrenceKey) === occurrenceKey) || null;
   }
 
+  function personalQuizDueAt(quiz, wordCount) {
+    const anchor = numeric(quiz?.lastPersonalTrustedQuizAt || quiz?.learningAnchorAt);
+    return wordCount >= 10 && anchor ? anchor + TABLE[TYPE.QUIZ_INACTIVE].delay : 0;
+  }
+
   function messageFor(type, facts, context) {
     switch (type) {
       case TYPE.CHEST_READY:
@@ -79,12 +86,14 @@
       }
       case TYPE.REVIEW_DUE:
         return { title: 'مراجعاتك بانتظارك', message: `لديك ${context.dueCount} كلمات مستحقة للمراجعة. جلسة قصيرة الآن تمنع تراكمها.`, cta: ['review-due', 'راجع الآن'], visualType: context.severe ? 'danger' : 'warning' };
+      case TYPE.GATE_REVIEW:
+        return { title: 'حان وقت مراجعة البوابة', message: `المراجعة الرسمية متاحة في بوابة ${context.gateLabel || 'رحلتك الحالية'}. أكمل اختبارًا موثوقًا لتتقدم نحو فتح البوابة التالية.`, cta: ['open-ready-gate', 'افتح البوابة'], visualType: 'warning' };
       case TYPE.GATE_PRACTICE:
         return { title: 'تدرّب قبل الاختبار', message: `في بوابة ${context.gateLabel || 'رحلتك'} ${context.unpracticedCount} كلمات موثوقة لم تتمرن عليها بعد.`, cta: ['practice-gate', 'تدرّب في البوابة'], visualType: 'warning' };
       case TYPE.WORDS_NEW:
         return { title: 'ثبّت كلماتك الجديدة', message: `أضفت ${context.wordCount} كلمات جديدة ولم تراجعها بعد. اختبر نفسك عليها الآن.`, cta: ['practice-new-words', 'راجع الكلمات'], visualType: 'info' };
       case TYPE.QUIZ_INACTIVE:
-        return { title: 'حان وقت اختبار قصير', message: `لديك ${context.wordCount} كلمات، ومرّ ${context.days} أيام دون Quiz مكتمل وموثوق.`, cta: ['start-quiz', 'ابدأ Quiz'], visualType: 'info' };
+        return { title: 'حان وقت اختبار قاموسك', message: 'اختر اختبارًا موثوقًا من صفحة الاختبار لقياس مستواك ورفع إتقان كلمات قاموسك الشخصي.', cta: ['start-quiz', 'افتح الاختبار'], visualType: 'info' };
       case TYPE.JOURNEY_NEXT_STEP:
         return { title: 'مهمتك التالية جاهزة', message: `بوابة ${context.gateLabel || 'رحلتك الحالية'} متاحة. افتحها وحمّل كلماتها لتبدأ المهمة.`, cta: ['open-journey-target', 'افتح المهمة'], visualType: 'info' };
       case TYPE.JOURNEY_INACTIVE:
@@ -174,13 +183,25 @@
       });
     }
 
-    const quizAnchor = numeric(facts.quiz.lastTrustedQuizAt || facts.quiz.learningAnchorAt);
-    if (facts.wordCount >= 10 && quizAnchor && now - quizAnchor >= 4 * DAY) {
+    const quizDueAt = personalQuizDueAt(facts.quiz, facts.wordCount);
+    if (quizDueAt && now >= quizDueAt) {
+      const quizAnchor = quizDueAt - TABLE[TYPE.QUIZ_INACTIVE].delay;
       rules.push({
         type: TYPE.QUIZ_INACTIVE,
         key: openKey(TYPE.QUIZ_INACTIVE, occurrence(TYPE.QUIZ_INACTIVE, quizAnchor)),
         since: quizAnchor,
         context: { wordCount: facts.wordCount, days: Math.floor((now - quizAnchor) / DAY) },
+      });
+    }
+
+    const gateReview = facts.gateReview;
+    if (gateReview?.due && gateReview.gateId) {
+      const { worldId, rankId, gateId, gateLabel, episodeKey } = gateReview;
+      rules.push({
+        type: TYPE.GATE_REVIEW,
+        key: occurrence(TYPE.GATE_REVIEW, worldId, rankId, gateId, episodeKey),
+        since: numeric(gateReview.dueAt) || now,
+        context: { worldId, rankId, gateId, gateLabel },
       });
     }
 
@@ -268,17 +289,20 @@
 
   function applyConflicts(rules, facts, reviewEligible) {
     const hasGateReady = rules.find((rule) => rule.type === TYPE.GATE_READY);
+    const hasGateReview = rules.find((rule) => rule.type === TYPE.GATE_REVIEW);
     const hasUnlock = rules.find((rule) => rule.type === TYPE.CONTENT_UNLOCKED);
     const hasJourneyNextStep = rules.find((rule) => rule.type === TYPE.JOURNEY_NEXT_STEP);
     const hasLongInactivity = rules.some((rule) => rule.type === TYPE.INACTIVITY);
     const hasLearningPriority = rules.some((rule) => [
-      TYPE.STREAK_RISK, TYPE.REVIEW_DUE, TYPE.GATE_READY,
+      TYPE.STREAK_RISK, TYPE.REVIEW_DUE, TYPE.GATE_READY, TYPE.GATE_REVIEW,
       TYPE.CONTENT_UNLOCKED, TYPE.JOURNEY_INACTIVE,
     ].includes(rule.type));
     return rules.filter((rule) => {
       if (reviewEligible && [TYPE.QUIZ_INACTIVE, TYPE.WORDS_WEAK].includes(rule.type)) return false;
       if (hasLongInactivity && rule.type === TYPE.CHEST_READY) return false;
       if (hasGateReady && [TYPE.GATE_PRACTICE, TYPE.JOURNEY_INACTIVE].includes(rule.type) && sameGate(rule, hasGateReady)) return false;
+      if (hasGateReady && rule.type === TYPE.GATE_REVIEW && sameGate(rule, hasGateReady)) return false;
+      if (hasGateReview && [TYPE.GATE_PRACTICE, TYPE.JOURNEY_INACTIVE].includes(rule.type) && sameGate(rule, hasGateReview)) return false;
       if (hasUnlock && rule.type === TYPE.JOURNEY_INACTIVE && sameGate(rule, hasUnlock)) return false;
       if (hasJourneyNextStep && rule.type === TYPE.JOURNEY_INACTIVE && sameGate(rule, hasJourneyNextStep)) return false;
       if (hasLearningPriority && rule.type === TYPE.FEEDBACK_REQUEST) return false;
@@ -387,6 +411,10 @@
     const deferredTypes = facts.dictionaryComplete === false ? new Set([
       TYPE.REVIEW_DUE, TYPE.WORDS_NEW, TYPE.WORDS_WEAK, TYPE.QUIZ_INACTIVE, TYPE.INACTIVITY,
     ]) : new Set();
+    if (facts.journeyComplete === false) {
+      [TYPE.GATE_PRACTICE, TYPE.GATE_REVIEW, TYPE.GATE_READY, TYPE.JOURNEY_NEXT_STEP, TYPE.JOURNEY_INACTIVE, TYPE.CONTENT_UNLOCKED]
+        .forEach((type) => deferredTypes.add(type));
+    }
     const raw = rawRules(facts).filter(rule => !deferredTypes.has(rule.type)).map((rule) => {
       const open = currentRecord(existing, rule.key);
       return open?.eligibleSince ? { ...rule, since: numeric(open.eligibleSince) } : rule;
@@ -399,11 +427,12 @@
     // A reminder suppressed by a stronger conflict may resume later as a new
     // occurrence without reviving its terminal tombstone.
     rules = rules.map((rule) => {
-      const suppressed = existing.find((record) => (
-        clean(record?.occurrenceKey) === rule.key &&
+      const suppressed = existing.filter((record) => (
+        (clean(record?.occurrenceKey) === rule.key || clean(record?.occurrenceKey).startsWith(`${rule.key}:resume:`)) &&
         ['resolved', 'dismissed'].includes(record?.status) &&
-        record?.resolutionReason === 'conflict-suppressed'
-      ));
+        (record?.resolutionReason === 'conflict-suppressed' ||
+          (rule.type === TYPE.REVIEW_DUE && record?.resolutionReason === 'source-cleared'))
+      )).sort((left, right) => numeric(right.updatedAt) - numeric(left.updatedAt))[0];
       return suppressed
         ? { ...rule, key: `${rule.key}:resume:${numeric(suppressed.resolvedAt || suppressed.dismissedAt || suppressed.updatedAt)}` }
         : rule;
@@ -411,13 +440,14 @@
     const rawAlive = new Set(raw.map((rule) => rule.key));
     const visibleAlive = new Set(rules.map((rule) => rule.key));
     const resolutions = existing.filter((record) => (
-      record?.kind === 'smart' && !deferredTypes.has(record.notificationType) &&
+      record?.kind === 'smart' && Object.hasOwn(TABLE, record.notificationType) && !deferredTypes.has(record.notificationType) &&
       ['pending', 'active'].includes(record.status) && !visibleAlive.has(clean(record.occurrenceKey))
     )).map((record) => ({
       id: record.id,
       reason: rawAlive.has(clean(record.occurrenceKey)) ? 'conflict-suppressed' : 'source-cleared',
     }));
     const evaluated = rules.map((rule) => makeRecord(rule, currentRecord(existing, rule.key), facts, ownerId, now));
+    const reviewVisible = evaluated.some(({ record }) => record.notificationType === TYPE.REVIEW_DUE && record.status === 'active');
     const minimumProminentPriority = Math.max(0, Number(options.minProminentPriority) || 0);
     const excludedProminentOccurrences = new Set(
       (Array.isArray(options.excludeProminentOccurrenceKeys) ? options.excludeProminentOccurrenceKeys : [])
@@ -426,6 +456,7 @@
     );
     const promotable = evaluated.filter((item) => (
       item.slot &&
+      !(reviewVisible && item.record.notificationType === TYPE.STREAK_RISK && item.record.cta?.id === 'review-due') &&
       item.record.priority >= minimumProminentPriority &&
       !excludedProminentOccurrences.has(clean(item.record.occurrenceKey))
     )).sort((left, right) => (
@@ -442,11 +473,11 @@
       selected.record.updatedAt = now;
     }
     const upserts = evaluated.map((item) => item.record);
-    const nextAt = Math.min(...evaluated.map((item) => {
+    const nextAt = Math.min(...[numeric(facts.gateReview?.nextAt), personalQuizDueAt(facts.quiz, facts.wordCount), ...evaluated.map((item) => {
       if (item.record.status === 'pending') return item.record.eligibleAt;
       if (item.record.notificationType === TYPE.STREAK_RISK) return now + 15 * 60 * 1000;
       return Infinity;
-    }).filter((value) => value > now));
+    })].filter((value) => value > now));
     return {
       now,
       rules,
@@ -464,6 +495,7 @@
     TABLE,
     localDateKey,
     localDayEnd,
+    personalQuizDueAt,
     reviewThreshold: (dueCount, activeCount) => Number(dueCount) >= 5 || (Number(activeCount) >= 10 && Number(dueCount) >= 3 && Number(dueCount) / Number(activeCount) >= 0.2),
     evaluate,
   });

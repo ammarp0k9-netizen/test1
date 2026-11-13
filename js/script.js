@@ -1962,6 +1962,7 @@ window.applyCanonicalLootlinguaProfile = function(d) {
     if (d.displayName !== undefined) put('lootlinguaDisplayName', d.displayName);
     if (d.activeTitleId !== undefined) put('lootlinguaActiveTitleId', d.activeTitleId);
     if (Array.isArray(d.quizExposureHistory) && typeof writeQuizExposureHistory === 'function') writeQuizExposureHistory(d.quizExposureHistory);
+    if (d.lastPersonalTrustedQuizAt) window.rememberLastPersonalTrustedQuizAt?.(d.lastPersonalTrustedQuizAt);
     for (const theme of d.themeIntroSeen || []) if (Object.prototype.hasOwnProperty.call(THEME_USE_MESSAGES, theme)) put(themeSeenKey('used', theme), '1');
     if (d.theme && document.documentElement.getAttribute('data-theme') !== d.theme) { setTheme(d.theme, true); changed = true; }
     if (d.oasisMode && document.documentElement.getAttribute('data-oasis-mode') !== d.oasisMode) { applyOasisMode(d.oasisMode, true); changed = true; }
@@ -2165,6 +2166,8 @@ function getGuestProgressSnapshot() {
   const bots = window.LootLinguaBots?.guestProgress?.();
   const owned = typeof hasDirtyGuestData === 'function' && hasDirtyGuestData();
   const profile = owned && window.getLootlinguaProfilePayload ? { ...window.getLootlinguaProfilePayload() } : {};
+  const lastPersonalQuiz = window.getLastPersonalTrustedQuizAt?.('guest');
+  if (owned && lastPersonalQuiz) profile.lastPersonalTrustedQuizAt = lastPersonalQuiz;
   const motivation = owned ? window.LootLinguaMotivation?.getGuestState?.() : null;
   if (motivation) profile.motivationRewards = motivation;
   if (bots) profile.lootBots = bots;

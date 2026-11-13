@@ -1177,14 +1177,19 @@ async function recordOfficialRunnerReview(user, input, sessionId) {
   const review = officialReviewGate(input);
   if (!review) return false;
   const ref = gateProgressRef(user.uid, review.worldId, review.rankId, review.gateId);
-  await runTransaction(db, async (transaction) => {
+  const saved = await runTransaction(db, async (transaction) => {
     const snapshot = await transaction.get(ref), progress = snapshot.data() || {};
-    if (!snapshot.exists() || !['learning', 'ready'].includes(progress.status)) return;
+    if (!snapshot.exists() || !['learning', 'ready'].includes(progress.status)) return false;
     const loaded = new Set((progress.loadedWordKeys || []).map(String));
-    if (!review.dueWordKeys.every((key) => loaded.has(key))) return;
+    if (!review.dueWordKeys.every((key) => loaded.has(key))) return false;
     transaction.update(ref, { runnerReviewCompletedSessionId: sessionId, runnerReviewCompletedDueWordKeys: review.dueWordKeys, lastActivityAt: serverTimestamp() });
+    return true;
   });
-  return true;
+  if (saved) {
+    cache.gateProgress.delete(gateCacheKey(review.worldId, review.rankId, review.gateId));
+    cache.rankGateProgress.delete(rankCacheKey(review.worldId, review.rankId));
+  }
+  return saved;
 }
 
 async function ensureQuizEvidenceSession(user, input, entries) {
@@ -1442,7 +1447,9 @@ async function evaluateActiveJourneyReadiness() {
       };
     });
     if (!saved) return { ready: false, reason: 'state-changed' };
-    cache.gateProgress.set(key, saved);
+    // The transaction's server timestamps and persisted readiness field names
+    // are authoritative for notifications and practice locks.
+    cache.gateProgress.delete(key);
     cache.rankGateProgress.delete(rankCacheKey(worldId, rankId));
     window.dispatchEvent(new CustomEvent('lootlingua:journey-changed', {
       detail: { worldId, rankId, gateId, type: readiness.ready ? 'gate-ready' : 'gate-readiness' },

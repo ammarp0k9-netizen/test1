@@ -158,6 +158,7 @@ export function applyProfileIntent(remote, intent, context = {}) {
     case 'learning-day': learn(profile, intent.day, intent.advanceAfterFreeze !== false); break;
     case 'quiz-activity': {
       if (!dayPattern.test(intent.day || '') || !(number(intent.answers) > 0)) { reason = 'invalid-activity'; break; }
+      if (number(intent.personalAt)) profile.lastPersonalTrustedQuizAt = Math.max(number(profile.lastPersonalTrustedQuizAt), number(intent.personalAt));
       profile.activityMap = { ...(profile.activityMap || {}), [intent.day]: number(profile.activityMap?.[intent.day]) + number(intent.answers) };
       if (intent.perfect) {
         profile.perfectQuizzes = number(profile.perfectQuizzes) + 1;
@@ -234,6 +235,9 @@ export function applyProfileIntent(remote, intent, context = {}) {
       profile.userXP = Math.max(number(profile.userXP), number(guest.userXP));
       for (const field of ['runnerCoins', 'streakFreezes']) profile[field] = number(profile[field]) + number(guest[field]);
       for (const field of ['freezeSaves', 'gameDictAdds', 'perfectQuizzes', 'maxStreak', 'runnerBestDistance']) profile[field] = Math.max(number(profile[field]), number(guest[field]));
+      if (number(guest.lastPersonalTrustedQuizAt)) {
+        profile.lastPersonalTrustedQuizAt = Math.max(number(profile.lastPersonalTrustedQuizAt), number(guest.lastPersonalTrustedQuizAt));
+      }
       if (guest.lootBots) profile.lootBots = mergeBotsProgress(profile.lootBots, guest.lootBots);
       if (String(guest.lastActivityDate || '') > String(profile.lastActivityDate || '')) {
         profile.lastActivityDate = guest.lastActivityDate;

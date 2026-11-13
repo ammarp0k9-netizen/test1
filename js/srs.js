@@ -491,6 +491,19 @@ function getQuizExposureHistoryStorageKey(uid) {
   return QUIZ_EXPOSURE_HISTORY_PREFIX + getStorageUserId(uid);
 }
 
+function lastPersonalQuizKey(uid) {
+  return `lootlinguaLastPersonalTrustedQuizAt_${getStorageUserId(uid)}`;
+}
+window.getLastPersonalTrustedQuizAt = function(uid) {
+  try { return Math.max(0, Number(localStorage.getItem(lastPersonalQuizKey(uid))) || 0); }
+  catch { return 0; }
+};
+window.rememberLastPersonalTrustedQuizAt = function(at, uid) {
+  try {
+    if (at > window.getLastPersonalTrustedQuizAt(uid)) localStorage.setItem(lastPersonalQuizKey(uid), String(at));
+  } catch { /* The account activity receipt still carries the timestamp. */ }
+};
+
 function readQuizExposureHistory(uid) {
   const history = loadJSON(getQuizExposureHistoryStorageKey(uid), []);
   return Array.isArray(history) ? history.slice(0, 3) : [];

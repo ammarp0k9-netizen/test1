@@ -63,6 +63,10 @@
     return active?.id || '';
   }
 
+  function companionFor(surface) {
+    return active?.persistent && surface?.contains(active.anchor) ? active.element : null;
+  }
+
   function canAct(id) {
     return active?.id === id && (!active.readUntil || Date.now() >= active.readUntil);
   }
@@ -148,6 +152,6 @@
   }
 
   Object.defineProperty(root, 'LootLinguaPopover', {
-    value: Object.freeze({ open, close, closeIf, getActiveId, canAct, isReadingAction, offerResume, position }), configurable: false, enumerable: true, writable: false,
+    value: Object.freeze({ open, close, closeIf, getActiveId, companionFor, canAct, isReadingAction, offerResume, position }), configurable: false, enumerable: true, writable: false,
   });
 })(window);

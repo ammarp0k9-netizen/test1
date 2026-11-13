@@ -7,6 +7,7 @@ const quiz = await readFile(new URL('../js/quiz.js', import.meta.url), 'utf8');
 const runner = await readFile(new URL('../js/gate-runner.js', import.meta.url), 'utf8');
 const start = quiz.slice(quiz.indexOf('let dictionaryRunnerPreparing ='), quiz.indexOf('let personalQuizPreparation ='));
 const summary = quiz.slice(quiz.indexOf('function refreshQuizSettingsSummary()'), quiz.indexOf('function startConfiguredQuiz()'));
+const practice = quiz.slice(quiz.indexOf('const personalQuizPracticeLockCopy ='), quiz.indexOf('function refreshQuizAvailableCount()'));
 const pool = Array.from({ length: 12 }, (_, index) => ({ word: `word${index}`, meaning: `meaning${index}` }));
 function fixture(count = 12) {
   const calls = [], notices = [], elements = { quizSettingsSummary: {}, quizStartButton: {} };
@@ -18,7 +19,7 @@ function fixture(count = 12) {
     getConfiguredQuizWords: () => pool.slice(0, 5), makeQuizSessionId: () => 'run',
     showToast: message => notices.push(message),
   });
-  vm.runInContext(summary + '\n' + start, context);
+  vm.runInContext(practice + '\n' + summary + '\n' + start, context);
   return { context, root, calls, notices, elements, start: () => context.startDictionaryRunner() };
 }
 
@@ -37,6 +38,16 @@ test('the configured pool keeps its size and gets distinct gate alternatives whe
   const f = fixture(); f.context.getConfiguredQuizWords = () => pool.slice(0, 5).map(word => ({ ...word, meaning: 'same' }));
   await f.start(); assert.equal(f.calls[0].words.length, 5);
   assert.equal(new Set(f.calls[0].words.map(word => word.meaning)).size, 3);
+});
+
+test('due personal quiz prevents dictionary runner launch even with enough words', async () => {
+  const f = fixture();
+  f.root.LootLinguaNotificationSources = { personalQuizDueAt: () => Date.now() - 1000 };
+  f.context.refreshQuizSettingsSummary();
+  assert.equal(f.elements.quizStartButton.disabled, true);
+  assert.match(f.elements.quizSettingsSummary.textContent, /القاموس الشخصي/);
+  assert.equal(await f.start(), false);
+  assert.equal(f.calls.length, 0);
 });
 
 test('navigation, account changes and unavailable sources cannot open a stale dictionary run', async () => {

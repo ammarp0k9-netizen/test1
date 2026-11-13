@@ -104,13 +104,13 @@
   function isInteractiveJourneyActive() {
     const journey = root.LootLinguaGuidedFirstJourney;
     const journeyState = journey?.getState?.();
+    const dictionary = root.LootLinguaPersonalDictionaryOnboarding?.getState?.();
     return Boolean(
       root.__entryExperienceActive ||
       root.hasActiveLearningQuiz?.() ||
       (typeof document !== 'undefined' && document.getElementById('appAuthDialogShell')?.hidden === false) ||
       (typeof document !== 'undefined' && document.documentElement.classList.contains('journey-auth-active')) ||
-      (['intro', 'awaiting-first-word'].includes(root.LootLinguaPersonalDictionaryOnboarding?.getState?.()?.phase) &&
-        (!root.getOnboardingView || root.getOnboardingView() === 'personal')) ||
+      ['awaiting-journey', 'intro', 'awaiting-first-word'].includes(dictionary?.phase) ||
       (journey?.isPresenting?.() ?? (root.LootLinguaGuidedFirstJourneyContract?.isActive?.(journeyState) &&
         !(journeyState?.guestDictionaryAvailable && !user())))
     );
@@ -119,12 +119,15 @@
   function notificationKey(feature) {
     const key = `feature-discovery:${feature}`;
     // Old builds terminally resolved these records on a transient word count.
-    const legacy = root.LootLinguaNotificationStore?.find?.(key);
-    return legacy?.resolutionReason === 'feature-discovery-ineligible' ? `${key}:available` : key;
+    const store = root.LootLinguaNotificationStore;
+    const legacy = store?.find?.(key);
+    const currentKey = legacy?.resolutionReason === 'feature-discovery-ineligible' ? `${key}:available` : key;
+    return store?.find?.(currentKey)?.resolutionReason === 'source-cleared' ? `${key}:invitation` : currentKey;
   }
 
   function canShowInvitation(feature) {
-    return api().FEATURES.includes(feature) && eligible(feature) && !isInteractiveJourneyActive();
+    return api().FEATURES.includes(feature) && eligible(feature) && !isInteractiveJourneyActive() &&
+      !['completed', 'skipped'].includes(getStatus(feature, true));
   }
 
   function updateMarkers() {
@@ -142,8 +145,7 @@
     });
     const worldsPending = !defer && ['starred', 'custom-worlds'].some((feature) => eligible(feature) && !['completed', 'skipped'].includes(getStatus(feature, true)));
     document.querySelector('#legendDock [data-dock-view="worlds"]')?.classList.toggle('feature-discovery-ready', worldsPending);
-    const tabPending = !defer && ['starred', 'custom-worlds'].some((feature) => eligible(feature) && !['completed', 'skipped'].includes(getStatus(feature, true)));
-    document.querySelector('#customWorldsTab')?.classList.toggle('feature-discovery-ready', tabPending);
+    document.querySelector('#customWorldsTab')?.classList.toggle('feature-discovery-ready', worldsPending);
   }
 
   function syncNotifications() {

@@ -103,6 +103,10 @@
       if (!draft?.meaning && (index >= 2 || draft?.locked || ['blocked', 'empty', 'error', 'interrupted'].includes(draft?.status))) {
         if (draft?.status === 'success') {
           selector = '#suggestionsList'; titleText = STEPS[2][2]; text = STEPS[2][3]; action = 'meaning';
+          if (draft.hidden) {
+            selector = '#suggestionsList .dictionary-search-recovery';
+            text = 'اضغط «عرض المعاني» لاسترجاع نتائجك، ثم اختر المعنى المناسب.';
+          }
         } else if (draft?.status || draft?.locked) {
           selector = draft.expanded ? '#meaningInput' : '#addFormToggle';
           titleText = 'أضف معنى يدويًا';
@@ -266,7 +270,7 @@
         state.step < 1 || state.step > 3 || event.detail?.type !== 'normal' ||
         !event.detail.scope?.endsWith(':personal')) return;
     if (state.step === 1 && event.detail.status === 'success') advance();
-    else if (event.detail.status !== 'success') renderStep();
+    else renderStep();
   });
   root.addEventListener('lootlingua:dictionary-meaning-selected', (event) => {
     const state = read();

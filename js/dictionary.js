@@ -1676,6 +1676,13 @@ function writeNormalSearch(scope, record) {
   writeDictionaryDraft(normalSearchRecords, DICTIONARY_SEARCH_PREFIX, scope, record);
 }
 
+const slowSearchFacts = [
+  'النجمة تجمع الكلمات التي تريد الرجوع إليها في صفحة الكلمات الصعبة.',
+  'يمكنك نسخ الكلمة إلى عالم خاص وإبقاؤها في قاموسك الشخصي.',
+  'اختبار البوابة يختبر كلماتها، ويمكنك اختيار مصدر مختلف في الاختبار العام.',
+  'المطابقة والصندوق المشفّر والهروب من النسيان تساعدك على رفع إتقان الكلمات.',
+];
+
 function renderNormalSearch(scope) {
   if (!isEditableDictionaryView() || getAddFormDraftScope() !== scope) return;
   const input = document.getElementById('wordInput');
@@ -1689,7 +1696,7 @@ function renderNormalSearch(scope) {
   const pending = record?.status === 'pending';
   const matches = word === record?.word;
   const heading = document.getElementById('suggestionsHeading');
-  if (heading) heading.hidden = !(matches && record.status === 'success');
+  if (heading) heading.hidden = !(matches && record.status === 'success' && !record.hidden && !record.selected);
   button.disabled = locked || pending;
   button.setAttribute('aria-busy', String(pending));
   button.textContent = pending ? 'جارٍ البحث…' : 'ابحث عن معنى';
@@ -1722,6 +1729,16 @@ function renderNormalSearch(scope) {
   if (!word || (matches && record.selected) || (!matches && !locked)) return;
   box.style.display = 'block';
   if (matches && record.status === 'success') {
+    const toggle = () => {
+      writeNormalSearch(scope, { ...record, hidden: !record.hidden });
+      renderNormalSearch(scope);
+      if (!record.hidden) announceDictionarySearchResult('normal', 'success', word);
+      list.querySelector('.dictionary-search-recovery')?.focus();
+    };
+    if (record.hidden) {
+      addAction('عرض المعاني', toggle);
+      return;
+    }
     window.__lastDictSearchWord = word;
     list.innerHTML = `<div class="dict-suggestions-results">${renderSuggestionHtml(record.data, 'sug-item', {
       sourceWord: word,
@@ -1729,6 +1746,7 @@ function renderNormalSearch(scope) {
       allowSelect: true,
       listSelector: '.dict-suggestions-results',
     })}</div>`;
+    addAction('إخفاء المعاني', toggle);
     injectGamerMeaningBubble();
     announceDictionarySearchResult('normal', 'success', word);
     return;
@@ -1739,13 +1757,31 @@ function renderNormalSearch(scope) {
   message.className = 'dictionary-search-status';
   message.setAttribute('role', 'status');
   message.textContent = {
-    pending: 'جارٍ جلب المعاني. يمكنك العودة إلى القاموس لمتابعة البحث.',
+    pending: 'جارٍ جلب المعاني…',
     empty: 'لم نجد معنى لهذه الكلمة.',
     blocked: 'استخدمت محاولة البحث المتاحة للضيف. يمكنك إضافة المعنى يدويًا.',
     interrupted: 'تعذّر استرجاع نتيجة البحث. يمكنك التحقق منها مجددًا.',
     error: 'تعذّر جلب المعاني. يمكنك إعادة المحاولة أو كتابة المعنى يدويًا.',
   }[status];
   list.append(message);
+  if (status === 'pending') {
+    const tip = document.createElement('p');
+    tip.className = 'dictionary-search-tip';
+    tip.hidden = true;
+    list.append(tip);
+    const update = () => {
+      if (!message.isConnected || normalSearchRecord(scope) !== record) return;
+      const elapsed = Date.now() - startedAt;
+      if (elapsed >= 5000) {
+        message.textContent = 'البحث مستمر. قد تستغرق استجابة الخادم الأولى وقتًا أطول.';
+        tip.textContent = slowSearchFacts[Math.floor((elapsed - 5000) / 7000) % slowSearchFacts.length];
+        tip.hidden = false;
+      }
+      setTimeout(update, elapsed < 5000 ? Math.max(1, 5000 - elapsed) : 7000);
+    };
+    const startedAt = record.startedAt || Date.now();
+    update();
+  }
   if (status === 'interrupted' && record.requestId) {
     addAction('استرجع نتيجة البحث', () => void runNormalSearch(scope, record, true));
   }
@@ -1763,7 +1799,7 @@ async function runNormalSearch(scope, record, recover = false) {
   if (normalSearchRequests.has(scope)) return;
   const generation = Number(window.__lootlinguaAuthGeneration) || 0;
   const sameOwner = () => generation === (Number(window.__lootlinguaAuthGeneration) || 0);
-  const pending = { ...record, selected: false, status: 'pending' };
+  const pending = { ...record, startedAt: record.startedAt || Date.now(), selected: false, status: 'pending' };
   normalSearchRequests.set(scope, generation);
   writeNormalSearch(scope, pending);
   renderNormalSearch(scope);
@@ -1811,6 +1847,7 @@ window.getPersonalDictionarySearchDraft = () => {
   return {
     ...draft,
     status: draft.word.trim() === record?.word ? record.status : '',
+    hidden: draft.word.trim() === record?.word && record.hidden === true,
     locked: isGuestSearchLocked('normal'),
   };
 };
@@ -1823,7 +1860,7 @@ window.fetchSuggestions = async function() {
   const scope = getAddFormDraftScope();
   const previous = normalSearchRecord(scope);
   if (previous?.word === word && previous.status === 'success') {
-    writeNormalSearch(scope, { ...previous, selected: false });
+    writeNormalSearch(scope, { ...previous, selected: false, hidden: false });
     renderNormalSearch(scope);
     return;
   }

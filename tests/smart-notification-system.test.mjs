@@ -218,18 +218,18 @@ test('one trusted quiz ends inactivity and a later cycle starts with clean count
   store.switchOwner('account-a');
   const now = Date.now();
   const oldAnchor = now - 5 * engine.DAY;
-  const first = engine.evaluate(baseFacts({ wordCount: 12, quiz: { lastTrustedQuizAt: oldAnchor } }), store.getAll(), { now, ownerId: 'account-a' });
+  const first = engine.evaluate(baseFacts({ wordCount: 12, quiz: { lastPersonalTrustedQuizAt: oldAnchor } }), store.getAll(), { now, ownerId: 'account-a' });
   store.upsertMany(first.upserts);
   assert.equal(first.selected.record.notificationType, engine.TYPE.QUIZ_INACTIVE);
   assert.equal(first.selected.record.showCount, 1);
 
   const trustedAt = now + 1000;
-  const ended = engine.evaluate(baseFacts({ wordCount: 12, quiz: { lastTrustedQuizAt: trustedAt } }), store.getAll(), { now: trustedAt, ownerId: 'account-a' });
+  const ended = engine.evaluate(baseFacts({ wordCount: 12, quiz: { lastPersonalTrustedQuizAt: trustedAt } }), store.getAll(), { now: trustedAt, ownerId: 'account-a' });
   assert.equal(ended.rules.some((rule) => rule.type === engine.TYPE.QUIZ_INACTIVE), false);
   ended.resolutions.forEach((item) => store.resolve(item.id, item.reason, trustedAt));
 
   const later = trustedAt + 4 * engine.DAY + 1;
-  const nextCycle = engine.evaluate(baseFacts({ wordCount: 12, quiz: { lastTrustedQuizAt: trustedAt } }), store.getAll(), { now: later, ownerId: 'account-a' });
+  const nextCycle = engine.evaluate(baseFacts({ wordCount: 12, quiz: { lastPersonalTrustedQuizAt: trustedAt } }), store.getAll(), { now: later, ownerId: 'account-a' });
   assert.equal(nextCycle.selected.record.notificationType, engine.TYPE.QUIZ_INACTIVE);
   assert.equal(nextCycle.selected.record.showCount, 1);
   assert.notEqual(nextCycle.selected.record.occurrenceKey, first.selected.record.occurrenceKey);
@@ -386,12 +386,12 @@ test('review conflict suppresses quiz only after the four-hour gate and quiz can
   store.switchOwner('u');
   const now = Date.now();
   const quizAnchor = now - 5 * engine.DAY;
-  const quiz = engine.evaluate(baseFacts({ wordCount: 12, quiz: { lastTrustedQuizAt: quizAnchor } }), [], { now, ownerId: 'u' });
+  const quiz = engine.evaluate(baseFacts({ wordCount: 12, quiz: { lastPersonalTrustedQuizAt: quizAnchor } }), [], { now, ownerId: 'u' });
   store.upsertMany(quiz.upserts);
 
   const reviewPending = engine.evaluate(baseFacts({
     wordCount: 12,
-    quiz: { lastTrustedQuizAt: quizAnchor },
+    quiz: { lastPersonalTrustedQuizAt: quizAnchor },
     review: { dueCount: 5, activeCount: 12, episodeKey: 'conflict' },
   }), store.getAll(), { now: now + 1000, ownerId: 'u' });
   assert.ok(reviewPending.rules.some((rule) => rule.type === engine.TYPE.QUIZ_INACTIVE));
@@ -400,7 +400,7 @@ test('review conflict suppresses quiz only after the four-hour gate and quiz can
 
   const reviewActive = engine.evaluate(baseFacts({
     wordCount: 12,
-    quiz: { lastTrustedQuizAt: quizAnchor },
+    quiz: { lastPersonalTrustedQuizAt: quizAnchor },
     review: { dueCount: 5, activeCount: 12, episodeKey: 'conflict' },
   }), store.getAll(), { now: now + 1000 + 4 * engine.HOUR, ownerId: 'u' });
   const suppressed = reviewActive.resolutions.find((item) => item.reason === 'conflict-suppressed');
@@ -410,13 +410,53 @@ test('review conflict suppresses quiz only after the four-hour gate and quiz can
 
   const resumed = engine.evaluate(baseFacts({
     wordCount: 12,
-    quiz: { lastTrustedQuizAt: quizAnchor },
+    quiz: { lastPersonalTrustedQuizAt: quizAnchor },
     review: { dueCount: 0, activeCount: 12 },
   }), store.getAll(), { now: reviewActive.now + 1000, ownerId: 'u' });
   const resumedQuiz = resumed.upserts.find((record) => record.notificationType === engine.TYPE.QUIZ_INACTIVE && record.status === 'active');
   assert.ok(resumedQuiz);
   assert.match(resumedQuiz.occurrenceKey, /:resume:/);
   assert.equal(resumedQuiz.showCount, 1);
+});
+
+test('gate review, personal inactivity and discovery keep separate lifecycles across evaluations', async () => {
+  const now = Date.now();
+  const harness = loadRuntimeHarness({});
+  const { engine, store, root } = harness;
+  const gate = { worldId: 'w', rankId: 'r', gateId: 'g', gateLabel: 'الأولى' };
+  const discoveryKey = 'discovery:test';
+  store.upsert({
+    kind: 'smart', notificationType: 'feature.discovery', occurrenceKey: discoveryKey,
+    status: 'active', cta: { id: 'open-feature-discovery', label: 'استكشفني', args: { feature: 'starred' } },
+  });
+  const facts = baseFacts({
+    wordCount: 10,
+    quiz: { learningAnchorAt: now - 5 * engine.DAY, lastTrustedQuizAt: now },
+    gateReview: { ...gate, due: true, episodeKey: 'first', dueAt: now - 1000 },
+    gatePractice: { ...gate, actionable: true, unpracticedCount: 9, loadedAt: now - 3 * engine.DAY },
+  });
+  harness.setFacts({ ...facts, now });
+  await root.LootLinguaNotificationRuntime.evaluate();
+  const review = store.getAll().find(item => item.notificationType === engine.TYPE.GATE_REVIEW);
+  const personal = store.getAll().find(item => item.notificationType === engine.TYPE.QUIZ_INACTIVE);
+  assert.equal(review?.cta?.args.gateId, 'g');
+  assert.equal(personal?.cta?.label, 'افتح الاختبار');
+  assert.equal(store.find(discoveryKey).status, 'active');
+  assert.equal(store.getDisplayRecords().some(item => item.notificationType === engine.TYPE.GATE_PRACTICE), false);
+  const destinations = [];
+  root.openPublishedGate = (...ids) => destinations.push(ids);
+  root.loadQuizView = () => destinations.push('quiz-modes');
+  await root.handleNotificationAction(review.id);
+  await root.handleNotificationAction(personal.id);
+  assert.deepEqual(destinations, [['w', 'r', 'g'], 'quiz-modes']);
+  harness.setFacts({ ...facts, now: now + 1000, journeyComplete: false, gateReview: {} });
+  await root.LootLinguaNotificationRuntime.evaluate();
+  assert.equal(store.find(review.id).status, 'active', 'a failed journey read does not erase a reminder');
+  harness.setFacts({ ...facts, now: now + 2000, quiz: { ...facts.quiz, lastPersonalTrustedQuizAt: now + 1000 } });
+  await root.LootLinguaNotificationRuntime.evaluate();
+  assert.equal(store.find(personal.id).status, 'resolved');
+  assert.equal(store.getAll().filter(item => item.notificationType === engine.TYPE.GATE_REVIEW).length, 1);
+  assert.equal(store.find(review.id).status, 'active');
 });
 
 test('streak-risk CTA completes a verified activity, marks the local day, preserves streak, and resolves', async () => {
