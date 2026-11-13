@@ -8,14 +8,14 @@ import WebSocket from 'ws';
 
 const root = path.resolve(import.meta.dirname, '..');
 const read = file => fs.readFileSync(path.join(root, file), 'utf8');
-const output = path.join(root, 'reports', 'runner-evidence');
+const output = process.env.RUNNER_SMOKE_OUTPUT || path.join(root, 'reports', 'runner-evidence');
 fs.mkdirSync(output, { recursive: true });
 const locks = read('js/core.js');
 const lockCode = locks.slice(locks.indexOf('const backgroundScrollLocks'), locks.indexOf('function syncHeroAvatar()'));
 const runtime = read('js/core-runtime.js');
 const shortcuts = runtime.slice(runtime.indexOf("document.addEventListener('keydown', function(e)"), runtime.indexOf('// Init'));
 const requests = [];
-const html = `<!doctype html><html lang="ar" dir="rtl" data-theme="lootlingua"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><link rel="stylesheet" href="/style.css"><style>body{margin:0;padding:24px;background:#09121c}main{height:1500px}main button{padding:12px;margin:8px}</style></head><body><main id="fixtureBackground"><button id="trigger">اللعب</button><button id="addBtn">إضافة كلمة خلف اللعبة</button></main><script>
+const html = `<!doctype html><html lang="ar" dir="rtl" data-theme="lootlingua"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><link rel="stylesheet" href="/style.css"><style>body{margin:0;padding:24px;background:#09121c}main{height:1500px}main button{padding:12px;margin:8px}</style></head><body><main class="main-content" id="fixtureBackground"><button id="trigger">اللعب</button><button id="addBtn">إضافة كلمة خلف اللعبة</button></main><script>
 window.auth={currentUser:{uid:'runner-A'}};window.__lootlinguaAuthGeneration=1;
 window.fixtureWords=[{word:'lantern',meaning:'فانوس'},{word:'bridge',meaning:'جسر'},{word:'river',meaning:'نهر'},{word:'treasure',meaning:'كنز'}];
 window.fixtureIntents=[];window.fixtureToasts=[];window.fixtureAdds=0;window.fixtureReceipts=new Set();
@@ -37,7 +37,7 @@ const server = http.createServer((req, res) => {
   if (pathname === '/fixture') { res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' }).end(html); return; }
   const target = path.resolve(root, pathname.replace(/^\/+/, ''));
   if (!target.startsWith(root + path.sep) || !fs.existsSync(target) || !fs.statSync(target).isFile()) { res.writeHead(404).end(); return; }
-  res.writeHead(200, { 'Content-Type': target.endsWith('.css') ? 'text/css' : target.endsWith('.js') ? 'text/javascript' : 'application/octet-stream' });
+  res.writeHead(200, { 'Content-Type': target.endsWith('.css') ? 'text/css' : /\.m?js$/.test(target) ? 'text/javascript' : 'application/octet-stream' });
   res.end(fs.readFileSync(target));
 });
 await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
@@ -113,6 +113,31 @@ try {
   // Preload the actual engine only to supply its supported deterministic RNG;
   // the controller still loads renderer/CSS through its production loader.
   await evaluate(`await new Promise((resolve,reject)=>{const s=document.createElement('script');s.src='js/runner-engine.js';s.onload=resolve;s.onerror=reject;document.head.append(s)});window.fixtureEngine=LootLinguaRunnerEngine;window.LootLinguaRunnerEngine=Object.freeze({...fixtureEngine,createState:(words,options)=>{const s=fixtureEngine.createState(words,{...options,random:()=>.5});if(words?.length)window.fixtureLiveState=s;return s}});`);
+  await evaluate(`document.documentElement.dataset.theme='glass';document.body.classList.add('perf-turbo','low-end-device');
+    document.getElementById('trigger').focus();
+    await LootLinguaGateRunner.launch(fixtureContext);`);
+  assert.ok(await evaluate(`document.body.classList.contains('runner-input-active') &&
+    getComputedStyle(document.getElementById('fixtureBackground')).visibility === 'hidden' &&
+    getComputedStyle(document.querySelector('.llr-primary')).transitionDuration !== '1e-06s'`));
+  await evaluate(`document.querySelector('.llr-screen .llr-primary').click()`);
+  await wait('LootLinguaGateRunner.getDiagnostics()?.distance > 0', 'Runner playing in Turbo');
+  await key('Escape');
+  assert.ok(await evaluate(`!document.body.classList.contains('runner-input-active') &&
+    getComputedStyle(document.getElementById('fixtureBackground')).visibility === 'visible' &&
+    document.activeElement.id === 'trigger'`));
+  await evaluate(`await new Promise((resolve,reject)=>{const link=document.createElement('link');link.rel='stylesheet';link.href='/loot-bots.css';link.onload=resolve;link.onerror=reject;document.head.append(link)});
+    const {openBattle}=await import('/js/loot-bots-game.mjs');
+    openBattle({words:fixtureWords,source:'اختبار',isCurrent:()=>true,returnFocus:document.getElementById('trigger')});`);
+  assert.ok(await evaluate(`document.querySelector('.loot-bots')?.open &&
+    getComputedStyle(document.getElementById('fixtureBackground')).visibility === 'hidden' &&
+    getComputedStyle(document.querySelector('.loot-bots [data-play]')).backgroundColor === 'rgb(154, 242, 220)'`));
+  await evaluate(`document.querySelector('.loot-bots [data-play]').click()`);
+  await wait(`document.querySelector('.loot-bots .lb-arena').classList.contains('is-fighting')`, 'Loot Bots playing in Turbo');
+  await evaluate(`document.querySelector('.loot-bots [data-close]').click()`);
+  assert.ok(await evaluate(`!document.querySelector('.loot-bots') && document.body.classList.contains('perf-turbo') &&
+    getComputedStyle(document.getElementById('fixtureBackground')).visibility === 'visible'`));
+  await evaluate(`document.documentElement.dataset.theme='lootlingua';document.body.classList.remove('perf-turbo','low-end-device')`);
+  report.checks.push({name:'Runner and Loot Bots own their styles under Glass/Turbo, stop background painting, and restore the page on exit',passed:true});
   for (const width of [1280, 390, 320]) {
     await send('Emulation.setDeviceMetricsOverride', { width, height: width === 1280 ? 900 : 844, deviceScaleFactor: width < 600 ? 3 : 1, mobile: width < 600 });
     await send('Emulation.setTouchEmulationEnabled', { enabled: width < 600 });
@@ -203,7 +228,7 @@ try {
   await evaluate(`let release;window.fixtureWordsGate=new Promise(resolve=>{release=resolve});window.fixtureLaunch=LootLinguaGateRunner.launch(fixtureContext);await new Promise(r=>setTimeout(r,30));fixtureContext.progress.availableForReviewNowCount=1;release();await fixtureLaunch;window.fixtureWordsGate=null;`);
   assert.equal(await evaluate(`!!document.querySelector('.llr-overlay')`), false);
   await evaluate(`fixtureContext.progress={readinessNextAt:0};await LootLinguaGateRunner.launch(fixtureContext);document.querySelector('.llr-screen .llr-primary').click();fixtureContext.progress.availableForReviewNowCount=1;`);
-  await wait(`document.querySelector('.llr-screen h2')?.textContent.includes('المراجعة')`, 'review becomes due'); await key('Escape');
+  await wait(`document.querySelector('.llr-screen h2')?.textContent.includes('الاختبار الموثوق')`, 'review becomes due'); await key('Escape');
   report.checks.push({ name: 'account switching, word-load failure and review due before/during launch are guarded', passed: true });
   await evaluate(`fixtureContext.progress={readinessNextAt:0};window.fixtureCanvas=document.createElement('canvas');fixtureCanvas.style.cssText='width:360px;height:520px';document.body.append(fixtureCanvas);window.fixtureRenderer=LootLinguaRunnerRenderer.createRenderer(fixtureCanvas);fixtureRenderer.resize(360,520);`);
   report.pool = await evaluate(`(()=>{const E=fixtureEngine,s=E.createState(fixtureWords,{random:()=>.5});let max=0,events=0,metrics,dom=document.querySelectorAll('*').length;const started=performance.now();for(let frame=0;frame<2400;frame++){if(s.gate&&!s.gate.resolved){E.move(s,s.gate.correctLane)}else{const ahead=s.entities.filter(e=>e.kind==='obstacle'&&!e.resolved&&e.z>0).sort((a,b)=>a.z-b.z);if(ahead.length){const row=ahead.filter(e=>e.row===ahead[0].row);const open=[0,1,2].find(lane=>!row.some(e=>e.lane===lane));const route=open===undefined?row.find(e=>['low','overhead','duckwall'].includes(e.obstacleType))||row.find(e=>e.obstacleType==='train'):null;E.move(s,open===undefined?route.lane:open);if(route&&route.z/s.speed<.18){if(route.obstacleType==='low')E.jump(s);if(['overhead','duckwall'].includes(route.obstacleType))E.slide(s)}}}E.update(s,50);if(frame%4===0)metrics=fixtureRenderer.draw(s);max=Math.max(max,s.entities.length);events=Math.max(events,s.events.length);if(s.over)throw Error('action-aware route died')}return{simulatedSeconds:120,draws:600,executionMs:performance.now()-started,maxEntities:max,pool:s._pool.length,active:s.entities.length,total:s._pool.length+s.entities.length,maxEvents:events,dpr:metrics.dpr,domBefore:dom,domAfter:document.querySelectorAll('*').length}})()`);

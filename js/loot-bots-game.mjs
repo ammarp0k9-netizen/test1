@@ -157,6 +157,7 @@ export function openBattle({ words, source, isCurrent, returnFocus }) {
     audio.close();
     dialog.close(); dialog.remove();
     window.unlockBackgroundScroll?.('loot-bots');
+    document.body.classList.remove('runner-input-active');
     window.__lootlinguaRunnerInputActive = false;
     window.dispatchEvent(new Event('lootlingua:runner-input-inactive'));
     if (returnFocus?.isConnected) returnFocus.focus({ preventScroll: true });
@@ -464,6 +465,7 @@ export function openBattle({ words, source, isCurrent, returnFocus }) {
     throw error;
   }
   window.lockBackgroundScroll?.('loot-bots');
+  document.body.classList.add('runner-input-active');
   window.__lootlinguaRunnerInputActive = true;
   window.dispatchEvent(new Event('lootlingua:runner-input-active'));
   return 'opened';

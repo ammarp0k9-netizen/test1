@@ -320,6 +320,7 @@
 // ═══════════════════════════════════════════════════════
 const PERFORMANCE_MODE_KEY = 'lootlinguaPerformanceMode';
 const PERFORMANCE_MODE_NOTICE_KEY = 'lootlinguaPerformanceModeNoticeSeen';
+const AUTOMATIC_PERFORMANCE_KEY = 'lootlinguaAutomaticPerformance:v1';
 const PERFORMANCE_LEVELS = ['ultra', 'balanced', 'stable', 'turbo'];
 const PERFORMANCE_LEVEL_LABELS = {
   ultra: 'أقصى جرافيك',
@@ -327,37 +328,53 @@ const PERFORMANCE_LEVEL_LABELS = {
   stable: 'أداء مستقر',
   turbo: 'تربو',
 };
+const performanceReducedMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)');
+const PERFORMANCE_SAMPLE_SIZE = 24;
+let performanceFrame = 0;
+let lastPerformanceScroll = -Infinity;
+let lastPerformanceFrame = 0;
+let performanceSamples = [];
+let performanceTheme = '';
+let smoothPerformanceSamples = 0;
+let bestAllowedPerformance = 0;
+let manualPerformanceLevel;
 
-function detectPerformanceLevel() {
-  const cores = navigator.hardwareConcurrency || 0;
-  const memory = navigator.deviceMemory || 0;
-  const isMobile = /Android|iPhone|iPad|iPod|Mobile|Windows Phone/i.test(navigator.userAgent || '');
-  if ((cores && cores <= 2) || (memory && memory <= 2)) return 'turbo';
-  if (isMobile || (cores && cores < 4) || (memory && memory <= 4)) return 'stable';
-  if ((cores && cores >= 8) && (!memory || memory >= 8)) return 'ultra';
+function detectPerformanceLevel(cores, memory, glass) {
+  // These browser hints are coarse. Start conservatively and let real scrolling
+  // decide whether the device has room for more visual effects.
+  if (cores === 1 || (memory && memory <= 1) || (cores === 2 && memory === 2)) return 'turbo';
+  if ((cores && cores < 4) || (memory && memory < 4)) return 'stable';
+  if (!glass && cores >= 8 && (!memory || memory >= 8)) return 'ultra';
   return 'balanced';
 }
 
-function getPerformanceModePreference() {
+function getManualPerformanceLevel() {
+  if (manualPerformanceLevel !== undefined) return manualPerformanceLevel;
   const pref = localStorage.getItem(PERFORMANCE_MODE_KEY);
-  if (PERFORMANCE_LEVELS.includes(pref)) return pref;
-  if (pref === 'on') {
-    localStorage.setItem(PERFORMANCE_MODE_KEY, 'turbo');
-    return 'turbo';
-  }
-  if (pref === 'off') {
-    localStorage.setItem(PERFORMANCE_MODE_KEY, 'ultra');
-    return 'ultra';
-  }
-  const autoLevel = detectPerformanceLevel();
-  localStorage.setItem(PERFORMANCE_MODE_KEY, autoLevel);
-  return autoLevel;
+  manualPerformanceLevel = PERFORMANCE_LEVELS.includes(pref) ? pref : pref === 'on' ? 'turbo' : pref === 'off' ? 'ultra' : '';
+  return manualPerformanceLevel;
 }
 
-function syncPerformanceModeToggle() {
+function automaticPerformanceProfile() {
+  const glass = document.documentElement.dataset.theme === 'glass';
+  const cores = Number(navigator.hardwareConcurrency) || 0;
+  const memory = Number(navigator.deviceMemory) || 0;
+  const key = `${glass ? 'glass' : 'standard'}:${cores}:${memory}`;
+  let saved = {};
+  try { saved = JSON.parse(localStorage.getItem(AUTOMATIC_PERFORMANCE_KEY)) || {}; } catch (_) {}
+  const level = PERFORMANCE_LEVELS.includes(saved[key]) ? saved[key] : detectPerformanceLevel(cores, memory, glass);
+  const minimum = performanceReducedMotion?.matches ? 2 : (cores === 1 || (memory && memory <= 1) ? 1 : 0);
+  return { key, saved, index: Math.max(minimum, PERFORMANCE_LEVELS.indexOf(level)), minimum };
+}
+
+function getPerformanceModePreference() {
+  return getManualPerformanceLevel() || PERFORMANCE_LEVELS[automaticPerformanceProfile().index];
+}
+
+function syncPerformanceModeToggle(level) {
   const slider = document.getElementById('performanceLevelSlider');
   const text = document.getElementById('performanceModeState');
-  const level = getPerformanceModePreference();
+  const automatic = !getManualPerformanceLevel();
   const index = Math.max(0, PERFORMANCE_LEVELS.indexOf(level));
   if (slider) {
     slider.value = String(index);
@@ -365,8 +382,69 @@ function syncPerformanceModeToggle() {
     slider.style.setProperty('--perf-progress', `${(index / (PERFORMANCE_LEVELS.length - 1)) * 100}%`);
   }
   if (text) {
-    text.textContent = PERFORMANCE_LEVEL_LABELS[level];
+    text.textContent = automatic ? `تلقائي · ${PERFORMANCE_LEVEL_LABELS[level]}` : PERFORMANCE_LEVEL_LABELS[level];
   }
+  document.getElementById('performanceAutoButton')?.setAttribute('aria-pressed', String(automatic));
+}
+
+function classifyPerformanceFrames(samples) {
+  // A 60 Hz frame is about 16.7 ms. Promote only with headroom, and step down
+  // only after repeated slow frames. A single long task is insufficient.
+  const slow = samples.filter(interval => interval > 25).length;
+  if (samples.filter(interval => interval > 34).length >= Math.ceil(samples.length / 4)) return 'strained';
+  if (slow >= Math.ceil(samples.length / 3)) return 'strained';
+  if (samples.filter(interval => interval > 20).length <= Math.floor(samples.length / 12)) return 'smooth';
+  return 'mixed';
+}
+
+function updateAutomaticPerformance() {
+  const profile = automaticPerformanceProfile();
+  const result = classifyPerformanceFrames(performanceSamples);
+  performanceSamples = [];
+  smoothPerformanceSamples = result === 'smooth' ? smoothPerformanceSamples + 1 : 0;
+  let index = profile.index;
+  if (result === 'strained') {
+    index = Math.min(PERFORMANCE_LEVELS.length - 1, index + 1);
+    bestAllowedPerformance = index;
+  } else if (smoothPerformanceSamples >= 2) {
+    index = Math.max(profile.minimum, bestAllowedPerformance, index - 1);
+    smoothPerformanceSamples = 0;
+  }
+  if (index === profile.index) return;
+  localStorage.setItem(AUTOMATIC_PERFORMANCE_KEY, JSON.stringify({ ...profile.saved, [profile.key]: PERFORMANCE_LEVELS[index] }));
+  applyPerformanceMode();
+}
+
+function canSamplePerformance() {
+  return !getManualPerformanceLevel() && !document.hidden &&
+    !document.documentElement.classList.contains('startup-pending') && !window.__entryExperienceActive &&
+    !window.__lootlinguaRunnerInputActive &&
+    !['smart-loading-active', 'modal-scroll-locked', 'profile-modal-open'].some(name => document.body.classList.contains(name));
+}
+
+function samplePerformanceFrame(now) {
+  performanceFrame = 0;
+  if (!canSamplePerformance()) { lastPerformanceFrame = 0; return; }
+  const scrolling = now - lastPerformanceScroll < 85;
+  if (lastPerformanceFrame) {
+    const interval = now - lastPerformanceFrame;
+    if (scrolling || interval >= 50) performanceSamples.push(interval);
+    if (performanceSamples.length >= PERFORMANCE_SAMPLE_SIZE) updateAutomaticPerformance();
+  }
+  lastPerformanceFrame = scrolling ? now : 0;
+  if (lastPerformanceFrame) performanceFrame = requestAnimationFrame(samplePerformanceFrame);
+}
+
+function stopPerformanceSampling() {
+  if (performanceFrame) cancelAnimationFrame(performanceFrame);
+  performanceFrame = lastPerformanceFrame = smoothPerformanceSamples = 0;
+  lastPerformanceScroll = -Infinity;
+  performanceSamples = [];
+}
+
+function resetPerformanceSampling() {
+  stopPerformanceSampling();
+  bestAllowedPerformance = 0;
 }
 
 function getPerformanceSliderPercent(slider, clientX) {
@@ -460,36 +538,68 @@ function initPerformanceSliderInteraction() {
 function initPerformanceControls() {
   applyPerformanceMode();
   initPerformanceSliderInteraction();
-}
-
-function applyPerformanceMode() {
-  const hadPreference = localStorage.getItem(PERFORMANCE_MODE_KEY) !== null;
+  window.addEventListener('scroll', () => {
+    if (!canSamplePerformance()) return;
+    lastPerformanceScroll = performance.now();
+    if (!performanceFrame) performanceFrame = requestAnimationFrame(samplePerformanceFrame);
+  }, { passive: true });
+  performanceTheme = automaticPerformanceProfile().key;
+  new MutationObserver(() => {
+    const key = automaticPerformanceProfile().key;
+    if (key === performanceTheme) return;
+    performanceTheme = key;
+    resetPerformanceSampling();
+    if (!getManualPerformanceLevel()) applyPerformanceMode();
+  }).observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
+  performanceReducedMotion?.addEventListener?.('change', () => {
+    resetPerformanceSampling();
+    if (!getManualPerformanceLevel()) applyPerformanceMode();
+  });
+  window.addEventListener('storage', (event) => {
+    if (![PERFORMANCE_MODE_KEY, AUTOMATIC_PERFORMANCE_KEY, null].includes(event.key)) return;
+    manualPerformanceLevel = undefined;
+    resetPerformanceSampling();
+    applyPerformanceMode();
+  });
+  window.addEventListener('lootlingua:runner-input-active', stopPerformanceSampling);
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden) stopPerformanceSampling();
+  });
   const level = getPerformanceModePreference();
-  document.body.classList.remove('low-end-device', ...PERFORMANCE_LEVELS.map(l => `perf-${l}`));
-  document.body.classList.add(`perf-${level}`);
-  document.body.classList.toggle('low-end-device', level === 'turbo');
-  syncPerformanceModeToggle();
-  if (!hadPreference && level !== 'ultra' && !localStorage.getItem(PERFORMANCE_MODE_NOTICE_KEY)) {
+  if (!getManualPerformanceLevel() && level !== 'ultra' && !localStorage.getItem(PERFORMANCE_MODE_NOTICE_KEY)) {
     localStorage.setItem(PERFORMANCE_MODE_NOTICE_KEY, '1');
     setTimeout(() => {
-      if (typeof showToast === 'function') {
-        showToast(`اخترنا مستوى الأداء ${PERFORMANCE_LEVEL_LABELS[level]} تلقائياً. تقدر تغيّره من الإعدادات.`, 'info', 5600);
-      }
+      if (!getManualPerformanceLevel()) window.showToast?.(`اخترنا مستوى الأداء ${PERFORMANCE_LEVEL_LABELS[getPerformanceModePreference()]} تلقائياً. تقدر تغيّره من الإعدادات.`, 'info', 5600);
     }, 900);
   }
 }
 
+function applyPerformanceMode() {
+  const level = getPerformanceModePreference();
+  PERFORMANCE_LEVELS.forEach(mode => document.body.classList.toggle(`perf-${mode}`, mode === level));
+  document.body.classList.toggle('low-end-device', level === 'turbo');
+  syncPerformanceModeToggle(level);
+}
+
 window.setPerformanceLevel = function(value) {
   const index = Math.round(Math.min(PERFORMANCE_LEVELS.length - 1, Math.max(0, Number(value) || 0)));
-  localStorage.setItem(PERFORMANCE_MODE_KEY, PERFORMANCE_LEVELS[index]);
+  resetPerformanceSampling();
+  manualPerformanceLevel = PERFORMANCE_LEVELS[index];
+  localStorage.setItem(PERFORMANCE_MODE_KEY, manualPerformanceLevel);
+  applyPerformanceMode();
+};
+
+window.useAutomaticPerformance = function() {
+  if (!getManualPerformanceLevel()) return;
+  localStorage.removeItem(PERFORMANCE_MODE_KEY);
+  manualPerformanceLevel = '';
+  resetPerformanceSampling();
   applyPerformanceMode();
 };
 
 window.togglePerformanceMode = function() {
   const current = getPerformanceModePreference();
-  const next = current === 'turbo' ? 'balanced' : 'turbo';
-  localStorage.setItem(PERFORMANCE_MODE_KEY, next);
-  applyPerformanceMode();
+  window.setPerformanceLevel(current === 'turbo' ? 1 : 3);
 };
 
 window.showPerformanceModeHelp = function(event) {

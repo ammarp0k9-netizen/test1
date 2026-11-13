@@ -12,6 +12,7 @@ const [
   xpBatchSource,
   transitionBatchSource,
   indexSource,
+  coreSource,
 ] = await Promise.all([
   readFile(new URL('../js/operation-runtime.js', import.meta.url), 'utf8'),
   readFile(new URL('../js/cloud.js', import.meta.url), 'utf8'),
@@ -21,7 +22,56 @@ const [
   readFile(new URL('../js/xp-batch.js', import.meta.url), 'utf8'),
   readFile(new URL('../js/srs-transition-batch.js', import.meta.url), 'utf8'),
   readFile(new URL('../index.html', import.meta.url), 'utf8'),
+  readFile(new URL('../js/core.js', import.meta.url), 'utf8'),
 ]);
+
+function performanceControls({ cores = 4, memory = 4, theme = 'lootlingua', preference } = {}) {
+  const source = coreSource.slice(coreSource.indexOf('const PERFORMANCE_MODE_KEY'), coreSource.indexOf('window.showPerformanceModeHelp'));
+  const values = new Map(preference ? [['lootlinguaPerformanceMode', preference]] : []);
+  const window = { matchMedia: () => ({ matches: false }) };
+  const classes = new Set();
+  const context = vm.createContext({
+    window, navigator: { hardwareConcurrency: cores, deviceMemory: memory, userAgent: 'Android' },
+    document: { documentElement: { dataset: { theme }, classList: { contains: () => false } }, getElementById: () => null,
+      body: { classList: { toggle: (name, on) => on ? classes.add(name) : classes.delete(name), contains: name => classes.has(name) } } },
+    localStorage: { getItem: key => values.get(key) ?? null, setItem: (key, value) => values.set(key, value), removeItem: key => values.delete(key) },
+  });
+  vm.runInContext(source, context);
+  return { window, values, context, mode: () => vm.runInContext('getPerformanceModePreference()', context),
+    frames: (...intervals) => vm.runInContext(`performanceSamples = ${JSON.stringify(intervals)}; updateAutomaticPerformance();`, context) };
+}
+
+test('automatic performance starts from hardware and theme rather than a phone user agent', () => {
+  assert.equal(performanceControls({ cores: 8, memory: 8 }).mode(), 'ultra');
+  assert.equal(performanceControls({ cores: 8, memory: 8, theme: 'glass' }).mode(), 'balanced');
+  assert.equal(performanceControls().mode(), 'balanced');
+  assert.equal(performanceControls({ cores: 2, memory: 4 }).mode(), 'stable');
+  assert.equal(performanceControls({ cores: 2, memory: 2 }).mode(), 'turbo');
+  assert.equal(performanceControls({ cores: 0, memory: 0 }).mode(), 'balanced');
+});
+
+test('automatic performance learns from sustained frame timing and restores its choice after a manual override', () => {
+  const app = performanceControls();
+  const smooth = Array(24).fill(16.7);
+  const strained = Array(24).fill(33.3);
+  app.frames(...smooth.slice(1), 130);
+  assert.equal(app.mode(), 'balanced', 'an isolated long frame does not lower the mode');
+  app.frames(...smooth);
+  assert.equal(app.mode(), 'ultra');
+  app.frames(...strained);
+  assert.equal(app.mode(), 'balanced');
+  app.frames(...smooth);
+  app.frames(...smooth);
+  assert.equal(app.mode(), 'balanced', 'a quality level that already struggled is not retried in the same session');
+  app.window.setPerformanceLevel(3);
+  assert.equal(app.mode(), 'turbo');
+  app.window.useAutomaticPerformance();
+  assert.equal(app.values.has('lootlinguaPerformanceMode'), false);
+  assert.equal(app.mode(), 'balanced');
+  app.window.__lootlinguaRunnerInputActive = true;
+  assert.equal(vm.runInContext('canSamplePerformance()', app.context), false);
+  assert.equal(performanceControls({ preference: 'on' }).mode(), 'turbo', 'older saved overrides remain valid');
+});
 
 test('operation telemetry records stages and scoped double-clicks join one task', async () => {
   const root = {

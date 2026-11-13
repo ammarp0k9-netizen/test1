@@ -9,8 +9,10 @@ const root=path.resolve(import.meta.dirname,'..');
 const baseline=process.argv.includes('--baseline'),mode=baseline?'before':'after';
 const paged=process.argv.includes('--paged');
 const integrity=process.argv.includes('--integrity');
+const performanceModes=process.argv.includes('--performance-modes');
+const performanceControls=process.argv.includes('--performance-controls');
 const baselineRef=process.argv.find(argument=>argument.startsWith('--baseline-ref='))?.slice('--baseline-ref='.length)||'b27ecf5a';
-const evidenceDir=path.join(root,'reports',integrity?'integrity-evidence':paged?'dictionary-pages-evidence':'dictionary-render-evidence');
+const evidenceDir=process.env.DICTIONARY_SMOKE_OUTPUT || path.join(root,'reports',integrity?'integrity-evidence':paged?'dictionary-pages-evidence':'dictionary-render-evidence');
 const browserPath=['C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe','C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe'].find(fs.existsSync);
 if(!browserPath)throw Error('Chrome/Edge not found');
 const sources=new Map();
@@ -63,6 +65,84 @@ try{
  const started=performance.now();renderLimit=20;render();return{renderMs:performance.now()-started,parses,cards:document.querySelectorAll('#list .word-card').length};
  })()`);
  await delay(400);
+ if (performanceControls) {
+  await send('Emulation.setDeviceMetricsOverride', {width:320,height:800,deviceScaleFactor:1,mobile:true});
+  report.automatic = await evaluate(`(async () => {
+    document.getElementById('smartLoadingOverlay')?.remove();
+    document.body.classList.remove('smart-loading-active');
+    window.__entryExperienceActive = false;
+    Object.defineProperty(navigator,'hardwareConcurrency',{configurable:true,value:4});
+    Object.defineProperty(navigator,'deviceMemory',{configurable:true,value:4});
+    setPerformanceLevel(3);
+    const auto = document.getElementById('performanceAutoButton');
+    auto.click();
+    const start = getPerformanceModePreference();
+    const savedManual = localStorage.getItem(PERFORMANCE_MODE_KEY);
+    await new Promise(resolve => {
+      let frames = 0;
+      function scroll() {
+        scrollTo(0, frames * 75);
+        if (++frames < 80) requestAnimationFrame(scroll); else resolve();
+      }
+      requestAnimationFrame(scroll);
+    });
+    const measured = getPerformanceModePreference();
+    const measuredChoice = JSON.parse(localStorage.getItem(AUTOMATIC_PERFORMANCE_KEY) || '{}')['standard:4:4'];
+    setPerformanceLevel(2);
+    const manual = auto.getAttribute('aria-pressed') === 'false';
+    auto.click();
+    const restored = getPerformanceModePreference() === measured;
+    toggleProfileModal();
+    auto.scrollIntoView({ block: 'center' });
+    await new Promise(requestAnimationFrame);
+    const rect = auto.getBoundingClientRect();
+    return {start,savedManual,measured,measuredChoice,manual,restored,buttonFits:rect.width >= 44 && rect.left >= 0 && rect.right <= innerWidth,
+      buttonVisible:rect.width > 0 && auto.contains(document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2))};
+  })()`);
+  assert.equal(report.automatic.start, 'balanced');
+  assert.equal(report.automatic.savedManual, null);
+  assert.ok(report.automatic.manual && report.automatic.restored && report.automatic.buttonFits);
+  assert.ok(report.automatic.measuredChoice, 'scrolling on the ready app stores a measured automatic choice');
+  await delay(280);
+  fs.mkdirSync(evidenceDir,{recursive:true});
+  const profileScreenshot = await send('Page.captureScreenshot',{format:'png',captureBeyondViewport:false});
+  fs.writeFileSync(path.join(evidenceDir,'performance-settings-320.png'),Buffer.from(profileScreenshot.data,'base64'));
+  await evaluate(`closeProfileModal(true);setPerformanceLevel(3)`);
+ }
+ if (performanceModes) {
+  report.performanceModes = [];
+  for (const [width, theme, rates] of [[1280, 'lootlingua', [1, 4]], [390, 'lootlingua', [1, 4, 6]], [390, 'glass', [1, 4, 6]]]) {
+   await send('Emulation.setDeviceMetricsOverride', {width,height:800,deviceScaleFactor:1,mobile:width<600});
+   await evaluate(`document.documentElement.setAttribute('data-theme', '${theme}')`);
+   for (const rate of rates) {
+    await send('Emulation.setCPUThrottlingRate', {rate});
+    for (const [index, level] of ['ultra', 'balanced', 'stable', 'turbo'].entries()) {
+     const sample = await evaluate(`(async () => {
+      setPerformanceLevel(${index}); scrollTo(0,0); await new Promise(resolve => setTimeout(resolve,220));
+      const list = document.getElementById('list');
+      const frames = [], renderWork = [];
+      let last = await new Promise(requestAnimationFrame);
+      for (let step = 1; step <= 32; step++) {
+        const started = performance.now();
+        scrollTo(0, step * 220);
+        render({scrollYOverride:step * 220});
+        list.getBoundingClientRect();
+        renderWork.push(performance.now() - started);
+        const now = await new Promise(requestAnimationFrame);
+        frames.push(now - last); last = now;
+      }
+      const percentile = (values, fraction) => Math.round(values.sort((a,b)=>a-b)[Math.ceil(values.length*fraction)-1] * 10) / 10;
+      return {frameP95:percentile(frames,.95),workP50:percentile(renderWork,.5),workP95:percentile(renderWork,.95),
+        over34ms:frames.filter(value=>value>34).length, cards:list.querySelectorAll('.word-card').length};
+     })()`);
+     report.performanceModes.push({width,theme,rate,level,...sample});
+    }
+   }
+  }
+  await send('Emulation.setCPUThrottlingRate', {rate:1});
+  await evaluate(`document.documentElement.setAttribute('data-theme','lootlingua');setPerformanceLevel(3)`);
+  console.log(JSON.stringify(report.performanceModes, null, 2));
+ }
  if(paged){
   report.pages=await evaluate(String.raw`(async()=>{
     const source=window.words;window.auth=window.__feedbackFirestore.auth;window.auth.currentUser={uid:'browser-pages'};window.__pageReads=[];let failNext=false;

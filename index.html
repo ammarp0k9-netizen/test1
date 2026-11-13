@@ -87,7 +87,7 @@
     content="#090c0f"
   >
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
-  <link rel="stylesheet" href="style.css?v=20261113-treasure-v1">
+  <link rel="stylesheet" href="style.css?v=20261113-automatic-performance">
   <link rel="stylesheet" href="entry-experience.css?v=20261104-world-guide-4">
   <link rel="stylesheet" href="motivation.css?v=20261106-motivation-1">
   <link rel="stylesheet" href="glass-theme.css?v=20261106-materials-1">
@@ -822,7 +822,7 @@
         <div class="performance-setting-row performance-level-setting">
           <div class="performance-setting-head">
             <span><i class="fa-solid fa-gauge-high" aria-hidden="true"></i> الأداء</span>
-            <small id="performanceModeState">متوازن</small>
+            <small id="performanceModeState" role="status">تلقائي · متوازن</small>
           </div>
           <div class="performance-slider-card">
             <div class="performance-level-labels" aria-hidden="true">
@@ -833,9 +833,12 @@
             </div>
             <input type="range" id="performanceLevelSlider" class="performance-level-slider" min="0" max="3" step="any" value="1" aria-label="مستوى الأداء">
           </div>
-          <button type="button" class="performance-help-btn" onclick="showPerformanceModeHelp(event)" aria-label="شرح وضع الأداء السريع">
-            <i class="fa-solid fa-question" aria-hidden="true"></i>
-          </button>
+          <div class="performance-setting-actions">
+            <button type="button" id="performanceAutoButton" class="performance-auto-btn" aria-pressed="true" onclick="useAutomaticPerformance()">الاختيار التلقائي</button>
+            <button type="button" class="performance-help-btn" onclick="showPerformanceModeHelp(event)" aria-label="شرح مستويات الأداء">
+              <i class="fa-solid fa-question" aria-hidden="true"></i>
+            </button>
+          </div>
         </div>
         <button type="button" class="auth-btn profile-auth-btn profile-settings-btn performance-toggle-btn keyboard-shortcuts-btn" onclick="showKeyboardShortcutsModal()">
           <i class="fa-solid fa-keyboard" aria-hidden="true"></i>
@@ -1104,7 +1107,8 @@
   <div class="modal-content">
     <div class="modal-icon"><i class="fa-solid fa-bolt" aria-hidden="true"></i></div>
     <h2>الأداء</h2>
-    <p>اختر مستوى التأثيرات حسب جهازك: "أقصى جرافيك" يشغّل كل المؤثرات، "متوازن" يخفف البلور والحركة، "أداء مستقر" يبقي الانتقالات الأساسية، و"تربو" يوقف المؤثرات بالكامل.</p>
+    <p>«الاختيار التلقائي» يضبط مؤثرات الموقع حسب جهازك وسلاسة التمرير. تقدر تختار مستوى بنفسك من الشريط.</p>
+    <p>«أقصى جرافيك» يشغّل المؤثرات، «متوازن» يخفف التمويه، «أداء مستقر» يقلّل الحركة، و«تربو» يخفّف المؤثرات لأدنى مستوى. لووت رنر وLoot Bots يستخدمان إعدادات عرضهما الخاصة.</p>
     <div class="modal-buttons">
       <button type="button" onclick="hideModal('performanceModeInfoModal')" class="btn-confirm">تمام</button>
     </div>
@@ -1220,7 +1224,7 @@
   <script src="js/test-clock-contract.js?v=20260729-2"></script>
   <script src="js/dictionary-pages.js?v=20261107-reads-1"></script>
   <script src="js/modal-focus.js?v=20261113-review-guide"></script>
-  <script data-startup-critical src="js/core.js?v=20261113-resumable-guide"></script>
+  <script data-startup-critical src="js/core.js?v=20261113-automatic-performance"></script>
 <script src="js/operation-runtime.js?v=20260811-3"></script>
     <script data-startup-critical src="js/storage.js?v=20261113-treasure-v1"></script>
   <script src="js/content-schema.js?v=20260722-1"></script>
@@ -1238,7 +1242,7 @@
 <script src="js/dictionary.js?v=20261113-review-guide"></script>
 <script src="js/gate-game-migration.js?v=20261007-1"></script>
 <script src="js/gate-runner.js?v=20261113-treasure-v1"></script>
-<script src="js/loot-bots.js?v=20261113-treasure-v1"></script>
+<script src="js/loot-bots.js?v=20261113-automatic-performance"></script>
 <script src="js/worlds.js?v=20261113-treasure-v1"></script>
 <script src="js/dictionary-window.js?v=20261105-render-1"></script>
 <script src="js/dictionary-render.js?v=20261107-word-visibility-1"></script>

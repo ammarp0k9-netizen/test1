@@ -7878,7 +7878,7 @@ body.view-has-back .page-header { margin-bottom: 14px; }
 }
 .performance-setting-row {
   display: grid;
-  grid-template-columns: 1fr 34px;
+  grid-template-columns: minmax(0, 1fr);
   align-items: start;
   gap: 10px;
 }
@@ -8012,6 +8012,31 @@ body.view-has-back .page-header { margin-bottom: 14px; }
   background: var(--accent-soft);
   transform: translateY(-1px);
 }
+.performance-setting-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 8px;
+}
+.performance-auto-btn {
+  min-height: 38px;
+  padding: 5px 12px;
+  border-radius: 10px;
+  border: 1px solid var(--accent);
+  background: var(--surface-bg);
+  color: var(--text-white);
+  font: inherit;
+  font-size: .8rem;
+  font-weight: 800;
+  cursor: pointer;
+}
+.performance-auto-btn[aria-pressed="true"] { background: var(--accent); color: var(--text-on-accent); }
+.performance-auto-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+@media (max-width: 400px) {
+  .performance-setting-head { gap: 6px; }
+  .performance-level-labels { font-size: 9px; }
+}
 .keyboard-shortcuts-btn {
   text-align: start;
   background: linear-gradient(135deg, color-mix(in srgb, var(--star) 18%, var(--surface-bg)), var(--surface-bg));
@@ -8097,37 +8122,28 @@ body.perf-stable,
 body.perf-turbo,
 body.low-end-device { --legend-glass-shadow: none; }
 
-body.perf-balanced *,
-body.perf-balanced *::before,
-body.perf-balanced *::after,
-body.perf-stable *,
-body.perf-stable *::before,
-body.perf-stable *::after,
-body.low-end-device *,
-body.low-end-device *::before,
-body.low-end-device *::after {
+body:is(.perf-balanced, .perf-stable, .low-end-device) :not(:where(.runner-overlay, .runner-overlay *, .loot-bots, .loot-bots *)),
+body:is(.perf-balanced, .perf-stable, .low-end-device) :not(:where(.runner-overlay, .runner-overlay *, .loot-bots, .loot-bots *))::before,
+body:is(.perf-balanced, .perf-stable, .low-end-device) :not(:where(.runner-overlay, .runner-overlay *, .loot-bots, .loot-bots *))::after {
   backdrop-filter: none !important;
   -webkit-backdrop-filter: none !important;
 }
-body.perf-balanced *,
-body.perf-balanced *::before,
-body.perf-balanced *::after {
+body.perf-balanced :not(:where(.runner-overlay, .runner-overlay *, .loot-bots, .loot-bots *)),
+body.perf-balanced :not(:where(.runner-overlay, .runner-overlay *, .loot-bots, .loot-bots *))::before,
+body.perf-balanced :not(:where(.runner-overlay, .runner-overlay *, .loot-bots, .loot-bots *))::after {
   transition-duration: 0.16s !important;
 }
-body.perf-stable *,
-body.perf-stable *::before,
-body.perf-stable *::after {
+body.perf-stable :not(:where(.runner-overlay, .runner-overlay *, .loot-bots, .loot-bots *)),
+body.perf-stable :not(:where(.runner-overlay, .runner-overlay *, .loot-bots, .loot-bots *))::before,
+body.perf-stable :not(:where(.runner-overlay, .runner-overlay *, .loot-bots, .loot-bots *))::after {
   animation-duration: 0.001ms !important;
   animation-iteration-count: 1 !important;
   transition-duration: 0.12s !important;
   scroll-behavior: auto !important;
 }
-body.perf-turbo *,
-body.perf-turbo *::before,
-body.perf-turbo *::after,
-body.low-end-device *,
-body.low-end-device *::before,
-body.low-end-device *::after {
+body:is(.perf-turbo, .low-end-device) :not(:where(.runner-overlay, .runner-overlay *, .loot-bots, .loot-bots *)),
+body:is(.perf-turbo, .low-end-device) :not(:where(.runner-overlay, .runner-overlay *, .loot-bots, .loot-bots *))::before,
+body:is(.perf-turbo, .low-end-device) :not(:where(.runner-overlay, .runner-overlay *, .loot-bots, .loot-bots *))::after {
   backdrop-filter: none !important;
   -webkit-backdrop-filter: none !important;
   animation-duration: 0.001ms !important;
@@ -12667,7 +12683,7 @@ html[data-theme="glass"] :where(.card-box, .stat-card)::after {
 }
 
 /* 6) Unified Liquid Glass buttons. No solid cyan primary button. */
-html[data-theme="glass"] button:not(.add-form-toggle):not(.treasure-dock-btn):not(.icon-circle):not(.star-btn):not(.notif-bell-btn):not(.voice-search-btn):not(.xp-guide-toggle):not(.treasure-chest-main) {
+html[data-theme="glass"] button:not(:where(.runner-overlay *, .loot-bots *, .performance-auto-btn)):not(.add-form-toggle):not(.treasure-dock-btn):not(.icon-circle):not(.star-btn):not(.notif-bell-btn):not(.voice-search-btn):not(.xp-guide-toggle):not(.treasure-chest-main) {
   --glass-button-tint: rgba(121,216,255,0.045);
   background:
     radial-gradient(95% 135% at 20% -34%, rgba(255,255,255,0.24), transparent 45%),
@@ -12773,8 +12789,7 @@ html[data-theme="glass"] .notif-hub.notif-open .notif-bell-ring {
 }
 
 @media (hover: hover) and (pointer: fine) {
-  html[data-theme="glass"] body.perf-ultra button:not(.add-form-toggle):not(.treasure-dock-btn):not(.icon-circle):not(.star-btn):not(.notif-bell-btn):not(.voice-search-btn):not(.xp-guide-toggle):not(.treasure-chest-main):hover,
-  html[data-theme="glass"] body.perf-balanced button:not(.add-form-toggle):not(.treasure-dock-btn):not(.icon-circle):not(.star-btn):not(.notif-bell-btn):not(.voice-search-btn):not(.xp-guide-toggle):not(.treasure-chest-main):hover {
+  html[data-theme="glass"] body:is(.perf-ultra, .perf-balanced) button:not(:where(.runner-overlay *, .loot-bots *, .performance-auto-btn)):not(.add-form-toggle):not(.treasure-dock-btn):not(.icon-circle):not(.star-btn):not(.notif-bell-btn):not(.voice-search-btn):not(.xp-guide-toggle):not(.treasure-chest-main):hover {
     transform: translateY(-1px);
     border-color: rgba(235,248,255,0.36) !important;
     box-shadow:
@@ -12785,7 +12800,7 @@ html[data-theme="glass"] .notif-hub.notif-open .notif-bell-ring {
   }
 }
 
-html[data-theme="glass"] button:not(.add-form-toggle):not(.treasure-dock-btn):not(.icon-circle):not(.star-btn):not(.notif-bell-btn):not(.voice-search-btn):not(.xp-guide-toggle):not(.treasure-chest-main):active {
+html[data-theme="glass"] button:not(:where(.runner-overlay *, .loot-bots *, .performance-auto-btn)):not(.add-form-toggle):not(.treasure-dock-btn):not(.icon-circle):not(.star-btn):not(.notif-bell-btn):not(.voice-search-btn):not(.xp-guide-toggle):not(.treasure-chest-main):active {
   transform: translateY(1px) scale(0.985) !important;
   box-shadow:
     inset 0 3px 7px rgba(1,7,18,0.16),
@@ -12840,7 +12855,7 @@ html[data-theme="glass"] :where(input, select, textarea, .app-dropdown-trigger):
 }
 
 html[data-theme="glass"] :where(
-  button,
+  button:not(.runner-overlay *, .loot-bots *, .performance-auto-btn),
   .published-card,
   .world-card,
   .published-word-card,
@@ -14695,6 +14710,11 @@ html[data-theme="glass"] body.low-end-device :where(.legend-dock, .treasure-dock
 /* Runner input/physics alignment: the visible player and pointer surface own the gesture. */
 .runner-input-active { overscroll-behavior: contain; }
 .runner-input-active .runner-overlay { overscroll-behavior: contain; }
+/* The opaque game surface owns the screen. Keep the page behind it mounted
+   and laid out, but stop painting it while the game is drawing frames. */
+body.runner-input-active > :where(.main-content, .legend-top-bar, .legend-dock, .sidebar, .treasure-dock) {
+  visibility: hidden;
+}
 .runner-stage .runner-player { left: calc(var(--player-x, .5) * 100%); }
 .gate-runner-launch:disabled { opacity: .48; cursor: not-allowed; filter: saturate(.55); }
 .gate-runner-review-lock { flex-basis: 100%; margin: 0; color: var(--text, #f7f8ff); font-size: .82rem; line-height: 1.45; }
