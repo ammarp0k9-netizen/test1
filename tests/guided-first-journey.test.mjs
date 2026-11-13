@@ -100,6 +100,7 @@ function createControllerHarness() {
       classList,
       append() {},
       setAttribute() {},
+      addEventListener() {},
     }),
   };
   const root = {
@@ -242,6 +243,58 @@ test('an active public-world journey does not override ordinary feature eligibil
   assert.equal(controller.getState().phase, 'awaiting-first-gate');
   assert.equal(controller.shouldAllowSurface('quiz'), true);
   assert.equal(controller.shouldAllowSurface('custom-worlds'), true);
+});
+
+test('choosing a world, browsing another, and starting there are distinct actions', async () => {
+  const { controller, root } = createControllerHarness();
+  const outbox = [];
+  root.queueProfileIntent = (intent) => outbox.push(intent);
+  await controller.beginFromEntry({
+    presentation: { classification: 'brand-new', audience: 'new' },
+    worldId: 'preview-world', chooseWorld: true,
+  });
+  assert.equal(controller.getState().phase, 'choosing-world');
+  assert.equal(controller.getState().worldId, '');
+  controller.selectWorld('first-world');
+  assert.equal(controller.getState().worldId, 'first-world');
+  const world = { isConnected: true, querySelectorAll: () => [], querySelector: () => null };
+  controller.selectWorld('browsed-world');
+  controller.applyRoute({ type: 'world', worldId: 'browsed-world', root: world });
+  assert.equal(controller.getState().worldId, 'first-world');
+  controller.journeyStarted({ worldId: 'browsed-world' });
+  assert.equal(controller.getState().worldId, 'browsed-world');
+  assert.equal(controller.getState().suggestedWorldId, 'preview-world');
+  assert.deepEqual(outbox.map(({ state }) => state.worldId), ['', 'first-world', 'browsed-world']);
+  assert.equal(outbox.every(({ tour }) => tour === 'public-world-guide'), true);
+});
+
+test('placement result checkpoints restore and follow only the recommended gate after continuing', async () => {
+  const { controller, root } = createControllerHarness();
+  const seen = [];
+  const target = { dataset: { guidePlacementLevel: 'B1' }, classList: { add() {} } };
+  const world = { isConnected: true, querySelectorAll: () => [target], querySelector: () => target };
+  root.LootLinguaPopover = { getActiveId: () => '', open(options) { seen.push(options); }, closeIf() {} };
+  await controller.beginFromEntry({ presentation: { classification: 'brand-new', audience: 'new' }, worldId: 'world-a' });
+  controller.setPlacement({ worldId: 'world-a', placementStage: 'assessment', placementLevel: 'A2', assessmentId: 'one' });
+  controller.applyRoute({ type: 'assessment', worldId: 'world-a', root: world });
+  assert.equal(seen.length, 0, 'answering the test is interruption-free');
+  controller.setPlacement({ worldId: 'world-a', placementStage: 'offer', placementLevel: 'A2', assessmentId: 'one' });
+  target.dataset.guidePlacementLevel = 'A2';
+  controller.applyRoute({ type: 'world', worldId: 'world-a', root: world });
+  assert.match(seen.at(-1).reading.text, /العودة لاختبار المستوى/);
+  controller.setPlacement({ worldId: 'world-a', placementStage: 'result', placementLevel: 'B1', assessmentId: 'one', resultStep: 2 });
+  controller.applyRoute({ type: 'placement-result', worldId: 'world-a', root: world, assessmentId: 'one', nextLevel: 'B1' });
+  assert.match(seen.at(-1).reading.text, /B1/);
+  target.dataset.guidePlacementLevel = 'B1';
+  controller.applyRoute({ type: 'world', worldId: 'world-a', root: world });
+  assert.match(seen.at(-1).reading.text, /B1/);
+  controller.placementGate({ worldId: 'world-a', rankId: 'rank-b', gateId: 'gate-b' });
+  controller.gateOpened({ worldId: 'world-a', gateId: 'wrong-gate' });
+  assert.equal(controller.getState().phase, 'awaiting-first-gate');
+  controller.gateOpened({ worldId: 'world-a', rankId: 'rank-b', gateId: 'gate-b' });
+  assert.equal(controller.getState().phase, 'first-gate-opened');
+  controller.worldCompleted('world-a');
+  assert.equal(controller.getState().phase, 'completed');
 });
 
 

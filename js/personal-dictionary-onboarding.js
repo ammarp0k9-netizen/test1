@@ -7,6 +7,7 @@
   const KEY_PREFIX = 'lootlingua:personal-dictionary-onboarding:v1:';
   const COACH_ID = 'personalDictionaryOnboardingCoach';
   let renderToken = 0;
+  let pausedForOverlay = false;
   const STEPS = [
     ['dictionary', '#legendDock [data-dock-view="personal"]', 'قاموسك الشخصي', 'اضغط قاموسك هنا لنضيف كلمة تتعلمها.', 'click'],
     ['search', '#searchBtn', 'جرّب البحث', 'اقترحنا journey: اكتبها أو اختر كلمة أخرى، ثم اضغط «ابحث عن معنى».', 'search'],
@@ -49,30 +50,93 @@
     write({ ...state, step });
     renderStep();
   }
+  function onDictionary() { return root.getOnboardingView?.() === 'personal'; }
+  function closeCoach() {
+    renderToken += 1;
+    root.LootLinguaPopover?.closeIf?.(COACH_ID, { silent: true });
+  }
+  function offerResume(state) {
+    const resume = state && !['completed', 'awaiting-journey'].includes(state.phase) && !root.__entryExperienceActive;
+    root.LootLinguaPopover?.offerResume?.(COACH_ID, resume ? {
+      label: 'تابع إرشاد قاموسك',
+      open: () => {
+        pausedForOverlay = false;
+        if (!onDictionary()) root.loadPersonalDictionary?.();
+        renderStep();
+      },
+    } : null);
+  }
   function renderStep() {
     const state = read();
-    if (!state || ['completed', 'awaiting-journey'].includes(state.phase)) return;
+    if (!state || ['completed', 'awaiting-journey'].includes(state.phase) || root.__entryExperienceActive ||
+        document.getElementById('appAuthDialogShell')?.hidden === false) {
+      closeCoach(); offerResume(null); return;
+    }
     const index = Number(state.step) || 0;
-    const [id, selector, titleText, text, action] = STEPS[index] || STEPS[0];
+    if ((index !== 0 && !onDictionary()) || pausedForOverlay) {
+      closeCoach(); offerResume(state); return;
+    }
+    let [id, selector, titleText, text, action] = STEPS[index] || STEPS[0];
+    const draft = root.getPersonalDictionarySearchDraft?.();
+    const requiresFirstWord = state.requiresFirstWord && owner() === 'guest';
+    if (!requiresFirstWord && index === 2 && draft?.status !== 'success') {
+      selector = '#normalSearchZone';
+      text = 'عند البحث، تظهر المعاني هنا. اختر المعنى الأنسب للكلمة التي تريد حفظها.';
+    }
+    if (!requiresFirstWord && index === 3 && !draft?.expanded) {
+      selector = '#addFormToggle';
+      text = 'افتح الحقول الإضافية لكتابة المعنى، ثم اضغط «إضافة للقاموس» عندما تكون جاهزًا.';
+    }
+    if (requiresFirstWord && index >= 1 && index <= 3) {
+      if (index === 2 && draft?.meaning && draft.expanded) {
+        advance(); return;
+      }
+      if (index === 1 && draft?.status === 'success' && !draft.meaning) {
+        advance(); return;
+      }
+      if (draft?.status === 'pending') {
+        closeCoach();
+        offerResume(null);
+        return; // The durable search will announce its result on this surface.
+      }
+      if (!draft?.meaning && (index >= 2 || draft?.locked || ['blocked', 'empty', 'error', 'interrupted'].includes(draft?.status))) {
+        if (draft?.status === 'success') {
+          selector = '#suggestionsList'; titleText = STEPS[2][2]; text = STEPS[2][3]; action = 'meaning';
+        } else if (draft?.status || draft?.locked) {
+          selector = draft.expanded ? '#meaningInput' : '#addFormToggle';
+          titleText = 'أضف معنى يدويًا';
+          text = 'تقدر تسترجع نتيجة بحثك إن ظهرت، أو تكتب المعنى في الحقول الإضافية وتحفظ الكلمة.';
+          action = 'manual';
+        } else {
+          selector = '#searchBtn'; titleText = STEPS[1][2]; text = STEPS[1][3]; action = 'search';
+        }
+      }
+    }
+    if (requiresFirstWord && index === 1 && draft?.meaning && draft.expanded) {
+      write({ ...state, step: 3 }); renderStep(); return;
+    }
+    const currentOwner = owner();
     const token = ++renderToken;
     root.LootLinguaPopover?.closeIf?.('guidedFirstJourneyCoach', { silent: true });
-    root.LootLinguaPopover?.closeIf?.(COACH_ID, { silent: true });
-    if (id === 'search') {
+    if (action === 'search') {
       const input = document.getElementById('wordInput');
       if (input && !input.value) { input.value = 'journey'; input.dispatchEvent(new Event('input', { bubbles: true })); }
     }
-    if (id === 'full-stats') { root.closeProfileModal?.(true); root.openStatsPanel?.(); }
+    if (id === 'full-stats' && !document.getElementById('statsPanel')?.classList.contains('show')) {
+      root.closeProfileModal?.(true); root.openStatsPanel?.();
+    }
     if (index >= 8 && index <= 15 && id !== 'full-stats') {
       if (!document.getElementById('profileModal')?.classList.contains('open')) root.toggleProfileModal?.();
     }
-    if (id === 'titles') { root.closeStatsPanel?.(); if (!document.getElementById('profileModal')?.classList.contains('open')) root.toggleProfileModal?.(); }
-    if (id === 'ready') { root.closeProfileModal?.(true); root.loadPersonalDictionary?.(); }
+    if (id === 'titles') { root.closeStatsPanel?.(true); if (!document.getElementById('profileModal')?.classList.contains('open')) root.toggleProfileModal?.(); }
+    if (id === 'ready') root.closeProfileModal?.(true);
     let attempts = 0;
     const show = () => {
-      if (token !== renderToken) return;
+      if (token !== renderToken || currentOwner !== owner() || (index !== 0 && !onDictionary())) return;
       const target = document.querySelector(selector);
       if (!target?.getClientRects().length) {
         if (++attempts < 30) setTimeout(show, 100);
+        else offerResume(state);
         return; // Keep the checkpoint: a missing target is never completion.
       }
       target.scrollIntoView?.({ block: 'center', behavior: 'instant' });
@@ -81,13 +145,21 @@
       const title = document.createElement('strong'); title.textContent = titleText;
       const copy = document.createElement('p'); copy.textContent = text;
       content.append(title, copy);
-      if (!action || (!state.requiresFirstWord && ['search', 'meaning', 'saved'].includes(action))) {
+      if (!action || (!requiresFirstWord && ['search', 'meaning', 'saved'].includes(action))) {
         const next = document.createElement('button'); next.type = 'button'; next.className = 'entry-primary';
         next.textContent = id === 'ready' ? 'يلا نكمل التعلّم' : 'التالي';
         next.addEventListener('click', () => id === 'ready' ? finish(read()) : advance());
         content.append(next);
       }
-      root.LootLinguaPopover?.open({ id: COACH_ID, className: 'lootlingua-popover personal-dictionary-onboarding-coach', anchor: target, content, persistent: true });
+      const popover = root.LootLinguaPopover;
+      const actions = action === 'manual'
+        ? (target.matches('#addFormToggle') ? [target] : [])
+        : (action ? [target] : []);
+      const shown = popover?.open({
+        id: COACH_ID, className: 'lootlingua-popover personal-dictionary-onboarding-coach', anchor: target,
+        content, persistent: true, reading: { step: `${index}:${selector}`, text, actions },
+      });
+      offerResume(shown ? null : state);
     };
     setTimeout(show, 60);
   }
@@ -112,8 +184,8 @@
   function finish(state) {
     if (!state || state.phase === 'completed') return state;
     const next = write({ ...state, phase: 'completed', completedAt: Date.now() });
-    renderToken += 1;
-    root.LootLinguaPopover?.closeIf?.(COACH_ID, { silent: true });
+    closeCoach();
+    offerResume(null);
     root.dispatchEvent(new CustomEvent('lootlingua:personal-dictionary-onboarding-change', { detail: { state: next } }));
     return next;
   }
@@ -122,7 +194,7 @@
     if (!state || state.phase === 'completed') return;
     const phase = state.requiresFirstWord ? 'awaiting-first-word' : 'intro';
     const next = state.phase === 'awaiting-journey' ? write({ ...state, phase }) : state;
-    if (typeof root.loadPersonalDictionary === 'function') root.loadPersonalDictionary();
+    if (!onDictionary()) root.loadPersonalDictionary?.();
     renderStep();
     return next;
   }
@@ -165,9 +237,18 @@
 
   root.addEventListener('lootlingua:guided-first-journey-change', () => continueWhenReady());
   root.addEventListener('lootlingua:onboarding-cloud-change', () => {
-    renderToken += 1;
-    root.LootLinguaPopover?.closeIf?.(COACH_ID, { silent: true });
     continueWhenReady();
+  });
+  root.addEventListener('lootlingua:dictionary-navigation', closeCoach);
+  root.addEventListener('lootlingua:surface-ready', () => continueWhenReady());
+  root.addEventListener('lootlingua:entry-closed', () => continueWhenReady());
+  root.addEventListener('lootlingua:auth-dialog-opened', closeCoach);
+  root.addEventListener('lootlingua:auth-dialog-closed', () => continueWhenReady());
+  root.addEventListener('lootlingua:profile-guide-closed', () => {
+    const state = read();
+    if (!state || state.phase === 'completed' || state.step < 8 || state.step > 15) return;
+    pausedForOverlay = true;
+    closeCoach(); offerResume(state);
   });
   root.addEventListener('lootlingua:dictionary-word-saved', (event) => {
     if (event.detail?.scope && event.detail.scope !== 'personal') return;
@@ -177,15 +258,43 @@
     }
   });
   root.addEventListener('lootlingua:dictionary-search-result', (event) => {
-    if (read()?.step === 1 && event.detail?.status === 'success') advance();
+    const state = read();
+    if (!state || !['intro', 'awaiting-first-word'].includes(state.phase) || !onDictionary() ||
+        state.step < 1 || state.step > 3 || event.detail?.type !== 'normal' ||
+        !event.detail.scope?.endsWith(':personal')) return;
+    if (state.step === 1 && event.detail.status === 'success') advance();
+    else if (event.detail.status !== 'success') renderStep();
   });
-  root.addEventListener('lootlingua:dictionary-meaning-selected', () => { if (read()?.step === 2) advance(); });
+  root.addEventListener('lootlingua:dictionary-meaning-selected', (event) => {
+    const state = read();
+    if (!onDictionary() || !event.detail?.scope?.endsWith(':personal') || state?.step < 1 || state?.step > 3 ||
+      !['intro', 'awaiting-first-word'].includes(state?.phase)) return;
+    write({ ...state, step: 3 }); renderStep();
+  });
+  root.addEventListener('lootlingua:dictionary-meaning-edited', () => {
+    const state = read();
+    if (!onDictionary() || !state || !['intro', 'awaiting-first-word'].includes(state.phase) ||
+        state.step < 1 || state.step > 3) return;
+    if (root.getPersonalDictionarySearchDraft?.()?.meaning.trim() && state.step !== 3) write({ ...state, step: 3 });
+    renderStep();
+  });
+  document.addEventListener('click', (event) => {
+    const state = read();
+    if (onDictionary() && state?.step >= 1 && state.step <= 3 && event.target.closest?.('#addFormToggle')) setTimeout(renderStep, 0);
+  });
   document.addEventListener('click', (event) => {
     const state = read();
     if (!state || ['awaiting-journey', 'completed'].includes(state.phase)) return;
     const step = STEPS[Number(state.step) || 0];
-    if (step?.[4] === 'click' && event.target.closest?.(step[1])) setTimeout(advance, 0);
+    if (step?.[4] !== 'click' || !event.target.closest?.(step[1]) ||
+        !root.LootLinguaPopover?.canAct?.(COACH_ID)) return;
+    const currentOwner = owner();
+    setTimeout(() => {
+      if (currentOwner === owner() && read()?.step === state.step) advance();
+    }, 0);
   }, true);
-  root.addEventListener('lootlingua:auth-state', () => { migrateGuestState(); setTimeout(continueWhenReady, 0); });
+  root.addEventListener('lootlingua:auth-state', () => {
+    closeCoach(); offerResume(null); pausedForOverlay = false; migrateGuestState(); setTimeout(continueWhenReady, 0);
+  });
   root.addEventListener('lootlingua:initial-data-ready', () => { migrateGuestState(); setTimeout(continueWhenReady, 0); });
 })(window);

@@ -5,7 +5,7 @@ import { spawn } from 'node:child_process';
 import WebSocketClient from 'ws';
 
 const root = path.resolve(import.meta.dirname, '..');
-const evidenceDir = path.join(root, 'reports', 'notification-system-evidence');
+const evidenceDir = process.env.NOTIFICATION_SMOKE_OUTPUT || path.join(root, 'reports', 'notification-system-evidence');
 const browserPath = [
   'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
   'C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe',
@@ -164,6 +164,30 @@ try {
   });
   await send('Runtime.enable');
   await send('Page.enable');
+  await send('Page.addScriptToEvaluateOnNewDocument', {
+    source: `window.addEventListener('DOMContentLoaded', () => {
+      const receipt = sessionStorage.getItem('smoke-reload-receipt');
+      if (!receipt) return;
+      window.__lootlinguaAuthResolved = false;
+      window.getAiGlobalCache = async () => null;
+      window.saveAiGlobalCache = async () => true;
+      const original = window.fetch.bind(window);
+      window.fetch = (url, options) => {
+        if (!String(url).startsWith('https://dictionary7-ayes.onrender.com/api/dictionary')) return original(url, options);
+        const body = JSON.parse(options.body);
+        if (!String(url).endsWith('/guest-result') || body.requestId !== receipt) {
+          sessionStorage.setItem('smoke-reload-invalid-request', '1');
+          return Promise.resolve(new Response('{}', {status: 403}));
+        }
+        return Promise.resolve(new Response(JSON.stringify([{ar:'رحلة',pos:'اسم',ex:'A journey begins.'}]), {
+          headers: {'X-Dictionary-Source': 'ai'},
+        }));
+      };
+      handleInitialRouting();
+      window.SmartLoadingOverlay?.forceHide?.();
+      document.getElementById('smartLoadingOverlay')?.remove();
+    }, {once: true});`,
+  });
   await send('Emulation.setDeviceMetricsOverride', { width: 1440, height: 900, deviceScaleFactor: 1, mobile: false });
   await send('Page.navigate', { url: appUrl });
   await waitFor(`Boolean(window.LootLinguaNotificationStore) && typeof toggleNotificationsPanel === 'function'`, 'notification app', 40000);
@@ -302,6 +326,9 @@ try {
     results.assertions['discovery-start-'+feature] = started;
     if (feature === 'treasure' && started) {
       await evaluate(`document.querySelector('.feature-mini-onboarding-skip')?.click()`);
+      results.assertions.readingDelayBlocksSkip = await evaluate(`LootLinguaFeatureDiscovery.getState().features.treasure.step === 0`);
+      await waitFor(`LootLinguaPopover.canAct('featureMiniOnboardingCoach')`, 'treasure reading delay');
+      await evaluate(`document.querySelector('.feature-mini-onboarding-skip')?.click()`);
       await delay(180);
       results.assertions.skipOnlyOneStep = await evaluate(`LootLinguaFeatureDiscovery.getStatus('treasure',true) === 'in-progress' && LootLinguaFeatureDiscovery.getState().features.treasure.step === 1 && !!document.getElementById('featureMiniOnboardingCoach')`);
     }
@@ -311,6 +338,7 @@ try {
     results.screenshots.push(await screenshot('discovery-mini-'+feature+'.png'));
     for (let step = 0; step < 12; step++) {
       if (await evaluate(`LootLinguaFeatureDiscovery.getStatus(${JSON.stringify(feature)},true) === 'completed'`)) break;
+      await waitFor(`LootLinguaPopover.canAct('featureMiniOnboardingCoach')`, 'feature reading delay');
       await evaluate(`(() => {
         const next = document.querySelector('.feature-mini-onboarding-next');
         if (next && !next.hidden) next.click();
@@ -334,6 +362,8 @@ try {
     await evaluate(`(() => {
       closeRouteOverlays();
       localStorage.removeItem('lootlingua:personal-dictionary-onboarding:v1:guest');
+      localStorage.removeItem('lootlingua:dictionary-draft:v1:guest:personal');
+      localStorage.removeItem('lootlingua:dictionary-search:v1:guest:personal');
       LootLinguaPersonalDictionaryOnboarding.planForFirstJourney({requiresFirstWord:true});
       LootLinguaPersonalDictionaryOnboarding.beginGuestDictionary();
     })()`);
@@ -341,14 +371,39 @@ try {
     await evaluate(`document.body.dispatchEvent(new PointerEvent('pointerdown',{bubbles:true}))`);
     results.assertions['persistent-core-'+width] = await evaluate(`!!document.getElementById('personalDictionaryOnboardingCoach')`);
     results.assertions['core-target-highlight-'+width] = await evaluate(`document.querySelector('#legendDock [data-dock-view="personal"]').classList.contains('coach-highlight-target')`);
+    await evaluate(`(() => {
+      localStorage.removeItem('hasUsedNormalGuestShot');
+      window.fetch = ((original) => (url, options) => {
+        if (!String(url).startsWith('https://dictionary7-ayes.onrender.com/api/dictionary')) return original(url, options);
+        const request = JSON.parse(options.body);
+        if (String(url).endsWith('/guest-result')) {
+          return Promise.resolve(new Response(JSON.stringify([{ar:'رحلة',pos:'اسم',ex:'A journey begins.'}]), {
+            headers: {'X-Dictionary-Source': 'ai'},
+          }));
+        }
+        window.__smokeSearchStarts = (window.__smokeSearchStarts || 0) + 1;
+        window.__smokeSearchReceipt = request.requestId;
+        return new Promise(resolve => {
+          window.__smokeFinishSearch = () => resolve(new Response(JSON.stringify([{ar:'رحلة',pos:'اسم',ex:'A journey begins.'}]), {
+            headers: {'X-Dictionary-Source': 'ai'},
+          }));
+        });
+      })(window.__smokeFetch || (window.__smokeFetch = window.fetch.bind(window)));
+      window.getAiGlobalCache = async () => null;
+      window.saveAiGlobalCache = async () => true;
+    })()`);
     for (let i = 0; i < 28; i++) {
       const state = await evaluate(`LootLinguaPersonalDictionaryOnboarding.getState()`);
       if (state.phase === 'completed') break;
+      await waitFor(`LootLinguaPopover.canAct('personalDictionaryOnboardingCoach')`, 'dictionary guide reading delay');
       await evaluate(`(async () => {
         const step = LootLinguaPersonalDictionaryOnboarding.getState().step || 0;
         if (step===0) document.querySelector('#legendDock [data-dock-view="personal"]').click();
-        else if (step===1) window.dispatchEvent(new CustomEvent('lootlingua:dictionary-search-result',{detail:{status:'success'}}));
-        else if (step===2) selectSuggestion('رحلة','اسم','A journey begins.');
+        else if (step===1) {
+          document.getElementById('wordInput').value = 'journey-'+${width};
+          void fetchSuggestions();
+        }
+        else if (step===2) document.querySelector('#suggestionsList [data-action="select-ai-meaning"]')?.click();
         else if (step===3) {
           document.getElementById('wordInput').value = 'journey-'+${width};
           await addWord();
@@ -357,11 +412,33 @@ try {
         else if (step===9) document.getElementById('xpRanksGuideToggle').click();
         else document.querySelector('#personalDictionaryOnboardingCoach button')?.click();
       })()`);
+      if (state.step === 1) {
+        await waitFor(`typeof window.__smokeFinishSearch === 'function'`, 'guest request starts');
+        await evaluate(`loadWorldsView()`);
+        await waitFor(`!document.getElementById('onboardingResume').hidden`, 'guide return action');
+        results.assertions['no-dictionary-coach-on-worlds-'+width] = await evaluate(`!document.getElementById('personalDictionaryOnboardingCoach')`);
+        if (width === 320) {
+          await evaluate(`sessionStorage.setItem('smoke-reload-receipt', window.__smokeSearchReceipt)`);
+          await send('Page.reload');
+          await waitFor(`!document.getElementById('onboardingResume')?.hidden && typeof loadPersonalDictionary === 'function'`, 'return action after reload', 25000);
+        } else {
+          await evaluate(`window.__smokeFinishSearch(); window.__smokeFinishSearch=null;`);
+          await waitFor(`JSON.parse(localStorage.getItem('lootlingua:dictionary-search:v1:guest:personal')).status === 'success'`, 'result saved away from dictionary');
+        }
+        await evaluate(`document.getElementById('onboardingResume').click()`);
+        await waitFor(`!!document.querySelector('#suggestionsList [data-action="select-ai-meaning"]')`, 'meaning after return');
+        results.assertions['one-guest-request-'+width] = await evaluate(width === 320
+          ? `!sessionStorage.getItem('smoke-reload-invalid-request') && isGuestSearchLocked('normal')`
+          : `window.__smokeSearchStarts === 1 && isGuestSearchLocked('normal')`);
+        results.assertions['resumed-meaning-guide-'+width] = await evaluate(`LootLinguaPersonalDictionaryOnboarding.getState().step === 2`);
+      }
       await delay(250);
       if ([4,8,13,16].includes(state.step)) results.screenshots.push(await screenshot('core-'+width+'-'+state.step+'.png'));
     }
     results.assertions['core-completed-'+width] = await evaluate(`LootLinguaPersonalDictionaryOnboarding.getState()?.phase === 'completed'`);
     results.assertions['core-highlight-cleared-'+width] = await evaluate(`document.querySelectorAll('.coach-highlight-target').length === 0`);
+    results.assertions['core-search-verified-'+width] = results.assertions['one-guest-request-'+width] === true &&
+      results.assertions['resumed-meaning-guide-'+width] === true;
     if (!results.assertions['core-completed-'+width]) results['core-diagnostic-'+width] = await evaluate(`({state:LootLinguaPersonalDictionaryOnboarding.getState(),coach:document.querySelector('#personalDictionaryOnboardingCoach')?.textContent})`);
   }
   results.passed = Object.values(results.assertions).every(Boolean);

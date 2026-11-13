@@ -5529,6 +5529,36 @@ body.test-clock-active .toast-host {
   box-shadow: 0 0 0 7px color-mix(in srgb, var(--accent) 22%, transparent) !important;
 }
 :where(div, section, ul).coach-highlight-target { border-radius: 14px; }
+
+.onboarding-resume {
+  margin-block: 0 12px;
+  max-width: 100%;
+  text-align: start;
+}
+.onboarding-resume[hidden] { display: none; }
+.coach-reading button, [data-reading="true"] { opacity: .55; cursor: wait; }
+.coach-reading-hint {
+  display: block;
+  margin-block-start: 8px;
+  color: var(--text-gray);
+}
+.dictionary-search-status {
+  margin: 0;
+  padding: 10px 14px;
+  color: var(--text-gray);
+}
+.dictionary-search-recovery { margin: 6px 14px; }
+.guided-world-choice-label {
+  display: inline-flex;
+  align-self: flex-start;
+  margin-block: 6px;
+  padding: 4px 8px;
+  border: 1px solid currentColor;
+  border-radius: 8px;
+  color: var(--accent);
+  font-size: .76rem;
+}
+.guided-world-choice-label[hidden] { display: none; }
 .feature-mini-onboarding-coach {
   z-index: 12000; width: min(304px, calc(100vw - 24px));
   box-sizing: border-box; padding: 16px; border-radius: 16px;

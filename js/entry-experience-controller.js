@@ -40,6 +40,8 @@
     },
     returnPreview: { status: 'idle', worldId: '', model: null, error: null },
     guestFirstRouteHandled: false,
+    readingStep: '',
+    readUntil: 0,
   };
 
   function api() {
@@ -638,7 +640,7 @@
       signals.journeyDestination,
       Date.now()
     );
-    persistLocalState(runtime.state, user);
+    if (entryState || runtime.state.startedAt || runtime.state.updatedAt) persistLocalState(runtime.state, user);
     announceEntryState();
     open();
     completeStartup();
@@ -1247,6 +1249,14 @@
   function bindPanelActions() {
     const panel = panelElement();
     if (!panel) return;
+    if (!runtime.settingsMode) {
+      const step = runtime.state?.currentStep || '';
+      if (runtime.readingStep !== step) {
+        runtime.readingStep = step;
+        const length = panel.querySelector('.entry-copy p, .entry-destination-screen > p, .entry-journey-copy p')?.textContent?.length || 0;
+        runtime.readUntil = Date.now() + (length >= 105 ? 4000 : 3000);
+      }
+    }
     panel.querySelectorAll('[data-entry-interest]').forEach((button) => {
       button.addEventListener('click', () => toggleInterest(button.dataset.entryInterest, button));
     });
@@ -1256,20 +1266,25 @@
     panel.querySelectorAll('[data-entry-world]').forEach((button) => {
       button.addEventListener('click', () => selectWorld(button.dataset.entryWorld));
     });
-    panel.querySelectorAll('[data-entry-preview-rank]').forEach((button) => {
-      button.addEventListener('click', () => selectPreviewRank(button.dataset.entryPreviewRank));
-    });
-    panel.querySelectorAll('[data-entry-preview-gate]').forEach((button) => {
-      button.addEventListener('click', () => inspectPreviewGate(button.dataset.entryPreviewGate));
-    });
     panel.querySelectorAll('[data-entry-oasis-mode]').forEach((button) => {
       button.addEventListener('click', () => selectOasisMode(button.dataset.entryOasisMode));
     });
-    panel.querySelectorAll('[data-entry-action]').forEach((button) => {
-      button.addEventListener('click', () => handleAction(button.dataset.entryAction));
-    });
-    panel.querySelectorAll('[data-entry-cta]').forEach((button) => {
-      button.addEventListener('click', () => runCta(button.dataset.entryCta));
+    panel.querySelectorAll('[data-entry-action], [data-entry-cta], [data-entry-preview-rank], [data-entry-preview-gate]').forEach((button) => {
+      const action = button.dataset.entryAction;
+      const gated = !runtime.settingsMode && (button.dataset.entryCta || button.dataset.entryPreviewRank ||
+        button.dataset.entryPreviewGate || /^(continue-|skip-|review-return)/.test(action || ''));
+      const wait = gated ? Math.max(0, runtime.readUntil - Date.now()) : 0;
+      if (wait) {
+        button.dataset.reading = 'true';
+        setTimeout(() => { delete button.dataset.reading; }, wait);
+      }
+      button.addEventListener('click', () => {
+        if (gated && Date.now() < runtime.readUntil) return;
+        if (action) handleAction(action);
+        else if (button.dataset.entryCta) runCta(button.dataset.entryCta);
+        else if (button.dataset.entryPreviewGate) inspectPreviewGate(button.dataset.entryPreviewGate);
+        else selectPreviewRank(button.dataset.entryPreviewRank);
+      });
     });
   }
 
@@ -1702,6 +1717,7 @@
       requestAnimationFrame(() => authPromptFocus.focus?.({ preventScroll: true }));
     }
     runtime.authPromptFocus = null;
+    if (prompt) root.dispatchEvent?.(new CustomEvent('lootlingua:entry-closed'));
   }
 
   function dismissJourneyAuthPrompt() {
@@ -1760,9 +1776,10 @@
     closeJourneyAuthPrompt({ silent: true });
     runtime.authPromptFocus = document.activeElement;
     const guidedState = root.LootLinguaGuidedFirstJourney?.getState?.();
+    const dictionaryGuide = root.LootLinguaPersonalDictionaryOnboarding?.getState?.();
     const isGuidedGuestFallback = Boolean(
-      guidedState?.guestDictionaryAvailable &&
-      !root.auth?.currentUser
+      guidedState?.worldId === intent.worldId && guidedState.phase !== 'completed' &&
+      dictionaryGuide?.phase === 'awaiting-journey' && !root.auth?.currentUser
     );
     const title = isGuidedGuestFallback
       ? 'سجّل دخولك لتتابع رحلتك'
@@ -1790,6 +1807,7 @@
     document.body.classList.add('journey-auth-active');
     setBackgroundInert(true);
     prompt.querySelector('[data-journey-auth="guest"]')?.addEventListener('click', () => {
+      root.LootLinguaGuidedFirstJourney?.enableGuestDictionary?.();
       dismissJourneyAuthPrompt();
       root.LootLinguaPersonalDictionaryOnboarding?.beginGuestDictionary?.();
     });
@@ -1802,6 +1820,16 @@
         if (typeof root.openAppAuth !== 'function') throw new Error('auth-unavailable');
         closeJourneyAuthPrompt({ silent: true });
         root.openAppAuth('login');
+        const dialog = document.getElementById('appAuthDialogShell');
+        if (dialog && !dialog.hidden) {
+          root.dispatchEvent(new CustomEvent('lootlingua:auth-dialog-opened'));
+          const observer = new MutationObserver(() => {
+            if (!dialog.hidden) return;
+            observer.disconnect();
+            root.dispatchEvent(new CustomEvent('lootlingua:auth-dialog-closed'));
+          });
+          observer.observe(dialog, { attributes: true, attributeFilter: ['hidden'] });
+        }
       } catch (_) {
         button.disabled = false;
         if (status) status.textContent = 'تعذّر تسجيل الدخول الآن. حاول مرة أخرى من دون فقدان خطوتك.';
@@ -1842,20 +1870,6 @@
   }
 
   async function consumePendingJourneyIntent(options) {
-    const dictionaryGuide = root.LootLinguaPersonalDictionaryOnboarding?.getState?.();
-    if (dictionaryGuide?.requiresFirstWord && dictionaryGuide.phase !== 'awaiting-journey' && !options?.explicitDiscovery) {
-      const store = root.LootLinguaNotificationStore;
-      const key = 'onboarding:resume-public-world';
-      if (!store?.find?.(key)) store?.upsert?.({
-        kind: 'smart', notificationType: 'feature.discovery', occurrenceKey: key,
-        actionGroup: 'feature-discovery', status: 'active', priority: 24,
-        visualType: 'danger', title: 'تابع رحلتك في العوالم العامة',
-        message: 'تقدمك في القاموس محفوظ. اختر استكشفني عندما تريد متابعة العالم والبوابة اللذين بدأت بهما.',
-        cta: { id: 'resume-public-world-onboarding', label: 'استكشفني', args: {} },
-        createdAt: Date.now(), updatedAt: Date.now(),
-      });
-      return false;
-    }
     const user = runtime.user || root.auth?.currentUser;
     if (!user || runtime.intentConsuming || (runtime.opened && !options?.allowWhileOpen)) return false;
     const candidates = pendingIntentCandidates(user);
@@ -1883,6 +1897,20 @@
       return false;
     }
     if (intent.status === 'consuming' && intent.leaseUntil > Date.now()) return false;
+    const dictionaryGuide = root.LootLinguaPersonalDictionaryOnboarding?.getState?.();
+    if (dictionaryGuide?.requiresFirstWord && dictionaryGuide.phase !== 'awaiting-journey' && !options?.explicitDiscovery) {
+      const store = root.LootLinguaNotificationStore;
+      const key = 'onboarding:resume-public-world';
+      if (!store?.find?.(key)) store?.upsert?.({
+        kind: 'smart', notificationType: 'feature.discovery', occurrenceKey: key,
+        actionGroup: 'feature-discovery', status: 'active', priority: 24,
+        visualType: 'danger', title: 'تابع رحلتك في العوالم العامة',
+        message: 'تقدمك محفوظ. اختر «استكشفني» عندما تريد العودة إلى العالم الذي بدأت به.',
+        cta: { id: 'resume-public-world-onboarding', label: 'استكشفني', args: {} },
+        createdAt: Date.now(), updatedAt: Date.now(),
+      });
+      return false;
+    }
     const mirrorGuestCandidate = selection.guestValid;
 
     const run = async () => {
@@ -1974,21 +2002,9 @@
     }
     if (id === 'open-selected-world') {
       const worldId = expected?.worldId || runtime.state?.selectedWorldId;
-      if (!worldId || typeof root.loadWorldsView !== 'function' || typeof root.openPublishedWorld !== 'function') {
-        throw new Error('Selected World destination is unavailable.');
-      }
-      const published = root.LootLinguaPublishedContent;
-      if (published?.getPublishedWorld) {
-        const world = await published.getPublishedWorld(worldId);
-        if (!world) {
-          root.loadWorldsView();
-          root.showToast?.('هذا العالم لم يعد منشورًا. اختر عالمًا آخر من قائمة العوالم.', 'info', 4200);
-          return { type: 'worlds' };
-        }
-      }
+      if (typeof root.loadWorldsView !== 'function') throw new Error('Worlds destination is unavailable.');
       root.loadWorldsView();
-      root.openPublishedWorld(worldId);
-      return { type: 'world', worldId };
+      return { type: 'worlds', suggestedWorldId: worldId };
     }
     if (id === 'review-words' || id === 'new-user-start') {
       if (typeof root.loadPersonalDictionary !== 'function') {
@@ -2015,11 +2031,11 @@
 
     setBusy(true, 'جارٍ فتح وجهتك…');
     try {
-      const startsGuidedFirstJourney = id === 'open-selected-world' &&
+      const startsGuidedFirstJourney = ['open-selected-world', 'explore-worlds', 'suggest-placement'].includes(id) &&
         root.LootLinguaGuidedFirstJourneyContract?.shouldStartForPresentation(runtime.presentation);
       const destination = await openEntryDestination(id, expected);
       if (epoch !== runtime.authEpoch) return;
-      if (startsGuidedFirstJourney && destination?.type === 'world') {
+      if (startsGuidedFirstJourney && destination?.type === 'worlds') {
         // Dictionary guidance is its own tiny, resumable hand-off.  It is
         // planned before the public gate journey but cannot surface until that
         // journey completes, so the two overlays never compete.
@@ -2030,7 +2046,8 @@
         // not a new Product Entry state or learning/progression mutation.
         await root.LootLinguaGuidedFirstJourney?.beginFromEntry({
           presentation: runtime.presentation,
-          worldId: destination.worldId,
+          worldId: destination.suggestedWorldId || runtime.state.selectedWorldId,
+          chooseWorld: true,
         });
       }
       if (epoch !== runtime.authEpoch) return;
@@ -2149,6 +2166,7 @@
 
   function close(options) {
     const shell = rootElement();
+    const wasOpen = runtime.opened;
     runtime.opened = false;
     root.__entryExperienceActive = false;
     if (shell) {
@@ -2165,6 +2183,7 @@
     }
     runtime.previousFocus = null;
     root.flushDeferredEntryToasts?.();
+    if (wasOpen) root.dispatchEvent?.(new CustomEvent('lootlingua:entry-closed'));
   }
 
   function init() {
@@ -2173,6 +2192,7 @@
     root.addEventListener('lootlingua:auth-state', (event) => {
       runtime.bootToken += 1;
       runtime.authEpoch += 1;
+      runtime.readingStep = '';
       runtime.savePromise = Promise.resolve();
       close({ silent: true });
       runtime.state = null;

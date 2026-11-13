@@ -623,7 +623,7 @@
         label: 'راجع كلماتك',
         hint: signals.hasPublishedWorld ? 'كلماتك محفوظة، ويمكنك استكشاف العوالم أيضًا.' : 'كلماتك محفوظة كما هي.',
         secondaryId: selectedWorldId ? 'open-selected-world' : (signals.hasPublishedWorld ? 'explore-worlds' : ''),
-        secondaryLabel: selectedWorldId ? 'افتح العالم الذي اخترته' : (signals.hasPublishedWorld ? 'اكتشف العوالم' : ''),
+        secondaryLabel: selectedWorldId || signals.hasPublishedWorld ? 'اكتشف العوالم' : '',
         secondaryWorldId: selectedWorldId,
         worldId: selectedWorldId,
         primary: true,
@@ -650,8 +650,8 @@
     if (selectedWorldId) {
       return {
         id: 'open-selected-world',
-        label: 'استكشف العالم الذي اخترته',
-        hint: 'سنفتح صفحة العالم نفسها. الاستكشاف متاح للضيف، وبدء الرحلة المحفوظة يطلب الحساب في سياقه فقط.',
+        label: 'اكتشف العوالم',
+        hint: 'اختر العالم الذي تريد البدء به. سنميّز لك العالم الذي شاهدته في المقدمة.',
         worldId: selectedWorldId,
         primary: true,
       };

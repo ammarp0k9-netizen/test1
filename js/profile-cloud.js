@@ -3,7 +3,7 @@
 import { getApps }  from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
 import { getFirestore, doc, getDoc, runTransaction, onSnapshot } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
 import { getAuth, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js";
-import { applyProfileIntent, profileOperationId, profileStorageIntents, mergeOnboardingProgress } from './profile-sync-policy.mjs?v=20261112-bots';
+import { applyProfileIntent, profileOperationId, profileStorageIntents, mergeOnboardingProgress } from './profile-sync-policy.mjs?v=20261113-guide';
 
 // استخدم التطبيق الموجود فقط بدون إعادة تعريف إذا كان معرف مسبقًا
 let profileApp  = getApps()[0];
@@ -158,19 +158,20 @@ function enqueueProfileTask(owner, task) {
 function syncOnboardingProgress(data, owner) {
   const discoveryKey = `lootlingua:feature-discovery:v1:user:${owner.uid}`;
   const personalKey = `lootlingua:personal-dictionary-onboarding:v1:user:${owner.uid}`;
+  const worldGuideKey = `lootlingua:public-world-guide:v1:user:${owner.uid}`;
   const read = key => { try { return JSON.parse(localStorage.getItem(key) || 'null'); } catch (_) { return null; } };
   const discovery = read(discoveryKey) || { version: 1, features: {} };
   const features = { ...(discovery.features || {}) };
   let changed = false;
-  for (const tour of ['treasure', 'quiz', 'starred', 'custom-worlds', 'personal-dictionary']) {
-    const personal = tour === 'personal-dictionary';
-    const local = personal ? read(personalKey) : features[tour];
+  for (const tour of ['treasure', 'quiz', 'starred', 'custom-worlds', 'personal-dictionary', 'public-world-guide']) {
+    const separateKey = tour === 'personal-dictionary' ? personalKey : tour === 'public-world-guide' ? worldGuideKey : '';
+    const local = separateKey ? read(separateKey) : features[tour];
     const remote = data.onboardingProgress?.[tour];
     const merged = mergeOnboardingProgress(tour, remote, local);
     if (!merged) continue;
     if (JSON.stringify(mergeOnboardingProgress(tour, local, null)) !== JSON.stringify(merged)) {
       changed = true;
-      if (personal) localStorage.setItem(personalKey, JSON.stringify(merged));
+      if (separateKey) localStorage.setItem(separateKey, JSON.stringify(merged));
       else features[tour] = merged;
     }
     // Firestore maps can return fields in a different order. Compare the

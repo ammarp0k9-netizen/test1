@@ -636,6 +636,8 @@ async function createHarness(options = {}) {
   }
 
   evaluateContract(root);
+  let now = Date.now();
+  class TestDate extends Date { static now() { return now; } }
   const evaluateController = new Function(
     'window',
     'globalThis',
@@ -647,6 +649,8 @@ async function createHarness(options = {}) {
     'location',
     'navigator',
     'CustomEvent',
+    'Date',
+    'setTimeout',
     `${controllerSource}\nreturn window.LootLinguaEntryExperienceController;`
   );
   const controller = evaluateController(
@@ -659,15 +663,18 @@ async function createHarness(options = {}) {
     (callback) => callback(),
     { pathname: '/app', search: '?view=worlds', hash: '' },
     root.navigator,
-    FakeCustomEvent
+    FakeCustomEvent,
+    TestDate,
+    (callback, delay) => { if (delay < 3000) return setTimeout(callback, delay); }
   );
   controller.init();
   await settle();
 
-  async function click(selector, scope = panel) {
+  async function click(selector, scope = panel, { waitForReading = true } = {}) {
     const element = scope.querySelector(selector);
     assert.ok(element, `Expected an interactive element matching ${selector}`);
     assert.equal(element.disabled, false, `${selector} should be enabled`);
+    if (waitForReading) now += 4100;
     element.click();
     await settle();
     return element;
@@ -745,7 +752,7 @@ function persistedState(storage, key) {
   return raw ? JSON.parse(raw) : null;
 }
 
-test('the destination screen stays in-progress until its CTA opens the concrete selected World', async () => {
+test('the destination CTA keeps Entry in progress during reading, then opens the Worlds list', async () => {
   const user = freshUser('destination-proof');
   const harness = await createHarness({ user });
   await harness.reachRevealedAction();
@@ -760,9 +767,12 @@ test('the destination screen stays in-progress until its CTA opens the concrete 
     'in-progress'
   );
 
+  await harness.click('[data-entry-cta="open-selected-world"]', harness.panel, { waitForReading: false });
+  assert.equal(harness.controller.getState().status, 'in-progress');
+  assert.equal(harness.calls.worlds, 0);
   await harness.click('[data-entry-cta="open-selected-world"]');
   assert.equal(harness.calls.worlds, 1);
-  assert.deepEqual(harness.calls.openedWorlds, ['world-study']);
+  assert.deepEqual(harness.calls.openedWorlds, []);
   assert.equal(harness.controller.getState().status, 'completed');
   assert.equal(harness.controller.isActive(), false);
   assert.equal(

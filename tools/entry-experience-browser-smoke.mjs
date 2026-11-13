@@ -5,11 +5,11 @@ import { spawn } from 'node:child_process';
 import WebSocketClient from 'ws';
 
 const root = path.resolve(import.meta.dirname, '..');
-const evidenceDir = process.argv.includes('--integrity')
+const evidenceDir = process.env.ENTRY_SMOKE_OUTPUT || (process.argv.includes('--integrity')
   ? path.join(root, 'reports', 'integrity-evidence', 'entry')
   : process.argv.some(flag => ['--sessions', '--session-switch'].includes(flag))
     ? path.join(root, 'reports', 'session-evidence')
-  : path.join(root, 'reports', 'product-entry-evidence');
+  : path.join(root, 'reports', 'product-entry-evidence'));
 const evidenceScreenshotNames = new Set([
   'guest-new-desktop-welcome',
   'guest-new-320-welcome',
@@ -157,7 +157,7 @@ addScenario('guest-words', {
     ]),
   },
 });
-addScenario('guest-xp-light', { localStorage: { userXP: '5' } });
+addScenario('guest-xp-light', { localStorage: { userXP: '5', lootlinguaGuestDataDirty: '1' } });
 addScenario('account-new', {
   initialUid: accountNew.uid,
   accounts: { [accountNew.uid]: accountNew },
@@ -621,6 +621,7 @@ async function waitFor(expression, label, timeoutMs = 8000) {
 }
 
 async function click(selector) {
+  await waitFor(`!document.querySelector(${JSON.stringify(selector)})?.hasAttribute('data-reading')`, 'reading time');
   await evaluate(`(() => {
     const element = document.querySelector(${JSON.stringify(selector)});
     element?.scrollIntoView?.({ block: 'center', inline: 'center', behavior: 'instant' });

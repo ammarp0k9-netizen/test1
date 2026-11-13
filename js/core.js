@@ -637,6 +637,14 @@ function renderNotificationsPanel() {
     }).join('');
 }
 
+window.addEventListener('lootlingua:discovery-display-change', () => {
+  const display = window.LootLinguaNotificationStore?.getDisplayRecords?.();
+  if (!display) return;
+  window.__notifications = display;
+  updateNotificationsBadge();
+  renderNotificationsPanel();
+});
+
 function focusNotificationDetails(id, ev, toggle) {
   if (ev) {
     ev.preventDefault();
@@ -811,6 +819,7 @@ window.toggleProfileModal = function() {
 };
 
 window.closeProfileModal = function(silent) {
+  if (!silent) window.dispatchEvent(new CustomEvent('lootlingua:profile-guide-closed'));
   const close = () => {
     const modal = document.getElementById('profileModal');
     if (!modal) return;

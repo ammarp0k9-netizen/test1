@@ -2,8 +2,8 @@
   'use strict';
 
   const runtime = {
-    state: null, loadedOwner: '', loading: null, persistQueue: Promise.resolve(), authEpoch: 0,
-    handoff: null, lastRoute: null, handoffAttempts: 0, reengagementOwner: '',
+    state: null, loadedOwner: '', loading: null, authEpoch: 0,
+    lastRoute: null, handoffAttempts: 0,
   };
   const COACH_ID = 'guidedFirstJourneyCoach';
   const HANDOFF_KEY = 'lootlingua:guided-first-journey:auth-handoff:v1';
@@ -12,16 +12,18 @@
   function cloud() { return root.LootLinguaGuidedFirstJourneyCloud; }
   function user() { return root.auth?.currentUser || null; }
   function identity() { const current = user(); return current ? { uid: current.uid } : {}; }
-  function readLocal() { try { return api().normalize(JSON.parse(localStorage.getItem(api().storageKey(identity())))); } catch (_) { return null; } }
-  function saveLocal(state) { localStorage.setItem(api().storageKey(identity()), JSON.stringify(state)); }
+  function readLocal(forOwner = identity(), legacy = false) {
+    try { return api().normalize(JSON.parse(localStorage.getItem(legacy ? api().storageKey(forOwner) : api().checkpointKey(forOwner)))); }
+    catch (_) { return null; }
+  }
   function active() { return api().isActive(runtime.state); }
 
   function readHandoff() {
-    try { return JSON.parse(sessionStorage.getItem(HANDOFF_KEY)); } catch (_) { return null; }
+    try { return JSON.parse(localStorage.getItem(HANDOFF_KEY) || sessionStorage.getItem(HANDOFF_KEY)); } catch (_) { return null; }
   }
 
   function writeHandoff(value) {
-    try { sessionStorage.setItem(HANDOFF_KEY, JSON.stringify(value)); } catch (_) {}
+    try { localStorage.setItem(HANDOFF_KEY, JSON.stringify(value)); } catch (_) {}
   }
 
   function pendingIntentFor(currentUser) {
@@ -37,8 +39,7 @@
     if (Number(local.updatedAt) !== Number(remote.updatedAt)) {
       return Number(local.updatedAt) > Number(remote.updatedAt) ? local : remote;
     }
-    const priority = { 'awaiting-first-gate': 1, 'first-gate-opened': 2, 'awaiting-quiz-cta': 3, completed: 4 };
-    return (priority[local.phase] || 0) >= (priority[remote.phase] || 0) ? local : remote;
+    return api().PHASES.indexOf(local.phase) >= api().PHASES.indexOf(remote.phase) ? local : remote;
   }
 
   function announce() {
@@ -54,35 +55,12 @@
     root.dispatchEvent(new CustomEvent('lootlingua:guided-first-journey-change', { detail: { state: runtime.state } }));
   }
 
-  async function persist(state) {
-    const epoch = runtime.authEpoch;
-    // A previous phase may still be awaiting Firestore while the user has
-    // already completed the quiz. Never let that older phase overwrite the
-    // newest local or cloud state.
-    const latest = runtime.state && Number(runtime.state.updatedAt) > Number(state.updatedAt)
-      ? runtime.state
-      : state;
-    saveLocal(latest);
-    const current = user();
-    if (!current || !cloud()?.save) return latest;
-    const ownerId = current.uid;
-    const write = runtime.persistQueue.catch(() => {}).then(async () => {
-      if (epoch !== runtime.authEpoch || user()?.uid !== ownerId) return latest;
-      const currentState = runtime.state &&
-        Number(runtime.state.updatedAt) > Number(latest.updatedAt)
-        ? runtime.state
-        : latest;
-      saveLocal(currentState);
-      await cloud().save(currentState, current);
-      return currentState;
-    });
-    runtime.persistQueue = write.then(() => undefined, () => undefined);
-    try { await write; } catch (_) {
-      // Owner-scoped local state remains available if cloud persistence fails.
-    }
-    return runtime.state && Number(runtime.state.updatedAt) > Number(latest.updatedAt)
-      ? runtime.state
-      : latest;
+  function persist(state) {
+    // World selection can change. Store the guide through the existing
+    // profile outbox. The legacy guidedFirstJourneys/v1 document pins worldId.
+    localStorage.setItem(api().checkpointKey(identity()), JSON.stringify(state));
+    if (user()) root.queueProfileIntent?.({ type: 'onboarding', tour: 'public-world-guide', state });
+    return state;
   }
 
   async function boot() {
@@ -97,11 +75,14 @@
       const local = readLocal();
       let remote = null;
       const current = user();
-      if (current && cloud()?.load) {
+      if (!local && current && cloud()?.load) {
         try { remote = await cloud().load(current); } catch (_) {}
       }
       if (!isCurrent()) return null;
-      runtime.state = preferNewestState(local, remote);
+      if (runtime.loadedOwner === owner) return runtime.state;
+      const checkpoint = readLocal();
+      runtime.state = checkpoint || preferNewestState(readLocal(identity(), true), remote);
+      const guest = current && (readLocal({}) || readLocal({}, true));
       const handoff = readHandoff();
       const pending = current ? pendingIntentFor(current) : null;
       if (
@@ -110,17 +91,22 @@
         String(pending.worldId || '') === String(handoff.state.worldId || '')
       ) {
         runtime.state = api().normalize(handoff.state);
+      }
+      if (guest && !runtime.state) runtime.state = guest;
+      if (runtime.state && (!checkpoint || guest)) persist(runtime.state);
+      if (guest && runtime.state) {
+        localStorage.removeItem(api().checkpointKey({}));
+        localStorage.removeItem(api().storageKey({}));
+      }
+      if (current && runtime.state && handoff?.state && (guest || pending?.operationId === handoff.operationId)) {
         writeHandoff({ ...handoff, claimedBy: current.uid, claimedAt: Date.now() });
-        if (runtime.state) void persist(runtime.state);
       }
       const handoffStillPending = current && !runtime.state && handoff?.state &&
         handoff?.claimedBy !== current.uid && handoff?.operationId;
       runtime.loadedOwner = owner;
       announce();
-      if (current && runtime.state?.guestDictionaryAvailable && runtime.reengagementOwner !== owner) {
-        runtime.reengagementOwner = owner;
-        root.showToast?.('تم تسجيل دخولك. إذا رغبت بمتابعة التعلّم، ستجد عالمك من قسم العوالم.', 'info', 5200);
-      }
+      if (runtime.lastRoute) applyRoute(runtime.lastRoute);
+      else updateResume();
       // Entry owns the secure guest-intent claim. It may finish its async boot a
       // moment after auth changes, so retry this bounded handoff instead of
       // copying guest state to an arbitrary account.
@@ -136,55 +122,44 @@
   }
 
   async function beginFromEntry(payload) {
-    if (!api().shouldStartForPresentation(payload?.presentation) || !payload?.worldId) return null;
-    const state = api().create(payload.worldId, Date.now());
+    if (!api().shouldStartForPresentation(payload?.presentation) || (!payload?.worldId && !payload?.chooseWorld)) return null;
+    if (runtime.state) return runtime.state;
+    const state = payload.chooseWorld ? api().chooseWorld(payload.worldId, Date.now()) : api().create(payload.worldId, Date.now());
     runtime.state = state;
     runtime.loadedOwner = api().storageKey(identity());
+    persist(state);
     announce();
-    await persist(state);
     return state;
   }
 
-  async function gateWordsLoaded(payload) {
+  function move(type, payload = {}) {
     if (!active()) return runtime.state;
-    const next = api().transition(runtime.state, { type: 'gate-words-loaded', worldId: payload?.worldId, gateId: payload?.gateId }, Date.now());
-    if (next === runtime.state) return next;
+    const next = api().transition(runtime.state, { ...payload, type }, Date.now());
+    if (next.updatedAt === runtime.state.updatedAt) return runtime.state;
     runtime.state = next;
+    persist(next);
     announce();
-    await persist(next);
     return next;
   }
 
-  async function gateOpened(payload) {
-    if (!active()) return runtime.state;
-    const next = api().transition(runtime.state, { type: 'gate-opened', worldId: payload?.worldId, gateId: payload?.gateId }, Date.now());
-    if (next === runtime.state) return next;
-    runtime.state = next;
-    announce();
-    await persist(next);
-    return next;
-  }
+  const gateWordsLoaded = (payload) => move('gate-words-loaded', payload);
+  const gateOpened = (payload) => move('gate-opened', payload);
+  const selectWorld = (worldId) => move('select-world', { worldId });
+  const journeyStarted = (journey) => move('start-world', { worldId: journey?.worldId });
+  const placementGate = (payload) => move('placement-gate', payload);
+  const completeFromQuizCta = (payload) => move('complete', payload);
 
-  async function enableGuestDictionary() {
+  function enableGuestDictionary() {
     if (!active() || user()) return runtime.state;
-    const next = api().transition(runtime.state, { type: 'enable-guest-dictionary' }, Date.now());
-    if (next === runtime.state) return next;
-    runtime.state = next;
     clearCoach();
-    announce();
-    await persist(next);
-    // The explicit Continue as guest action owns the dictionary hand-off.
-    return next;
+    return move('enable-guest-dictionary');
   }
 
-  async function completeFromQuizCta(payload) {
-    if (!active()) return runtime.state;
-    const next = api().transition(runtime.state, { type: 'complete', worldId: payload?.worldId, gateId: payload?.gateId }, Date.now());
-    if (next === runtime.state) return next;
-    runtime.state = next;
-    announce();
-    await persist(next);
-    return next;
+  function setPlacement(payload) {
+    if (!active() || payload.worldId !== runtime.state.worldId) return;
+    if (['placementStage', 'placementLevel', 'assessmentId', 'resultStep'].every((field) =>
+      (payload[field] || '') === (runtime.state[field] || ''))) return;
+    return move('placement', payload);
   }
 
   function shouldAllowSurface() {
@@ -194,38 +169,149 @@
     return true;
   }
 
-  function applyRoute(payload) {
+  function canPresent() {
     const dictionary = root.LootLinguaPersonalDictionaryOnboarding?.getState?.();
-    if (dictionary && dictionary.phase !== 'awaiting-journey' && dictionary.phase !== 'completed') { clearCoach(); return; }
-    if (!user() && runtime.state?.guestDictionaryAvailable) { clearCoach(); return; }
-    if (!active() || !payload?.root) return;
-    runtime.lastRoute = payload;
+    return active() && !root.__entryExperienceActive &&
+      !root.hasActiveLearningQuiz?.() &&
+      document.getElementById?.('appAuthDialogShell')?.hidden !== false &&
+      !document.documentElement.classList.contains('journey-auth-active') &&
+      (!dictionary || ['awaiting-journey', 'completed'].includes(dictionary.phase)) &&
+      !(!user() && runtime.state.guestDictionaryAvailable);
+  }
+
+  function isPresenting() {
+    const route = runtime.lastRoute;
+    if (!canPresent() || !route?.root?.isConnected || (root.getOnboardingView && root.getOnboardingView() !== 'worlds')) return false;
+    if (route.type === 'worlds') return runtime.state.phase === 'choosing-world';
+    return (route.worldId === runtime.state.worldId && ['assessment', 'placement-result', 'placement-resume'].includes(route.type)) ||
+      root.LootLinguaPopover?.getActiveId?.() === COACH_ID;
+  }
+
+  function updateResume() {
     const state = runtime.state;
-    if (String(payload.worldId || '') !== state.worldId) return;
+    const resume = canPresent() && !isPresenting() && state;
+    root.LootLinguaPopover?.offerResume?.(COACH_ID, resume ? {
+      label: 'تابع إرشاد رحلتك',
+      open: () => {
+        if (!state.worldId) root.loadWorldsView?.();
+        else if (state.placementStage === 'result' && state.assessmentId && root.openGuidedPlacementResult) {
+          root.openGuidedPlacementResult(state.worldId, state.assessmentId);
+        } else if (state.gateId && state.rankId && !['offer', 'assessment'].includes(state.placementStage)) {
+          root.openPublishedGate?.(state.worldId, state.rankId, state.gateId);
+        } else root.openPublishedWorld?.(state.worldId);
+      },
+    } : null);
+  }
+
+  function applyRoute(payload) {
+    if (!payload?.root || (root.getOnboardingView && root.getOnboardingView() !== 'worlds')) return;
+    runtime.lastRoute = payload;
+    renderRoute(payload);
+    updateResume();
+    root.LootLinguaFeatureDiscovery?.requestEvaluation?.();
+  }
+
+  function renderRoute(payload) {
+    if (!canPresent()) {
+      root.LootLinguaPopover?.closeIf?.(COACH_ID, { silent: true });
+      return;
+    }
+    const state = runtime.state;
     const rootNode = payload.root;
-    rootNode.querySelectorAll('.guided-first-journey-note, .guided-first-journey-target').forEach((node) => {
-      node.classList.remove('guided-first-journey-target');
-      if (node.classList.contains('guided-first-journey-note')) node.remove();
-    });
-    root.LootLinguaPopover?.closeIf?.(COACH_ID, { silent: true });
+    if (payload.type === 'worlds') {
+      rootNode.querySelectorAll('[data-guided-world]').forEach((card) => {
+        const marker = card.querySelector('.guided-world-choice-label');
+        const id = card.dataset.guidedWorld;
+        const label = id === state.worldId ? 'بدأت الإرشاد في هذا العالم'
+          : id === state.suggestedWorldId ? 'اخترت هذا العالم في المقدمة' : '';
+        if (marker) { marker.hidden = !label; marker.textContent = label; }
+      });
+      if (state.phase === 'choosing-world') {
+        const target = rootNode.querySelector('.published-hub-intro');
+        showCoachMark(target, 'اختر أي عالم لتبدأ إرشاده. ميّزنا لك العالم الذي شاهدته في المقدمة.', { step: 'choose-world' });
+        return;
+      }
+    }
+    if (payload.worldId !== state.worldId || payload.type === 'assessment' ||
+        (payload.type === 'gate' && state.gateId && payload.gateId && payload.gateId !== state.gateId)) {
+      root.LootLinguaPopover?.closeIf?.(COACH_ID, { silent: true });
+      return;
+    }
+    if (payload.type === 'placement-resume') {
+      const target = rootNode.querySelector('.published-level-placement-resume .published-placement-resume-actions');
+      showCoachMark(target, 'تابع من سؤالك المحفوظ، أو ارجع إلى العالم واختر متى تبدأ التعلّم.',
+        { step: 'placement-resume', actions: [target].filter(Boolean) });
+      return;
+    }
+    if (payload.type === 'placement-result') {
+      const stage = state.assessmentId === payload.assessmentId ? state.resultStep : 0;
+      const record = { worldId: state.worldId, placementStage: 'result', placementLevel: payload.nextLevel || '',
+        assessmentId: payload.assessmentId, resultStep: stage };
+      setPlacement(record);
+      const next = () => {
+        setPlacement({ ...record, resultStep: stage + 1 });
+        applyRoute(payload);
+      };
+      if (stage === 0) {
+        showCoachMark(rootNode.querySelector('.published-placement-result-score'),
+          'هنا عدد الإجابات الصحيحة من مجموع الأسئلة. افتح «مراجعة النتيجة» لترى أداءك في كل جزء.',
+          { step: `${payload.assessmentId}:score`, next });
+      } else if (stage === 1) {
+        const target = rootNode.querySelector('[data-guide-placement-save]');
+        showCoachMark(target, payload.canChooseWords
+          ? 'اختر حفظ الكلمات التي أخطأت بها، أو احفظ كل الكلمات، أو تابع من دون حفظها.'
+          : 'هنا تجد ما اخترت حفظه من الاختبار. تابع رحلتك عندما تكون جاهزًا.',
+        { step: `${payload.assessmentId}:words`, next, actions: [target].filter(Boolean) });
+      } else {
+        const target = rootNode.querySelector('[data-guide-placement-destination]');
+        const text = payload.worldCompleted
+          ? 'أنهيت محتوى هذا العالم المنشور حاليًا. استكشف عالمًا آخر، وتابع هذا العالم عند نشر بوابات أو مستويات جديدة.'
+          : payload.nextLevel
+            ? `يمكنك اختبار مستوى ${payload.nextLevel} الآن أو متابعة التعلّم من البوابة المقترحة.`
+            : payload.hasGate
+              ? 'تابع إلى البوابة التي حددتها نتيجة اختبارك. ستبدأ التعلّم من المكان المناسب لك.'
+              : 'ارجع إلى العالم لتختار خطوتك التالية من البوابات المتاحة.';
+        showCoachMark(target, text, { step: `${payload.assessmentId}:destination`, actions: [target].filter(Boolean) });
+      }
+      return;
+    }
     if (payload.type === 'world') {
-      const target = state.phase !== 'awaiting-first-gate' && state.gateId
-        ? [...rootNode.querySelectorAll('.published-gate-node')]
-          .find((node) => String(node.dataset.gateId || '') === state.gateId)
-        : rootNode.querySelector('.published-gate-node.is-available');
+      const placementButtons = [...rootNode.querySelectorAll('[data-guide-placement-level]:not([disabled])')];
+      const offer = !state.placementStage ? state.phase === 'awaiting-first-gate' && !state.gateId
+        : ['assessment', 'offer', 'result'].includes(state.placementStage);
+      const assessment = offer && (state.placementLevel
+        ? placementButtons.find((button) => button.dataset.guidePlacementLevel === state.placementLevel)
+        : placementButtons[0]);
+      if (assessment) {
+        const continuation = () => {
+          setPlacement({ worldId: state.worldId, placementStage: 'continue' });
+          applyRoute(payload);
+        };
+        const text = state.placementStage === 'result' && state.placementLevel
+          ? `يمكنك اختبار مستوى ${state.placementLevel} من هنا، أو متابعة التعلّم من البوابة المقترحة.`
+          : state.placementStage === 'offer' && state.assessmentId
+          ? 'يمكنك العودة لاختبار المستوى من هنا، أو متابعة التعلّم من بوابتك.'
+          : 'اختبر مستواك لتبدأ من البوابة المناسبة لك. الاختبار اختياري؛ يمكنك المتابعة إلى البوابات.';
+        showCoachMark(assessment, text, {
+          step: `assessment:${assessment.dataset.guidePlacementLevel}`, actions: [assessment],
+          next: continuation, label: 'تابع إلى البوابات',
+        });
+        return;
+      }
+      const target = (state.gateId && [...rootNode.querySelectorAll('.published-gate-node')]
+        .find((node) => node.dataset.gateId === state.gateId && !node.disabled && !node.classList.contains('is-locked'))) ||
+        rootNode.querySelector('.published-journey-panel .published-journey-cta:not([disabled]), .published-gate-node.is-available');
       if (!target) return;
-      target.classList.add('guided-first-journey-target');
       const message = state.phase === 'awaiting-quiz-cta'
         ? 'أنت هنا — أكمل من البوابة التي بدأت بها.'
         : (state.phase === 'first-gate-opened'
           ? 'هذه بوابتك الأولى. افتحها لتبدأ الرحلة وتتعلم كلماتها.'
           : 'هذا عالمك: ينتظم التعلم فيه بحسب المستوى ثم البوابات. ابدأ من أول بوابة متاحة.');
-      showCoachMark(target, message);
+      showCoachMark(target, message, { step: `world:${state.phase}`, actions: [target] });
     }
     if (payload.type === 'gate') {
-      const target = rootNode.querySelector('.published-journey-cta');
+      const target = rootNode.querySelector('.published-journey-cta:not([disabled])');
       if (!target) return;
-      target.classList.add('guided-first-journey-target');
       const label = String(target.textContent || '');
       const guestHint = !user()
         ? ' يمكنك أيضًا استخدام قاموسك الشخصي لإضافة كلمات بنفسك.'
@@ -235,17 +321,21 @@
         : (label.includes('أضف')
           ? 'هذه كلمات بوابتك التالية. أضفها إلى قاموسك لتبدأ التعلّم.'
           : `هنا تبدأ رحلتك. ${guestHint}`);
-      showCoachMark(target, message);
+      showCoachMark(target, message, { step: `gate:${state.phase}`, actions: [target] });
     }
   }
 
-  function showCoachMark(anchor, message) {
+  function showCoachMark(anchor, message, options = {}) {
     const popover = root.LootLinguaPopover;
     if (!anchor || !popover?.open) return;
     const activeId = popover.getActiveId?.();
     // A meaning/help popover owns the layer until the user closes it. The guide
     // remains visually highlighted and returns on the next real route render.
     if (activeId && activeId !== COACH_ID) return;
+    const rect = anchor.getBoundingClientRect?.();
+    if (rect && (rect.bottom < 56 || rect.top > root.innerHeight - 90)) {
+      anchor.scrollIntoView?.({ block: 'center', inline: 'nearest', behavior: 'instant' });
+    }
     const content = document.createElement('div');
     content.className = 'guided-first-journey-coach-content';
     const title = document.createElement('strong');
@@ -254,6 +344,14 @@
     const copy = document.createElement('p');
     copy.textContent = message;
     content.append(title, copy);
+    if (options.next) {
+      const next = document.createElement('button');
+      next.type = 'button';
+      next.className = 'entry-primary';
+      next.textContent = options.label || 'التالي';
+      next.addEventListener('click', options.next);
+      content.append(next);
+    }
     popover.open({
       id: COACH_ID,
       className: 'lootlingua-popover guided-first-journey-coach',
@@ -261,6 +359,7 @@
       content,
       labelledBy: title.id,
       persistent: true,
+      reading: { step: options.step, text: message, actions: options.actions },
     });
   }
 
@@ -271,24 +370,48 @@
   }
   root.addEventListener('lootlingua:personal-dictionary-onboarding-change', () => {
     const dictionary = root.LootLinguaPersonalDictionaryOnboarding?.getState?.();
-    if (dictionary?.phase !== 'awaiting-journey') clearCoach();
+    if (!['awaiting-journey', 'completed'].includes(dictionary?.phase)) clearCoach();
+    updateResume();
   });
 
   root.addEventListener('lootlingua:journey-auth-requested', (event) => {
     const intent = event.detail?.intent;
     if (!active() || user() || !intent || String(intent.worldId || '') !== String(runtime.state?.worldId || '')) return;
     writeHandoff({ operationId: intent.operationId, state: runtime.state, claimedBy: '', createdAt: Date.now() });
-    void enableGuestDictionary();
+    root.LootLinguaPopover?.closeIf?.(COACH_ID, { silent: true });
+    updateResume();
+  });
+  root.addEventListener('lootlingua:entry-closed', () => {
+    if (runtime.lastRoute) applyRoute(runtime.lastRoute);
+      else updateResume();
+  });
+  root.addEventListener('lootlingua:auth-dialog-closed', () => {
+    if (runtime.lastRoute) applyRoute(runtime.lastRoute);
+    else updateResume();
+  });
+  root.addEventListener('lootlingua:auth-dialog-opened', () => {
+    root.LootLinguaPopover?.closeIf?.(COACH_ID, { silent: true });
+    updateResume();
+  });
+  root.addEventListener('lootlingua:surface-ready', updateResume);
+  root.addEventListener('lootlingua:onboarding-cloud-change', () => {
+    if (!user()) return;
+    const checkpoint = readLocal();
+    if (!checkpoint || JSON.stringify(checkpoint) === JSON.stringify(runtime.state)) return;
+    runtime.state = preferNewestState(checkpoint, runtime.state);
+    if (runtime.lastRoute) applyRoute(runtime.lastRoute);
+    else updateResume();
+    announce();
   });
   root.addEventListener('lootlingua:popover-closed', (event) => {
     if (!active() || event.detail?.id === COACH_ID || !runtime.lastRoute?.root?.isConnected) return;
-    requestAnimationFrame(() => applyRoute(runtime.lastRoute));
+    requestAnimationFrame(() => { if (runtime.lastRoute) applyRoute(runtime.lastRoute); });
   });
 
   root.addEventListener('lootlingua:auth-state', () => {
     runtime.authEpoch++; runtime.loadedOwner = ''; runtime.loading = null;
-    runtime.state = null; runtime.persistQueue = Promise.resolve(); runtime.handoffAttempts = 0;
-    root.LootLinguaPopover?.closeIf?.(COACH_ID, { silent: true });
+    runtime.state = null; runtime.handoffAttempts = 0;
+    clearCoach(); updateResume();
     announce(); void boot();
   });
   root.addEventListener('lootlingua:guided-first-journey-cloud-ready', () => { runtime.loadedOwner = ''; void boot(); });
@@ -340,7 +463,11 @@
   queueMicrotask(boot);
 
   Object.defineProperty(root, 'LootLinguaGuidedFirstJourney', {
-    value: Object.freeze({ boot, beginFromEntry, gateOpened, gateWordsLoaded, completeFromQuizCta, enableGuestDictionary, shouldAllowSurface, applyRoute, clearCoach, getState: () => runtime.state }),
+    value: Object.freeze({
+      boot, beginFromEntry, selectWorld, journeyStarted, setPlacement, placementGate, gateOpened, gateWordsLoaded,
+      completeFromQuizCta, enableGuestDictionary, shouldAllowSurface, applyRoute, clearCoach, isPresenting,
+      worldCompleted: (worldId) => move('world-completed', { worldId }), getState: () => runtime.state,
+    }),
     configurable: false, writable: false,
   });
 })(typeof window !== 'undefined' ? window : globalThis);

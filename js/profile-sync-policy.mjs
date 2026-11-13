@@ -13,6 +13,26 @@ export const PROFILE_SYNC_VERSION = 1;
 // Onboarding completion is monotonic across devices; replaying an older tour
 // checkpoint must never reopen a completed tour.
 export function mergeOnboardingProgress(tour, left, right) {
+  if (tour === 'public-world-guide') {
+    const normalize = value => {
+      const phases = ['choosing-world', 'awaiting-first-gate', 'first-gate-opened', 'awaiting-quiz-cta', 'completed'];
+      if (value?.version !== 1 || !phases.includes(value.phase) || (!value.worldId && value.phase !== 'choosing-world')) return null;
+      const id = field => typeof value[field] === 'string' ? value[field].trim().slice(0, 128) : '';
+      return {
+        version: 1, audience: 'new', phase: value.phase, worldId: id('worldId'),
+        suggestedWorldId: id('suggestedWorldId'), gateId: id('gateId'), rankId: id('rankId'),
+        placementStage: ['assessment', 'result', 'offer', 'continue'].includes(value.placementStage) ? value.placementStage : '',
+        placementLevel: id('placementLevel').slice(0, 8), assessmentId: id('assessmentId'),
+        resultStep: Math.min(2, Math.floor(number(value.resultStep))), guestDictionaryAvailable: value.guestDictionaryAvailable === true,
+        startedAt: number(value.startedAt), updatedAt: number(value.updatedAt),
+        completedAt: value.phase === 'completed' ? number(value.completedAt) : 0,
+      };
+    };
+    const a = normalize(left), b = normalize(right);
+    if (!a || !b) return a || b;
+    if ((a.phase === 'completed') !== (b.phase === 'completed')) return a.phase === 'completed' ? a : b;
+    return a.updatedAt >= b.updatedAt ? a : b;
+  }
   const personal = tour === 'personal-dictionary';
   if (!personal && !['treasure', 'quiz', 'starred', 'custom-worlds'].includes(tour)) return null;
   const phases = personal ? ['awaiting-journey', 'intro', 'awaiting-first-word', 'completed'] : ['available', 'in-progress', 'skipped', 'completed'];

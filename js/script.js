@@ -1290,10 +1290,14 @@ function parseAppRoute() {
   const parts = slug.split('/').filter(Boolean);
   if (parts[0] === APP_VIEW_ROUTES.worlds && parts.length > 1) {
     if (parts.length === 2) {
+      const assessmentId = history.state?.params?.worldId === parts[1] ? history.state.params.assessmentId : '';
       return {
         kind: 'published',
         key: 'world',
-        params: { worldId: parts[1] }
+        params: {
+          worldId: parts[1],
+          ...(assessmentId ? { assessmentId } : {}),
+        }
       };
     }
     if (parts.length === 4 && parts[2] === 'ranks') {
@@ -1312,23 +1316,36 @@ function parseAppRoute() {
     }
     return { kind: 'published', key: 'not-found', params: {} };
   }
-  if (APP_ROUTE_TO_VIEW[slug]) return { kind: 'view', key: APP_ROUTE_TO_VIEW[slug] };
+  if (APP_ROUTE_TO_VIEW[slug]) {
+    const key = APP_ROUTE_TO_VIEW[slug];
+    const tab = key === 'worlds' && history.state?.key === 'worlds' ? history.state.tab : '';
+    return { kind: 'view', key, ...(tab === 'custom' ? { tab } : {}) };
+  }
   if (APP_ROUTE_TO_MODAL[slug]) return { kind: 'modal', key: APP_ROUTE_TO_MODAL[slug] };
   if (APP_ROUTE_TO_OVERLAY[slug]) return { kind: 'overlay', key: APP_ROUTE_TO_OVERLAY[slug] };
   return { kind: 'view', key: 'personal' };
 }
 
 function setAppRoute(kind, key, options = {}) {
-  if (!appRoutingReady || appRouteSyncing) return;
   const routeKey = kind === 'published' ? (options.params || {}) : key;
-  const path = getAppRoutePath(kind, routeKey);
   const state = {
     lootlingua: true,
     kind,
     key,
     ...(kind === 'published' ? { params: routeKey } : {}),
+    ...(options.tab ? { tab: options.tab } : {}),
     source: options.source || (options.replace ? 'replace' : 'push')
   };
+  if (kind === 'view' || kind === 'published') {
+    const generation = window.__dictionaryNavigationGeneration;
+    queueMicrotask(() => {
+      if (generation === window.__dictionaryNavigationGeneration) {
+        window.dispatchEvent(new CustomEvent('lootlingua:surface-ready', { detail: state }));
+      }
+    });
+  }
+  if (!appRoutingReady || appRouteSyncing) return;
+  const path = getAppRoutePath(kind, routeKey);
   try {
     if (location.pathname === path) {
       history.replaceState({ ...state, source: history.state?.source || state.source }, '', path);
@@ -1343,6 +1360,9 @@ function setAppRoute(kind, key, options = {}) {
 function setAppViewRoute(viewKey, options = {}) {
   setAppRoute('view', viewKey, options);
 }
+
+window.getOnboardingView = () => currentView;
+window.hasActiveLearningQuiz = () => currentView === 'quiz' && Boolean(activeQuizSession);
 
 function setPublishedContentRoute(key, params, options = {}) {
   setAppRoute('published', key, { ...options, params });
@@ -1507,6 +1527,7 @@ function applyAppRoute(route = parseAppRoute()) {
   closeRouteOverlays();
   if (route.kind === 'view') {
     openRouteView(route.key);
+    if (route.key === 'worlds' && route.tab === 'custom') window.showCustomWorldsTab?.();
   } else if (route.kind === 'published') {
     if (typeof window.loadPublishedContentRoute === 'function') {
       window.loadPublishedContentRoute(route);
@@ -2609,6 +2630,7 @@ window.declineGuestMigration = function() {
 };
 
 function beginViewSwitch() {
+  window.cancelPendingStatsPanel?.();
   window.releaseDictionaryDraggedCard?.();
   window.cancelDictionaryFullDataRequest?.();
   window.watchPersonalDictionaryRows?.([]);

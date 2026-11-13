@@ -87,7 +87,7 @@
     content="#090c0f"
   >
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
-  <link rel="stylesheet" href="style.css?v=20261106-runner-entry-1">
+  <link rel="stylesheet" href="style.css?v=20261113-resumable-guide">
   <link rel="stylesheet" href="entry-experience.css?v=20261104-world-guide-4">
   <link rel="stylesheet" href="motivation.css?v=20261106-motivation-1">
   <link rel="stylesheet" href="glass-theme.css?v=20261106-materials-1">
@@ -211,6 +211,8 @@
     </div>
   </header>
 
+  <button id="onboardingResume" class="onboarding-resume entry-secondary" type="button" hidden></button>
+
   <!-- بطاقة الإضافة (تُخفى عند قواميس الألعاب) -->
   <div class="card-box" id="personalControls">
     <div id="normalSearchZone" class="search-zone" data-search-type="normal">
@@ -230,7 +232,7 @@
       <span class="sr-only">إظهار الحقول الإضافية</span>
     </button>
     <div id="suggestionsBox">
-      <p style="font-size:13px; color:var(--accent); font-weight:bold; margin:0; padding:10px 14px 4px;">اختر المعنى الأنسب:</p>
+      <p id="suggestionsHeading" style="font-size:13px; color:var(--accent); font-weight:bold; margin:0; padding:10px 14px 4px;">اختر المعنى الأنسب</p>
       <div id="suggestionsList"></div>
     </div>
     <div id="addFormAdvancedFields" class="add-form-advanced" aria-hidden="true">
@@ -1161,14 +1163,14 @@
 <!-- ══ FIREBASE ══ -->
 <script src="js/startup-recovery.js?v=20261106-stage2-1"></script>
 <script src="js/cloud-backoff.js?v=20261106-quota-1"></script>
-<script src="js/entry-experience-contract.js?v=20261029-entry-simplify-1"></script>
-  <script src="js/guided-first-journey-contract.js?v=20260827-1"></script>
+<script src="js/entry-experience-contract.js?v=20261113-resumable-guide"></script>
+  <script src="js/guided-first-journey-contract.js?v=20261113-resumable-guide"></script>
   <script src="js/feature-discovery-contract.js?v=20261104-discovery-1"></script>
-<script data-startup-critical src="js/entry-experience-controller.js?v=20261106-session-1"></script>
-<script src="js/guided-first-journey-controller.js?v=20261106-session-1"></script>
-<script src="js/personal-dictionary-onboarding.js?v=20261106-onboarding-sync-1"></script>
-  <script src="js/feature-discovery-controller.js?v=20261106-onboarding-sync-1"></script>
-<script src="js/feature-mini-onboarding.js?v=20261106-rewards-layout-1"></script>
+<script data-startup-critical src="js/entry-experience-controller.js?v=20261113-resumable-guide"></script>
+<script src="js/guided-first-journey-controller.js?v=20261113-resumable-guide"></script>
+<script src="js/personal-dictionary-onboarding.js?v=20261113-resumable-guide"></script>
+  <script src="js/feature-discovery-controller.js?v=20261113-resumable-guide"></script>
+<script src="js/feature-mini-onboarding.js?v=20261113-resumable-guide"></script>
 <script data-startup-critical type="module" src="js/cloud.js?v=20261107-world-cache-1"></script>
 <script data-startup-critical type="module" src="js/entry-experience-cloud.js?v=20260808-1"></script>
 <script type="module" src="js/guided-first-journey-cloud.js?v=20260827-1"></script>
@@ -1205,19 +1207,19 @@
 </div>
 
 <!-- ══ FIREBASE PROFILE SYNC ══ -->
-  <script data-startup-critical type="module" src="js/profile-cloud.js?v=20261112-bots"></script>
+  <script data-startup-critical type="module" src="js/profile-cloud.js?v=20261113-resumable-guide"></script>
 <script type="module" src="js/published-content.js?v=20260722-1"></script>
 <script data-startup-critical type="module" src="js/journey-cloud.js?v=20261105-pages-1"></script>
 <script type="module" src="js/notification-cloud.js?v=20261107-reads-1"></script>
 <script type="module" src="js/feedback.js?v=20261105-feedback-1"></script>
   <script src="js/notification-policy.js?v=20260811-1"></script>
-  <script src="js/notification-store.js?v=20260811-1"></script>
+  <script src="js/notification-store.js?v=20261113-resumable-guide"></script>
 <script src="js/notification-engine.js?v=20261105-pages-1"></script>
-<script src="js/popover.js?v=20261106-help-fit-1"></script>
+<script src="js/popover.js?v=20261113-resumable-guide"></script>
   <script src="js/test-clock-contract.js?v=20260729-2"></script>
   <script src="js/dictionary-pages.js?v=20261107-reads-1"></script>
   <script src="js/modal-focus.js?v=20261112-top-layer"></script>
-  <script data-startup-critical src="js/core.js?v=20261106-stage2-1"></script>
+  <script data-startup-critical src="js/core.js?v=20261113-resumable-guide"></script>
 <script src="js/operation-runtime.js?v=20260811-3"></script>
     <script data-startup-critical src="js/storage.js?v=20261112-bots"></script>
   <script src="js/content-schema.js?v=20260722-1"></script>
@@ -1229,14 +1231,14 @@
 <script src="js/placement.js?v=20260720-1"></script>
 <script src="js/level-placement.js?v=20260728-1"></script>
 <script src="js/word-list-data.js?v=20261106-admin-fixes-1"></script>
-<script data-startup-critical src="js/script.js?v=20261112-bots"></script>
+<script data-startup-critical src="js/script.js?v=20261113-resumable-guide"></script>
 <script src="js/xp.js?v=20261106-glass-paused-1"></script>
 <script src="js/xp-batch.js?v=20261105-integrity-1"></script>
-<script src="js/dictionary.js?v=20261107-word-visibility-1"></script>
+<script src="js/dictionary.js?v=20261113-resumable-guide"></script>
 <script src="js/gate-game-migration.js?v=20261007-1"></script>
 <script src="js/gate-runner.js?v=20261111-jump-4"></script>
 <script src="js/loot-bots.js?v=8"></script>
-<script src="js/worlds.js?v=20261112-bots-focus"></script>
+<script src="js/worlds.js?v=20261113-resumable-guide"></script>
 <script src="js/dictionary-window.js?v=20261105-render-1"></script>
 <script src="js/dictionary-render.js?v=20261107-word-visibility-1"></script>
 <script src="js/srs.js?v=20261105-render-1"></script>

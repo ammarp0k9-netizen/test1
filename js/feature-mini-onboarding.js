@@ -5,6 +5,7 @@
   let stepIndex = 0;
   let internalClose = false;
   let worldSaveHandled = false;
+  let run = 0;
 
   const STEPS = Object.freeze({
     treasure: [
@@ -38,6 +39,12 @@
   });
 
   function controller() { return root.LootLinguaFeatureDiscovery; }
+  function onFeature(feature) {
+    const view = root.getOnboardingView?.();
+    if (!view) return false;
+    if (feature === 'custom-worlds') return view === 'worlds' && document.getElementById('customWorldsTab')?.classList.contains('active');
+    return view === feature;
+  }
   function close() {
     internalClose = true;
     root.LootLinguaPopover?.closeIf?.(COACH_ID, { silent: true });
@@ -66,7 +73,9 @@
     if (stepIndex + 1 >= STEPS[activeFeature].length) { finish(); return; }
     stepIndex += 1;
     controller()?.checkpoint?.(activeFeature, stepIndex);
-    close(); prepareStep(); setTimeout(show, 100);
+    close(); prepareStep();
+    const currentRun = run;
+    setTimeout(() => { if (currentRun === run) show(); }, 100);
   }
   function targetForCurrentStep() {
     const step = STEPS[activeFeature]?.[stepIndex];
@@ -76,7 +85,9 @@
   }
   function show() {
     const { step, target } = targetForCurrentStep();
-    if (!step || !target || !target.getClientRects().length || !root.LootLinguaPopover?.open) { activeFeature = ''; close(); return; }
+    if (!step || !onFeature(activeFeature) || !target?.getClientRects().length || !root.LootLinguaPopover?.open) {
+      pause(); return;
+    }
     const content = document.createElement('div');
     content.className = 'feature-mini-onboarding-content';
     const title = document.createElement('strong');
@@ -95,19 +106,33 @@
     if (step.click || step.event) next.hidden = true;
     next.addEventListener('click', advance);
     actions.append(skip, next); content.append(title, copy, actions);
-    root.LootLinguaPopover.open({ id: COACH_ID, className: 'lootlingua-popover feature-mini-onboarding-coach', anchor: target, content, labelledBy: title.id, persistent: true });
+    const actionsToDelay = step.click ? [...document.querySelectorAll(step.click)]
+      : step.event ? [target] : [];
+    if (!root.LootLinguaPopover.open({
+      id: COACH_ID, className: 'lootlingua-popover feature-mini-onboarding-coach', anchor: target,
+      content, labelledBy: title.id, persistent: true,
+      reading: { step: `${activeFeature}:${stepIndex}`, text: step.text, actions: actionsToDelay },
+    })) pause();
+  }
+  function pause() {
+    run += 1;
+    activeFeature = '';
+    close();
   }
   function start(feature) {
-    if (!STEPS[feature] || (activeFeature && activeFeature !== feature)) return false;
+    if (!STEPS[feature] || !onFeature(feature) || controller()?.isInteractiveJourneyActive?.() ||
+        (activeFeature && activeFeature !== feature)) return false;
+    if (activeFeature === feature) return true;
+    const currentRun = ++run;
     activeFeature = feature;
     worldSaveHandled = false;
     stepIndex = Math.min(controller()?.getState?.()?.features?.[feature]?.step || 0, STEPS[feature].length - 1);
     prepareStep();
     let attempts = 0;
     const wait = () => {
-      if (!activeFeature) return;
+      if (currentRun !== run || activeFeature !== feature) return;
       if (document.querySelector(STEPS[feature][stepIndex].selector)?.getClientRects().length) { show(); return; }
-      if (++attempts >= 20) { activeFeature = ''; controller()?.evaluate?.(); return; }
+      if (++attempts >= 20) { pause(); controller()?.evaluate?.(); return; }
       setTimeout(wait, 100);
     };
     wait();
@@ -115,9 +140,23 @@
   }
   Object.defineProperty(root, 'LootLinguaFeatureMiniOnboarding', { value: Object.freeze({ start, finish, getActiveFeature: () => activeFeature }), configurable: false });
   root.addEventListener('lootlingua:popover-closed', (event) => {
-    if (!internalClose && event.detail?.id === COACH_ID) activeFeature = '';
+    if (!internalClose && event.detail?.id === COACH_ID) pause();
   });
-  root.addEventListener('lootlingua:auth-state', () => { activeFeature = ''; close(); });
+  root.addEventListener('lootlingua:auth-state', pause);
+  root.addEventListener('lootlingua:dictionary-navigation', pause);
+  function resume() {
+    if (activeFeature || controller()?.isInteractiveJourneyActive?.()) return;
+    const features = controller()?.getState?.()?.features || {};
+    const feature = Object.keys(STEPS).find((key) => onFeature(key) &&
+      features[key]?.status === 'in-progress' && controller()?.getStatus?.(key) === 'in-progress');
+    if (feature) start(feature);
+  }
+  root.addEventListener('lootlingua:surface-ready', () => {
+    if (activeFeature && (!onFeature(activeFeature) || controller()?.isInteractiveJourneyActive?.())) pause();
+    resume();
+  });
+  root.addEventListener('lootlingua:onboarding-cloud-change', resume);
+  root.addEventListener('lootlingua:initial-data-ready', resume);
   root.addEventListener('lootlingua:custom-world-saved', () => {
     if (activeFeature === 'custom-worlds' && stepIndex >= 3 && stepIndex <= 4) {
       worldSaveHandled = true;
@@ -126,13 +165,13 @@
   });
   document.addEventListener('click', (event) => {
     const step = STEPS[activeFeature]?.[stepIndex];
-    if (!step?.click || !event.target.closest?.(step.click)) return;
+    if (!step?.click || !event.target.closest?.(step.click) || !root.LootLinguaPopover?.canAct?.(COACH_ID)) return;
     advance();
   });
   setInterval(() => {
     if (!activeFeature || !document.getElementById(COACH_ID)) return;
     const selector = STEPS[activeFeature]?.[stepIndex]?.selector;
     const target = selector && document.querySelector(selector);
-    if (!target?.getClientRects().length) { activeFeature = ''; close(); }
+    if (!target?.getClientRects().length) pause();
   }, 500);
 })(window);

@@ -1677,6 +1677,10 @@ async function resumePendingJourneyIntent(intent, world) {
     throw new Error('Pending Journey intent no longer matches the published world.');
   }
   const previousError = publishedContentState.journeyError;
+  if (currentView !== 'worlds' || publishedContentState.tab !== 'published' ||
+      publishedContentState.route?.params?.worldId !== world.worldId) {
+    await window.openPublishedWorld(world.worldId);
+  }
   let result;
   if (action === 'start-journey') result = await startOrResumePublishedJourney(world);
   else if (action === 'begin-journey-from-start') result = await beginPublishedJourneyFromStart(world);
@@ -1692,7 +1696,7 @@ async function resumePendingJourneyIntent(intent, world) {
       code: nextError.code || 'journey/restore-failed',
     });
   }
-  return { restored: result != null, result };
+  return { restored: result != null || (action === 'start-journey' && publishedContentState.journeyAction?.type === 'choose-start'), result };
 }
 
 Object.defineProperty(window, 'LootLinguaJourneyEntryActions', {
@@ -1846,6 +1850,9 @@ async function openPublishedJourneyDestination(worldId, options) {
     return destination;
   }
   if (destination.type === 'gate' || destination.type === 'gate-clear') {
+    if (options?.guidePlacement) window.LootLinguaGuidedFirstJourney?.placementGate?.({
+      worldId: destinationWorldId, rankId: destination.rank.rankId, gateId: destination.gate.gateId,
+    });
     window.openPublishedGate(
       destinationWorldId,
       destination.rank.rankId,
@@ -1854,7 +1861,11 @@ async function openPublishedJourneyDestination(worldId, options) {
     return destination;
   }
   if (destination.type === 'completed-current-content') {
-    await loadPublishedWorlds({ force: true });
+    window.openPublishedWorldsRoot();
+    return destination;
+  }
+  if (options?.guidePlacement && destinationWorldId) {
+    await window.openPublishedWorld(destinationWorldId);
     return destination;
   }
   await loadPublishedWorlds({ force: true });
@@ -1866,6 +1877,8 @@ async function startOrResumePublishedJourney(world) {
     requestJourneySignIn({ action: 'start-journey', worldId: world?.worldId, source: 'world' });
     return null;
   }
+  const owner = window.auth.currentUser.uid;
+  const generation = window.__dictionaryNavigationGeneration;
   const activeJourney = publishedContentState.activeJourney ||
     await getJourneyCloudApi().getActiveJourney();
   if (
@@ -1876,8 +1889,9 @@ async function startOrResumePublishedJourney(world) {
     return null;
   }
 
-  const journey = publishedContentState.journey ||
+  const journey = (publishedContentState.journey?.worldId === world.worldId && publishedContentState.journey) ||
     await getJourneyCloudApi().getJourney(world.worldId, { force: true });
+  if (owner !== window.auth?.currentUser?.uid || generation !== window.__dictionaryNavigationGeneration) return null;
   if (!journey || journey.placementStatus === 'not-started') {
     publishedContentState.journeyAction = { type: 'choose-start', pending: false };
     rerenderPublishedRoute();
@@ -1895,12 +1909,18 @@ async function startOrResumePublishedJourney(world) {
       : (activeJourney && String(activeJourney.worldId) !== String(world.worldId)
         ? await api.switchActiveJourney(world.worldId)
         : await api.startJourney(world.worldId));
+    if (window.auth?.currentUser?.uid !== owner) return null;
+    window.LootLinguaGuidedFirstJourney?.journeyStarted?.(resumed);
+    if (generation !== window.__dictionaryNavigationGeneration) return resumed;
     publishedContentState.journey = resumed;
     publishedContentState.activeJourney = resumed;
     publishedContentState.journeyAction = null;
     clearPublishedJourneyError();
+    const guide = window.LootLinguaGuidedFirstJourney?.getState?.();
+    const continuingWithoutTest = guide?.worldId === resumed.worldId && guide.placementStage === 'continue';
     await openPublishedJourneyDestination(resumed.worldId, {
-      resumePausedLevelPlacement: true,
+      resumePausedLevelPlacement: !continuingWithoutTest,
+      guidePlacement: continuingWithoutTest,
     });
     return resumed;
   } catch (error) {
@@ -1925,8 +1945,11 @@ async function beginPublishedJourneyFromStart(world) {
     requestJourneySignIn({ action: 'begin-journey-from-start', worldId: world?.worldId, source: 'world' });
     return null;
   }
+  const owner = window.auth.currentUser.uid;
+  const generation = window.__dictionaryNavigationGeneration;
   const activeJourney = publishedContentState.activeJourney ||
     await getJourneyCloudApi().getActiveJourney();
+  if (owner !== window.auth?.currentUser?.uid || generation !== window.__dictionaryNavigationGeneration) return null;
   if (
     activeJourney &&
     String(activeJourney.worldId) !== String(world.worldId) &&
@@ -1938,6 +1961,9 @@ async function beginPublishedJourneyFromStart(world) {
   rerenderPublishedRoute();
   try {
     const journey = await getJourneyCloudApi().beginJourneyFromStart(world.worldId);
+    if (window.auth?.currentUser?.uid !== owner) return null;
+    window.LootLinguaGuidedFirstJourney?.journeyStarted?.(journey);
+    if (generation !== window.__dictionaryNavigationGeneration) return journey;
     publishedContentState.journey = journey;
     publishedContentState.activeJourney = journey;
     publishedContentState.journeyAction = null;
@@ -2034,13 +2060,24 @@ async function beginPublishedLevelPlacement(world, cefrLevel) {
     return null;
   }
   if (publishedContentState.levelPlacementPending) return null;
+  const resultView = publishedViewRoot()?.querySelector('.published-level-placement-result');
+  if (resultView) resultView.querySelectorAll('[data-guide-placement-destination] button').forEach((button) => { button.disabled = true; });
+  const owner = window.auth.currentUser.uid;
+  const generation = window.__dictionaryNavigationGeneration;
   publishedContentState.levelPlacementPending = true;
-  rerenderPublishedRoute();
+  if (!resultView) rerenderPublishedRoute();
   try {
     const bundle = await getJourneyCloudApi().startLevelPlacement(
       world.worldId,
       cefrLevel
     );
+    if (window.auth?.currentUser?.uid !== owner) return null;
+    window.LootLinguaGuidedFirstJourney?.journeyStarted?.(bundle.journey);
+    window.LootLinguaGuidedFirstJourney?.setPlacement?.({
+      worldId: world.worldId, placementStage: 'assessment', placementLevel: bundle.session.cefrLevel,
+      assessmentId: bundle.session.assessmentId,
+    });
+    if (generation !== window.__dictionaryNavigationGeneration) return bundle;
     publishedContentState.levelPlacementPending = false;
     publishedContentState.levelPlacementBundle = bundle;
     publishedContentState.journey = bundle.journey;
@@ -2049,6 +2086,7 @@ async function beginPublishedLevelPlacement(world, cefrLevel) {
     renderPublishedLevelPlacementAssessment(bundle);
     return bundle;
   } catch (error) {
+    if (window.auth?.currentUser?.uid !== owner || generation !== window.__dictionaryNavigationGeneration) return null;
     publishedContentState.levelPlacementPending = false;
     const overview = publishedContentState.levelPlacementOverviews.get(
       getLevelPlacementContract().normalizeLevel(cefrLevel)
@@ -2062,7 +2100,8 @@ async function beginPublishedLevelPlacement(world, cefrLevel) {
       () => beginPublishedLevelPlacement(world, cefrLevel),
       world.worldId
     );
-    rerenderPublishedRoute();
+    if (resultView?.isConnected) resultView.querySelectorAll('[data-guide-placement-destination] button').forEach((button) => { button.disabled = false; });
+    else rerenderPublishedRoute();
     showToast(journeyError.text, 'danger', 4800);
     return null;
   }
@@ -2111,12 +2150,16 @@ async function showPublishedLevelPlacementResume(worldId) {
 }
 
 async function showPublishedLevelPlacementResult(worldId, assessmentId) {
+  const generation = window.__dictionaryNavigationGeneration;
+  const owner = window.auth?.currentUser?.uid;
   try {
     const bundle = await getJourneyCloudApi().getLevelPlacementResult(
       worldId,
       assessmentId,
       { force: true }
     );
+    if (owner !== window.auth?.currentUser?.uid || generation !== window.__dictionaryNavigationGeneration) return null;
+    if (bundle.session.status !== 'completed' || bundle.session.resultApplied !== true) return null;
     publishedContentState.levelPlacementBundle = bundle;
     publishedContentState.journey = bundle.journey;
     renderPublishedLevelPlacementResult(bundle);
@@ -2126,6 +2169,10 @@ async function showPublishedLevelPlacementResult(worldId, assessmentId) {
     return null;
   }
 }
+
+window.openGuidedPlacementResult = async function(worldId, assessmentId) {
+  window.openPublishedWorld(worldId, { assessmentId });
+};
 
 async function continuePublishedLevelPlacement(bundle) {
   if (publishedContentState.levelPlacementPending) return null;
@@ -2181,10 +2228,17 @@ function renderPublishedLevelPlacementResumePrompt(bundle) {
       'published-action-btn published-placement-secondary',
       () => abandonPublishedLevelPlacement(bundle),
       'fa-solid fa-xmark'
+    ),
+    publishedButton(
+      'العودة للبوابات',
+      'published-action-btn published-placement-secondary',
+      () => void stopPublishedLevelPlacement(bundle),
+      'fa-solid fa-arrow-right'
     )
   );
   section.append(icon, copy, actions);
   root.replaceChildren(section);
+  window.LootLinguaGuidedFirstJourney?.applyRoute?.({ type: 'placement-resume', worldId: bundle.journey.worldId, root });
 }
 
 function renderPublishedLevelPlacementAssessment(bundle) {
@@ -2201,6 +2255,11 @@ function renderPublishedLevelPlacementAssessment(bundle) {
     return;
   }
   setPublishedPlacementMode(true);
+  if (publishedContentState.route?.key === 'world' && publishedContentState.route.params?.assessmentId) {
+    delete publishedContentState.route.params.assessmentId;
+    setPublishedContentRoute('world', { worldId: bundle.journey.worldId }, { replace: true });
+  }
+  window.LootLinguaGuidedFirstJourney?.applyRoute?.({ type: 'assessment', worldId: bundle.journey.worldId, root });
   publishedContentState.levelPlacementBundle = bundle;
   const feedback = publishedContentState.levelPlacementFeedback;
   const pending = publishedContentState.levelPlacementPending;
@@ -2273,6 +2332,9 @@ function renderPublishedLevelPlacementAssessment(bundle) {
 async function submitPublishedLevelPlacementAnswer(bundle, question, selectedId) {
   if (publishedContentState.levelPlacementPending || publishedContentState.levelPlacementFeedback) return;
   const correct = String(selectedId) === String(question.questionId);
+  const owner = window.auth?.currentUser?.uid;
+  const generation = window.__dictionaryNavigationGeneration;
+  const current = () => owner === window.auth?.currentUser?.uid && generation === window.__dictionaryNavigationGeneration;
   publishedContentState.levelPlacementPending = true;
   publishedContentState.levelPlacementFeedback = { selectedId: String(selectedId), correct };
   renderPublishedLevelPlacementAssessment(bundle);
@@ -2296,6 +2358,7 @@ async function submitPublishedLevelPlacementAnswer(bundle, question, selectedId)
       savePromise,
       new Promise((resolve) => setTimeout(resolve, reduceMotion ? 100 : 520)),
     ]);
+    if (!current()) { operationUi?.clear(); return; }
     trace?.stage('answer-saved');
     publishedContentState.levelPlacementPending = false;
     publishedContentState.levelPlacementFeedback = null;
@@ -2317,6 +2380,7 @@ async function submitPublishedLevelPlacementAnswer(bundle, question, selectedId)
     trace?.count('rerenderCount').stage('result-visible').end({ completed: true });
     operationUi?.clear();
   } catch (error) {
+    if (!current()) { operationUi?.clear(); return; }
     publishedContentState.levelPlacementPending = false;
     publishedContentState.levelPlacementFeedback = null;
     const resultSaveFailed = String(error?.operation || '') === 'apply-placement-outcome';
@@ -2367,6 +2431,9 @@ function renderPublishedLevelPlacementResult(bundle) {
   setPublishedPlacementMode(false);
   const session = bundle.session;
   const passedLevel = Boolean(session.passedLevel);
+  const nextLevel = passedLevel && !session.completedCurrentContent && session.nextCefrLevel &&
+    !bundle.journey?.passedCefrLevels?.includes(session.nextCefrLevel) &&
+    getLevelPlacementContract().canStartLevelPlacement(session.nextCefrLevel, bundle.journey) ? session.nextCefrLevel : '';
   const recommendedGateId = String(session.recommendedStartGateId || '');
   const section = publishedElement(
     'section',
@@ -2385,7 +2452,9 @@ function renderPublishedLevelPlacementResult(bundle) {
       'p',
       '',
       passedLevel
-        ? 'تم حفظ نتيجة المستوى وفتح المستوى التالي دون بدء اختبار جديد تلقائيًا.'
+        ? (session.completedCurrentContent
+          ? 'أنهيت البوابات المنشورة حاليًا. استكشف عوالم أخرى، وارجع هنا عند نشر بوابات أو مستويات جديدة.'
+          : 'تم حفظ نتيجتك. اختر كيف تتابع رحلتك أدناه.')
         : `أساسياتك جيدة. أفضل نقطة تبدأ منها هي البوابة ${recommendedGateId ? 'المقترحة' : 'الأولى المتاحة'}.`
     ),
     publishedElement(
@@ -2411,6 +2480,7 @@ function renderPublishedLevelPlacementResult(bundle) {
   }
 
   const savePanel = publishedElement('div', 'published-level-save-panel');
+  savePanel.dataset.guidePlacementSave = '';
   savePanel.append(publishedElement('strong', '', 'هل تريد حفظ كلمات الاختبار للمراجعة؟'));
   const saveActions = publishedElement('div', 'published-placement-resume-actions');
   const pendingWordIds = session.saveWordPendingIds || [];
@@ -2465,31 +2535,46 @@ function renderPublishedLevelPlacementResult(bundle) {
   section.append(savePanel);
 
   const actions = publishedElement('div', 'published-placement-resume-actions');
-  if (passedLevel && session.nextCefrLevel) {
-    actions.append(publishedButton(
-      `متابعة الرحلة في ${session.nextCefrLevel}`,
-      'published-action-btn published-placement-primary',
-      () => continueToNextPublishedLevel(bundle),
-      'fa-solid fa-route'
+  const destinationActions = publishedElement('div', 'published-placement-resume-actions');
+  destinationActions.dataset.guidePlacementDestination = '';
+  if (nextLevel) {
+    destinationActions.append(publishedButton(
+      `اختبار مستوى ${nextLevel}`,
+      'published-action-btn published-placement-secondary',
+      () => beginPublishedLevelPlacement(bundle.world || { worldId: bundle.journey.worldId }, nextLevel),
+      'fa-solid fa-location-crosshairs'
     ));
-  } else if (
-    session.resultStartRankId &&
-    session.resultStartGateId
-  ) {
-    actions.append(publishedButton(
-      'متابعة رحلة التعلم',
+  }
+  if (session.resultStartRankId && session.resultStartGateId) {
+    destinationActions.append(publishedButton(
+      'ابدأ من البوابة المقترحة',
       'published-action-btn published-placement-primary',
       () => beginPublishedJourneyAtLevelResult(bundle),
       'fa-solid fa-route'
     ));
+  } else if (nextLevel) {
+    destinationActions.append(publishedButton(
+      `متابعة الرحلة في ${nextLevel}`,
+      'published-action-btn published-placement-primary',
+      () => continueToNextPublishedLevel(bundle),
+      'fa-solid fa-route'
+    ));
   } else if (session.completedCurrentContent) {
-    actions.append(publishedButton(
+    destinationActions.append(publishedButton(
       'استكشف العوالم',
       'published-action-btn published-placement-primary',
-      () => openPublishedJourneyDestination(bundle.journey.worldId, {
-        resumePausedLevelPlacement: true,
-      }),
+      () => {
+        void openPublishedJourneyDestination(bundle.journey.worldId);
+        window.LootLinguaGuidedFirstJourney?.worldCompleted?.(bundle.journey.worldId);
+      },
       'fa-solid fa-circle-check'
+    ));
+  } else {
+    destinationActions.append(publishedButton(
+      'العودة للبوابات',
+      'published-action-btn published-placement-primary',
+      () => window.openPublishedWorld(bundle.journey.worldId),
+      'fa-solid fa-arrow-right'
     ));
   }
   actions.append(
@@ -2509,9 +2594,21 @@ function renderPublishedLevelPlacementResult(bundle) {
       'fa-regular fa-clock'
     )
   );
+  section.append(destinationActions);
   section.append(actions);
   appendPublishedLevelPlacementStats(section, session);
   root.replaceChildren(section);
+  if (publishedContentState.route?.key === 'world' && publishedContentState.route.params?.worldId === bundle.journey.worldId &&
+      session.assessmentId) {
+    const params = { worldId: bundle.journey.worldId, assessmentId: session.assessmentId };
+    publishedContentState.route.params = params;
+    setPublishedContentRoute('world', params, { replace: true });
+  }
+  window.LootLinguaGuidedFirstJourney?.applyRoute?.({
+    type: 'placement-result', worldId: bundle.journey.worldId, root, assessmentId: session.assessmentId,
+    nextLevel, canChooseWords: !saveChoiceResolved, worldCompleted: session.completedCurrentContent === true,
+    hasGate: Boolean(session.resultStartRankId && session.resultStartGateId),
+  });
   if (bundle.worldCompletionRecorded === true) {
     const completionId = String(bundle.worldCompletionId || bundle.journey?.worldId || '');
     if (!publishedContentState.shownWorldCompletionCelebrations.has(completionId)) {
@@ -2609,11 +2706,18 @@ async function savePublishedLevelPlacementWords(bundle, choice) {
 }
 
 async function beginPublishedJourneyAtLevelResult(bundle) {
-  await openPublishedJourneyDestination(bundle.journey.worldId);
+  await openPublishedJourneyDestination(bundle.journey.worldId, { guidePlacement: true });
 }
 
 async function continueToNextPublishedLevel(bundle) {
-  await openPublishedJourneyDestination(bundle.journey.worldId);
+  await openPublishedJourneyDestination(bundle.journey.worldId, { guidePlacement: true });
+}
+
+function offerPublishedLevelPlacementAgain(bundle) {
+  window.LootLinguaGuidedFirstJourney?.setPlacement?.({
+    worldId: bundle.journey.worldId, placementStage: 'offer',
+    placementLevel: bundle.session.cefrLevel, assessmentId: bundle.session.assessmentId,
+  });
 }
 
 async function pausePublishedLevelPlacement(bundle) {
@@ -2624,6 +2728,7 @@ async function pausePublishedLevelPlacement(bundle) {
   );
   publishedContentState.journey = journey;
   publishedContentState.activeJourney = journey;
+  offerPublishedLevelPlacementAgain(bundle);
   setPublishedPlacementMode(false);
   return journey;
 }
@@ -2701,6 +2806,7 @@ window.confirmLevelPlacementExit = async function() {
     await runner(`level-placement-leave:${bundle.session.assessmentId}`, async () => {
       if (mode === 'abandon') {
         await getJourneyCloudApi().abandonLevelPlacement(bundle.journey.worldId);
+        offerPublishedLevelPlacementAgain(bundle);
         setPublishedPlacementMode(false);
       } else {
         await pausePublishedLevelPlacement(bundle);
@@ -2737,6 +2843,7 @@ async function abandonPublishedLevelPlacement(bundle, confirmed = false) {
     return;
   }
   await getJourneyCloudApi().abandonLevelPlacement(bundle.journey.worldId);
+  offerPublishedLevelPlacementAgain(bundle);
   setPublishedPlacementMode(false);
   window.openPublishedWorld(bundle.journey.worldId);
 }
@@ -4275,6 +4382,7 @@ function makePublishedGateJourneyNode(world, rank, gate, state, progress, active
   );
   node.type = 'button';
   node.dataset.journeyState = state;
+  node.dataset.gateId = String(gate.gateId || '');
   const marker = publishedElement('span', 'published-journey-node-marker');
   marker.append(publishedIcon(presentation.icon));
   const copy = publishedElement('span', 'published-journey-node-copy');
@@ -4449,6 +4557,8 @@ function makePublishedJourneyPanel(world, ranks, journey, activeJourney) {
   );
   if (completedCurrentContent) {
     panel.classList.add('published-journey-completed');
+    panel.append(publishedElement('small', 'published-journey-message',
+      'استكشف عوالم أخرى. تابع هذا العالم عند نشر بوابات أو مستويات جديدة.'));
   } else if (choosing) {
     const choices = publishedElement('div', 'published-journey-start-choices');
     const beginning = publishedButton(
@@ -4725,7 +4835,7 @@ function renderPublishedGateClearResult(world, rank, gate, bundle) {
       '',
       passed
         ? (completedCurrentContent
-          ? 'أكملت جميع البوابات المنشورة حاليًا. يمكنك متابعة المراجعات والكلمات المتبقية دون أن يتغير إنجازك.'
+          ? 'أكملت البوابات المنشورة حاليًا. استكشف عوالم أخرى، وتابع هذا العالم عند نشر بوابات أو مستويات جديدة.'
           : (rankCompleted
             ? 'حُفظ إنجازك، وأصبحت خطوتك التالية متاحة. الكلمات المتبقية للمراجعة لا تعيق تقدمك.'
             : 'فُتحت الخطوة التالية في رحلتك، ولن تبدأ تلقائيًا.'))
@@ -4773,6 +4883,7 @@ function renderPublishedGateClearResult(world, rank, gate, bundle) {
     }
   }
   if (worldCompleted && bundle.result?.worldCompletionRecorded === true) {
+    window.LootLinguaGuidedFirstJourney?.worldCompleted?.(world.worldId);
     const completionId = String(bundle.result?.worldCompletionId || world.worldId || '');
     if (!publishedContentState.shownWorldCompletionCelebrations.has(completionId)) {
       publishedContentState.shownWorldCompletionCelebrations.add(completionId);
@@ -5286,16 +5397,25 @@ function renderPublishedWorlds(items, activeJourney, accountDestination) {
     const grid = publishedElement('div', 'published-card-grid');
     const viewerInterestIds = getPublishedViewerInterestIds();
     items.forEach((world) => {
-      grid.append(makePublishedHierarchyCard(
+      const card = makePublishedHierarchyCard(
         'world',
         world,
-        () => window.openPublishedWorld(world.worldId),
+        () => {
+          window.LootLinguaGuidedFirstJourney?.selectWorld?.(world.worldId);
+          window.openPublishedWorld(world.worldId);
+        },
         { recommendation: getPublishedWorldRecommendation(world, viewerInterestIds) }
-      ));
+      );
+      card.dataset.guidedWorld = world.worldId;
+      const marker = publishedElement('span', 'guided-world-choice-label');
+      marker.hidden = true;
+      card.append(marker);
+      grid.append(card);
     });
     content.append(grid);
   }
   root.replaceChildren(content);
+  window.LootLinguaGuidedFirstJourney?.applyRoute?.({ type: 'worlds', root });
 }
 
 function makePublishedLevelSection(world, cefrLevel, ranks, journey, activeJourney) {
@@ -5348,6 +5468,7 @@ function makePublishedLevelSection(world, cefrLevel, ranks, journey, activeJourn
     );
     button.disabled = state === 'locked' || state === 'passed' ||
       publishedContentState.levelPlacementPending;
+    if (['available', 'in-progress', 'new-content'].includes(state)) button.dataset.guidePlacementLevel = cefrLevel;
     summary.append(button);
     const history = overview?.history;
     const pendingWordDecision = history?.resultApplied === true &&
@@ -5436,7 +5557,10 @@ function renderPublishedRanks(world, ranks, journey, activeJourney) {
   }
   content.append(section);
   root.replaceChildren(content);
-  window.LootLinguaGuidedFirstJourney?.applyRoute?.({ type: 'world', worldId: world.worldId, root });
+  const guided = window.LootLinguaGuidedFirstJourney;
+  if (journey?.contentJourneyStatus === 'completed-current-content' && section.querySelector('.published-journey-completed')) {
+    guided?.worldCompleted?.(world.worldId);
+  } else guided?.applyRoute?.({ type: 'world', worldId: world.worldId, root });
 }
 
 function renderPublishedGates(
@@ -5796,6 +5920,18 @@ function makePublishedPagination(snapshot, meta) {
 function renderPublishedGateWords(world, rank, gate, snapshot) {
   const root = publishedViewRoot();
   if (!root) return;
+  if (publishedContentState.journey?.worldId === world.worldId) {
+    const guide = window.LootLinguaGuidedFirstJourney;
+    const checkpoint = guide?.getState?.();
+    if (checkpoint?.worldId === world.worldId && publishedContentState.journey.activeGateId === gate.gateId) {
+      if (checkpoint.phase === 'awaiting-first-gate') {
+        guide.gateOpened({ worldId: world.worldId, rankId: rank.rankId, gateId: gate.gateId });
+      }
+      if (publishedContentState.gateProgress?.loadedAt) {
+        guide.gateWordsLoaded({ worldId: world.worldId, gateId: gate.gateId });
+      }
+    }
+  }
   const section = publishedElement('section', 'published-route-view');
   appendPublishedHeader(section, {
     journey: true,
@@ -6053,9 +6189,7 @@ async function loadPublishedWorlds(options) {
 window.showPublishedWorldsTab = function() {
   setPublishedTabState('published');
   setPublishedTabsVisible(true);
-  if (publishedContentState.route.key !== 'worlds') {
-    setAppViewRoute('worlds');
-  }
+  setAppViewRoute('worlds');
   loadPublishedWorlds();
 };
 
@@ -6070,11 +6204,12 @@ window.showCustomWorldsTab = function() {
   publishedContentState.ranks = [];
   publishedContentState.gates = [];
   clearPublishedJourneyViewState();
+  window.LootLinguaGuidedFirstJourney?.clearCoach?.();
   setPublishedTabState('custom');
   setTreasureDockActive('custom-worlds');
   setPublishedTabsVisible(true);
   renderCustomWorldCards();
-  setAppViewRoute('worlds');
+  setAppViewRoute('worlds', { tab: 'custom' });
 };
 
 window.loadWorldsView = function() {
@@ -6143,6 +6278,14 @@ async function loadPublishedRouteData(route, options) {
       publishedContentState.journeyGraph = journeyContext.graph || null;
       publishedContentState.journey = journeyContext.journey;
       publishedContentState.activeJourney = journeyContext.activeJourney;
+      const guide = window.LootLinguaGuidedFirstJourney?.getState?.();
+      const resultArrivedWhileAway = guide?.worldId === params.worldId && guide.placementStage === 'assessment' &&
+        journeyContext.journey?.levelPlacementAssessmentIds?.[guide.placementLevel] === guide.assessmentId;
+      const assessmentId = options?.assessmentId || params.assessmentId || (resultArrivedWhileAway && guide.assessmentId);
+      if (assessmentId && window.auth?.currentUser) {
+        if (await showPublishedLevelPlacementResult(params.worldId, assessmentId)) return;
+        if (generation !== publishedContentState.generation) return;
+      }
       if (await maybeRenderPublishedLevelPlacementResume(journeyContext.journey, generation)) {
         return;
       }
@@ -6338,7 +6481,7 @@ async function loadPublishedRouteData(route, options) {
   }
 }
 
-window.loadPublishedContentRoute = function(route) {
+window.loadPublishedContentRoute = function(route, options) {
   // Rank URLs are retained only as backwards-compatible deep links.  The
   // product surface no longer exposes Rank as a navigation destination.
   if (route?.key === 'rank') {
@@ -6355,7 +6498,10 @@ window.loadPublishedContentRoute = function(route) {
   setPublishedTabState('published');
   setPublishedTabsVisible(false);
   window.scrollTo({ top: 0, behavior: 'auto' });
-  loadPublishedRouteData(route);
+  // History is already synchronized by the caller. The ready event follows
+  // beginViewSwitch so stale transitions cannot revive another page's guide.
+  setPublishedContentRoute(route.key, route.params, { replace: true });
+  return loadPublishedRouteData(route, options);
 };
 
 window.openPublishedWorldsRoot = function() {
@@ -6364,10 +6510,10 @@ window.openPublishedWorldsRoot = function() {
   window.loadWorldsView();
 };
 
-window.openPublishedWorld = function(worldId) {
-  const route = { key: 'world', params: { worldId: String(worldId || '') } };
+window.openPublishedWorld = function(worldId, options) {
+  const route = { key: 'world', params: { worldId: String(worldId || ''), ...(options?.assessmentId ? { assessmentId: options.assessmentId } : {}) } };
   setPublishedContentRoute(route.key, route.params);
-  window.loadPublishedContentRoute(route);
+  return window.loadPublishedContentRoute(route, options);
 };
 
 window.openPublishedRank = function(worldId, rankId) {
@@ -6378,7 +6524,7 @@ window.openPublishedRank = function(worldId, rankId) {
 };
 
 window.openPublishedGate = function(worldId, rankId, gateId) {
-  void window.LootLinguaGuidedFirstJourney?.gateOpened?.({ worldId, gateId });
+  void window.LootLinguaGuidedFirstJourney?.gateOpened?.({ worldId, rankId, gateId });
   const route = {
     key: 'gate',
     params: {

@@ -34,6 +34,8 @@ function harness() {
     setCategoryDropdownValue(value) { calls.push(['category', value]); },
     setAddFormExpanded(value) { calls.push(['expanded', value]); },
     clearGamerSuggestionsUI() { calls.push('clear-gamer'); },
+    getAddFormDraftScope: () => 'guest:personal',
+    normalSearchRecord: () => null,
   });
   vm.runInContext([
     block('function escapeHtml(', 'function safeClassToken('),

@@ -263,12 +263,18 @@
     return records.map((record) => ({ ...record, context: { ...record.context }, cta: record.cta ? { ...record.cta, args: { ...record.cta.args } } : null }));
   }
 
+  function isDisplayable(record) {
+    if (record.status !== 'active') return false;
+    if (record.cta?.id !== 'open-feature-discovery') return true;
+    return root.LootLinguaFeatureDiscovery?.canShowInvitation?.(record.cta.args?.feature) !== false;
+  }
+
   function getDisplayRecords() {
-    return records.filter((record) => record.status === 'active').slice(0, DISPLAY_LIMIT).map((record) => ({ ...record }));
+    return records.filter(isDisplayable).slice(0, DISPLAY_LIMIT).map((record) => ({ ...record }));
   }
 
   function getUnreadCount() {
-    return records.filter((record) => record.status === 'active' && !record.readAt).length;
+    return records.filter((record) => isDisplayable(record) && !record.readAt).length;
   }
 
   function find(idOrOccurrence) {

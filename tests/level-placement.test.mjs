@@ -488,7 +488,8 @@ test('continue later clears the active assessment and keeps the next-level CTA o
   assert.match(finishBlock, /activeLevelPlacementAssessmentId: ''/);
   assert.match(finishBlock, /activeLevelPlacementCefrLevel: ''/);
   assert.match(worldsSource, /shouldResumeLevelPlacement\(null, journey\)/);
-  assert.match(worldsSource, /`متابعة الرحلة في \$\{session\.nextCefrLevel\}`/);
+  assert.match(worldsSource, /if \(nextLevel\) \{[\s\S]*?`اختبار مستوى \$\{nextLevel\}`[\s\S]*?beginPublishedLevelPlacement/);
+  assert.match(worldsSource, /else if \(nextLevel\) \{[\s\S]*?`متابعة الرحلة في \$\{nextLevel\}`/);
   const continueNextBlock = worldsSource.slice(
     worldsSource.indexOf('async function continueToNextPublishedLevel'),
     worldsSource.indexOf('async function pausePublishedLevelPlacement')

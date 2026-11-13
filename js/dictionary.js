@@ -65,9 +65,9 @@ async function openStatsPanel() {
   renderHeatmap(); renderStatsNumbers();
   setAppRoute('overlay', 'stats');
 }
-function closeStatsPanel() {
+function closeStatsPanel(silent = false) {
   statsPanelRequest++;
-  closeRouteEntry('overlay', 'stats', () => {
+  const close = () => {
     const p=document.getElementById('statsPanel'); if(!p)return;
     p.classList.remove('show');
     p.setAttribute('aria-hidden', 'true');
@@ -75,7 +75,12 @@ function closeStatsPanel() {
     window.LootLinguaModalFocus?.close(p);
     clearTimeout(statsPanelHideTimer);
     statsPanelHideTimer = setTimeout(()=>p.style.display='none',300);
-  });
+  };
+  if (silent === true) close();
+  else {
+    window.dispatchEvent(new CustomEvent('lootlingua:profile-guide-closed'));
+    closeRouteEntry('overlay', 'stats', close);
+  }
 }
 function renderHeatmap() {
   const container=document.getElementById('heatmapGrid'); if(!container)return;
@@ -382,10 +387,29 @@ window.restoreDictionaryWordById = function(wordId, options = {}) {
 let isExpanded = false;
 window.isExpanded = isExpanded;
 const addFormDrafts = new Map();
+const normalSearchRecords = new Map();
+const normalSearchRequests = new Map();
+const DICTIONARY_DRAFT_PREFIX = 'lootlingua:dictionary-draft:v1:';
+const DICTIONARY_SEARCH_PREFIX = 'lootlingua:dictionary-search:v1:';
 
 function getAddFormDraftScope() {
-  const owner = window.auth?.currentUser?.uid || 'guest';
+  const uid = window.auth?.currentUser?.uid;
+  const owner = uid ? `user:${uid}` : 'guest';
   return `${owner}:${isCustomWorldView() ? `custom:${activeCustomWorldId}` : 'personal'}`;
+}
+
+function readDictionaryDraft(records, prefix, scope) {
+  if (records.has(scope)) return records.get(scope);
+  try { return JSON.parse(localStorage.getItem(prefix + scope) || 'null'); }
+  catch (_) { return null; }
+}
+
+function writeDictionaryDraft(records, prefix, scope, value) {
+  records.set(scope, value);
+  try {
+    if (value) localStorage.setItem(prefix + scope, JSON.stringify(value));
+    else localStorage.removeItem(prefix + scope);
+  } catch (_) { /* Keep the current tab usable when storage is unavailable. */ }
 }
 
 function readAddFormDraftFromDom() {
@@ -430,15 +454,19 @@ function resetAddFormEditState() {
 
 window.saveActiveAddFormDraft = function() {
   if (window.__restoringAddFormDraft || !isEditableDictionaryView()) return;
-  addFormDrafts.set(getAddFormDraftScope(), readAddFormDraftFromDom());
+  writeDictionaryDraft(addFormDrafts, DICTIONARY_DRAFT_PREFIX, getAddFormDraftScope(), readAddFormDraftFromDom());
 };
 
 function restoreActiveAddFormDraft() {
-  writeAddFormDraftToDom(addFormDrafts.get(getAddFormDraftScope()) || {});
+  const scope = getAddFormDraftScope();
+  writeAddFormDraftToDom(readDictionaryDraft(addFormDrafts, DICTIONARY_DRAFT_PREFIX, scope) || {});
+  restoreNormalSearch(scope);
 }
 
 function resetActiveAddFormDraft() {
-  addFormDrafts.delete(getAddFormDraftScope());
+  const scope = getAddFormDraftScope();
+  writeDictionaryDraft(addFormDrafts, DICTIONARY_DRAFT_PREFIX, scope, null);
+  writeDictionaryDraft(normalSearchRecords, DICTIONARY_SEARCH_PREFIX, scope, null);
 }
 
 function initAddFormDraftTracking() {
@@ -446,7 +474,13 @@ function initAddFormDraftTracking() {
     const el = document.getElementById(id);
     if (!el || el.dataset.draftTracked === '1') return;
     el.dataset.draftTracked = '1';
-    el.addEventListener('input', () => window.saveActiveAddFormDraft());
+    el.addEventListener('input', () => {
+      window.saveActiveAddFormDraft();
+      if (id === 'wordInput' && isEditableDictionaryView()) renderNormalSearch(getAddFormDraftScope());
+      if (id === 'meaningInput' && isEditableDictionaryView() && !isCustomWorldView()) {
+        window.dispatchEvent(new CustomEvent('lootlingua:dictionary-meaning-edited'));
+      }
+    });
     el.addEventListener('change', () => window.saveActiveAddFormDraft());
   });
 }
@@ -505,6 +539,7 @@ if (document.readyState === 'loading') {
 // Add / Edit Word
 // ═══════════════════════════════════════════════════════
 window.addWord = async function() {
+  if (window.LootLinguaPopover?.isReadingAction?.(document.getElementById('addBtn'))) return false;
   const context = captureDictionaryWriteContext();
   const key = JSON.stringify([context.owner, context.generation, context.scope]);
   if (window.__dictionarySaveInFlight?.key === key) return false;
@@ -1121,6 +1156,7 @@ function announceDictionarySearchResult(type, status, word) {
       type: type === 'gamer' ? 'gamer' : 'normal',
       status: String(status || 'error'),
       word: String(word || '').trim(),
+      scope: type === 'normal' ? getAddFormDraftScope() : '',
     },
   }));
 }
@@ -1164,7 +1200,7 @@ function bindSearchLockOverlays() {
 /**
  * جلب معاني AI: كاش Firestore → API (بعد فحص الضيف/التوكن على السيرفر).
  */
-async function fetchAiMeaningsWithCache(word, type) {
+async function fetchAiMeaningsWithCache(word, type, { requestId, recover = false } = {}) {
   const trimmed = String(word || '').trim();
   if (!trimmed) return { ok: false, data: [], error: 'empty' };
   const owner = window.auth?.currentUser?.uid || 'guest';
@@ -1175,13 +1211,13 @@ async function fetchAiMeaningsWithCache(word, type) {
     }
   };
 
-  if (!guardGuestAiSearch(type)) {
+  if (!recover && !guardGuestAiSearch(type)) {
     const err = new Error('Forbidden');
     err.code = 403;
     throw err;
   }
 
-  if (typeof window.getAiGlobalCache === 'function') {
+  if (!recover && typeof window.getAiGlobalCache === 'function') {
     try {
       const cached = await window.getAiGlobalCache(trimmed, type);
       assertOwner();
@@ -1194,45 +1230,49 @@ async function fetchAiMeaningsWithCache(word, type) {
     }
   }
 
-  if (!guardGuestAiSearch(type)) {
+  if (!recover && !guardGuestAiSearch(type)) {
     const err = new Error('Forbidden');
     err.code = 403;
     throw err;
   }
 
-  const endpoint = type === 'gamer' ? '/api/gamer-dictionary' : '/api/dictionary';
+  const endpoint = recover ? '/api/dictionary/guest-result' : type === 'gamer' ? '/api/gamer-dictionary' : '/api/dictionary';
   const headers = await buildAiRequestHeaders();
   assertOwner();
-  const res = await fetch(`${DICT_API_BASE}${endpoint}`, {
-    method: 'POST',
-    headers,
-    body: JSON.stringify({ word: trimmed }),
+  const response = await fetch(`${DICT_API_BASE}${endpoint}`, {
+    method: 'POST', headers,
+    body: JSON.stringify({ word: trimmed, ...(requestId ? { requestId } : {}) }),
+    ...(requestId && !recover ? { keepalive: true } : {}),
   });
-
-  const payload = await res.json().catch(() => ({}));
+  const status = response.status;
+  const payload = await response.json().catch(() => ({}));
   assertOwner();
-  if (res.status === 401) {
+  if (requestId && status === 202) return { pending: true };
+  if (recover && status === 404) return { missing: true };
+  if (status === 401) {
     throw Object.assign(new Error('تعذّر تأكيد جلسة الدخول. سجّل الدخول مجددًا أو أعد البحث.'), { code: 401 });
   }
-  if (res.status === 403) {
+  if (status === 403) {
     if (owner !== 'guest') {
       throw Object.assign(new Error(payload.error || 'تعذّر إكمال البحث من هذا الحساب. أعد المحاولة.'), { code: 'dictionary/forbidden', status: 403 });
     }
-    markGuestSearchUsed(type);
-    showGuestTrialBlocked();
+    if (!recover) markGuestSearchUsed(type);
+    if (!recover && (type !== 'normal' || !requestId)) showGuestTrialBlocked();
     const err = new Error('Forbidden');
     err.code = 403;
     throw err;
   }
-  if (!res.ok) {
-    if (res.status === 502 || res.status === 503 || res.status === 504) {
+  if (status < 200 || status >= 300) {
+    if (status === 502 || status === 503 || status === 504) {
       throw new Error('sleeping');
     }
     throw new Error(payload.error || 'server error');
   }
 
+  if (recover && response.headers?.get('X-Dictionary-Source') == null) return { missing: true };
   const data = Array.isArray(payload) ? payload : [];
-  if (!isAiUserLoggedIn()) {
+  const fromCache = response.headers?.get('X-Dictionary-Source') === 'saved';
+  if (!isAiUserLoggedIn() && !fromCache) {
     markGuestSearchUsed(type);
   }
   if (data.length && typeof window.saveAiGlobalCache === 'function') {
@@ -1241,7 +1281,7 @@ async function fetchAiMeaningsWithCache(word, type) {
     });
   }
 
-  return { ok: true, data, fromCache: false };
+  return { ok: true, data, fromCache };
 }
 
 function clearGamerSuggestionsUI() {
@@ -1628,91 +1668,177 @@ window.fetchGamerSuggestions = async function() {
   }
 };
 
-window.fetchSuggestions = async function() {
-  const word = document.getElementById('wordInput')?.value.trim();
+function normalSearchRecord(scope) {
+  return readDictionaryDraft(normalSearchRecords, DICTIONARY_SEARCH_PREFIX, scope);
+}
 
-  if (!word) {
-    showToast("اكتب الكلمة أولاً!");
-    return;
-  }
+function writeNormalSearch(scope, record) {
+  writeDictionaryDraft(normalSearchRecords, DICTIONARY_SEARCH_PREFIX, scope, record);
+}
 
-  if (!guardGuestAiSearch('normal')) {
-    announceDictionarySearchResult('normal', 'blocked', word);
-    return;
-  }
-  // Spam protection: max 5 requests per 30 seconds
-  if (!rateLimit('fetchSuggestions', 5, 30000)) {
-    announceDictionarySearchResult('normal', 'error', word);
-    return;
-  }
-  const btn  = document.getElementById('searchBtn');
-  const box  = document.getElementById('suggestionsBox');
+function renderNormalSearch(scope) {
+  if (!isEditableDictionaryView() || getAddFormDraftScope() !== scope) return;
+  const input = document.getElementById('wordInput');
+  const button = document.getElementById('searchBtn');
+  const box = document.getElementById('suggestionsBox');
   const list = document.getElementById('suggestionsList');
-
-  btn.innerHTML = "<i class='fas fa-spinner fa-spin'></i>";
-  btn.disabled  = true;
+  if (!input || !button || !box || !list) return;
+  const word = input.value.trim();
+  const record = normalSearchRecord(scope);
+  const locked = isGuestSearchLocked('normal');
+  const pending = record?.status === 'pending';
+  const matches = word === record?.word;
+  const heading = document.getElementById('suggestionsHeading');
+  if (heading) heading.hidden = !(matches && record.status === 'success');
+  button.disabled = locked || pending;
+  button.setAttribute('aria-busy', String(pending));
+  button.textContent = pending ? 'جارٍ البحث…' : 'ابحث عن معنى';
+  list.replaceChildren();
+  box.style.display = 'none';
   clearGamerSuggestionsUI();
-  if (box) box.style.display = 'block';
-  
-  const loadingTimers = [];
-  const setLoadingMessage = (message) => {
-    if (!list) return;
-    list.innerHTML = `<p style="text-align:center;font-size:12px;color:var(--text-gray);padding:10px;line-height:1.8;">${message}</p>`;
-  };
 
-  setLoadingMessage('جاري البحث... لحظة وبنجيب المعاني.');
-  loadingTimers.push(setTimeout(() => setLoadingMessage('استنى شوي.. هي المعاني بترسبن!'), 7000));
-  loadingTimers.push(setTimeout(() => setLoadingMessage('في تأخير بسيط في الرسبون.. السيرفر يمكن كان نايم.'), 14000));
-  loadingTimers.push(setTimeout(() => setLoadingMessage('لسه بنحاول.. لا تطلع من اللوبي.'), 22000));
+  function addAction(label, callback) {
+    const action = document.createElement('button');
+    action.type = 'button';
+    action.className = 'entry-secondary dictionary-search-recovery';
+    action.textContent = label;
+    action.addEventListener('click', callback);
+    list.append(action);
+  }
 
-  try {
-    const { data: suggestions, fromCache } = await fetchAiMeaningsWithCache(word, 'normal');
+  if (record && !matches && ['success', 'pending', 'interrupted'].includes(record.status)) {
+    box.style.display = 'block';
+    addAction(`العودة إلى البحث عن «${record.word}»`, () => {
+      input.value = record.word;
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    return;
+  }
+  if (matches && record.selected && record.status === 'success' && !document.getElementById('meaningInput')?.value.trim()) {
+    writeNormalSearch(scope, { ...record, selected: false });
+    renderNormalSearch(scope);
+    return;
+  }
+  if (!word || (matches && record.selected) || (!matches && !locked)) return;
+  box.style.display = 'block';
+  if (matches && record.status === 'success') {
     window.__lastDictSearchWord = word;
-
-    if (!suggestions.length) {
-      list.innerHTML = '<p style="text-align:center;font-size:12px;color:var(--text-gray);padding:10px;">ما لقينا معاني لهالكلمة.</p>';
-      announceDictionarySearchResult('normal', 'empty', word);
-      return;
-    }
-
-    if (fromCache) {
-      loadingTimers.forEach(clearTimeout);
-      setLoadingMessage('تم العثور على معاني محفوظة مسبقاً!');
-    }
-
-    let html = '<div class="dict-suggestions-results">';
-    html += renderSuggestionHtml(suggestions, 'sug-item', {
+    list.innerHTML = `<div class="dict-suggestions-results">${renderSuggestionHtml(record.data, 'sug-item', {
       sourceWord: word,
       game: '',
       allowSelect: true,
       listSelector: '.dict-suggestions-results',
-    });
-    html += '</div>';
-    list.innerHTML = html;
+    })}</div>`;
     injectGamerMeaningBubble();
     announceDictionarySearchResult('normal', 'success', word);
+    return;
+  }
 
+  const status = matches ? record.status : 'blocked';
+  const message = document.createElement('p');
+  message.className = 'dictionary-search-status';
+  message.setAttribute('role', 'status');
+  message.textContent = {
+    pending: 'جارٍ جلب المعاني. يمكنك العودة إلى القاموس لمتابعة البحث.',
+    empty: 'لم نجد معنى لهذه الكلمة.',
+    blocked: 'استخدمت محاولة البحث المتاحة للضيف. يمكنك إضافة المعنى يدويًا.',
+    interrupted: 'تعذّر استرجاع نتيجة البحث. يمكنك التحقق منها مجددًا.',
+    error: 'تعذّر جلب المعاني. يمكنك إعادة المحاولة أو كتابة المعنى يدويًا.',
+  }[status];
+  list.append(message);
+  if (status === 'interrupted' && record.requestId) {
+    addAction('استرجع نتيجة البحث', () => void runNormalSearch(scope, record, true));
+  }
+  if (!pending) addAction('اكتب المعنى يدويًا', () => {
+    if (matches) writeNormalSearch(scope, { ...record, selected: true });
+    setAddFormExpanded(true);
+    box.style.display = 'none';
+    document.getElementById('meaningInput')?.focus();
+    window.dispatchEvent(new CustomEvent('lootlingua:dictionary-meaning-selected', { detail: { scope } }));
+  });
+  announceDictionarySearchResult('normal', status, word);
+}
+
+async function runNormalSearch(scope, record, recover = false) {
+  if (normalSearchRequests.has(scope)) return;
+  const generation = Number(window.__lootlinguaAuthGeneration) || 0;
+  const sameOwner = () => generation === (Number(window.__lootlinguaAuthGeneration) || 0);
+  const pending = { ...record, selected: false, status: 'pending' };
+  normalSearchRequests.set(scope, generation);
+  writeNormalSearch(scope, pending);
+  renderNormalSearch(scope);
+  let result;
+  try {
+    result = await fetchAiMeaningsWithCache(record.word, 'normal', { requestId: record.requestId, recover });
+    for (let attempt = 0; record.requestId && attempt < 30 &&
+      (result.pending || (recover && result.missing && attempt < 2)); attempt += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 4500));
+      if (!sameOwner()) return;
+      result = await fetchAiMeaningsWithCache(record.word, 'normal', { requestId: record.requestId, recover: true });
+    }
   } catch (error) {
-    if (error.code === 403) {
-      announceDictionarySearchResult('normal', 'blocked', word);
+    result = { status: recover ? 'interrupted' : error.code === 403 ? 'blocked' : 'error' };
+  } finally {
+    if (normalSearchRequests.get(scope) === generation) normalSearchRequests.delete(scope);
+    if (sameOwner() && normalSearchRecord(scope) === pending) {
+      const data = result?.data || [];
+      const status = result?.status || (result?.pending || result?.missing ? 'interrupted' : data.length ? 'success' : 'empty');
+      writeNormalSearch(scope, { ...pending, status, data });
+      renderNormalSearch(scope);
+    }
+  }
+}
+
+function restoreNormalSearch(scope) {
+  const record = normalSearchRecord(scope);
+  const generation = Number(window.__lootlinguaAuthGeneration) || 0;
+  if (record?.status === 'pending' && normalSearchRequests.get(scope) !== generation) {
+    normalSearchRequests.delete(scope);
+    if (record.requestId && !isAiUserLoggedIn()) {
+      void runNormalSearch(scope, record, true);
       return;
     }
-    console.error("Frontend Error:", error);
-    
-    // التعامل مع الأخطاء بطريقة مريحة للمستخدم
-    if (error.code === 401 || error.code === 'dictionary/forbidden') {
-         list.innerHTML = `<p class="gamer-suggestions-error">${escapeHtml(error.message)}</p>`;
-    } else if (error.message === "sleeping" || error.message.includes("fetch")) {
-         list.innerHTML = "<p style='color:var(--warning);text-align:center;font-size:12px;padding:10px;'>السيرفر كان في وضع السكون ويستيقظ الآن.. جرب الضغط على بحث مرة أخرى بعد ثوانٍ</p>";
-    } else {
-         list.innerHTML = "<p style='color:var(--danger);text-align:center;font-size:12px;padding:10px;'>فشل في جلب البيانات من السيرفر</p>";
-    }
-    announceDictionarySearchResult('normal', 'error', word);
-  } finally {
-    loadingTimers.forEach(clearTimeout);
-    btn.disabled  = false;
-    syncAddFormExpanded();
+    writeNormalSearch(scope, { ...record, status: 'error' });
   }
+  renderNormalSearch(scope);
+}
+
+window.getPersonalDictionarySearchDraft = () => {
+  if (!isEditableDictionaryView() || isCustomWorldView()) return null;
+  const scope = getAddFormDraftScope();
+  const draft = readAddFormDraftFromDom();
+  const record = normalSearchRecord(scope);
+  return {
+    ...draft,
+    status: draft.word.trim() === record?.word ? record.status : '',
+    locked: isGuestSearchLocked('normal'),
+  };
+};
+
+window.fetchSuggestions = async function() {
+  const popover = window.LootLinguaPopover;
+  if (popover?.isReadingAction?.(document.getElementById('searchBtn'))) return;
+  const word = document.getElementById('wordInput')?.value.trim();
+  if (!word) { showToast('اكتب الكلمة أولاً!'); return; }
+  const scope = getAddFormDraftScope();
+  const previous = normalSearchRecord(scope);
+  if (previous?.word === word && previous.status === 'success') {
+    writeNormalSearch(scope, { ...previous, selected: false });
+    renderNormalSearch(scope);
+    return;
+  }
+  if (!isEditableDictionaryView() || normalSearchRequests.has(scope) || !rateLimit('fetchSuggestions', 5, 30000)) return;
+  if (isGuestSearchLocked('normal')) {
+    if (previous?.requestId && previous.word === word && previous.status === 'interrupted') {
+      await runNormalSearch(scope, previous, true);
+    } else renderNormalSearch(scope);
+    return;
+  }
+  const uuid = window.crypto?.randomUUID?.();
+  const requestId = isAiUserLoggedIn() ? undefined
+    : (previous?.word === word ? previous.requestId : undefined) || uuid;
+  window.saveActiveAddFormDraft();
+  await runNormalSearch(scope, { word, requestId });
 };
 
 function selectSuggestion(ar, pos, ex) {
@@ -1720,10 +1846,15 @@ function selectSuggestion(ar, pos, ex) {
   setCategoryDropdownValue(pos || 'عام');
   document.getElementById('exampleInput').value  = ex;
   setAddFormExpanded(true);
+  const scope = getAddFormDraftScope();
+  const record = normalSearchRecord(scope);
+  if (record && record.word === document.getElementById('wordInput')?.value.trim()) {
+    writeNormalSearch(scope, { ...record, selected: true });
+  }
   const box = document.getElementById('suggestionsBox');
   if (box) box.style.display = 'none';
   clearGamerSuggestionsUI();
-  window.dispatchEvent(new CustomEvent('lootlingua:dictionary-meaning-selected'));
+  window.dispatchEvent(new CustomEvent('lootlingua:dictionary-meaning-selected', { detail: { scope } }));
 }
 
 const WORD_HUNTER_MIN_CONFIDENCE = 45;

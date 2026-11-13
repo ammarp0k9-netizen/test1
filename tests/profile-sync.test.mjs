@@ -325,6 +325,14 @@ test('onboarding checkpoints merge monotonically without affecting rewards', () 
   assert.equal(profile.onboardingProgress['personal-dictionary'].phase, 'completed');
   assert.equal(profile.userXP, 42); assert.equal(profile.runnerCoins, 7);
   assert.equal(mergeOnboardingProgress('quiz', {status:'in-progress',step:4}, {status:'in-progress',step:1,updatedAt:900}).step, 4);
+  const worldGuide = (worldId, phase, updatedAt, extra = {}) => ({ version: 1, worldId, phase, updatedAt, ...extra });
+  const old = worldGuide('old-world', 'awaiting-quiz-cta', 300);
+  const next = worldGuide('new-world', 'awaiting-first-gate', 400, {
+    placementStage: 'result', assessmentId: 'result-a', resultStep: 2,
+  });
+  assert.equal(mergeOnboardingProgress('public-world-guide', next, old).worldId, 'new-world');
+  assert.equal(mergeOnboardingProgress('public-world-guide', old, next).resultStep, 2);
+  assert.equal(mergeOnboardingProgress('public-world-guide', worldGuide('new-world', 'completed', 450), old).phase, 'completed');
 });
 
 test('account onboarding imports local completion and restores it to another device', async () => {
@@ -332,12 +340,15 @@ test('account onboarding imports local completion and restores it to another dev
   const key = 'lootlingua:feature-discovery:v1:user:A';
   a.localStorage.setItem(key, JSON.stringify({version:1,features:{treasure:{status:'completed',completedAt:100,updatedAt:100}}}));
   a.localStorage.setItem('lootlingua:personal-dictionary-onboarding:v1:user:A', JSON.stringify({version:1,phase:'completed',step:16,completedAt:100}));
+  const guideKey = 'lootlingua:public-world-guide:v1:user:A';
+  a.localStorage.setItem(guideKey, JSON.stringify({version:1,phase:'awaiting-first-gate',worldId:'world-b',placementStage:'result',assessmentId:'result-a',resultStep:2,updatedAt:200}));
   await a.root.loadProfileFromCloud({uid:'A'});
   await a.root.flushProfileIntents();
   assert.equal(db.profile().onboardingProgress.treasure.status, 'completed');
   const b = client(db); await b.root.loadProfileFromCloud({uid:'A'});
   assert.equal(JSON.parse(b.localStorage.getItem(key)).features.treasure.status, 'completed');
   assert.equal(JSON.parse(b.localStorage.getItem('lootlingua:personal-dictionary-onboarding:v1:user:A')).phase, 'completed');
+  assert.equal(JSON.parse(b.localStorage.getItem(guideKey)).resultStep, 2);
   b.switchTo('B');
   assert.equal(b.localStorage.getItem('lootlingua:feature-discovery:v1:user:B'), null);
 });
