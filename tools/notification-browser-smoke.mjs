@@ -188,6 +188,65 @@ async function checkGuestSearchReload() {
   console.log(JSON.stringify({ passed: true, screenshots: results.screenshots }));
 }
 
+async function checkTreasureVault() {
+  await evaluate(fixture);
+  await waitFor('!!window.LootLinguaTreasure', 'treasure module');
+  await evaluate(`(() => {
+    const now = Date.now();
+    window.__entryExperienceActive = false;
+    writeWordsToStorage([{ id:'vault-word', word:'lantern', meaning:'مصباح' }], 'normal', 'guest');
+    localStorage.setItem('lootlinguaDailyLootState', JSON.stringify({ lastOpenAt: now - 86400001, lockStartedAt: now - 86400001, lockedXP: 32 }));
+    localStorage.setItem('lootlingua:guest-treasure:v1', JSON.stringify({ extraChests: [
+      { id:'training-old', kind:'training', slot:0, xp:11, freezes:1, readyAt:now-1000 },
+      { id:'mastery-old', kind:'mastery', slot:1, xp:16, freezes:0, readyAt:now+300000 },
+      { id:'station-old', kind:'station', slot:2, xp:25, freezes:0, readyAt:now+600000 },
+      { id:'training-other', kind:'training', slot:3, xp:8, freezes:0, readyAt:now+900000 }
+    ] }));
+    loadTreasureView();
+  })()`);
+  await waitFor(`document.getElementById('treasureView').getClientRects().length && document.querySelector('#treasureSlots button.is-ready')`, 'treasure page');
+  for (const [theme, width, mode] of [['lootlingua', 1280, 'light'], ['ocean', 390, 'light'], ['glass', 320, 'light'], ['ocean', 320, 'dark']]) {
+    await send('Emulation.setDeviceMetricsOverride', { width, height: 850, deviceScaleFactor: 1, mobile: width < 500 });
+    await evaluate(`document.documentElement.setAttribute('data-theme', '${theme}'); document.documentElement.setAttribute('data-oasis-mode', '${mode}'); document.getElementById('treasureVault').scrollIntoView({block:'center'});`);
+    const fit = await evaluate(`(() => {
+      const slots = [...document.querySelectorAll('#treasureSlots > *')];
+      const rects = slots.map(item => item.getBoundingClientRect());
+      return rects.length === 4 && rects.every(rect => rect.width >= 44 && Math.abs(rect.top-rects[0].top)<2 &&
+        rect.left >= 0 && rect.right <= innerWidth) && document.documentElement.scrollWidth <= innerWidth;
+    })()`);
+    results.assertions[`vault-layout-${theme}-${width}`] = fit;
+    results.screenshots.push(await screenshot(`vault-${theme}-${width}.png`));
+  }
+  results.assertions.fullVaultRefusesTraining = await evaluate(`LootLinguaTreasure.training('runner','smoke-full',3).then(text => text.includes('ممتلئة') && document.getElementById('treasureVaultCapacity').textContent === '4/4')`);
+  const before = await evaluate(`({ xp: userXP, freezes: getStreakFreezeCount() })`);
+  results.assertions.openReceivesPointer = await clickVisible(`document.querySelector('[data-chest-id="training-old"]')`);
+  await waitFor(`document.getElementById('treasureVaultCapacity').textContent === '3/4'`, 'saved extra chest');
+  results.assertions.dailyLockUntouched = await evaluate(`getLootAvailability().lockedXP === 32 && getLootAvailability().ready === false`);
+  results.assertions.dailyDueStillListed = await evaluate(`!document.getElementById('dailyLootNext').hidden &&
+    document.getElementById('dailyLootNextStatus').textContent.includes('وصل موعده') && document.getElementById('dailyLootNextOpen').hidden`);
+  results.assertions.extraRewardAndFreeze = await evaluate(`userXP === ${before.xp} + 11 && getStreakFreezeCount() === ${before.freezes} + 1`);
+  results.assertions.otherSlotDoesNotMoveOrOpen = await evaluate(`document.getElementById('treasureSlots').children[1].dataset.chestId === 'mastery-old' && !document.querySelector('[data-chest-id="mastery-old"]').classList.contains('is-ready')`);
+  results.assertions.trainingRefillsFreedSlot = await evaluate(`LootLinguaTreasure.training('bots','smoke-after-full',1).then(text => text.includes('كسبت') && document.getElementById('treasureSlots').children[0].dataset.kind === 'training')`);
+  const notification = await evaluate(`(() => {
+    const now = Date.now(), engine = LootLinguaNotificationEngine;
+    const state = JSON.parse(localStorage.getItem('lootlingua:guest-treasure:v1'));
+    for (const chest of state.extraChests.slice(0,2)) chest.readyAt = now - 1000;
+    localStorage.setItem('lootlingua:guest-treasure:v1', JSON.stringify(state));
+    const result = engine.evaluate({ chest: { lockedByXp:true }, vault:LootLinguaTreasure.facts(now) }, [], { now });
+    return result.upserts.filter(item => item.notificationType === engine.TYPE.CHEST_READY).map(item => item.context.extraCount);
+  })()`);
+  results.assertions.oneReadyNotice = notification.length === 1 && notification[0] === 2;
+  results.assertions.dailyBecomesOpenableWhenUnlocked = await evaluate(`(() => {
+    const state = getLootState();
+    saveLootState({ ...state, lockedXP: 0 });
+    renderTreasureRoom();
+    return !document.getElementById('dailyLootNextOpen').hidden &&
+      document.getElementById('dailyLootNextStatus').textContent === 'جاهز للفتح' && getLootAvailability().ready;
+  })()`);
+  console.log(JSON.stringify(results, null, 2));
+  if (!Object.values(results.assertions).every(Boolean)) process.exitCode = 1;
+}
+
 try {
   fs.mkdirSync(evidenceDir, { recursive: true });
   await retry(async () => {
@@ -240,7 +299,9 @@ try {
   await send('Emulation.setDeviceMetricsOverride', { width: 1440, height: 900, deviceScaleFactor: 1, mobile: false });
   await send('Page.navigate', { url: appUrl });
   await waitFor(`Boolean(window.LootLinguaNotificationStore) && typeof toggleNotificationsPanel === 'function'`, 'notification app', 40000);
-  if (process.argv.includes('--guest-search-reload')) {
+  if (process.argv.includes('--treasure-vault')) {
+    await checkTreasureVault();
+  } else if (process.argv.includes('--guest-search-reload')) {
     await checkGuestSearchReload();
   } else {
   const seeded = await evaluate(fixture);

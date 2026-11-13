@@ -17,6 +17,7 @@ export function openBattle({ words, source, isCurrent, returnFocus }) {
 
   const profile = window.LootLinguaBots;
   const uid = window.auth?.currentUser?.uid || '';
+  const generation = window.__lootlinguaAuthGeneration;
   const audio = createBotsAudio(profile?.progress(uid)?.audio);
   const lifetime = new AbortController();
   const listen = (target, event, fn) => target.addEventListener(event, fn, { signal: lifetime.signal });
@@ -58,6 +59,7 @@ export function openBattle({ words, source, isCurrent, returnFocus }) {
           <p data-copy></p>
           <small data-mission>لما تفتح محطة الطاقة، فكّ رمزها لتكسب تعزيزًا وتفتح مواجهة الزعيم.</small>
           <small data-record></small>
+          <small data-chest-result role="status"></small>
           <fieldset id="lbAudioSettings" hidden><legend>إعدادات الصوت</legend>
             <label><input type="checkbox" data-effects> صوت المؤثرات</label>
             <label><input type="checkbox" data-speech> نطق الكلمات</label>
@@ -102,6 +104,7 @@ export function openBattle({ words, source, isCurrent, returnFocus }) {
     if (mode !== 'play') renderer.draw(battle.state);
   }
   function newRound() {
+    find('[data-chest-result]').textContent = '';
     geometry = arenaForAspect(arena.clientWidth / arena.clientHeight);
     renderer = createRenderer(canvas, geometry, true);
     battle = createBattle(deck, Math.random, geometry, lastBoss);
@@ -115,6 +118,18 @@ export function openBattle({ words, source, isCurrent, returnFocus }) {
     recorded = true;
     const s = battle.state;
     outcome = profile?.record(uid, runId, { best: s.score, coins: s.collected, bosses: s.bossWins, seconds: Math.floor(s.time) });
+    if (s.bossWins > 0 && uid === (window.auth?.currentUser?.uid || '') &&
+        generation === window.__lootlinguaAuthGeneration) {
+      const completedRun = runId;
+      void window.LootLinguaTreasure?.training('bots', runId, s.bossWins).then(text => {
+        if (!closed && runId === completedRun) {
+          const notice = find('[data-chest-result]');
+          if (notice) notice.textContent = text;
+        } else if (text && uid === (window.auth?.currentUser?.uid || '') && generation === window.__lootlinguaAuthGeneration) {
+          window.showToast?.(text, 'info', { persist: false });
+        }
+      });
+    }
   }
   function showRecord() {
     const saved = profile?.progress(uid) || {};

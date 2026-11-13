@@ -459,6 +459,29 @@ test('gate review, personal inactivity and discovery keep separate lifecycles ac
   assert.equal(store.find(review.id).status, 'active');
 });
 
+test('the chest notice tracks all ready extras without counting locked daily XP or interrupting review', () => {
+  const now = Date.now(), { engine, store } = loadSystem();
+  const facts = baseFacts({
+    chest: { hasOpenedBefore: true, ready: false, lockedByXp: true },
+    vault: { count: 1, readyKey: 'a', readyAt: now, nextAt: now + 1000 },
+    review: { dueCount: 6, activeCount: 10, eligibleSince: now - 5 * engine.HOUR },
+  });
+  const evalNotice = (vault, time) => engine.evaluate({ ...facts, vault }, store.getAll(), { now: time });
+  const first = evalNotice(facts.vault, now);
+  assert.equal(first.nextAt, now + 1000);
+  assert.equal(first.selected.record.notificationType, engine.TYPE.REVIEW_DUE);
+  store.upsertMany(first.upserts);
+  const second = evalNotice({ count: 2, readyKey: 'a|b', readyAt: now }, now + 1000);
+  const notices = second.upserts.filter(record => record.notificationType === engine.TYPE.CHEST_READY);
+  assert.equal(notices.length, 1);
+  assert.equal(notices[0].id, first.upserts.find(record => record.notificationType === engine.TYPE.CHEST_READY).id);
+  assert.equal(notices[0].context.extraCount, 2);
+  assert.equal(notices[0].context.dailyReady, false);
+  store.upsertMany(second.upserts);
+  const empty = evalNotice({ count: 0 }, now + 2000);
+  assert.equal(empty.resolutions.find(item => item.id === notices[0].id)?.reason, 'source-cleared');
+});
+
 test('streak-risk CTA completes a verified activity, marks the local day, preserves streak, and resolves', async () => {
   const now = new Date('2026-08-11T22:20:00+03:00').getTime();
   const today = '2026-08-11';

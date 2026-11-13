@@ -6,7 +6,6 @@ const ACTIVE_TITLE_KEY = 'lootlinguaActiveTitleId';
 const ACTIVE_TITLE_NONE = '__none';
 const STREAK_FREEZE_KEY = 'lootlinguaStreakFreezes';
 const FREEZE_SAVES_KEY = 'lootlinguaFreezeSaves';
-const EXTRA_CHESTS_KEY = 'lootlinguaExtraChests';
 
 const TITLE_DEFS = [
   {
@@ -443,7 +442,7 @@ async function revealDailyLootReward(state, reward, operation = captureLootOpeni
     return true;
   }
   if ((Number(state.lockedXP) || 0) > 0) {
-    showToast(`عندك ${Number(state.lockedXP) || 0} XP مقفولة. افتح المكافأة الحالية أولا قبل صندوق جديد.`, 'warning', 5200);
+    showToast(`عندك ${Number(state.lockedXP) || 0} XP مقفولة من الصندوق اليومي. حرّرها قبل فتح اليومي مرة ثانية.`, 'warning', 5200);
     renderTreasureRoom();
     return;
   }
@@ -532,7 +531,7 @@ window.cancelLootChestCharge = function(event) {
 window.openDailyLootBox = function() {
   const availability = getLootAvailability();
   if (availability.lockedXP > 0) {
-    showToast(`عندك ${availability.lockedXP} XP مقفولة. افتح المكافأة الحالية أولا قبل صندوق جديد.`, 'warning', 5200);
+    showToast(`عندك ${availability.lockedXP} XP مقفولة من الصندوق اليومي. حرّرها قبل فتح اليومي مرة ثانية.`, 'warning', 5200);
     renderTreasureRoom();
     return;
   }
@@ -724,7 +723,6 @@ function renderLootSummary() {
   const status = document.getElementById('lootStatusText');
   const count = document.getElementById('lootCountdownText');
   const preview = document.getElementById('lootRewardPreview');
-  const slots = document.getElementById('treasureSlots');
   const lockedXP = Number(state.lockedXP) || 0;
   if (chest) chest.classList.toggle('is-locked', lockedXP > 0 || !ready);
   const statusHtml = lockedXP > 0
@@ -747,51 +745,29 @@ function renderLootSummary() {
       : `سلسلة صناديقك: ${state.streak || 0} يوم | Freeze عندك: ${getStreakFreezeCount()} | مجموع الفتحات: ${state.totalOpens || 0}`;
     if (preview.textContent !== previewText) preview.textContent = previewText;
   }
-  if (slots) {
-    const rewards = state.rewards || [];
-    const freezeCount = getStreakFreezeCount();
-    const unlockedTitleCount = getTitleState().unlocked?.length || 0;
-    const slotRenderKey = JSON.stringify([
-      ready,
-      state.streak || 0,
-      freezeCount,
-      unlockedTitleCount,
-      rewards[0] || null,
-    ]);
-    if (slots.dataset.renderKey !== slotRenderKey) {
-      slots.dataset.renderKey = slotRenderKey;
-      slots.innerHTML = `
-      <article class="treasure-slot ${ready ? 'treasure-slot-ready' : 'treasure-slot-locked'}">
-        <i class="fa-solid ${ready ? 'fa-box-open' : 'fa-lock'}" aria-hidden="true"></i>
-        <h3>الصندوق اليومي</h3>
-        <p>${ready ? 'جاهز للفتح الآن.' : 'مقفول مؤقتاً حتى الرسبون.'}</p>
-      </article>
-      <article class="treasure-slot">
-        <i class="fa-solid fa-fire-flame-curved" aria-hidden="true"></i>
-        <h3>سلسلة اللوت</h3>
-        <p>${state.streak || 0} يوم متتالي | Freeze: ${freezeCount}.</p>
-      </article>
-      <article class="treasure-slot">
-        <i class="fa-solid fa-medal" aria-hidden="true"></i>
-        <h3>الألقاب المفتوحة</h3>
-        <p>${unlockedTitleCount} لقب حالياً.</p>
-      </article>
-      <article class="treasure-slot">
-        <i class="fa-solid fa-scroll" aria-hidden="true"></i>
-        <h3>آخر لوت</h3>
-        <p>${rewards[0] ? describeLootReward(rewards[0]) : 'لسه ما فتحت ولا صندوق.'}</p>
-      </article>`;
-    }
+  const stats = document.getElementById('dailyLootStats');
+  if (stats) stats.textContent = `سلسلة الصناديق: ${state.streak || 0} يوم · رصيد تجميد السلسلة: ${getStreakFreezeCount()}`;
+  const nextDaily = document.getElementById('dailyLootNext');
+  if (nextDaily) {
+    nextDaily.hidden = !state.lastOpenAt;
+    const status = remaining > 0
+      ? `بعد ${formatLootTime(remaining)}${lockedXP > 0 ? ' · بانتظار تحرير XP السابقة' : ''}`
+      : lockedXP > 0 ? `وصل موعده · حرّر ${lockedXP} XP من اليومي السابق لفتحه` : 'جاهز للفتح';
+    const nextStatus = document.getElementById('dailyLootNextStatus');
+    if (nextStatus.textContent !== status) nextStatus.textContent = status;
+    const open = document.getElementById('dailyLootNextOpen');
+    open.hidden = !ready;
   }
-  return { ready, lockedXP };
+  return { ready, lockedXP, remaining };
 }
 
 function renderTreasureRoom() {
   evaluateTitleUnlocks(false);
   const summary = renderLootSummary();
+  window.LootLinguaTreasure?.refresh?.();
   clearInterval(window.__lootCountdownTimer);
   window.__lootCountdownTimer = null;
-  if (!summary || summary.ready || summary.lockedXP > 0) return;
+  if (!summary?.remaining) return;
   window.__lootCountdownTimer = setInterval(() => {
     if (currentView !== 'treasure') {
       clearInterval(window.__lootCountdownTimer);
@@ -799,7 +775,7 @@ function renderTreasureRoom() {
       return;
     }
     const nextSummary = renderLootSummary();
-    if (nextSummary.ready || nextSummary.lockedXP > 0) {
+    if (!nextSummary.remaining) {
       clearInterval(window.__lootCountdownTimer);
       window.__lootCountdownTimer = null;
     }

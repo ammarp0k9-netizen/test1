@@ -67,6 +67,7 @@
         if (result.userXP > xp) root.applyXPDelta?.(result.userXP - xp);
         if (Number(result.revision) >= revision) { revision = result.revision; save(result.state); }
       }
+      if (result.awarded.length) void root.LootLinguaTreasure?.offerAchievements?.(result.awarded);
       document.querySelectorAll('.motivation-sync-error').forEach(node => node.remove());
       announce(Object.values(current().rewards));
       pendingAwards.push(...result.awarded);
@@ -126,6 +127,11 @@
     for (const award of rewards.slice(0, historyLimit)) {
       const row = element('article', 'motivation-history-row'), copy = element('div');
       copy.append(element('strong', '', award.title), element('span', '', award.reason), element('small', '', new Date(award.at).toLocaleDateString('ar')));
+      const vault = root.LootLinguaTreasure;
+      if (vault?.hasPendingAchievement(award.id)) {
+        if (vault.canClaimAchievement()) copy.append(button('استلم الصندوق', () => void vault.claimAchievement(award)));
+        else copy.append(element('small', '', 'صندوقك محفوظ. أفرغ خانة في الخزنة لاستلامه.'));
+      }
       row.append(copy, element('b', '', `+${award.xp} XP`)); panel.append(row);
     }
     if (rewards.length > historyLimit) panel.append(button('عرض المزيد', () => { historyLimit += 20; render(); }));
@@ -177,6 +183,7 @@
   root.addEventListener('lootlingua:motivation-cloud-ready', () => schedule(1200));
   root.addEventListener('lootlingua:profile-snapshot', event => acceptProfile(event.detail?.data, event.detail?.uid));
   root.addEventListener('lootlingua:word-mastery-snapshot', () => schedule(700));
+  root.addEventListener('lootlingua:treasure-changed', render);
   root.addEventListener('online', () => schedule(200));
   root.addEventListener('lootlingua:auth-state', () => {
     clearTimeout(timer); clearTimeout(celebrationTimer); pendingAwards = []; pendingTitles = []; queuedGates.clear(); pending = false;

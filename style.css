@@ -5585,12 +5585,6 @@ body.test-clock-active .toast-host {
   line-height: 1.65;
 }
 .dictionary-search-tip[hidden] { display: none; }
-.treasure-chest-schedule {
-  margin: 0;
-  color: var(--text-gray);
-  font-size: .85rem;
-  line-height: 1.7;
-}
 .dictionary-search-recovery { margin: 6px 14px; }
 .guided-world-choice-label {
   display: inline-flex;
@@ -6557,49 +6551,113 @@ body.treasure-mode .main-content {
   color: var(--text-white);
 }
 
-.treasure-slots {
+.treasure-vault {
+  width: min(100%, 480px);
+  margin: 0 auto 8px;
+  min-width: 0;
+}
+
+.treasure-vault-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 8px;
+  margin-block-end: 8px;
+}
+
+.treasure-vault-header h3 {
+  margin: 0;
+  font-size: 1rem;
+  color: var(--text-white);
+}
+
+#treasureVaultCapacity { color: var(--text-gray); font-variant-numeric: tabular-nums; }
+
+.treasure-vault-grid {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 12px;
-  margin-bottom: 16px;
+  gap: clamp(5px, 2vw, 12px);
 }
 
-.treasure-slot {
-  border: 1px solid var(--border);
-  background: var(--card-bg);
-  border-radius: 12px;
-  padding: 15px;
-  min-height: 150px;
+.treasure-vault-slot {
+  --chest-tone: var(--text-gray);
+  aspect-ratio: 1;
+  min-width: 0;
+  min-height: 44px;
+  border: 0;
+  border-radius: 9px;
+  background: color-mix(in srgb, var(--card-bg) 92%, var(--text-gray));
+  padding: 3px;
   display: grid;
-  align-content: start;
-  gap: 8px;
-}
-
-.treasure-slot i {
-  color: var(--accent);
-  font-size: 23px;
-}
-
-.treasure-slot h3 {
-  margin: 0;
+  align-content: center;
+  justify-items: center;
+  gap: clamp(2px, .6vw, 6px);
   color: var(--text-white);
-  font-size: 15px;
+  font-family: inherit;
+  text-align: center;
 }
 
-.treasure-slot p {
-  margin: 0;
+.treasure-vault-icon {
+  position: relative;
+  width: clamp(21px, 8vw, 42px);
+  height: clamp(16px, 6vw, 32px);
+  border-radius: 4px;
+  background: linear-gradient(var(--chest-tone) 42%, color-mix(in srgb, var(--chest-tone) 48%, #17121e) 43%, var(--chest-tone) 56%);
+  box-shadow: inset 0 -3px #130f1b36;
+}
+.treasure-vault-icon::after {
+  content: '';
+  position: absolute;
+  left: 40%;
+  top: 31%;
+  width: 20%;
+  height: 34%;
+  border-radius: 2px;
+  background: color-mix(in srgb, var(--chest-tone) 32%, #fff1c2);
+  box-shadow: 0 1px 1px #130f1b80;
+}
+.treasure-vault-slot:not([data-kind]) .treasure-vault-icon { opacity: .24; }
+.treasure-vault-slot[data-kind] { cursor: pointer; background: color-mix(in srgb, var(--chest-tone) 12%, var(--card-bg)); }
+.treasure-vault-slot[data-kind="training"] { --chest-tone: #b97744; }
+.treasure-vault-slot[data-kind="mastery"] { --chest-tone: #458ef3; }
+.treasure-vault-slot[data-kind="station"] { --chest-tone: #a06bea; }
+.treasure-vault-slot.is-ready { box-shadow: inset 0 -3px var(--chest-tone); }
+.treasure-vault-slot:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.treasure-vault-slot strong { font-size: clamp(.66rem, 3vw, .88rem); line-height: 1.15; }
+.treasure-vault-slot small { font-size: clamp(.63rem, 2.8vw, .8rem); line-height: 1.15; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.treasure-vault-slot.is-ready small { font-weight: 800; text-decoration: underline; text-underline-offset: 2px; }
+
+.treasure-vault-deferred:not(:empty) {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 12px;
+  margin-block-start: 10px;
+  font-size: .82rem;
+}
+
+.treasure-vault-deferred p { margin: 0; }
+.treasure-vault-daily:not([hidden]) {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 0;
+  margin-block-start: 6px;
+}
+.treasure-vault-daily i { color: var(--accent); }
+.treasure-vault-daily div { flex: 1; min-width: 0; display: grid; gap: 2px; }
+.treasure-vault-daily strong { color: var(--text-white); font-size: .85rem; }
+.treasure-vault-daily span { color: var(--text-gray); font-size: .8rem; }
+.treasure-vault-deferred button, .treasure-vault-daily button { font: inherit; min-height: 36px; padding: 6px 10px; border: 1px solid var(--border); border-radius: 8px; background: var(--card-bg); color: var(--text-white); cursor: pointer; }
+.treasure-vault-help, .daily-loot-stats {
+  margin-block: 10px 0;
   color: var(--text-gray);
   line-height: 1.7;
-  font-size: 13px;
+  font-size: .8rem;
 }
 
-.treasure-slot-ready {
-  border-color: rgba(245, 158, 11, 0.52);
-}
-
-.treasure-slot-locked {
-  opacity: 0.72;
-}
+.treasure-vault-help summary { width: fit-content; color: var(--text-white); cursor: pointer; }
+.treasure-vault-help p { margin: 4px 0; }
 
 .treasure-title-strip {
   display: flex;
@@ -6639,14 +6697,6 @@ body.treasure-mode .main-content {
     border-radius: 18px;
   }
 
-  .treasure-slots {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-
-  .treasure-slot {
-    min-height: 142px;
-    padding: 13px;
-  }
 }
 
 @media (prefers-reduced-motion: reduce) {

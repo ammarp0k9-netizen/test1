@@ -191,6 +191,7 @@ function guestMigrationSnapshotFingerprint(snapshot) {
       gameDictAdds: profile.gameDictAdds || 0,
       perfectQuizzes: profile.perfectQuizzes || 0,
       extraChests: profile.extraChests || [],
+      ...(profile.extraChestState ? { extraChestState: profile.extraChestState } : {}),
       runnerCoins: profile.runnerCoins || 0,
       runnerBestDistance: profile.runnerBestDistance || 0,
       ...(profile.lootBots ? { lootBots: profile.lootBots } : {}),
@@ -271,6 +272,7 @@ function purgeStaleGuestLocalData() {
   localStorage.removeItem('lootlinguaLastPersonalTrustedQuizAt_guest');
   localStorage.removeItem('lootlinguaWordMastery_guest');
   localStorage.removeItem('lootlinguaMotivation_v1_guest');
+  localStorage.removeItem('lootlingua:guest-treasure:v1');
   localStorage.removeItem('active_quiz_session');
   localStorage.removeItem(LEGACY_DICTIONARY_KEY);
   localStorage.removeItem(GUEST_DATA_DIRTY_KEY);

@@ -80,7 +80,7 @@
       link.onload = resolve; link.onerror = () => reject(new Error('Arena stylesheet unavailable'));
       document.head.append(link);
     });
-    resources = Promise.all([styles, import(new URL('js/loot-bots-game.mjs?v=8', base))])
+    resources = Promise.all([styles, import(new URL('js/loot-bots-game.mjs?v=9', base))])
       .then(([, game]) => game)
       .catch(error => { link.remove(); resources = null; throw error; });
     return resources;

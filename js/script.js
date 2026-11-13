@@ -2170,6 +2170,8 @@ function getGuestProgressSnapshot() {
   if (owned && lastPersonalQuiz) profile.lastPersonalTrustedQuizAt = lastPersonalQuiz;
   const motivation = owned ? window.LootLinguaMotivation?.getGuestState?.() : null;
   if (motivation) profile.motivationRewards = motivation;
+  const vault = window.LootLinguaTreasure?.guestProfile?.();
+  if (vault) Object.assign(profile, vault);
   if (bots) profile.lootBots = bots;
   return profile;
 }
@@ -2182,6 +2184,8 @@ function getGuestProgressSummary(profile) {
   if ((Number(profile?.dailyStreak) || 0) > 0) stats.push({ label: `${profile.dailyStreak} يوم`, hint: 'سلسلة يومية' });
   if (titles > 0) stats.push({ label: `${titles} ألقاب`, hint: 'إنجازات مفتوحة' });
   if (chests > 0) stats.push({ label: `${chests} صناديق`, hint: 'لوت يومي' });
+  const extras = (profile?.extraChests?.length || 0) + (profile?.extraChestState?.transferred?.length || 0);
+  if (extras > 0) stats.push({ label: `${extras} صناديق إضافية`, hint: 'خزنة المكافآت' });
   if ((Number(profile?.streakFreezes) || 0) > 0) stats.push({ label: `${profile.streakFreezes} تجميد`, hint: 'حماية الستريك' });
   if ((Number(profile?.runnerCoins) || 0) > 0) stats.push({ label: `${profile.runnerCoins} عملة`, hint: 'رصيد لعبة الجري' });
   if (Number(profile?.lootBots?.coins) > 0) stats.push({ label: `${profile.lootBots.coins} عملة`, hint: 'رصيد Loot Bots' });

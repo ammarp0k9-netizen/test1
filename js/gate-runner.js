@@ -212,7 +212,7 @@
     const orderedWords = [...words.filter(item => !recentSet.has(promptKey(item.word))), ...repeated];
     const E = engine(), state = E.createState(orderedWords, { orderedPrompts: true });
     state.running = false;
-    let answeredGate = false;
+    let answeredGate = false, correctGates = 0;
     const recoveryKey = 'lootlingua.runner.recovery.v1';
     const hintsKey = 'lootlingua.runner.hints.v1';
     let showObstacleHints = true;
@@ -409,6 +409,12 @@
         else void launch(context);
       });
       screen.append(button(context?.source === 'dictionary' ? 'العودة إلى إعدادات اللعبة' : 'العودة إلى البوابة', 'llr-secondary', cleanup));
+      if (state.over && correctGates >= 3 && runnerOwnerCurrent(owner)) {
+        const chestNotice = node('p', 'llr-chest-result');
+        chestNotice.setAttribute('role', 'status');
+        screen.append(chestNotice);
+        void window.LootLinguaTreasure?.training('runner', runId, correctGates).then(text => { chestNotice.textContent = text; });
+      }
       pause.disabled = true;
     }
     function syncHUD() {
@@ -440,7 +446,10 @@
       const delta = Math.min(50, Math.max(0, now - previous)); previous = now;
       E.update(state, delta);
       for (const event of state.events) {
-        if (event.type === 'gate') answeredGate = true;
+        if (event.type === 'gate') {
+          answeredGate = true;
+          if (event.correct) correctGates++;
+        }
         if (event.type !== 'gate-approach') continue;
         const key = promptKey(event.word);
         const history = (recentPrompts.get(scope) || []).filter(word => word !== key);

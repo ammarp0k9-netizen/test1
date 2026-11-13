@@ -10,6 +10,87 @@ function calendarTime(day) {
   return Number.isFinite(date.getTime()) && date.toISOString().slice(0, 10) === day ? date.getTime() : NaN;
 }
 export const PROFILE_SYNC_VERSION = 1;
+export const TREASURE_CAPACITY = 4;
+export const TREASURE_TYPES = Object.freeze({
+  training: Object.freeze({ label: 'تدريب', minutes: 20, minXP: 7, maxXP: 11, freezeChance: .08 }),
+  mastery: Object.freeze({ label: 'إتقان', minutes: 60, minXP: 13, maxXP: 20, freezeChance: .12 }),
+  station: Object.freeze({ label: 'محطة', minutes: 180, minXP: 22, maxXP: 30, freezeChance: .18 }),
+});
+
+export function treasureChests(profile) {
+  return (Array.isArray(profile?.extraChests) ? profile.extraChests : [])
+    .filter(chest => chest?.id && Object.hasOwn(TREASURE_TYPES, chest.kind) && Number.isFinite(chest.readyAt))
+    .slice(0, TREASURE_CAPACITY);
+}
+
+export function treasureSlots(profile) {
+  const slots = Array(TREASURE_CAPACITY).fill(null);
+  const overflow = [];
+  for (const chest of treasureChests(profile)) {
+    if (Number.isInteger(chest.slot) && chest.slot >= 0 && chest.slot < TREASURE_CAPACITY && !slots[chest.slot]) slots[chest.slot] = chest;
+    else overflow.push(chest);
+  }
+  for (const chest of overflow) slots[slots.indexOf(null)] = chest;
+  return slots;
+}
+
+function treasureCommand(profile, intent, context, effects) {
+  const now = context.now ?? Date.now();
+  const stored = Array.isArray(profile.extraChests) ? profile.extraChests : [];
+  const chests = treasureChests(profile);
+  const state = { ...(profile.extraChestState || {}) };
+  const { eventId, type } = intent;
+  if (typeof eventId !== 'string' || !eventId || eventId.length > 450) return 'invalid-chest';
+  if (type === 'treasure-open') {
+    const chest = chests.find(item => item.id === intent.chestId);
+    if (!chest || context.consumedExtraIds?.has(chest.id)) return 'extra-chest-unavailable';
+    if (chest.readyAt > now) return 'extra-chest-waiting';
+    const policy = TREASURE_TYPES[chest.kind];
+    if (!Number.isInteger(chest.xp) || chest.xp < policy.minXP || chest.xp > policy.maxXP ||
+        ![0, 1].includes(chest.freezes)) return 'invalid-chest';
+    profile.userXP = number(profile.userXP) + chest.xp;
+    profile.streakFreezes = number(profile.streakFreezes) + chest.freezes;
+    profile.extraChests = stored.filter(item => item.id !== chest.id);
+    effects.consumedExtraId = chest.id;
+    effects.reward = { xp: chest.xp, freezes: chest.freezes };
+    return '';
+  }
+  if (chests.length >= TREASURE_CAPACITY) return 'treasure-full';
+  if (type === 'treasure-recover') {
+    const chest = state.transferred?.find(item => item.id === intent.chestId);
+    if (!chest || context.consumedExtraIds?.has(chest.id) || chests.some(item => item.id === chest.id)) return 'extra-chest-unavailable';
+    profile.extraChests = [...stored, { ...chest, slot: treasureSlots(profile).indexOf(null) }];
+    profile.extraChestState = { ...state, transferred: state.transferred.filter(item => item.id !== chest.id) };
+    return '';
+  }
+  let kind, id;
+  if (type === 'treasure-training') {
+    if (!Number.isFinite(calendarTime(intent.day))) return 'invalid-chest';
+    if (!['runner', 'bots'].includes(intent.game) || !Number.isSafeInteger(intent.score) ||
+        intent.score < (intent.game === 'runner' ? 3 : 1)) return 'training-not-qualified';
+    if (String(state.trainingDay || '') >= intent.day) return 'training-already-earned';
+    kind = 'training';
+    id = `training:${intent.day}`;
+    state.trainingDay = intent.day;
+  } else {
+    const award = profile.motivationRewards?.rewards?.[intent.awardId];
+    if (!award || !['mastery', 'station'].includes(award.kind)) return 'unknown-achievement';
+    if (state.achievements?.[intent.awardId] === true) return 'achievement-already-claimed';
+    kind = award.kind;
+    id = `award:${intent.awardId}`;
+    state.achievements = { ...state.achievements, [intent.awardId]: true };
+  }
+  if (stored.some(item => item.id === id) || context.consumedExtraIds?.has(id)) return 'extra-chest-unavailable';
+  if (![intent.xpRoll, intent.freezeRoll].every(roll => Number.isFinite(roll) && roll >= 0 && roll < 1)) return 'invalid-chest';
+  const policy = TREASURE_TYPES[kind];
+  profile.extraChests = [...stored, {
+    id, kind, slot: treasureSlots(profile).indexOf(null), readyAt: now + policy.minutes * 60000,
+    xp: policy.minXP + Math.floor(intent.xpRoll * (policy.maxXP - policy.minXP + 1)),
+    freezes: intent.freezeRoll < policy.freezeChance ? 1 : 0,
+  }];
+  profile.extraChestState = state;
+  return '';
+}
 // Onboarding completion is monotonic across devices; replaying an older tour
 // checkpoint must never reopen a completed tour.
 export function mergeOnboardingProgress(tour, left, right) {
@@ -127,6 +208,12 @@ export function applyProfileIntent(remote, intent, context = {}) {
   let reason = '';
   const effects = {};
   switch (intent.type) {
+    case 'treasure-training':
+    case 'treasure-achievement':
+    case 'treasure-recover':
+    case 'treasure-open':
+      reason = treasureCommand(profile, intent, context, effects);
+      break;
     case 'bots-run': {
       if (!intent.eventId || !intent.run || !['coins', 'best', 'bosses', 'seconds'].every(key => Number.isSafeInteger(intent.run[key]) && intent.run[key] >= 0)) {
         reason = 'invalid-bots-run'; break;
@@ -249,6 +336,27 @@ export function applyProfileIntent(remote, intent, context = {}) {
       profile.titlesState = titles.titlesState;
       const extras = applyProfileIntent(profile, { type: 'extra-add', chests: guest.extraChests || [] }, context).profile;
       profile.extraChests = extras.extraChests;
+      if (guest.extraChestState || treasureChests(guest).length) {
+        const current = profile.extraChestState || {}, incoming = guest.extraChestState || {};
+        const vault = profile.extraChests.filter(item => treasureChests({ extraChests: [item] }).length);
+        const overflow = vault.slice(TREASURE_CAPACITY);
+        const overflowIds = new Set(overflow.map(item => item.id));
+        profile.extraChests = profile.extraChests.filter(item => !overflowIds.has(item.id));
+        const slots = treasureSlots(profile);
+        profile.extraChests = profile.extraChests.map(item => {
+          const slot = slots.indexOf(item);
+          return slot < 0 ? item : { ...item, slot };
+        });
+        const present = new Set(profile.extraChests.map(item => item.id));
+        const transferred = new Map([...(current.transferred || []), ...(incoming.transferred || []), ...overflow]
+          .filter(item => item?.id && !present.has(item.id) && !context.consumedExtraIds?.has(item.id))
+          .map(item => [item.id, item]));
+        profile.extraChestState = {
+          trainingDay: [current.trainingDay || '', incoming.trainingDay || ''].sort().at(-1),
+          achievements: { ...current.achievements, ...incoming.achievements },
+          transferred: [...transferred.values()],
+        };
+      }
       if (!profile.dailyLootState && guest.dailyLootState) profile.dailyLootState = copy(guest.dailyLootState);
       if (guest.dailyQuestDate) quest(profile, guest.dailyQuestDate, guest.dailyQuestState);
       if (guest.motivationRewards?.version === 1) {

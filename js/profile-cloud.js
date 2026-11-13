@@ -3,7 +3,7 @@
 import { getApps }  from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
 import { getFirestore, doc, getDoc, runTransaction, onSnapshot } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
 import { getAuth, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js";
-import { applyProfileIntent, profileOperationId, profileStorageIntents, mergeOnboardingProgress } from './profile-sync-policy.mjs?v=20261113-review-guide';
+import { applyProfileIntent, profileOperationId, profileStorageIntents, mergeOnboardingProgress } from './profile-sync-policy.mjs?v=20261113-treasure-v1';
 
 // استخدم التطبيق الموجود فقط بدون إعادة تعريف إذا كان معرف مسبقًا
 let profileApp  = getApps()[0];
@@ -125,6 +125,7 @@ const _profileLocalBaselines = new Map();
 
 function profileOutboxPrefix(uid) { return `lootlingua:profile-outbox:v1:${uid}:`; }
 function botsOutboxPrefix(uid) { return `lootlingua:profile-outbox:bots-v1:${uid}:`; }
+function treasureOutboxPrefix(uid) { return `lootlingua:profile-outbox:treasure-v1:${uid}:`; }
 function profileReceiptId(id) {
   const encoded = encodeURIComponent(id);
   if (encoded.length > 1200) throw new Error('Profile operation identifier is too long');
@@ -133,10 +134,11 @@ function profileReceiptId(id) {
 function readProfileOutbox(uid) {
   const prefix = profileOutboxPrefix(uid);
   const botsPrefix = botsOutboxPrefix(uid);
+  const treasurePrefix = treasureOutboxPrefix(uid);
   const operations = [];
   for (let index = 0; index < localStorage.length; index++) {
     const key = localStorage.key(index);
-    if (!key?.startsWith(prefix) && !key?.startsWith(botsPrefix)) continue;
+    if (!key?.startsWith(prefix) && !key?.startsWith(botsPrefix) && !key?.startsWith(treasurePrefix)) continue;
     try {
       const operation = JSON.parse(localStorage.getItem(key));
       if (operation?.version === 1 && operation.uid === uid && operation.id && Array.isArray(operation.commands)) operations.push({ ...operation, key });
@@ -215,6 +217,7 @@ function applyCanonicalProfile(data, owner) {
     _profileLocalBaselines.set(owner.uid, window.getLootlinguaProfilePayload?.() || projected);
     try { window.LootLinguaMotivation?.acceptProfile?.(data, owner.uid); }
     catch (error) { console.warn('[Motivation] Profile presentation deferred.', error); }
+    window.LootLinguaTreasure?.refresh?.();
   } finally { window.__profileHydrating = wasHydrating; }
 }
 function scheduleProfileFlush() {
@@ -256,7 +259,9 @@ function queueProfileCommands(commands, options = {}) {
   profileReceiptId(id);
   // Older open tabs can still flush the ordinary outbox. Keep new commands
   // out of their queue so they cannot receipt a game command as unsupported.
-  const prefix = commands.every(command => command.type.startsWith('bots-')) ? botsOutboxPrefix(owner.uid) : profileOutboxPrefix(owner.uid);
+  const prefix = commands.every(command => command.type.startsWith('treasure-') || command.type === 'guest-import' && command.profile?.extraChestState)
+    ? treasureOutboxPrefix(owner.uid)
+    : commands.every(command => command.type.startsWith('bots-')) ? botsOutboxPrefix(owner.uid) : profileOutboxPrefix(owner.uid);
   const key = `${prefix}${encodeURIComponent(id)}`;
   if (!localStorage.getItem(key)) {
     _profileOperationClock = Math.max(Date.now(), _profileOperationClock + 1);
@@ -290,7 +295,9 @@ async function transactProfileOutbox(owner, options = {}) {
     const receiptRefs = operations.map((operation) => doc(profileDb, 'users', owner.uid, 'meta', profileReceiptId(operation.id)));
     const consumedIds = [...new Set(operations.flatMap((operation) => operation.commands.flatMap((command) =>
       command.type === 'extra-add' ? (command.chests || []).map((chest) => String(chest.id)) :
-        command.type === 'extra-remove' ? [String(command.chestId)] : [])))];
+        ['extra-remove', 'treasure-open', 'treasure-recover'].includes(command.type) ? [String(command.chestId)] :
+        command.type === 'guest-import' ? [...(command.profile?.extraChests || []), ...(command.profile?.extraChestState?.transferred || [])]
+          .map(chest => String(chest.id)) : [])))];
     const consumedRefs = consumedIds.map((id) => doc(profileDb, 'users', owner.uid, 'meta', profileReceiptId(`extra-consumed:${id}`)));
     const unlockIds = [...new Set(operations.flatMap((operation) => operation.commands
       .filter((command) => command.type === 'loot-progress' && command.resolved)
@@ -311,16 +318,17 @@ async function transactProfileOutbox(owner, options = {}) {
           return;
         }
         const before = profile;
-        let applied = false, reason = '';
+        let applied = false, reason = '', reward;
         for (const command of operation.commands) {
           const next = applyProfileIntent(profile, command, { consumedExtraIds: consumed, confirmedXP: confirmed.has(String(command.lockId)) });
           if (next.reason) { reason = next.reason; profile = before; break; }
           profile = next.profile;
           applied ||= next.applied;
+          if (next.effects.reward) reward = next.effects.reward;
           if (next.effects.consumedExtraId) { consumed.add(next.effects.consumedExtraId); newConsumed.add(next.effects.consumedExtraId); }
         }
-        outcomes[operation.id] = { applied: !reason && applied, reason };
-        // This receipt is a synchronization acknowledgement, never an XP grant.
+        outcomes[operation.id] = { applied: !reason && applied, reason, ...(!reason && reward ? { reward } : {}) };
+        // Chest rewards are committed with the profile and acknowledged here.
         transaction.set(receiptRefs[index], { type: 'profile-sync-v1', operationId: operation.id, result: outcomes[operation.id], createdAt: new Date() });
       });
       // A monotonic revision lets hydration discard an older transaction's
@@ -390,7 +398,8 @@ window.commitProfileIntent = async function(intent) {
 window.addEventListener?.('online', () => window.flushProfileIntents?.());
 window.addEventListener?.('storage', (event) => {
   const uid = profileAuth.currentUser?.uid || '';
-  if (event.key?.startsWith(profileOutboxPrefix(uid)) || event.key?.startsWith(botsOutboxPrefix(uid))) scheduleProfileFlush();
+  if (event.key?.startsWith('lootlingua:profile-outbox:') &&
+      [profileOutboxPrefix(uid), botsOutboxPrefix(uid), treasureOutboxPrefix(uid)].some(prefix => event.key.startsWith(prefix))) scheduleProfileFlush();
 });
 
 function captureProfileOwner(user = profileAuth.currentUser) {

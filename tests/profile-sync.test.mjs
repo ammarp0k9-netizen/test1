@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 import vm from 'node:vm';
-import { applyProfileIntent, profileOperationId, profileStorageIntents, mergeOnboardingProgress } from '../js/profile-sync-policy.mjs';
+import { applyProfileIntent, profileOperationId, profileStorageIntents, mergeOnboardingProgress, treasureSlots } from '../js/profile-sync-policy.mjs';
 
 const source = (await readFile(new URL('../js/profile-cloud.js', import.meta.url), 'utf8')).replace(/^import .*;\r?\n/gm, '');
 const clone = (value) => value === undefined ? undefined : structuredClone(value);
@@ -96,6 +96,76 @@ test('stale full snapshots cannot overwrite XP, spendable balances, counters or 
   assert.equal(db.profile().streakFreezes, 0);
   assert.equal(db.profile().dailyStreak, 1);
   assert.equal(db.profile().perfectQuizzes, 9);
+});
+
+const chestRolls = { xpRoll: .999, freezeRoll: 0 };
+const trainingChest = (game, eventId) => ({ type: 'treasure-training', day: '2026-11-13', game, score: 3, eventId, ...chestRolls });
+const masteryChest = (id, eventId) => ({ type: 'treasure-achievement', awardId: id, eventId, ...chestRolls });
+
+test('extra chest timing, single daily training reward and slot positions are independent of the daily lock', () => {
+  const now = Date.now();
+  let state = { userXP: 20, dailyLootState: { lockedXP: 30, lastOpenAt: now },
+    motivationRewards: { rewards: { 'mastery:10': { kind: 'mastery' } } } };
+  const apply = (command, at = now) => {
+    const result = applyProfileIntent(state, command, { now: at });
+    state = result.profile;
+    return result;
+  };
+  assert.equal(apply({ ...trainingChest('runner', 'short'), score: 2 }).reason, 'training-not-qualified');
+  assert.equal(apply(trainingChest('runner', 'run')).applied, true);
+  assert.equal(apply(trainingChest('bots', 'fight')).reason, 'training-already-earned');
+  assert.equal(apply(masteryChest('mastery:10', 'learn')).applied, true);
+  const [training, mastery] = treasureSlots(state);
+  assert.equal(training.readyAt, now + 20 * 60000);
+  assert.equal(mastery.readyAt, now + 60 * 60000);
+  const open = { type: 'treasure-open', chestId: training.id, eventId: 'open-first' };
+  assert.equal(apply(open, training.readyAt - 1).reason, 'extra-chest-waiting');
+  assert.deepEqual(apply(open, training.readyAt).effects.reward, { xp: 11, freezes: 1 });
+  assert.equal(state.dailyLootState.lockedXP, 30);
+  assert.equal(state.userXP, 31);
+  assert.equal(state.streakFreezes, 1);
+  assert.deepEqual(treasureSlots(state), [null, mastery, null, null]);
+  assert.equal(apply(open, training.readyAt).reason, 'extra-chest-unavailable');
+});
+
+test('two devices racing for the last slot and retrying an open award each reward once', async () => {
+  const old = Date.now() - 1000;
+  const existing = ['first', 'second', 'third'].map((id, slot) => ({ id, slot, kind: 'mastery', readyAt: old, xp: 20, freezes: 1 }));
+  const db = database({ userXP: 80, streakFreezes: 2, dailyLootState: { lockedXP: 40 }, extraChests: existing,
+    motivationRewards: { rewards: { 'mastery:10': { kind: 'mastery' } } } });
+  const a = client(db), b = client(db);
+  const earned = await Promise.all([a.root.commitProfileIntent(trainingChest('runner', 'A')), b.root.commitProfileIntent(trainingChest('bots', 'B'))]);
+  assert.equal(earned.filter(result => result.applied).length, 1);
+  assert.equal(db.profile().extraChests.length, 4);
+  assert.equal((await a.root.commitProfileIntent(masteryChest('mastery:10', 'full'))).reason, 'treasure-full');
+  const open = { type: 'treasure-open', chestId: 'first', eventId: 'open-first' };
+  db.controls.loseAck = true;
+  assert.equal((await a.root.commitProfileIntent(open)).saved, false);
+  const retried = await a.root.commitProfileIntent(open);
+  assert.deepEqual(clone(retried.reward), { xp: 20, freezes: 1 });
+  assert.equal((await b.root.commitProfileIntent({ ...open, eventId: 'other-device' })).applied, false);
+  assert.equal(db.profile().userXP, 100);
+  assert.equal(db.profile().streakFreezes, 3);
+  assert.equal(db.profile().dailyLootState.lockedXP, 40);
+  assert.equal((await b.root.commitProfileIntent(masteryChest('mastery:10', 'new-slot'))).applied, true);
+  assert.equal(db.profile().extraChests.length, 4);
+});
+
+test('guest chest transfer retains an earned chest outside a full vault until a slot is available', async () => {
+  const readyAt = Date.now() - 1000;
+  const make = id => ({ id, kind: 'training', readyAt, xp: 8, freezes: 0 });
+  const db = database({ extraChests: ['a', 'b', 'c', 'd'].map(make) });
+  const a = client(db);
+  const imported = { type: 'guest-import', eventId: 'guest-vault', profile: { extraChests: [make('guest')], extraChestState: { trainingDay: '2026-11-13' } } };
+  await a.root.commitProfileIntent(imported);
+  assert.equal(db.profile().extraChests.length, 4);
+  assert.equal(db.profile().extraChestState.transferred[0].id, 'guest');
+  await a.root.commitProfileIntent({ type: 'treasure-open', chestId: 'b', eventId: 'open-b' });
+  assert.equal((await a.root.commitProfileIntent({ type: 'treasure-recover', chestId: 'guest', eventId: 'recover' })).applied, true);
+  assert.equal(db.profile().extraChests.find(item => item.id === 'guest').readyAt, readyAt);
+  assert.equal(db.profile().extraChestState.transferred.length, 0);
+  await a.root.commitProfileIntent(imported);
+  assert.equal(db.profile().extraChests.length, 4);
 });
 
 test('Loot Bots receipts merge distinct runs across devices and acknowledge a replay once', async () => {

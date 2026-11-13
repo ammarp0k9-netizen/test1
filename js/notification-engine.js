@@ -78,6 +78,12 @@
   function messageFor(type, facts, context) {
     switch (type) {
       case TYPE.CHEST_READY:
+        if (context.extraCount) {
+          const count = context.extraCount + (context.dailyReady ? 1 : 0);
+          return { title: count === 1 ? 'صندوق جاهز' : `صناديق جاهزة · ${count}`,
+            message: count === 1 ? 'عندك صندوق جاهز للفتح في خزنة المكافآت.' : `عندك ${count} صناديق جاهزة للفتح في خزنة المكافآت.`,
+            cta: ['open-treasure', 'افتح الكنز'], visualType: 'success' };
+        }
         return { title: 'كنزك جاهز', message: 'صندوقك اليومي صار جاهزًا. افتحه وخذ مكافأتك.', cta: ['open-treasure', 'افتح الكنز'], visualType: 'success' };
       case TYPE.STREAK_RISK: {
         const freeze = Number(facts.streak?.freezeCount) > 0 ? ' لديك Streak Freeze احتياطي، لكن الممارسة الآن تحفظ يومك.' : '';
@@ -142,8 +148,19 @@
     const reviewActive = Math.max(0, Number(facts.review.activeCount) || facts.wordCount);
     const reviewEligible = reviewDue >= 5 || (reviewActive >= 10 && reviewDue >= 3 && reviewDue / reviewActive >= 0.2);
 
-    if (facts.chest.hasOpenedBefore && facts.chest.ready && !facts.chest.lockedByXp) {
-      rules.push({ type: TYPE.CHEST_READY, key: openKey(TYPE.CHEST_READY, occurrence(TYPE.CHEST_READY, numeric(facts.chest.lastOpenAt))), since: numeric(facts.chest.readyAt) || now, context: {} });
+    const dailyReady = Boolean(facts.chest.hasOpenedBefore && facts.chest.ready && !facts.chest.lockedByXp);
+    const extraCount = numeric(facts.vault?.count);
+    if (dailyReady || extraCount) {
+      const dailyKey = numeric(facts.chest.lastOpenAt);
+      const readyKey = extraCount ? `${dailyReady ? dailyKey : ''}|${facts.vault.readyKey}` : '';
+      const previous = facts.lastChestNotice;
+      const dismissed = previous?.status === 'dismissed' && previous.context?.readyKey === readyKey;
+      const fallback = extraCount
+        ? occurrence(TYPE.CHEST_READY, 'vault', readyKey, previous?.resolvedAt || 0)
+        : occurrence(TYPE.CHEST_READY, dailyKey);
+      rules.push({ type: TYPE.CHEST_READY, key: openKey(TYPE.CHEST_READY, extraCount && dismissed ? previous.occurrenceKey : fallback),
+        since: numeric(extraCount ? facts.vault.readyAt : facts.chest.readyAt) || now,
+        context: { extraCount, dailyReady, readyKey } });
     }
 
     const today = localDateKey(now);
@@ -299,7 +316,7 @@
     ].includes(rule.type));
     return rules.filter((rule) => {
       if (reviewEligible && [TYPE.QUIZ_INACTIVE, TYPE.WORDS_WEAK].includes(rule.type)) return false;
-      if (hasLongInactivity && rule.type === TYPE.CHEST_READY) return false;
+      if (hasLongInactivity && rule.type === TYPE.CHEST_READY && !rule.context.extraCount) return false;
       if (hasGateReady && [TYPE.GATE_PRACTICE, TYPE.JOURNEY_INACTIVE].includes(rule.type) && sameGate(rule, hasGateReady)) return false;
       if (hasGateReady && rule.type === TYPE.GATE_REVIEW && sameGate(rule, hasGateReady)) return false;
       if (hasGateReview && [TYPE.GATE_PRACTICE, TYPE.JOURNEY_INACTIVE].includes(rule.type) && sameGate(rule, hasGateReview)) return false;
@@ -406,7 +423,9 @@
     const openOccurrences = Object.fromEntries(existing
       .filter((record) => record?.kind === 'smart' && ['pending', 'active'].includes(record.status))
       .map((record) => [String(record.notificationType || ''), String(record.occurrenceKey || '')]));
-    const facts = normalizeFacts({ ...(inputFacts || {}), openOccurrences }, now);
+    const lastChestNotice = existing.filter(record => record.notificationType === TYPE.CHEST_READY)
+      .sort((left, right) => numeric(right.updatedAt) - numeric(left.updatedAt))[0];
+    const facts = normalizeFacts({ ...(inputFacts || {}), openOccurrences, lastChestNotice }, now);
     // A partial page is not evidence that an existing reminder has cleared.
     const deferredTypes = facts.dictionaryComplete === false ? new Set([
       TYPE.REVIEW_DUE, TYPE.WORDS_NEW, TYPE.WORDS_WEAK, TYPE.QUIZ_INACTIVE, TYPE.INACTIVITY,
@@ -415,6 +434,7 @@
       [TYPE.GATE_PRACTICE, TYPE.GATE_REVIEW, TYPE.GATE_READY, TYPE.JOURNEY_NEXT_STEP, TYPE.JOURNEY_INACTIVE, TYPE.CONTENT_UNLOCKED]
         .forEach((type) => deferredTypes.add(type));
     }
+    if (facts.vault?.complete === false) deferredTypes.add(TYPE.CHEST_READY);
     const raw = rawRules(facts).filter(rule => !deferredTypes.has(rule.type)).map((rule) => {
       const open = currentRecord(existing, rule.key);
       return open?.eligibleSince ? { ...rule, since: numeric(open.eligibleSince) } : rule;
@@ -456,6 +476,7 @@
     );
     const promotable = evaluated.filter((item) => (
       item.slot &&
+      !(item.record.notificationType === TYPE.CHEST_READY && item.record.context.extraCount) &&
       !(reviewVisible && item.record.notificationType === TYPE.STREAK_RISK && item.record.cta?.id === 'review-due') &&
       item.record.priority >= minimumProminentPriority &&
       !excludedProminentOccurrences.has(clean(item.record.occurrenceKey))
@@ -473,7 +494,7 @@
       selected.record.updatedAt = now;
     }
     const upserts = evaluated.map((item) => item.record);
-    const nextAt = Math.min(...[numeric(facts.gateReview?.nextAt), personalQuizDueAt(facts.quiz, facts.wordCount), ...evaluated.map((item) => {
+    const nextAt = Math.min(...[numeric(facts.vault?.nextAt), numeric(facts.gateReview?.nextAt), personalQuizDueAt(facts.quiz, facts.wordCount), ...evaluated.map((item) => {
       if (item.record.status === 'pending') return item.record.eligibleAt;
       if (item.record.notificationType === TYPE.STREAK_RISK) return now + 15 * 60 * 1000;
       return Infinity;

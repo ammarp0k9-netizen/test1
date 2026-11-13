@@ -287,6 +287,7 @@
       dictionaryComplete: root.LootLinguaDictionaryPages?.current(ownerId)?.state().complete !== false,
       wordCount: root.LootLinguaDictionaryPages?.current(ownerId)?.state().counts?.total ?? words.length,
       chest: chestFacts(now),
+      vault: root.LootLinguaTreasure?.facts?.(now),
       streak: {
         count: Math.max(0, Number(localStorage.getItem('dailyStreak')) || 0),
         lastActivityDate: profileLastActivity,
