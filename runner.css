@@ -76,6 +76,7 @@
 .llr-picker-stage { position: relative; background: #091923; }
 .llr-map-toggle { position: absolute; z-index: 1; top: 7px; right: 7px; display: flex; align-items: center; gap: 6px; direction: rtl; color: #e8f8f4; font-size: 12px; cursor: pointer; min-height: 33px; padding: 4px 8px; border: 1px solid #658383; border-radius: 8px; background: #0b202aef; }
 .llr-map-toggle input { width: 17px; height: 17px; margin: 0; accent-color: #f2cc80; }
+.llr-map-toggle:has(input:disabled) { opacity: .72; cursor: default; }
 .llr-map-carousel { display: grid; grid-template-columns: 40px minmax(0, 1fr) 40px; gap: 6px; align-items: center; }
 .llr-map-card { margin: 0; overflow: hidden; border-radius: 13px; border: 1px solid #55777a; background: #0c232e; text-align: start; touch-action: pan-y; }
 .llr-map-preview { display: block; width: 100%; height: clamp(94px, 26dvh, 215px); object-fit: cover; }
@@ -87,6 +88,20 @@
 .llr-map-card figcaption span { grid-column: 1 / -1; min-height: 3em; color: #c3dedb; font-size: 12px; line-height: 1.5; }
 .llr-map-arrow { min-width: 40px; min-height: 46px; border: 1px solid #698986; border-radius: 10px; background: #193843; color: #ffe1a3; font: 700 27px/1 system-ui, sans-serif; cursor: pointer; }
 .llr-map-arrow:active { background: #375b62; }
+.llr-shop-lock { position: absolute; z-index: 1; inset: 0; display: grid; place-items: center; background: #0207103b; pointer-events: none; }
+.llr-shop-lock-icon { position: absolute; right: 8px; bottom: 8px; display: grid; place-items: center; width: 50px; height: 50px; border: 1px solid #e8c47d9c; border-radius: 16px; background: #0a1b26d9; color: #f6d58f; box-shadow: 0 5px 14px #0006; }
+.llr-shop-lock-icon::after { content: ""; width: 18px; height: 14px; margin-top: 8px; border-radius: 4px; background: radial-gradient(ellipse at 50% 46%, #273544 0 2px, transparent 2.5px), currentColor; box-shadow: inset 0 -2px #b2884d; }
+.llr-shop-shackle { position: absolute; top: 12px; left: 18px; width: 12px; height: 12px; border: 2px solid currentColor; border-bottom: 0; border-radius: 8px 8px 0 0; transform-origin: right bottom; }
+.llr-shop-lock[data-unlocking] .llr-shop-shackle { animation: llr-shackle-open .35s cubic-bezier(.2,.75,.25,1) both; }
+.llr-shop-lock[data-unlocking] .llr-shop-lock-icon { animation: llr-lock-release .57s ease-out both; }
+@keyframes llr-shackle-open { to { transform: translateY(-4px) rotate(35deg); } }
+@keyframes llr-lock-release { 42% { transform: scale(1.09); } to { transform: translateY(-11px) scale(.9); } }
+.llr-shop-row { display: flex; justify-content: center; flex-wrap: wrap; align-items: center; gap: 4px 8px; min-height: 34px; color: #f6d58f; font-size: 12px; }
+.llr-shop-balance { padding: 4px 9px; border: 1px solid #567175; border-radius: 8px; background: #102a36; font-variant-numeric: tabular-nums; }
+.llr-shop-buy { min-height: 36px; padding: 5px 11px; border: 1px solid #e9c378; border-radius: 8px; background: #eac16d; color: #152733; font: inherit; font-weight: 800; cursor: pointer; touch-action: manipulation; }
+.llr-shop-buy:disabled, .llr-primary:disabled { opacity: .58; cursor: default; }
+.llr-shop-buy:focus-visible { outline: 2px solid #ffe0a1; outline-offset: 2px; }
+.llr-shop-message { flex-basis: 100%; color: #f1d6a4; text-align: center; font-size: 12px; }
 .llr-map-picker .llr-map-tip { margin: 0 auto; }
 .llr-map-notice { position: absolute; z-index: 4; inset: 53px 12% auto; margin: auto; width: fit-content; max-width: 76%; padding: 7px 15px; background: #0a2029ef; border: 1px solid #c6a36b; border-radius: 20px; color: #ffe6b4; direction: rtl; font-size: 13px; pointer-events: none; }
 @media (prefers-reduced-motion: reduce) { .llr-picker-tabs::before, .llr-picker-tab { transition: none; } }

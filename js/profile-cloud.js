@@ -3,7 +3,7 @@
 import { getApps }  from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
 import { getFirestore, doc, getDoc, runTransaction, onSnapshot } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
 import { getAuth, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js";
-import { applyProfileIntent, profileOperationId, profileStorageIntents, mergeOnboardingProgress } from './profile-sync-policy.mjs?v=20261113-treasure-v1';
+import { applyProfileIntent, profileOperationId, profileStorageIntents, mergeOnboardingProgress } from './profile-sync-policy.mjs?v=20261114-runner-shop-1';
 
 // استخدم التطبيق الموجود فقط بدون إعادة تعريف إذا كان معرف مسبقًا
 let profileApp  = getApps()[0];
@@ -126,19 +126,21 @@ const _profileLocalBaselines = new Map();
 function profileOutboxPrefix(uid) { return `lootlingua:profile-outbox:v1:${uid}:`; }
 function botsOutboxPrefix(uid) { return `lootlingua:profile-outbox:bots-v1:${uid}:`; }
 function treasureOutboxPrefix(uid) { return `lootlingua:profile-outbox:treasure-v1:${uid}:`; }
+function runnerOutboxPrefix(uid) { return `lootlingua:profile-outbox:runner-v1:${uid}:`; }
+function profileOutboxPrefixes(uid) {
+  return [profileOutboxPrefix(uid), botsOutboxPrefix(uid), treasureOutboxPrefix(uid), runnerOutboxPrefix(uid)];
+}
 function profileReceiptId(id) {
   const encoded = encodeURIComponent(id);
   if (encoded.length > 1200) throw new Error('Profile operation identifier is too long');
   return `xp_event_profile_sync_v1_${encoded}`;
 }
 function readProfileOutbox(uid) {
-  const prefix = profileOutboxPrefix(uid);
-  const botsPrefix = botsOutboxPrefix(uid);
-  const treasurePrefix = treasureOutboxPrefix(uid);
+  const prefixes = profileOutboxPrefixes(uid);
   const operations = [];
   for (let index = 0; index < localStorage.length; index++) {
     const key = localStorage.key(index);
-    if (!key?.startsWith(prefix) && !key?.startsWith(botsPrefix) && !key?.startsWith(treasurePrefix)) continue;
+    if (!key || !prefixes.some(prefix => key.startsWith(prefix))) continue;
     try {
       const operation = JSON.parse(localStorage.getItem(key));
       if (operation?.version === 1 && operation.uid === uid && operation.id && Array.isArray(operation.commands)) operations.push({ ...operation, key });
@@ -259,7 +261,10 @@ function queueProfileCommands(commands, options = {}) {
   profileReceiptId(id);
   // Older open tabs can still flush the ordinary outbox. Keep new commands
   // out of their queue so they cannot receipt a game command as unsupported.
-  const prefix = commands.every(command => command.type.startsWith('treasure-') || command.type === 'guest-import' && command.profile?.extraChestState)
+  const hasRunnerPurchase = commands.some(command => command.type === 'runner-purchase' ||
+    command.type === 'guest-import' && command.profile?.runnerUnlocks?.length);
+  const prefix = hasRunnerPurchase ? runnerOutboxPrefix(owner.uid)
+    : commands.every(command => command.type.startsWith('treasure-') || command.type === 'guest-import' && command.profile?.extraChestState)
     ? treasureOutboxPrefix(owner.uid)
     : commands.every(command => command.type.startsWith('bots-')) ? botsOutboxPrefix(owner.uid) : profileOutboxPrefix(owner.uid);
   const key = `${prefix}${encodeURIComponent(id)}`;
@@ -399,7 +404,7 @@ window.addEventListener?.('online', () => window.flushProfileIntents?.());
 window.addEventListener?.('storage', (event) => {
   const uid = profileAuth.currentUser?.uid || '';
   if (event.key?.startsWith('lootlingua:profile-outbox:') &&
-      [profileOutboxPrefix(uid), botsOutboxPrefix(uid), treasureOutboxPrefix(uid)].some(prefix => event.key.startsWith(prefix))) scheduleProfileFlush();
+      profileOutboxPrefixes(uid).some(prefix => event.key.startsWith(prefix))) scheduleProfileFlush();
 });
 
 function captureProfileOwner(user = profileAuth.currentUser) {

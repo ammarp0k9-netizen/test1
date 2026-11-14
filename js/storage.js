@@ -27,6 +27,7 @@ const GUEST_PROFILE_DIRTY_KEYS = new Set([
   'lootlinguaPerfectQuizzes',
   'lootlinguaExtraChests',
   'lootlingua.runner.coins.v1',
+  'lootlingua.runner.shop.v1:guest',
   'lootlingua.runner.best-distance.v1',
   'lootlingua.bots.v1:guest',
 ]);
@@ -193,6 +194,7 @@ function guestMigrationSnapshotFingerprint(snapshot) {
       extraChests: profile.extraChests || [],
       ...(profile.extraChestState ? { extraChestState: profile.extraChestState } : {}),
       runnerCoins: profile.runnerCoins || 0,
+      ...(profile.runnerUnlocks?.length ? { runnerUnlocks: profile.runnerUnlocks } : {}),
       runnerBestDistance: profile.runnerBestDistance || 0,
       ...(profile.lootBots ? { lootBots: profile.lootBots } : {}),
     },
@@ -328,6 +330,7 @@ function hasMeaningfulGuestLoot(snapshot) {
   if ((Number(p.gameDictAdds) || 0) > 0) return true;
   if ((Number(p.perfectQuizzes) || 0) > 0) return true;
   if ((Number(p.runnerCoins) || 0) > 0) return true;
+  if (p.runnerUnlocks?.length > 0) return true;
   if ((Number(p.runnerBestDistance) || 0) > 0) return true;
   if (p.lootBots && (['coins', 'best', 'bosses', 'seconds'].some(key => Number(p.lootBots[key]) > 0) ||
       Object.keys(p.lootBots.audio || {}).length > 0)) return true;

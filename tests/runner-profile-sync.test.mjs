@@ -2,6 +2,9 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 import vm from 'node:vm';
+import { createProfileHarness } from './profile-cloud-harness.mjs';
+import { applyProfileIntent } from '../js/profile-sync-policy.mjs';
+import { runnerPrice, runnerOwns } from '../js/runner-shop.mjs';
 const source = await readFile(new URL('../js/gate-runner.js', import.meta.url), 'utf8');
 function harness(signed = true) {
   const values = new Map([['lootlingua.runner.coins.v1', '100'], ['lootlingua.runner.best-distance.v1', '10']]);
@@ -47,4 +50,28 @@ test('all runner entry points share account progress while different accounts st
   h.api.acceptProfile({runnerCoins:7,runnerBestDistance:320},'B');
   assert.equal(h.api.RunnerCoinWallet.balance(),7);assert.equal(h.api.RunnerBestDistance.value(),320);
   h.root.auth.currentUser={uid:'A'};assert.equal(h.api.RunnerCoinWallet.balance(),100);assert.equal(h.api.RunnerBestDistance.value(),10);
+});
+
+test('Runner purchases use the catalog price and keep the charge and ownership in the same profile', async () => {
+  const h = createProfileHarness({ profile: { runnerCoins: 420, lootBots: { coins: 99 }, userXP: 20 } });
+  const buy = (item, eventId) => h.root.commitProfileIntent({ type: 'runner-purchase', item, eventId, price: 1 });
+  const results = await Promise.all([buy('map:neon', 'click-a'), buy('map:neon', 'click-b')]);
+  assert.equal(results.filter(result => result.applied).length, 1);
+  assert.equal((await buy('map:neon', 'click-a')).saved, true);
+  assert.equal((await buy('character:mechanic', 'unfunded')).reason, 'insufficient-balance');
+  assert.equal(runnerPrice('map:classic'), 0);
+  assert.equal((await buy('map:classic', 'free')).reason, 'invalid-runner-item');
+  assert.deepEqual(h.docs.get(h.path()).runnerUnlocks, ['map:neon']);
+  assert.equal(h.docs.get(h.path()).runnerCoins, 0);
+  assert.equal(h.docs.get(h.path()).lootBots.coins, 99);
+  assert.equal(h.docs.get(h.path()).userXP, 20);
+});
+
+test('guest migration keeps purchased items even after the guest spent their last coin', () => {
+  const existing = { runnerCoins: 12, runnerUnlocks: ['map:forest'] };
+  const guest = { runnerCoins: 0, runnerUnlocks: ['character:diver', 'map:forest', 'unknown'] };
+  const { profile } = applyProfileIntent(existing, { type: 'guest-import', profile: guest });
+  assert.equal(profile.runnerCoins, 12);
+  assert.deepEqual(profile.runnerUnlocks, ['map:forest', 'character:diver']);
+  assert.equal(runnerOwns(profile, 'character:diver'), true);
 });

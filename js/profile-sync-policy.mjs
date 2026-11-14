@@ -1,5 +1,7 @@
 // Profile synchronization operations are not XP awards. XP remains owned by
 // the existing XP-event transactions; only a receipted guest import can seed it.
+import { purchaseRunnerItem, runnerUnlocks } from './runner-shop.mjs?v=20261114-runner-shop-1';
+
 const number = (value) => Math.max(0, Number(value) || 0);
 const copy = (value) => JSON.parse(JSON.stringify(value));
 const unique = (values = []) => [...new Set(values.filter(Boolean))];
@@ -235,6 +237,13 @@ export function applyProfileIntent(remote, intent, context = {}) {
       break;
     }
     case 'acknowledge': break;
+    case 'runner-purchase': {
+      const result = purchaseRunnerItem(profile, intent.item);
+      if (result.reason === 'already-owned') break;
+      if (result.reason) { reason = result.reason; break; }
+      Object.assign(profile, result.profile);
+      break;
+    }
     case 'wallet-delta': {
       if (!['runnerCoins', 'streakFreezes'].includes(intent.field) || !Number.isFinite(intent.amount)) { reason = 'invalid-wallet'; break; }
       const balance = number(profile[intent.field]) + intent.amount;
@@ -321,6 +330,9 @@ export function applyProfileIntent(remote, intent, context = {}) {
       const guest = intent.profile || {};
       profile.userXP = Math.max(number(profile.userXP), number(guest.userXP));
       for (const field of ['runnerCoins', 'streakFreezes']) profile[field] = number(profile[field]) + number(guest[field]);
+      if (Array.isArray(guest.runnerUnlocks)) {
+        profile.runnerUnlocks = runnerUnlocks([...runnerUnlocks(profile.runnerUnlocks), ...guest.runnerUnlocks]);
+      }
       for (const field of ['freezeSaves', 'gameDictAdds', 'perfectQuizzes', 'maxStreak', 'runnerBestDistance']) profile[field] = Math.max(number(profile[field]), number(guest[field]));
       if (number(guest.lastPersonalTrustedQuizAt)) {
         profile.lastPersonalTrustedQuizAt = Math.max(number(profile.lastPersonalTrustedQuizAt), number(guest.lastPersonalTrustedQuizAt));

@@ -20,7 +20,22 @@ window.auth={currentUser:{uid:'runner-A'}};window.__lootlinguaAuthGeneration=1;
 window.fixtureWords=[{word:'lantern',meaning:'فانوس'},{word:'bridge',meaning:'جسر'},{word:'river',meaning:'نهر'},{word:'treasure',meaning:'كنز'}];
 window.fixtureIntents=[];window.fixtureToasts=[];window.fixtureAdds=0;window.fixtureReceipts=new Set();
 window.fixtureSpeech=[];Object.defineProperty(window,'speechSynthesis',{configurable:true,value:{getVoices:()=>[{lang:'en-US'}],speak:u=>fixtureSpeech.push({text:u.text,lang:u.lang}),cancel:()=>{}}});window.SpeechSynthesisUtterance=class{constructor(text){this.text=text}};
-window.commitProfileIntent=async intent=>{fixtureIntents.push({uid:auth.currentUser?.uid,intent:structuredClone(intent)});if(!fixtureReceipts.has(intent.eventId)){fixtureReceipts.add(intent.eventId);if(intent.type==='wallet-delta')localStorage.setItem('lootlingua.runner.coins.v1',String(Number(localStorage.getItem('lootlingua.runner.coins.v1')||0)+intent.amount));}return{saved:true,applied:true}};
+window.fixtureRunnerProfile={runnerCoins:600,runnerUnlocks:[]};
+window.commitProfileIntent=async intent=>{
+  const uid=auth.currentUser?.uid;
+  fixtureIntents.push({uid,intent:structuredClone(intent)});
+  if(fixtureReceipts.has(intent.eventId))return{saved:true,applied:false};
+  fixtureReceipts.add(intent.eventId);
+  if(intent.type==='wallet-delta')fixtureRunnerProfile.runnerCoins+=intent.amount;
+  if(intent.type==='runner-purchase'){
+    const {purchaseRunnerItem}=await import('/js/runner-shop.mjs');
+    const result=purchaseRunnerItem(fixtureRunnerProfile,intent.item);
+    if(result.reason)return{saved:true,applied:false,reason:result.reason};
+    fixtureRunnerProfile=result.profile;
+  }
+  LootLinguaGateRunner.acceptProfile(fixtureRunnerProfile,uid);
+  return{saved:true,applied:true};
+};
 window.queueProfileIntent=intent=>{fixtureIntents.push({uid:auth.currentUser?.uid,intent:structuredClone(intent)});return'fixture-max'};
 window._saveProfileToCloudNow=async()=>true;
 window.showToast=(...args)=>fixtureToasts.push(args);
@@ -144,6 +159,7 @@ try {
     assert.equal(await evaluate('innerWidth'), width, 'the responsive test must use the requested CSS viewport');
     await evaluate(`fixtureContext.progress={readinessNextAt:0};document.getElementById('trigger').focus();await LootLinguaGateRunner.launch(fixtureContext);`);
     await wait(`!!document.querySelector('.llr-screen .llr-primary')`, 'intro');
+    await evaluate(`LootLinguaGateRunner.acceptProfile(fixtureRunnerProfile,auth.currentUser.uid)`);
     const intro = await evaluate(`({title:document.querySelector('.llr-screen h2').textContent,inside:document.querySelector('.llr-game').contains(document.activeElement),locked:document.documentElement.classList.contains('modal-scroll-locked'),inert:document.getElementById('fixtureBackground').inert,dom:document.querySelector('.llr-overlay').querySelectorAll('*').length})`);
     assert.ok(intro.inside && intro.locked && intro.inert);
     if (width === 320) {
@@ -172,7 +188,12 @@ try {
       assert.equal(portraits.selected, 'غوّاص الأعماق');
       assert.equal(portraits.retained, portraits.selected);
       assert.equal(portraits.map, 'المدينة القديمة');
+      assert.ok(await evaluate(`!document.querySelector('.llr-shop-lock').hidden && !document.querySelector('.llr-shop-buy').disabled && document.querySelector('.llr-primary').disabled`));
       await screenshot('characters-mobile');
+      await evaluate(`document.querySelector('.llr-shop-buy').click()`);
+      await wait(`document.querySelector('.llr-shop-lock').hasAttribute('data-unlocking')`, 'character lock opening');
+      await wait(`document.querySelector('.llr-shop-lock').hidden && !document.querySelector('.llr-primary').disabled`, 'character unlocked');
+      assert.ok(await evaluate(`fixtureRunnerProfile.runnerUnlocks.includes('character:diver') && fixtureRunnerProfile.runnerCoins === 302`));
       report.checks.push({ name: 'seven distinct character previews, independent map selection and carousel wrap', names: portraits.names });
     }
     await evaluate(`window.fixtureNotes=0;const NativeAudio=window.AudioContext;if(NativeAudio&&!window.fixtureAudioInstrumented){window.fixtureAudioInstrumented=true;const original=NativeAudio.prototype.createOscillator;NativeAudio.prototype.createOscillator=function(...args){window.fixtureNotes++;return original.apply(this,args)}}document.querySelector('.llr-screen .llr-primary').click()`);
@@ -248,6 +269,23 @@ try {
   const credits = await evaluate(`fixtureIntents.filter(row=>row.intent.type==='wallet-delta')`);
   assert.equal(credits.length, 1, 'the collected desktop coins must be credited once despite cleanup'); assert.ok(credits[0].intent.amount > 0);
   report.checks.push({ name: 'wallet award once per run, no XP or SRS intent', credits });
+  await evaluate(`auth.currentUser=null;window.__lootlinguaAuthGeneration++;
+    localStorage.setItem('lootlingua.runner.coins.v1','120');
+    window.fixtureRotation = LootLinguaRunnerEngine.configureMaps;
+    window.LootLinguaRunnerEngine = Object.freeze({...LootLinguaRunnerEngine,configureMaps(...args){window.fixtureSelectedMaps=args[2];return fixtureRotation(...args)}});
+    await LootLinguaGateRunner.launch(fixtureContext);
+    document.querySelector('.llr-map-arrow:last-child').click();
+    document.querySelector('.llr-map-arrow:last-child').click();
+  `);
+  assert.ok(await evaluate(`document.querySelector('.llr-shop-buy').disabled && document.querySelector('.llr-shop-message').textContent.includes('ناقصك') && document.querySelector('.llr-map-toggle input').disabled`));
+  await evaluate(`document.querySelector('.llr-map-arrow:first-child').click();document.querySelector('.llr-shop-buy').click()`);
+  await wait(`!document.querySelector('.llr-map-toggle input').disabled`, 'second map enables rotation');
+  assert.deepEqual(await evaluate(`LootLinguaGateRunner.guestShopProfile()`), { runnerCoins: 10, runnerUnlocks: ['map:forest'] });
+  await evaluate(`document.querySelector('.llr-map-toggle input').click();document.querySelector('.llr-primary').click()`);
+  assert.deepEqual(await evaluate('fixtureSelectedMaps'), ['classic', 'forest']);
+  await key('Escape');
+  await evaluate(`auth.currentUser={uid:'runner-A'};window.__lootlinguaAuthGeneration++`);
+  report.checks.push({ name: 'preview locks show shortages, successful purchases unlock characters and enable rotation at two maps', passed: true });
   await evaluate(`await LootLinguaGateRunner.launch(fixtureContext);document.querySelector('.llr-screen .llr-primary').click();auth.currentUser={uid:'runner-B'};window.__lootlinguaAuthGeneration++;`);
   await wait('LootLinguaGateRunner.getDiagnostics()===null', 'account switch closes run');
   assert.equal((await evaluate(`fixtureIntents.filter(row=>row.uid==='runner-B'&&row.intent.type==='wallet-delta').length`)), 0);
