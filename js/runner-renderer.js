@@ -15,6 +15,8 @@
     const back = background.getContext('2d', { alpha: false });
     let width = 1, height = 1, dpr = 1, laneWidth = 1, horizon = 1, ground = 1, actorHeight = 1;
     let destroyed = false, visualLane = 1, lastElapsed = null, activeTime = 0, horizonFog;
+    const getMap = id => root.LootLinguaRunnerMaps?.get(id);
+    let map = getMap('classic'), distance = 0, changeDistance = -100, curve = 0, climb = 0;
     const ordered = [], vehicles = [];
     const metrics = { drawn: 0, culled: 0, dpr: 1 };
     function paintDepth(entity) {
@@ -64,14 +66,53 @@
     }
     function project(lane, z) {
       const depth = Number(z) || 0, scale = 17 / Math.max(2, 17 + depth);
-      return { x: width / 2 + ((Number(lane) || 0) - 1) * laneWidth * scale,
-        y: horizon + (ground - horizon) * scale, scale, laneWidth: laneWidth * scale,
+      const sweep = curve || climb ? Math.max(-.12, Math.min(1, depth / 100)) : 0;
+      const bend = curve * sweep * sweep * width;
+      const grade = climb * sweep * height;
+      const y = horizon + (ground - horizon) * scale - grade;
+      return { x: width / 2 + ((Number(lane) || 0) - 1) * laneWidth * scale + bend,
+        y, scale, laneWidth: laneWidth * scale,
         visible: depth >= NEAR && depth <= FAR,
-        gateTop: horizon + (ground - horizon) * scale - actorHeight * 1.48 * scale,
-        labelY: horizon + (ground - horizon) * scale - actorHeight * 1.16 * scale };
+        gateTop: y - actorHeight * 1.48 * scale,
+        labelY: y - actorHeight * 1.16 * scale };
+    }
+    function polygon(ctx, points, fill) {
+      ctx.fillStyle = fill; ctx.beginPath(); ctx.moveTo(points[0], points[1]);
+      for (let i = 2; i < points.length; i += 2) ctx.lineTo(points[i], points[i + 1]);
+      ctx.closePath(); ctx.fill();
+    }
+    function landscape() {
+      const sky = back.createLinearGradient(0, 0, 0, height);
+      sky.addColorStop(0, map.sky); sky.addColorStop(.42, map.horizon); sky.addColorStop(1, map.ground);
+      back.fillStyle = sky; back.fillRect(0, 0, width, height);
+      const y = horizon, unit = height * .14, scene = map.scene;
+      const lightX = width * (scene === 'volcano' ? .36 : .74);
+      back.fillStyle = map.light; back.beginPath(); back.arc(lightX, y * .42, Math.max(3, unit * .28), 0, Math.PI * 2); back.fill();
+      for (let i = 0; i < 15; i++) {
+        const x = i * width / 13 - width * .07, w = width * (.075 + i % 4 * .009), h = unit * (.45 + (i * 7 % 11) * .11);
+        if (scene === 'forest') {
+          for (let branch = 0; branch < 3; branch++) {
+            const top = y - h + branch * h * .22;
+            polygon(back, [x, top, x - w * .4 - branch * w * .08, top + h * .59, x + w * .4 + branch * w * .08, top + h * .59], i % 2 ? '#32574b' : '#416454');
+          }
+        } else if (scene === 'summit' || scene === 'volcano' || scene === 'desert') {
+          const peak = y - h * (i === 6 && scene === 'volcano' ? 1.75 : 1);
+          polygon(back, [x - w, y + unit * .4, x - w * .16, peak, x + w * .16, peak + unit * .055, x + w, y + unit * .4], i % 2 ? map.shade : map.face);
+          if (scene === 'summit') polygon(back, [x - w * .4, peak + h * .4, x - w * .16, peak, x + w * .16, peak + unit * .055, x + w * .42, peak + h * .39, x, peak + h * .27], '#c9e3e9');
+          if (i === 6 && scene === 'volcano') polygon(back, [x - w * .14, peak, x + w * .12, peak, x + w * .55, y + unit * .18, x + w * .19, y - unit * .1], '#e06d42');
+        } else if (scene === 'harbor') {
+          back.fillStyle = map.shade; back.fillRect(x - w / 2, y - h * .18, w, h * .42);
+          if (i % 3 === 0) { line(back, x, y, x, y - h, map.face, 3); line(back, x - w * .25, y - h, x + w, y - h, map.face, 3); line(back, x + w * .68, y - h, x + w * .68, y - h * .48, map.light); }
+        } else {
+          back.fillStyle = i % 2 ? map.shade : map.dark; back.fillRect(x - w / 2, y - h, w * .76, h + unit * .3);
+          for (let row = 0; row < 4; row++) { back.fillStyle = row % 2 ? map.edge : map.light; back.fillRect(x - w * .26, y - h * (.82 - row * .17), w * .11, Math.max(1, h * .035)); }
+        }
+      }
+      back.fillStyle = map.ground; back.fillRect(0, y + unit * .2, width, height);
     }
     function cacheBackground() {
       back.setTransform(dpr, 0, 0, dpr, 0, 0);
+      if (map && map.scene !== 'classic') { landscape(); return; }
       const sky = back.createLinearGradient(0, 0, 0, height);
       sky.addColorStop(0, '#06121f'); sky.addColorStop(.38, '#12373e'); sky.addColorStop(1, '#0a1c25');
       back.fillStyle = sky; back.fillRect(0, 0, width, height);
@@ -124,13 +165,57 @@
       laneWidth = Math.min(width * .94, height * 1.24) / 3;
       horizon = height * .285; ground = height * .84;
       actorHeight = clamp(Math.min(height * .2, laneWidth * .85), 57, 128);
-      metrics.dpr = dpr; cacheBackground();
-      horizonFog = context.createLinearGradient(0, horizon - height * .05, 0, horizon + height * .16);
-      horizonFog.addColorStop(0, 'rgba(53,91,96,0)'); horizonFog.addColorStop(.18, 'rgba(53,91,96,.35)');
-      horizonFog.addColorStop(.34, 'rgba(53,91,96,.86)'); horizonFog.addColorStop(.53, 'rgba(53,91,96,.88)');
-      horizonFog.addColorStop(.7, 'rgba(53,91,96,.68)'); horizonFog.addColorStop(.86, 'rgba(53,91,96,.22)'); horizonFog.addColorStop(1, 'rgba(53,91,96,0)');
+      metrics.dpr = dpr; cacheScene();
+    }
+    function cacheScene() {
+      cacheBackground();
+      const fog = map?.fog || '#355b60';
+      const top = horizon - height * (map?.road ? .23 : .05);
+      horizonFog = context.createLinearGradient(0, top, 0, horizon + height * (map?.road ? .19 : .16));
+      const stops = map?.road ? [[0, '00'], [.21, '16'], [.46, '63'], [.69, 'ab'], [.80, '7a'], [.93, '19'], [1, '00']] :
+        [[0, '00'], [.18, '59'], [.34, 'db'], [.53, 'e0'], [.70, 'ad'], [.86, '38'], [1, '00']];
+      for (const [stop, alpha] of stops) horizonFog.addColorStop(stop, fog + alpha);
+    }
+    function strip(left, right, front, end, color, step = 12) {
+      const count = Math.max(1, Math.ceil((end - front) / step));
+      context.beginPath();
+      for (let i = 0; i <= count; i++) {
+        const p = project(left, front + (end - front) * i / count);
+        if (i) context.lineTo(p.x, p.y); else context.moveTo(p.x, p.y);
+      }
+      for (let i = count; i >= 0; i--) {
+        const p = project(right, front + (end - front) * i / count);
+        context.lineTo(p.x, p.y);
+      }
+      context.closePath(); context.fillStyle = color; context.fill();
+    }
+    function biomeRoad() {
+      strip(-.64, 2.64, -8, FAR, map.shade);
+      strip(-.53, 2.53, -8, FAR, map.road);
+      const forest = map.scene === 'forest', city = map.scene === 'neon', dock = map.scene === 'harbor';
+      const pitch = forest ? 4 : city || dock ? 12 : 8;
+      const offset = distance % pitch;
+      for (let z = 92 - offset; z > -8; z -= pitch) {
+        const a = project(-.5, z), b = project(2.5, z);
+        if (!city && !dock) line(context, a.x, a.y, b.x, b.y, map.shade, Math.max(.6, a.scale * (forest ? 2.8 : 1.5)));
+        if (city || dock) for (const lane of [.5, 1.5]) strip(lane - .014, lane + .014, z, z + 4, map.mark);
+        else if (map.scene === 'volcano') {
+          const shard = Math.floor((distance + z) / pitch) % 3;
+          const x = .7 + shard * .31;
+          mesh([[x,z,0],[x+.22,z+1.2,0],[x+.12,z+2.1,0]],map.edge);
+        } else if (map.scene === 'desert') {
+          const side = Math.floor((distance + z) / pitch) % 2 === 0 ? 0 : 2;
+          strip(side - .22, side + .22, z, z + .7, map.face);
+        } else if (map.scene === 'summit') {
+          mesh([[-.48,z,0],[-.28,z+2,0],[-.46,z+3.1,0]],map.mark);
+          mesh([[2.48,z+2,0],[2.17,z+3.8,0],[2.48,z+5,0]],map.edge);
+        }
+      }
+      for (const lane of [-.49, 2.49]) strip(lane - .024, lane + .024, -8, FAR, map.edge);
+      if (!city && !dock) for (const lane of [.5, 1.5]) strip(lane - .012, lane + .012, -8, FAR, map.mark);
     }
     function road(distance) {
+      if (map?.road) { biomeRoad(); return; }
       const nearLeft = project(-.54, -6), nearRight = project(2.54, -6);
       const farLeft = project(-.54, FAR), farRight = project(2.54, FAR);
       quad(context, farLeft.x, farLeft.y, farRight.x, farRight.y, nearRight.x, nearRight.y, nearLeft.x, nearLeft.y, '#183039');
@@ -169,6 +254,7 @@
       line(context, p.x, y + h * .43, p.x, y + h * .7, '#65c5b4', Math.max(.7, w * .045));
     }
     function environment(distance) {
+      if (map?.road) { biomeScenery(); return; }
       const offset = distance % 12;
       const segment = Math.floor(distance / 12);
       // Continuous shoulders meet the road; the buildings behind them remain
@@ -209,6 +295,44 @@
       }
       context.globalAlpha = 1;
     }
+    function biomeScenery() {
+      const { scene, face, shade, light, edge, dark } = map;
+      const gap = scene === 'forest' ? 13 : 17;
+      for (const side of [-1, 1]) {
+        const lane = side < 0 ? -.65 : 2.65;
+        strip(Math.min(lane, lane + side * 4), Math.max(lane, lane + side * 4), -8, FAR, shade);
+      }
+      const far = 100 - distance % gap;
+      for (let z = far; z >= -9; z -= gap) {
+        context.globalAlpha = clamp((96 - z) / 21, 0, 1);
+        for (const lane of [-.93, 2.93]) {
+          const p = project(lane, z), x = p.x, y = p.y, w = laneWidth * p.scale * .65, h = actorHeight * p.scale;
+          if (x < -w * 2 || x > width + w * 2) continue;
+          if (scene === 'forest') {
+            context.fillStyle = face; context.fillRect(x - w * .12, y - h * 2.1, w * .24, h * 2.1);
+            for (let k = 0; k < 3; k++) polygon(context, [x, y - h * (3 - k * .44), x - w * (.55 + k * .16), y - h * (1.98 - k * .49), x + w * (.55 + k * .16), y - h * (1.98 - k * .49)], k % 2 ? shade : '#39654a');
+            if (p.scale > .3) polygon(context, [x,y-h*3,x+w*.26,y-h*1.08,x+w*.87,y-h,x,y-h*1.39], '#60845b');
+          } else if (scene === 'volcano' || scene === 'summit') {
+            polygon(context, [x-w*.62,y,x-w*.52,y-h*.7,x-w*.22,y-h*1.58,x+w*.24,y-h*1.44,x+w*.65,y-h*.58,x+w*.7,y], face);
+            polygon(context, [x-w*.22,y-h*1.58,x+w*.24,y-h*1.44,x+w*.65,y-h*.58,x,y-h*.79], scene === 'summit' ? light : shade);
+            if (scene === 'volcano') line(context,x-w*.32,y-h*.82,x+w*.11,y-h*.16,edge,Math.max(1,p.scale*2));
+          } else if (scene === 'desert') {
+            polygon(context, [x-w*.38,y,x-w*.27,y-h*1.66,x,y-h*2.03,x+w*.24,y-h*1.66,x+w*.36,y], face);
+            polygon(context, [x,y-h*2.03,x+w*.24,y-h*1.66,x+w*.36,y,x,y], shade);
+            for (let k=1;k<4;k++) line(context,x-w*.16,y-h*k*.32,x+w*.14,y-h*k*.32,light,Math.max(1,p.scale));
+          } else {
+            const top = y - h * (scene === 'harbor' ? 1.04 : 2.45);
+            quad(context,x-w*.62,top,x+w*.56,top,x+w*.69,y,x-w*.62,y,face);
+            quad(context,x+w*.56,top,x+w*.84,top-h*.18,x+w*.96,y-h*.18,x+w*.69,y,shade);
+            for (let k=1;k<5;k++) {
+              if (scene === 'harbor') line(context,x-w*.61+k*w*.22,top,x-w*.59+k*w*.22,y,dark,Math.max(1,p.scale*2));
+              else line(context,x-w*.51,top+k*h*.37,x+w*.38,top+k*h*.37,k%2?edge:light,Math.max(1,p.scale*3));
+            }
+          }
+        }
+      }
+      context.globalAlpha = 1;
+    }
     function shadow(x, y, w, h, alpha = .3) {
       context.fillStyle = `rgba(0,7,12,${alpha})`; context.beginPath(); context.ellipse(x, y, w, h, 0, 0, Math.PI * 2); context.fill();
     }
@@ -229,6 +353,46 @@
       context.beginPath(); context.arc(0, 0, radius * .65, 0, Math.PI * 2); context.stroke();
       context.fillStyle = '#fff0a6'; context.beginPath(); context.moveTo(0, -radius * .45); context.lineTo(radius * .3, 0); context.lineTo(0, radius * .45); context.lineTo(-radius * .3, 0); context.fill(); context.restore();
     }
+    function biomeObstacle(type, p, w, h) {
+      const { scene, face, shade, light, edge, dark } = map;
+      const x = p.x, y = p.y, a = x - w / 2, b = x + w / 2;
+      if (type === 'overhead' || type === 'duckwall') {
+        const bottom = y - h * .58, top = y - h * (type === 'duckwall' ? 1.65 : .76);
+        for (const side of [-1, 1]) {
+          const post = x + side * w * .44;
+          polygon(context, [post-w*.07,y,post-w*.06,top,post+w*.045,top-h*.09,post+w*.075,y], shade);
+        }
+        const faceted = scene === 'forest' || scene === 'summit' || scene === 'volcano';
+        polygon(context, [a,bottom,a,top,x-w*.24,top-h*(faceted ? .12 : .045),b,top,b+w*.05,bottom-h*.03], face);
+        line(context,a,bottom,b,bottom,light,Math.max(1,p.scale*2));
+        if (type === 'duckwall') for (let i = -1; i <= 1; i++) {
+          const center = x + i * w * .24, mid = (top + bottom) / 2;
+          line(context,center-w*.07,mid-h*.08,center,mid,edge,Math.max(1,p.scale*3));
+          line(context,center,mid,center+w*.07,mid-h*.08,edge,Math.max(1,p.scale*3));
+        }
+        return;
+      }
+      const low = type === 'low' || type === 'lowbar', top = y - h * (low ? .37 : 1.4);
+      if (scene === 'forest' || scene === 'volcano' || scene === 'summit') {
+        polygon(context, [a,y,x-w*.47,y-(y-top)*.57,x-w*.26,top,x+w*.19,top-h*.04,b,top+(y-top)*.38,b,y-h*.05], face);
+        polygon(context, [x-w*.26,top,x+w*.19,top-h*.04,b,top+(y-top)*.38,x+w*.03,top+(y-top)*.30], scene === 'summit' ? light : scene === 'forest' ? '#809956' : shade);
+        polygon(context, [x+w*.03,top+(y-top)*.30,b,top+(y-top)*.38,b,y-h*.05,x+w*.18,y], shade);
+        if (scene === 'volcano') line(context,x-w*.25,top+(y-top)*.45,x+w*.10,y-h*.07,edge,Math.max(1,p.scale*2));
+        return;
+      }
+      const crown = scene === 'desert' ? w * .14 : scene === 'neon' ? w * .12 : 0;
+      polygon(context, [a,y,a+crown,top,b-crown,top,b,y], face);
+      polygon(context, [a+crown,top,a+crown+w*.09,top-h*.09,b-crown+w*.09,top-h*.09,b-crown,top], edge);
+      polygon(context, [b-crown,top,b-crown+w*.09,top-h*.09,b+w*.09,y-h*.09,b,y], shade);
+      if (scene === 'desert') {
+        for (let i = 1; i <= (low ? 1 : 4); i++) line(context,a+w*.16,top+(y-top)*i/5,b-w*.16,top+(y-top)*i/5,dark,Math.max(1,p.scale));
+      } else if (scene === 'harbor') {
+        for (let i = 1; i < 6; i++) line(context,a+w*i/6,top+h*.07,a+w*i/6,y-h*.05,dark,Math.max(1,p.scale*2));
+      } else {
+        quad(context,a+w*.22,top+(y-top)*.25,b-w*.22,top+(y-top)*.25,b-w*.13,y-(y-top)*.35,a+w*.13,y-(y-top)*.35,dark);
+        line(context,a+w*.19,y-(y-top)*.32,b-w*.19,y-(y-top)*.32,light,Math.max(1,p.scale*3));
+      }
+    }
     function obstacle(entity, p, foreground = false) {
       const type = entity.obstacleType || entity.type;
       const w = laneWidth * .72 * p.scale, h = actorHeight * p.scale;
@@ -240,6 +404,40 @@
         const face = (from, to, color) => mesh([vertex(from, -1), vertex(to, -1), vertex(to, 1), vertex(from, 1)], color);
         const edge = (from, to, side, color, size = 1) => mesh([vertex(from, side), vertex(to, side)], color, size);
         const end = entity.length, cab = end - 3;
+        if (map?.vehicle) {
+          const tracked = map.vehicle === 'crawler' || map.vehicle === 'snow';
+          const slats = map.vehicle === 'timber' || map.vehicle === 'freight';
+          const nose = map.vehicle === 'metro' ? 4.6 : map.vehicle === 'expedition' ? 3.8 : 2.8;
+          face(end, end + VEHICLE_EXIT, map.road);
+          for (const side of [-1, 1]) {
+            mesh([vertex(0,side,0),vertex(VEHICLE_RAMP,side),vertex(end,side),vertex(end,side,.09),vertex(VEHICLE_RAMP,side,.09)], map.shade);
+            if (tracked) {
+              mesh([vertex(5,side,.09),vertex(end-.4,side,.09),vertex(end-.4,side,.31),vertex(5,side,.31)], map.dark);
+              for (const z of [7, 11, 15, 18]) mesh([vertex(z,side,.12),vertex(z+1.5,side,.12),vertex(z+1.5,side,.27),vertex(z,side,.27)], map.mark);
+            } else for (const z of [7, end-2]) {
+              mesh([vertex(z-1.1,side,.07),vertex(z+1.1,side,.07),vertex(z+.7,side,.35),vertex(z-.7,side,.35)], map.dark);
+            }
+            mesh([vertex(end-nose,side,.89),vertex(end-.35,side,.89),vertex(end-.35,side,.53),vertex(end-nose,side,.53)], map.dark);
+            for (const z of slats ? [8,10,12,14,16] : [9,15]) mesh([vertex(z,side,.36),vertex(z,side,.85)], map.edge, 1.5);
+            if (map.vehicle === 'metro') mesh([vertex(7,side,.45),vertex(end-.5,side,.45)],map.light,3);
+            if (map.vehicle === 'expedition') mesh([vertex(7,side,.58),vertex(10,side,.58),vertex(12,side,.35),vertex(9,side,.35)],map.light);
+            if (map.vehicle === 'timber') for (const z of [7.6,10.4,13.2]) {
+              mesh([vertex(z,side,.51),vertex(z+2.4,side,.51),vertex(z+2.4,side,.72),vertex(z,side,.72)], '#9d774c');
+            }
+          }
+          mesh([vertex(end,-1),vertex(end,1),vertex(end,1,.07),vertex(end,-1,.07)], map.face);
+          mesh([vertex(end,-.82,.88),vertex(end,.82,.88),vertex(end,.82,.57),vertex(end,-.82,.57)],map.dark);
+          for (const side of [-1,1]) mesh([vertex(end,side*.65,.42),vertex(end,side*.91,.42),vertex(end,side*.91,.28),vertex(end,side*.65,.28)],map.light);
+          face(VEHICLE_RAMP,end,map.face); face(end-nose,end,map.edge); face(0,VEHICLE_RAMP,map.shade);
+          for (const z of [1,2.2,3.4,4.6,5.6]) mesh([vertex(z,-.91),vertex(z,.91)],map.mark,1);
+          mesh([vertex(1.4,-.16),vertex(3.5,-.16),vertex(3.5,-.47),vertex(5.3,0),vertex(3.5,.47),vertex(3.5,.16),vertex(1.4,.16)],map.light);
+          for (const side of [-1, 1]) {
+            edge(0,VEHICLE_RAMP,side,map.edge,2); edge(VEHICLE_RAMP,end,side,map.mark,2);
+            if (slats) for (const z of [8,11,14]) mesh([vertex(z,side*.86),vertex(z,side*.34)],map.mark,1.5);
+            else edge(8,end-nose,side*.68,map.light,2);
+          }
+          return;
+        }
         face(end, end + VEHICLE_EXIT, '#526768');
         for (const offset of [7.5, entity.length - 3]) {
           if (entity.z + offset < NEAR) continue;
@@ -294,6 +492,7 @@
         }
         return;
       }
+      if (map?.road) { biomeObstacle(type, p, w, h); return; }
       if (type === 'duckwall') {
         const left = p.x - w / 2, top = p.y - h * 1.65, bottom = p.y - h * .58, panelHeight = bottom - top, depth = h * .1;
         for (const post of [left, left + w * .9]) {
@@ -348,42 +547,56 @@
         line(context, x + w * .92, y + blockHeight * .1, x + w * .08, y + blockHeight * .9, '#b38c57', Math.max(1, h * .05));
       }
     }
-    function portalPath(z) {
+    function archPath(x, y, w, foot, scene, open = false) {
+      context.moveTo(x, foot);
+      if (scene === 'harbor' || scene === 'neon') {
+        const bevel = w * (scene === 'neon' ? .19 : .065);
+        context.lineTo(x, y + bevel); context.lineTo(x + bevel, y); context.lineTo(x + w - bevel, y);
+        context.lineTo(x + w, y + bevel);
+      } else if (scene === 'volcano' || scene === 'summit') {
+        context.lineTo(x, y + w * .52); context.lineTo(x + w * .22, y + w * .11);
+        context.lineTo(x + w * .59, y); context.lineTo(x + w * .88, y + w * .19); context.lineTo(x + w, y + w * .48);
+      } else {
+        context.lineTo(x, y + w * (scene === 'desert' ? .26 : .48));
+        context.quadraticCurveTo(x, y, x + w / 2, y); context.quadraticCurveTo(x + w, y, x + w, y + w * .48);
+      }
+      context.lineTo(x + w, foot); if (!open) context.closePath();
+    }
+    function portalPath(z, transit = false, scene = map?.scene) {
       const headroom = Math.max(2.4, (ground - horizon) / actorHeight + .7);
-      for (let lane = 0; lane < 3; lane++) {
-        const p = project(lane, z), w = laneWidth * .9 * p.scale, h = actorHeight * headroom * p.scale;
-        const x = p.x - w / 2, y = p.y - h;
-        context.moveTo(x, p.y); context.lineTo(x, y + w * .48);
-        context.quadraticCurveTo(x, y, p.x, y); context.quadraticCurveTo(x + w, y, x + w, y + w * .48);
-        context.lineTo(x + w, p.y); context.closePath();
+      const first = transit ? 1 : 0, last = transit ? 1 : 2;
+      for (let lane = first; lane <= last; lane++) {
+        const p = project(lane, z), w = laneWidth * (transit ? 3.24 : .9) * p.scale, h = actorHeight * headroom * p.scale;
+        archPath(p.x - w / 2, p.y - h, w, p.y, scene);
       }
     }
     function tunnelFloor(entity) {
-      const front = Math.max(NEAR, entity.z), end = entity.z + (entity.length || 42);
-      if (end < NEAR) return;
-      const a = project(-.62, front), b = project(2.62, front), c = project(2.62, end), d = project(-.62, end);
-      quad(context, a.x, a.y, b.x, b.y, c.x, c.y, d.x, d.y, '#10232d');
+      const front = Math.max(NEAR, entity.z), end = Math.min(FAR + 12, entity.z + (entity.length || 42));
+      if (end <= front) return;
+      const style = getMap(entity.mapId) || map;
+      strip(-.62, 2.62, front, end, style?.dark || '#10232d');
       for (const lane of [.5, 1.5]) {
-        const a = project(lane - .006, front), b = project(lane + .006, front);
-        const c = project(lane + .006, end), d = project(lane - .006, end);
-        quad(context, a.x, a.y, b.x, b.y, c.x, c.y, d.x, d.y, '#406a70');
+        strip(lane - .009, lane + .009, front, end, style?.mark || '#406a70');
       }
     }
-    function tunnelRing(z) {
+    function tunnelRing(z, style = map) {
       const headroom = Math.max(2.4, (ground - horizon) / actorHeight + .7);
+      const squared = style?.scene === 'harbor' || style?.scene === 'neon';
+      const rises = squared ? [0, .23, .23, .23, 0] : [0, .55, .75, .55, 0];
       return [0, .25, .5, .75, 1].map((t, index) => {
-        const p = project(-.62 + 3.24 * t, z), h = headroom + [0, .55, .75, .55, 0][index];
+        const p = project(-.62 + 3.24 * t, z), h = headroom + rises[index];
         return { x: p.x, y: p.y - actorHeight * h * p.scale, ground: p.y, scale: p.scale };
       });
     }
     function clipToTunnel(entity, passage) {
       if (!passage || entity.z < passage.z) return;
       context.beginPath();
-      if (passage.z >= 0) portalPath(passage.z);
+      const style = getMap(passage.mapId) || map;
+      if (passage.z >= 0) portalPath(passage.z, passage.kind === 'passage', style?.scene);
       else {
         // Bound each depth slice to the same ceiling and walls as the shell.
         // Beyond the exit, the visible world is framed by the exit aperture.
-        const arch = tunnelRing(Math.max(NEAR, Math.min(entity.z, passage.z + passage.length)));
+        const arch = tunnelRing(Math.max(NEAR, Math.min(entity.z, passage.z + passage.length)), style);
         context.moveTo(arch[0].x, arch[0].ground);
         for (const point of arch) context.lineTo(point.x, point.y);
         context.lineTo(arch[4].x, arch[4].ground); context.closePath();
@@ -392,19 +605,33 @@
     }
     function tunnelInterior(entity) {
       const length = entity.length || 42, front = Math.max(NEAR, entity.z), end = entity.z + length;
+      const style = getMap(entity.mapId) || map, transit = entity.kind === 'passage';
       if (end < NEAR) return;
       context.save();
-      if (entity.z > NEAR) { context.beginPath(); portalPath(entity.z); context.clip(); }
-      const ring = tunnelRing;
+      if (entity.z > NEAR) { context.beginPath(); portalPath(entity.z, transit, style?.scene); context.clip(); }
+      const ring = z => tunnelRing(z, style);
       const near = ring(front), far = ring(end);
-      quad(context, near[0].x, near[0].ground, far[0].x, far[0].ground, far[0].x, far[0].y, near[0].x, near[0].y, '#203d46');
-      quad(context, near[4].x, near[4].ground, far[4].x, far[4].ground, far[4].x, far[4].y, near[4].x, near[4].y, '#132c38');
-      for (let i = 0; i < 4; i++) quad(context, near[i].x, near[i].y, near[i + 1].x, near[i + 1].y, far[i + 1].x, far[i + 1].y, far[i].x, far[i].y, i < 2 ? '#1b3541' : '#122a36');
+      if (transit && entity.z <= NEAR && end > 0) {
+        context.beginPath(); context.rect(0, 0, width, height);
+        context.moveTo(far[0].x, far[0].ground); for (const point of far) context.lineTo(point.x, point.y);
+        context.lineTo(far[4].x, far[4].ground); context.closePath();
+        context.fillStyle = style?.dark || '#10232d'; context.fill('evenodd');
+        tunnelFloor(entity);
+        if (!entity.changed) {
+          context.beginPath(); context.moveTo(far[0].x, far[0].ground);
+          for (const point of far) context.lineTo(point.x, point.y);
+          context.lineTo(far[4].x, far[4].ground); context.closePath();
+          context.fillStyle = style?.dark || '#10232d'; context.fill();
+        }
+      }
+      quad(context, near[0].x, near[0].ground, far[0].x, far[0].ground, far[0].x, far[0].y, near[0].x, near[0].y, style?.face || '#203d46');
+      quad(context, near[4].x, near[4].ground, far[4].x, far[4].ground, far[4].x, far[4].y, near[4].x, near[4].y, style?.shade || '#132c38');
+      for (let i = 0; i < 4; i++) quad(context, near[i].x, near[i].y, near[i + 1].x, near[i + 1].y, far[i + 1].x, far[i + 1].y, far[i].x, far[i].y, i < 2 ? style?.shade || '#1b3541' : style?.dark || '#122a36');
       for (let offset = length; offset >= 0; offset -= 6) {
         const z = entity.z + offset;
         if (z < NEAR || z > FAR) continue;
         const arch = ring(z);
-        context.strokeStyle = offset === length ? '#7ca7a0' : '#36575f'; context.lineWidth = Math.max(1, arch[0].scale * 4);
+        context.strokeStyle = offset === length ? style?.edge || '#7ca7a0' : style?.face || '#36575f'; context.lineWidth = Math.max(1, arch[0].scale * 4);
         context.beginPath(); context.moveTo(arch[0].x, arch[0].ground);
         for (const p of arch) context.lineTo(p.x, p.y);
         context.lineTo(arch[4].x, arch[4].ground); context.stroke();
@@ -414,7 +641,7 @@
         if (z < NEAR || z > FAR) continue;
         for (const lane of [-.6, 2.6]) {
           const p = project(lane, z), y = p.y - actorHeight * .95 * p.scale;
-          context.fillStyle = '#dfbc70'; context.fillRect(p.x - p.scale * 2, y, p.scale * 4, actorHeight * .14 * p.scale);
+          context.fillStyle = style?.light || '#dfbc70'; context.fillRect(p.x - p.scale * 2, y, p.scale * 4, actorHeight * .14 * p.scale);
         }
       }
       context.restore();
@@ -422,30 +649,38 @@
     function gate(entity, state) {
       if (entity.z <= NEAR) return;
       const headroom = Math.max(2.4, (ground - horizon) / actorHeight + .7);
+      const style = getMap(entity.mapId) || map, scene = style?.scene, transit = entity.kind === 'passage';
       if (!entity.resolved) {
-        context.beginPath(); portalPath(entity.z); context.fillStyle = '#030a12'; context.fill();
+        if (!transit) { context.beginPath(); portalPath(entity.z, false, scene); context.fillStyle = '#030a12'; context.fill(); }
       }
       const left = project(-2.4, entity.z), right = project(4.4, entity.z), center = project(1, entity.z);
       const peak = center.y - actorHeight * (headroom + 1.8) * center.scale;
       const mountainPath = () => {
+        if (scene === 'harbor' || scene === 'neon' || scene === 'desert') {
+          context.moveTo(left.x, left.y); context.lineTo(left.x, peak + actorHeight * .69 * center.scale);
+          context.lineTo(right.x, peak + actorHeight * .69 * center.scale); context.lineTo(right.x, right.y); context.closePath(); return;
+        }
         context.moveTo(left.x, left.y); context.lineTo(left.x, peak + actorHeight * center.scale);
         context.lineTo(center.x - laneWidth * center.scale, peak + actorHeight * .2 * center.scale);
         context.lineTo(center.x + laneWidth * .3 * center.scale, peak);
         context.lineTo(right.x, peak + actorHeight * .95 * center.scale); context.lineTo(right.x, right.y); context.closePath();
       };
-      context.save(); context.beginPath(); mountainPath(); portalPath(entity.z); context.clip('evenodd');
-      context.fillStyle = '#28414b'; context.fillRect(0, 0, width, height);
-      quad(context, left.x, left.y, left.x, peak, center.x, peak, center.x - laneWidth * center.scale, center.y, '#3c565d');
-      quad(context, center.x, peak, right.x, peak, right.x, right.y, center.x + laneWidth * .8 * center.scale, center.y, '#1d3440');
-      line(context, left.x, peak + actorHeight * center.scale, right.x, peak + actorHeight * .95 * center.scale, '#526c6d', Math.max(1, center.scale * 3));
+      context.save(); context.beginPath(); mountainPath(); portalPath(entity.z, transit, scene); context.clip('evenodd');
+      context.fillStyle = style?.shade || '#28414b'; context.fillRect(0, 0, width, height);
+      quad(context, left.x, left.y, left.x, peak, center.x, peak, center.x - laneWidth * center.scale, center.y, style?.face || '#3c565d');
+      quad(context, center.x, peak, right.x, peak, right.x, right.y, center.x + laneWidth * .8 * center.scale, center.y, style?.dark || '#1d3440');
+      line(context, left.x, peak + actorHeight * center.scale, right.x, peak + actorHeight * .95 * center.scale, style?.edge || '#526c6d', Math.max(1, center.scale * 3));
+      if (style?.road) for (let i = -2; i <= 2; i++) {
+        const p = project(1 + i * 1.1, entity.z), top = peak + actorHeight * 1.05 * center.scale;
+        line(context, p.x, top, p.x + (scene === 'forest' ? i * laneWidth * .2 * center.scale : 0), p.y, style.face, Math.max(1, center.scale * 4));
+      }
       context.restore();
-      for (let lane = 0; lane < 3; lane++) {
-        const p = project(lane, entity.z), w = laneWidth * .9 * p.scale, h = actorHeight * headroom * p.scale;
+      for (let lane = transit ? 1 : 0; lane <= (transit ? 1 : 2); lane++) {
+        const p = project(lane, entity.z), w = laneWidth * (transit ? 3.24 : .9) * p.scale, h = actorHeight * headroom * p.scale;
         const x = p.x - w / 2, y = p.y - h, rim = Math.max(2, w * .085);
-        context.strokeStyle = '#405861'; context.lineWidth = rim * 1.5;
-        context.beginPath(); context.moveTo(x, p.y); context.lineTo(x, y + w * .48);
-        context.quadraticCurveTo(x, y, p.x, y); context.quadraticCurveTo(x + w, y, x + w, y + w * .48); context.lineTo(x + w, p.y); context.stroke();
-        context.strokeStyle = entity.resolved && state.feedback?.chosenLane === lane ? state.feedback.correct ? '#81f6a5' : '#fa8278' : laneColors[lane];
+        context.strokeStyle = style?.face || '#405861'; context.lineWidth = rim * (transit ? .75 : 1.5);
+        context.beginPath(); archPath(x, y, w, p.y, scene, true); context.stroke();
+        context.strokeStyle = transit ? style?.edge || '#7ca7a0' : entity.resolved && state.feedback?.chosenLane === lane ? state.feedback.correct ? '#81f6a5' : '#fa8278' : laneColors[lane];
         context.lineWidth = Math.max(1, rim * .25); context.stroke();
       }
     }
@@ -481,6 +716,11 @@
         if (impact.kind === 'hit' && age < 140) context.scale(1.07, .9);
       }
       if ((!impact || state.elapsed > impact.freezeUntil) && Number(state.invulnerableUntil) > Number(state.elapsed) && Math.floor(activeTime / 80) % 2) context.globalAlpha = .58;
+      drawExplorer(state, h, phase, pose);
+      context.restore();
+    }
+    function drawExplorer(state, h, phase, pose) {
+      const jumping = pose.action === 'jump', sliding = pose.action === 'slide';
       if (sliding) {
         // One leg extends toward the camera while the other stays folded.
         // All visual points remain within the shared .43-body crouch height.
@@ -537,7 +777,6 @@
         // A short scarf trails toward the camera; its flap never obscures lanes.
         quad(context, -h * .11, -h * .76, -h * .03, -h * .74, -h * (.12 + .035 * Math.sin(phase * .7)), -h * .58, -h * .18, -h * .62, '#edbd65');
       }
-      context.restore();
     }
     function opacity(entity, elapsed) {
       const span = (entity.length || 0) + (entity.obstacleType === 'train' ? VEHICLE_EXIT : 0);
@@ -546,7 +785,7 @@
       const spawn = root.LootLinguaRunnerEngine.constants.SPAWN_Z;
       // Vehicle faces become fully opaque within the distant fog strip,
       // before approaching the visible road; no see-through roof or sides.
-      const progress = clamp((spawn - entity.z) / (vehicle ? 6 : 34), 0, 1);
+      const progress = clamp((spawn - entity.z) / (vehicle ? 6 : map?.road ? 38 : 34), 0, 1);
       // Zero visibility at allocation, with a zero-slope reveal driven by
       // distance, not an observable timed fade at the spawn plane.
       const reveal = entity.kind === 'gate' ? clamp((FAR - entity.z) / 10, 0, 1) : progress * progress * (3 - 2 * progress);
@@ -565,13 +804,23 @@
     function draw(input = {}) {
       if (destroyed) return metrics;
       const state = input.engine || input;
+      distance = Math.max(0, Number(state.distance) || 0);
+      const nextMap = getMap(state.mapId);
+      if (nextMap !== map) {
+        map = nextMap;
+        changeDistance = state.mapTunnel ? distance : distance - 100;
+        cacheScene();
+      }
+      const corridor = state.mapTunnel;
+      const shapeMix = corridor ? (corridor.changed ? clamp((distance - changeDistance) / 42, 0, 1) : clamp((corridor.z + 27) / 42, 0, 1)) : 1;
+      curve = (map?.curve || 0) * Math.sin(distance / 160) * shapeMix;
+      climb = (map?.climb || 0) * (.67 + .33 * Math.sin(distance / 95)) * shapeMix;
       const elapsed = Number(state.elapsed) || 0;
       const delta = lastElapsed === null ? 16 : clamp(elapsed - lastElapsed, 0, 80);
       if (lastElapsed === null || elapsed < lastElapsed) visualLane = clamp(Number(state.lane) || 0, 0, 2);
       lastElapsed = elapsed; activeTime += delta;
       context.setTransform(dpr, 0, 0, dpr, 0, 0); context.globalAlpha = 1;
       context.drawImage(background, 0, 0, background.width, background.height, 0, 0, width, height);
-      const distance = Math.max(0, Number(state.distance) || 0);
       road(distance); environment(distance);
       ordered.length = vehicles.length = 0; metrics.drawn = 0; metrics.culled = 0; metrics.foreground = 0;
       for (const entity of state.entities || []) {
@@ -581,8 +830,9 @@
       }
       ordered.sort(byDepth);
       const readingGate = ordered.find(item => item.kind === 'gate' && !item.resolved);
-      const passage = ordered.find(item => item.kind === 'gate');
-      if (passage) { context.globalAlpha = opacity(passage, elapsed); tunnelFloor(passage); tunnelInterior(passage); context.globalAlpha = 1; }
+      const passage = ordered.find(item => item.kind === 'gate') || (corridor?.z <= FAR ? corridor : null);
+      const tunnelAlpha = passage?.kind === 'passage' ? clamp((96 - passage.z) / 17, 0, 1) : passage ? opacity(passage, elapsed) : 0;
+      if (passage) { context.globalAlpha = tunnelAlpha; tunnelFloor(passage); tunnelInterior(passage); context.globalAlpha = 1; }
       const pose = root.LootLinguaRunnerEngine.getPose(state);
       const inFront = entity => entity.kind === 'obstacle' && entity.obstacleType !== 'train' && entity.z < 0 && (entity.obstacleType !== 'overhead' || pose.floor < .88);
       for (const entity of ordered) {
@@ -599,8 +849,10 @@
       context.globalAlpha = 1;
       // One cached gradient softens distant births without hiding the road's
       // nearby hazards. The tunnel facade stays opaque in front of this haze.
-      context.fillStyle = horizonFog; context.fillRect(0, horizon - height * .05, width, height * .21);
-      if (passage) { context.globalAlpha = opacity(passage, elapsed); gate(passage, state); metrics.drawn++; }
+      if (!corridor || corridor.z > NEAR) {
+        context.fillStyle = horizonFog; context.fillRect(0, horizon - height * (map?.road ? .23 : .05), width, height * (map?.road ? .42 : .21));
+      }
+      if (passage) { context.globalAlpha = tunnelAlpha; gate(passage, state); metrics.drawn++; }
       context.globalAlpha = 1;
       actor(state, delta);
       // The vehicle supports the feet, so it stays behind the actor. A beam

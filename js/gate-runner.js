@@ -107,11 +107,11 @@
     });
     const css = document.querySelector('link[data-runner-style]');
     const styles = css ? Promise.resolve() : new Promise((resolve, reject) => {
-      const link = document.createElement('link'); link.rel = 'stylesheet'; link.href = 'runner.css?v=20261107-runner-entry-1';
+      const link = document.createElement('link'); link.rel = 'stylesheet'; link.href = 'runner.css?v=20261114-maps-1';
       link.dataset.runnerStyle = ''; link.onload = resolve; link.onerror = () => { link.remove(); reject(new Error('Runner styles unavailable')); };
       document.head.append(link);
     });
-    resources = Promise.all([styles, module('LootLinguaRunnerEngine', 'js/runner-engine.js?v=20261111-runner-1'), module('LootLinguaRunnerRenderer', 'js/runner-renderer.js?v=20261111-jump-4')]).catch(error => { resources = null; throw error; });
+    resources = Promise.all([styles, module('LootLinguaRunnerMaps', 'js/runner-maps.js?v=20261114-maps-1'), module('LootLinguaRunnerEngine', 'js/runner-engine.js?v=20261114-maps-1'), module('LootLinguaRunnerRenderer', 'js/runner-renderer.js?v=20261114-maps-1')]).catch(error => { resources = null; throw error; });
     return resources;
   }
   function button(label, cls, action) {
@@ -241,8 +241,9 @@
     const options = node('div', 'llr-gate-labels'); options.hidden = true;
     const labels = [0, 1, 2].map(lane => { const label = node('div', 'llr-gate-label'); label.dataset.lane = String(lane); options.append(label); return label; });
     const status = node('p', 'llr-status'); status.setAttribute('role', 'status'); status.setAttribute('aria-live', 'polite');
+    const mapNotice = node('div', 'llr-map-notice'); mapNotice.setAttribute('role', 'status'); mapNotice.hidden = true;
     const screen = node('div', 'llr-screen');
-    viewport.append(canvas, hud, challenge, options, status, screen);
+    viewport.append(canvas, hud, challenge, options, status, mapNotice, screen);
     const controls = node('div', 'llr-controls');
     const move = lane => { E.move(state, lane); };
     for (const [label, action, icon] of [
@@ -255,7 +256,7 @@
     window.dispatchEvent(new CustomEvent('lootlingua:runner-input-active'));
     window.lockBackgroundScroll?.('runner');
     let renderer, resizeObserver, raf = 0, previous = 0, destroyed = false, settled = false, gateId = null, feedbackUntil = 0, hudKey = '', rect, lastDueCheck = 0, gesture = null;
-    let gateZ = 0;
+    let gateZ = 0, mapNoticeUntil = 0;
     let settingsOpen = false, resumeAfterSettings = false, demoRenderer = null, demoRaf = 0, demoState = null, demoPrevious = 0, demoIndex = 0;
     let demoPlaying = !window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
     const settings = node('section', 'llr-settings'); settings.hidden = true; settings.tabIndex = -1;
@@ -360,6 +361,58 @@
     }
     const startingBest = RunnerBestDistance.value();
     const resize = () => { rect = viewport.getBoundingClientRect(); renderer?.resize(rect.width, rect.height); if (renderer) renderer.draw(state); };
+    const catalog = window.LootLinguaRunnerMaps;
+    const maps = catalog.maps;
+    const mapIds = maps.map(map => map.id);
+    const mapKey = 'lootlingua.runner.map.v1';
+    let mapIndex = 0, rotateMaps = false;
+    try {
+      const preference = JSON.parse(localStorage.getItem(mapKey));
+      mapIndex = Math.max(0, mapIds.indexOf(preference?.mapId)); rotateMaps = preference?.rotate === true;
+    } catch {}
+    function mapPicker(free) {
+      const panel = node('div', 'llr-map-picker');
+      const toggle = node('label', 'llr-map-toggle'), checkbox = node('input'); checkbox.type = 'checkbox'; checkbox.checked = rotateMaps;
+      toggle.append(checkbox, node('span', '', 'التنقّل بين الخرائط'));
+      checkbox.addEventListener('change', () => { rotateMaps = checkbox.checked; });
+      const carousel = node('div', 'llr-map-carousel'); carousel.dir = 'ltr';
+      const card = node('figure', 'llr-map-card'), preview = node('canvas', 'llr-map-preview'); preview.setAttribute('aria-hidden', 'true');
+      const caption = node('figcaption'), title = node('strong'), count = node('small'), description = node('span');
+      caption.dir = 'rtl'; caption.setAttribute('aria-live', 'polite'); caption.append(title, count, description); card.append(preview, caption);
+      const select = step => { mapIndex = (mapIndex + step + maps.length) % maps.length; paint(); };
+      const prev = button('‹', 'llr-map-arrow', () => select(-1)), next = button('›', 'llr-map-arrow', () => select(1));
+      prev.setAttribute('aria-label', 'الخريطة السابقة'); next.setAttribute('aria-label', 'الخريطة التالية');
+      carousel.append(prev, card, next);
+      panel.append(toggle, carousel, node('p', 'llr-map-tip', free ? 'جري حر · لا توجد معانٍ كافية لبوابات الأسئلة.' : 'اعبر بوابة المعنى الصحيح أثناء الجري.'));
+      const sample = E.createState([], { random: () => .5 }); sample.running = false;
+      sample.distance = 145;
+      sample.entities = [
+        { id: 1, kind: 'obstacle', obstacleType: 'train', lane: 2, z: 19, length: 20 },
+        { id: 2, kind: 'obstacle', obstacleType: 'wall', lane: 0, z: 14 },
+        { id: 3, kind: 'obstacle', obstacleType: 'overhead', lane: 1, z: 29 },
+        { id: 4, kind: 'coin', lane: 1, z: 9 }, { id: 5, kind: 'coin', lane: 1, z: 13 },
+      ];
+      const still = window.LootLinguaRunnerRenderer.createRenderer(preview, { width: 512, height: 240, dprCap: 1 });
+      function paint() {
+        const map = maps[mapIndex];
+        title.textContent = map.name; count.textContent = `${mapIndex + 1} / ${maps.length}`; description.textContent = map.description;
+        sample.mapId = map.id; still.draw(sample);
+      }
+      let touchX = null;
+      card.addEventListener('pointerdown', event => { touchX = event.clientX; card.setPointerCapture?.(event.pointerId); });
+      card.addEventListener('pointerup', event => {
+        if (touchX !== null && Math.abs(event.clientX - touchX) > 30) select(event.clientX < touchX ? 1 : -1);
+        touchX = null;
+      });
+      card.addEventListener('pointercancel', () => { touchX = null; });
+      carousel.addEventListener('keydown', event => {
+        if (!['ArrowLeft', 'ArrowRight'].includes(event.key)) return;
+        event.preventDefault(); select(event.key === 'ArrowLeft' ? -1 : 1);
+      });
+      paint();
+      return { panel, release: () => still.destroy() };
+    }
+    let releasePicker;
     const saveRun = () => {
       if (settled || !runnerOwnerCurrent(owner)) return;
       settled = true; RunnerBestDistance.save(Math.floor(state.distance));
@@ -367,6 +420,7 @@
     };
     function cleanup() {
       if (destroyed) return; saveRun(); destroyed = true; cancelAnimationFrame(raf);
+      releasePicker?.(); releasePicker = null;
       cancelAnimationFrame(demoRaf); demoRenderer?.destroy();
       resizeObserver?.disconnect(); renderer?.destroy(); audio.destroy(); speech.cancel();
       window.removeEventListener('resize', resize); window.removeEventListener('keydown', keyboard, true);
@@ -381,6 +435,17 @@
     }
     function showScreen(title, description, cta, action) {
       const primary = button(cta, 'llr-primary', action);
+      let touch;
+      primary.addEventListener('pointerdown', event => {
+        if (event.pointerType === 'touch') touch = { id: event.pointerId, x: event.clientX, y: event.clientY };
+      });
+      primary.addEventListener('pointercancel', () => { touch = null; });
+      primary.addEventListener('pointerup', event => {
+        if (event.pointerId !== touch?.id) return;
+        const tap = Math.hypot(event.clientX - touch.x, event.clientY - touch.y) < 14;
+        touch = null;
+        if (tap && !screen.hidden && primary.isConnected) { event.preventDefault(); primary.click(); }
+      });
       screen.replaceChildren(node('small', 'llr-screen-kicker', 'LOOT RUNNER'), node('h2', '', title), node('p', '', description), primary);
       screen.hidden = false;
       requestAnimationFrame(() => { if (!destroyed && primary.isConnected && !screen.hidden) primary.focus({ preventScroll: true }); });
@@ -445,7 +510,12 @@
       if (now - lastDueCheck > 1000) { lastDueCheck = now; if (practiceLocked(context)) { finish('حان وقت الاختبار الموثوق'); return; } }
       const delta = Math.min(50, Math.max(0, now - previous)); previous = now;
       E.update(state, delta);
+      if (mapNoticeUntil && state.elapsed >= mapNoticeUntil) { mapNotice.hidden = true; mapNoticeUntil = 0; }
       for (const event of state.events) {
+        if (event.type === 'map-change') {
+          mapNotice.textContent = catalog.get(event.mapId).name;
+          mapNotice.hidden = false; mapNoticeUntil = state.elapsed + 2200;
+        }
         if (event.type === 'gate') {
           answeredGate = true;
           if (event.correct) correctGates++;
@@ -467,6 +537,7 @@
       if (event.key === 'Tab') return;
       if (settingsOpen) { if (event.key === 'Escape') { event.preventDefault(); event.stopImmediatePropagation(); closeSettings(); } return; }
       if (event.key === 'Escape') { event.preventDefault(); event.stopImmediatePropagation(); cleanup(); return; }
+      if (event.target?.closest?.('.llr-map-picker')) return;
       if (event.target?.closest?.('button') && ['Enter', ' '].includes(event.key)) return;
       const key = event.key.toLowerCase();
       const actions = { arrowleft: () => move(state.lane - 1), a: () => move(state.lane - 1), arrowright: () => move(state.lane + 1), d: () => move(state.lane + 1), arrowup: () => E.jump(state), w: () => E.jump(state), ' ': () => E.jump(state), arrowdown: () => E.slide(state), s: () => E.slide(state), p: () => setPaused(!state.paused) };
@@ -475,7 +546,7 @@
     const visibility = () => { if (document.hidden) setPaused(true); resumeDemo(); };
     const authChanged = () => { if (!runnerOwnerCurrent(owner)) cleanup(); };
     viewport.addEventListener('pointerdown', event => {
-      if (event.target.closest('button') || (event.button != null && event.button !== 0)) return;
+      if (event.target.closest('.llr-screen, button') || (event.button != null && event.button !== 0)) return;
       gesture = { id: event.pointerId, x: event.clientX, y: event.clientY, lane: state.lane, acted: false };
       viewport.setPointerCapture?.(event.pointerId); event.preventDefault();
     });
@@ -503,10 +574,19 @@
       window.LootLinguaModalFocus?.open(overlay, { dialog: game, onEscape: cleanup });
       syncHUD(); renderer.draw(state);
       const free = new Set(words.map(w => w.meaning)).size < 3;
-      showScreen('الطريق لك', `${free ? 'هذه جولة جري حر؛ البوابة تحتاج ثلاثة معانٍ مختلفة.' : 'عند ظهور كلمة، اعبر بوابة معناها الصحيح.'} السباق تدريب ولا يزيد الإتقان أو جاهزية البوابة.`, 'انطلق', () => {
+      showScreen('اختر خريطة البداية', '', 'انطلق', () => {
+        if (state.running || destroyed) return;
+        const mapId = maps[mapIndex].id;
+        E.configureMaps(state, mapId, rotateMaps ? mapIds : []);
+        try { localStorage.setItem(mapKey, JSON.stringify({ mapId, rotate: rotateMaps })); } catch {}
+        releasePicker?.(); releasePicker = null;
+        screen.classList.remove('llr-map-screen');
+        renderer.draw(state);
         audio.unlock(); screen.hidden = true; state.running = true; state.paused = false; previous = performance.now(); viewport.focus({ preventScroll: true }); raf = requestAnimationFrame(frame);
       });
-      screen.insertBefore(node('div', 'llr-tutorial', '← → مسارات   ↑ قفز   ↓ انزلاق\nالهاتف: اسحب في الاتجاه نفسه أو استخدم الأزرار'), screen.lastChild);
+      screen.classList.add('llr-map-screen');
+      const picker = mapPicker(free); releasePicker = picker.release;
+      screen.querySelector('p').replaceWith(picker.panel);
       return true;
     } catch (error) { cleanup(); window.showToast?.('تعذّر تشغيل الرسومات. حاول مجددًا.', 'warning'); return false; }
   }
@@ -554,7 +634,7 @@
   window.LootLinguaGateRunner = {
     render, launch, mountPreview, acceptProfile, refreshProgressUI, reviewIsDue, normalizeWords, RunnerCoinWallet, RunnerBestDistance, MAX_HEARTS,
     createState: (...args) => engine().createState(...args), step: (...args) => engine().update(...args), chooseLane: (...args) => engine().move(...args),
-    getDiagnostics: () => activeRun ? { lane: activeRun.state.lane, action: activeRun.state.action, paused: activeRun.state.paused, entities: activeRun.state.entities.filter(e => e.active !== false).length, distance: activeRun.state.distance } : null,
+    getDiagnostics: () => activeRun ? { lane: activeRun.state.lane, action: activeRun.state.action, paused: activeRun.state.paused, entities: activeRun.state.entities.filter(e => e.active !== false).length, distance: activeRun.state.distance, mapId: activeRun.state.mapId } : null,
   };
   window.addEventListener?.('lootlingua:trusted-quiz-completed', () => { practiceBreak = { rounds: 0, until: 0 }; });
   window.addEventListener?.('lootlingua:auth-state', () => {

@@ -12,6 +12,46 @@ function seeded(seed = 42) { return () => { seed = (seed * 1664525 + 1013904223)
 function make(pool = words) { const state = engine.createState(pool, { random: seeded() }); state._nextRowAt = Infinity; state._nextGateAt = Infinity; return state; }
 function entity(state, values) { const item = state._pool.pop(); Object.assign(item, { id: state._nextId++, resolved: false, z: .1, lane: 1 }, values); state.entities.push(item); return item; }
 
+test('map rotation starts in the selected map and changes only deep inside a separate tunnel', () => {
+  const state = make([]);
+  const maps = ['volcano', 'forest', 'summit', 'desert', 'harbor', 'neon'];
+  engine.configureMaps(state, 'forest', maps);
+  const visited = new Set([state.mapId]);
+  const { MAP_INTERVAL_MIN, MAP_INTERVAL_MAX, MAP_SWITCH_DEPTH } = engine.constants;
+  assert.equal(state.mapId, 'forest');
+  for (let step = 0; step < 6500 && visited.size < maps.length; step++) {
+    const previous = state.mapId;
+    engine.update(state, 50);
+    assert.ok(state._nextMapAt >= MAP_INTERVAL_MIN && state._nextMapAt <= MAP_INTERVAL_MAX);
+    if (state.mapId === previous) continue;
+    assert.ok(state.mapTunnel?.z <= MAP_SWITCH_DEPTH && state.mapTunnel.z + state.mapTunnel.length > 0);
+    assert.equal(state.mapTunnel.mapId, previous);
+    assert.equal(state.events.filter(event => event.type === 'map-change').length, 1);
+    assert.ok(!visited.has(state.mapId));
+    visited.add(state.mapId);
+  }
+  assert.equal(visited.size, maps.length);
+});
+
+test('a fixed map persists and a due translation gate waits for the travel tunnel to clear', () => {
+  const fixed = make();
+  engine.configureMaps(fixed, 'harbor');
+  for (let i = 0; i < 1000; i++) engine.update(fixed, 50);
+  assert.equal(fixed.mapId, 'harbor');
+  assert.equal(fixed.mapTunnel, null);
+  engine.configureMaps(fixed, 'summit', ['summit', 'desert']);
+  fixed._mapTime = fixed._nextMapAt;
+  fixed._nextGateAt = fixed.elapsed;
+  for (let i = 0; i < 500; i++) {
+    engine.update(fixed, 50);
+    if (!fixed.mapTunnel) break;
+    assert.equal(fixed.gate, null);
+  }
+  assert.equal(fixed.mapId, 'desert');
+  engine.update(fixed, 50);
+  assert.equal(fixed.gate?.kind, 'gate');
+});
+
 test('normalization and seeded updates are deterministic and never mutate source dictionary records', () => {
   const original = copy(words), a = engine.createState(words, { random: seeded() }), b = engine.createState(words, { random: seeded() });
   for (let index = 0; index < 220; index++) { engine.update(a, 16); engine.update(b, 16); }

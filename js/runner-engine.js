@@ -6,6 +6,8 @@
   const TUNNEL_LENGTH = 42, LONG_TUNNEL_MIN = 240, MIN_ROW_MS = 780;
   const IMPACT_FREEZE_MS = 260, RECOVERY_START_MS = 140;
   const GATE_BLOCKER_OFFSET = 6, GATE_COMMIT_Z = 2.5;
+  const MAP_INTERVAL_MIN = 16000, MAP_INTERVAL_MAX = 24000, MAP_TUNNEL_LENGTH = 72, MAP_SWITCH_DEPTH = -28;
+  const MAX_VEHICLE_LENGTH = 20;
   // Templates describe relationships, then lanes are shuffled. A truck can
   // accompany any normal hazard, not just another truck.
   const FORMATIONS = [
@@ -51,7 +53,29 @@
       _pool: Array.from({ length: MAX_ENTITIES }, () => ({})), _nextId: 1,
       _nextRowAt: 400, _nextGateAt: 30000 + Math.floor(clamp(Number(rng()) || 0, 0, 1) * 12000), _row: 0, _escapeLane: 1, _safeUntil: 0,
       _canGate: new Set(normalized.map(item => item.meaning)).size >= LANES,
+      mapId: 'classic', mapTunnel: null, _mapOrder: [], _mapChoices: [], _nextMapAt: Infinity, _mapTime: 0,
     };
+  }
+  function configureMaps(state, mapId, rotation = []) {
+    state.mapId = mapId;
+    state._mapChoices = [...new Set(rotation)];
+    state._mapOrder = [];
+    state._mapTime = 0;
+    state._nextMapAt = state._mapChoices.length > 1 ? mapInterval(state) : Infinity;
+  }
+  function mapInterval(state) {
+    return MAP_INTERVAL_MIN + random(state) * (MAP_INTERVAL_MAX - MAP_INTERVAL_MIN);
+  }
+  function maybeMapTunnel(state) {
+    if (state.gate || state.mapTunnel || state._mapTime < state._nextMapAt) return;
+    if (!state._mapOrder.length) {
+      state._mapOrder = state._mapChoices.filter(id => id !== state.mapId);
+      for (let i = state._mapOrder.length - 1; i > 0; i--) {
+        const j = Math.floor(random(state) * (i + 1));
+        [state._mapOrder[i], state._mapOrder[j]] = [state._mapOrder[j], state._mapOrder[i]];
+      }
+    }
+    state.mapTunnel = { kind: 'passage', z: SPAWN_Z, length: MAP_TUNNEL_LENGTH, mapId: state.mapId, destination: state._mapOrder.pop(), changed: false };
   }
   function usable(state) { return state.running && !state.paused && !state.over; }
   function getAction(state, at = state.elapsed) {
@@ -252,7 +276,7 @@
     return true;
   }
   function maybeGate(state) {
-    if (state.elapsed < state._nextGateAt || state.gate || !hasGateWords(state)) return;
+    if (state.elapsed < state._nextGateAt || state.gate || state.mapTunnel || !hasGateWords(state)) return;
     const data = createWordGate(state);
     const gate = data && allocate(state, data);
     if (!gate) return;
@@ -280,9 +304,13 @@
     // Do not queue hidden hazards behind the reading veil: returning to full
     // speed would compress their spacing and reveal them too close together.
     const spawnZ = seeded ? seededZ : SPAWN_Z;
-    const passage = state.gate, insideTunnel = passage && spawnZ >= passage.z && spawnZ <= passage.z + passage.length;
+    const passage = state.gate || state.mapTunnel;
+    // A vehicle spawned before the entrance must clear the tunnel with its
+    // complete ramp and roof. Reserve that space while the approach moves in.
+    const intersectsTravel = passage?.kind === 'passage' && spawnZ + MAX_VEHICLE_LENGTH + VEHICLE_EXIT >= passage.z && spawnZ <= passage.z + passage.length;
+    const insideTunnel = passage && spawnZ >= passage.z && spawnZ <= passage.z + passage.length;
     const tunnelSafe = !insideTunnel || passage.length >= LONG_TUNNEL_MIN && spawnZ - passage.z >= 40;
-    const draining = reading || !tunnelSafe || !seeded && hasGateWords(state) && state._nextGateAt - state.elapsed < clearance;
+    const draining = reading || intersectsTravel || !tunnelSafe || !seeded && hasGateWords(state) && state._nextGateAt - state.elapsed < clearance;
     const escapeOptions = [0, 1, 2].filter(lane => Math.abs(lane - state._escapeLane) <= 1 && (lane === state._escapeLane || !state.entities.some(item => item.kind === 'obstacle' && item.lane === lane && sideOccupied(item, item.z - spawnZ))));
     const escape = choose(state, escapeOptions);
     const blocked = [0, 1, 2].filter(lane => lane !== escape);
@@ -322,7 +350,7 @@
       const type = layout[lane];
       if (!type || occupiedByTruck(lane)) continue;
       const z = spawnZ + (type === 'train' && random(state) < .5 ? lane * 4 : 0);
-      allocate(state, { kind: 'obstacle', obstacleType: type, length: type === 'train' ? 20 : 0, lane, z, row, safeRoute: lane === route, routeLane: route, tunnelId: insideTunnel ? passage.id : null });
+      allocate(state, { kind: 'obstacle', obstacleType: type, length: type === 'train' ? MAX_VEHICLE_LENGTH : 0, lane, z, row, safeRoute: lane === route, routeLane: route, tunnelId: insideTunnel ? passage.id : null });
       if (type === 'train') for (const offset of [10, 15]) allocate(state, { kind: 'coin', lane, z: z + offset, height: VEHICLE_HEIGHT + .44, row });
       if (['low', 'overhead', 'duckwall'].includes(type) && random(state) < .65) {
         for (const offset of [0, 2]) allocate(state, { kind: 'coin', lane, z: spawnZ + offset,
@@ -401,12 +429,25 @@
       if (state.elapsed <= impact.freezeUntil) return state;
       if (state.elapsed >= impact.endAt) state.impact = null;
     }
+    maybeMapTunnel(state);
     maybeGate(state);
     const desired = Math.min(MAX_SPEED, BASE_SPEED + state.distance / 70);
     state.speed = state.gate && !state.gate.resolved ? 12 : desired;
     const movingDt = impact ? Math.min(dt, Math.max(0, state.elapsed - impact.freezeUntil)) : dt;
     const travelled = state.speed * movingDt / 1000;
     state.distance += travelled;
+    const mapTunnel = state.mapTunnel;
+    if (mapTunnel) {
+      mapTunnel.z -= travelled;
+      if (!mapTunnel.changed && mapTunnel.z <= MAP_SWITCH_DEPTH) {
+        mapTunnel.changed = true;
+        state.mapId = mapTunnel.destination;
+        emit(state, { type: 'map-change', mapId: state.mapId });
+      }
+      if (mapTunnel.z + mapTunnel.length < NEAR) {
+        state.mapTunnel = null; state._mapTime = 0; state._nextMapAt = mapInterval(state);
+      }
+    } else if (!state.gate && state._mapChoices.length > 1) state._mapTime += movingDt;
     for (const entity of state.entities) entity.z -= travelled;
     const passage = state.gate;
     if (passage && !passage.entryReleased) {
@@ -430,7 +471,7 @@
     if (!state.over) spawnRow(state);
     return state;
   }
-  root.LootLinguaRunnerEngine = Object.freeze({ createState, update, move, jump, slide, getAction, getPose, vehicleSurface, normalizeWords, createWordGate,
-    constants: Object.freeze({ LANES, MAX_HEARTS, MAX_ENTITIES, MAX_EVENTS, FAR, NEAR, VEHICLE_HEIGHT, VEHICLE_RAMP, VEHICLE_EXIT, TUNNEL_LENGTH, LONG_TUNNEL_MIN, MIN_ROW_MS, SPAWN_Z, GATE_BLOCKER_OFFSET, BASE_SPEED, MAX_SPEED, JUMP_MS, SLIDE_MS, INVULNERABLE_MS }),
+  root.LootLinguaRunnerEngine = Object.freeze({ createState, configureMaps, update, move, jump, slide, getAction, getPose, vehicleSurface, normalizeWords, createWordGate,
+    constants: Object.freeze({ LANES, MAX_HEARTS, MAX_ENTITIES, MAX_EVENTS, FAR, NEAR, VEHICLE_HEIGHT, VEHICLE_RAMP, VEHICLE_EXIT, TUNNEL_LENGTH, LONG_TUNNEL_MIN, MIN_ROW_MS, SPAWN_Z, GATE_BLOCKER_OFFSET, BASE_SPEED, MAX_SPEED, JUMP_MS, SLIDE_MS, INVULNERABLE_MS, MAP_INTERVAL_MIN, MAP_INTERVAL_MAX, MAP_SWITCH_DEPTH }),
   });
 })(window);
