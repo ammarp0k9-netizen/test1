@@ -67,25 +67,31 @@
 .llr-map-screen h2 { font-size: clamp(18px, 3.4vw, 31px); }
 .llr-map-screen .llr-screen-kicker { display: none; }
 .llr-map-picker { display: grid; gap: 8px; width: min(100%, 585px); }
-.llr-picker-tabs { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 4px; justify-self: center; width: min(100%, 270px); padding: 3px; background: #0a202b; border: 1px solid #375761; border-radius: 10px; }
-.llr-picker-tab { min-height: 38px; padding: 4px 9px; border: 1px solid transparent; border-radius: 7px; background: transparent; color: #cde4e0; font: inherit; font-weight: 700; font-size: 13px; cursor: pointer; }
-.llr-picker-tab[aria-pressed="true"] { border-color: #b3955a; color: #ffe0a1; background: #213b44; }
+.llr-picker-tabs { position: relative; isolation: isolate; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 4px; justify-self: center; width: min(100%, 270px); padding: 3px; background: #0a202b; border: 1px solid #375761; border-radius: 10px; }
+.llr-picker-tabs::before { content: ""; position: absolute; inset-block: 3px; inset-inline-start: 3px; width: calc((100% - 10px) / 2); border: 1px solid #b3955a; border-radius: 7px; background: #213b44; transition: transform .24s cubic-bezier(.2,.75,.25,1); pointer-events: none; z-index: -1; }
+.llr-picker-tabs[data-character]::before { transform: translateX(calc(-100% - 4px)); }
+.llr-picker-tab { min-height: 38px; padding: 4px 9px; border: 1px solid transparent; border-radius: 7px; background: transparent; color: #cde4e0; font: inherit; font-weight: 700; font-size: 13px; cursor: pointer; transition: color .2s ease; }
+.llr-picker-tab[aria-pressed="true"] { color: #ffe0a1; }
 .llr-picker-tab:focus-visible, .llr-map-arrow:focus-visible { outline: 2px solid #ffe0a1; outline-offset: 2px; }
-.llr-map-toggle { display: flex; align-items: center; justify-content: center; gap: 8px; justify-self: center; color: #e8f8f4; font-size: 13px; cursor: pointer; min-height: 36px; padding: 4px 12px; border: 1px solid #4a6868; border-radius: 9px; background: #15303b; }
+.llr-picker-stage { position: relative; background: #091923; }
+.llr-map-toggle { position: absolute; z-index: 1; top: 7px; right: 7px; display: flex; align-items: center; gap: 6px; direction: rtl; color: #e8f8f4; font-size: 12px; cursor: pointer; min-height: 33px; padding: 4px 8px; border: 1px solid #658383; border-radius: 8px; background: #0b202aef; }
 .llr-map-toggle input { width: 17px; height: 17px; margin: 0; accent-color: #f2cc80; }
 .llr-map-carousel { display: grid; grid-template-columns: 40px minmax(0, 1fr) 40px; gap: 6px; align-items: center; }
 .llr-map-card { margin: 0; overflow: hidden; border-radius: 13px; border: 1px solid #55777a; background: #0c232e; text-align: start; touch-action: pan-y; }
-.llr-map-preview { display: block; width: 100%; height: clamp(94px, 28dvh, 225px); object-fit: cover; }
-.llr-map-preview[data-portrait] { height: clamp(100px, 24dvh, 205px); object-fit: contain; background: #091923; }
+.llr-map-preview { display: block; width: 100%; height: clamp(94px, 26dvh, 215px); object-fit: cover; }
+.llr-map-preview[data-portrait] { object-fit: contain; background: #091923; }
+.llr-preview-outgoing { position: absolute; inset: 0; pointer-events: none; }
 .llr-map-card figcaption { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 4px; padding: 7px 10px 9px; }
 .llr-map-card strong { color: #ffe0a1; font-size: 15px; }
 .llr-map-card small { color: #b8d2d0; direction: ltr; }
-.llr-map-card figcaption span { grid-column: 1 / -1; color: #c3dedb; font-size: 12px; line-height: 1.5; }
+.llr-map-card figcaption span { grid-column: 1 / -1; min-height: 3em; color: #c3dedb; font-size: 12px; line-height: 1.5; }
 .llr-map-arrow { min-width: 40px; min-height: 46px; border: 1px solid #698986; border-radius: 10px; background: #193843; color: #ffe1a3; font: 700 27px/1 system-ui, sans-serif; cursor: pointer; }
 .llr-map-arrow:active { background: #375b62; }
 .llr-map-picker .llr-map-tip { margin: 0 auto; }
 .llr-map-notice { position: absolute; z-index: 4; inset: 53px 12% auto; margin: auto; width: fit-content; max-width: 76%; padding: 7px 15px; background: #0a2029ef; border: 1px solid #c6a36b; border-radius: 20px; color: #ffe6b4; direction: rtl; font-size: 13px; pointer-events: none; }
-@media (max-height: 570px) { .llr-map-preview, .llr-map-preview[data-portrait] { height: clamp(70px, 21dvh, 115px); } .llr-map-picker { gap: 4px; } .llr-map-tip { display: none; } }
+@media (prefers-reduced-motion: reduce) { .llr-picker-tabs::before, .llr-picker-tab { transition: none; } }
+.perf-turbo .llr-picker-tabs::before, .perf-turbo .llr-picker-tab { transition: none; }
+@media (max-height: 570px) { .llr-map-preview { height: clamp(70px, 21dvh, 115px); } .llr-map-picker { gap: 4px; } .llr-map-tip { display: none; } }
 @media (max-width: 360px) { .llr-brand small { font-size: 8px; letter-spacing: .08em; } .llr-header .llr-brand strong { font-size: 13px; } .llr-header .llr-icon-button { padding-inline: 7px; font-size: 11px; } }
 @media (max-width: 560px) { .llr-overlay { padding: 5px; } .llr-game { height: calc(100dvh - 10px); padding: 8px; gap: 7px; border-radius: 15px; } .llr-brand strong { font-size: 16px; } .llr-header { gap: 5px; } .llr-icon-button { padding: 7px 10px; } .llr-hud { inset: 9px 7px auto; } .llr-hud span { font-size: 11px; padding: 5px 7px; } .llr-screen { gap: 12px; } .llr-screen p { font-size: 13px; } .llr-challenge { top: 48px; } }
 @media (max-height: 480px) and (orientation: landscape) { .llr-game { width: 100%; height: calc(100dvh - 10px); padding: 6px; grid-template-columns: minmax(0,1fr) 108px; grid-template-rows: auto minmax(0,1fr); gap: 5px; } .llr-header { grid-column: 1/-1; } .llr-viewport { grid-column: 1; grid-row: 2; } .llr-controls { grid-column: 2; grid-row: 2; grid-template-columns: repeat(2,minmax(0,1fr)); } .llr-hint { display: none; } .llr-screen { gap: 7px; padding: 10px; } .llr-screen h2 { font-size: 22px; } .llr-screen p { font-size: 11px; } .llr-tutorial { display: none; } .llr-challenge { top: 40px; padding: 4px; } .llr-challenge strong { font-size: 20px; } }

@@ -4,11 +4,11 @@
   const characters = [
     { id: 'explorer', name: 'المستكشف', description: 'السترة الفيروزية وحقيبة الكنوز الأصلية.', accent: '#dcb978' },
     { id: 'mechanic', name: 'مهندسة الميناء', description: 'لباس عمل برتقالي، ضفيرة، وحزام عدّة.', accent: '#f8ab63', main: '#c96437', shade: '#8f3f34', trim: '#ffe0a0', legs: '#323b4e', skin: '#b87352', hair: '#392336', shoulders: .20, hips: .096 },
-    { id: 'ranger', name: 'كشّافة السرو', description: 'عباءة من الأوراق، حزام مائل وشعر مجعّد.', accent: '#acd07b', main: '#507a49', shade: '#2c5549', trim: '#bdce80', legs: '#3a4c3c', skin: '#85503d', hair: '#282129', shoulders: .17, hips: .085 },
+    { id: 'ranger', name: 'كشّافة السرو', description: 'عباءة قصيرة بمشبك ورقة، جزمة جلد وشعر مجعّد.', accent: '#acd07b', main: '#507a49', shade: '#29483d', trim: '#c6b47c', legs: '#38463e', skin: '#85503d', hair: '#282129', shoulders: .17, hips: .085 },
     { id: 'alpinist', name: 'متسلّق الصقيع', description: 'معطف مبطّن، قبعة فرو وحقيبة بحبال تسلّق.', accent: '#a5ecff', main: '#6095be', shade: '#396588', trim: '#d9f0ee', legs: '#3b5477', skin: '#e6b795', hair: '#58434c', shoulders: .24, hips: .11 },
     { id: 'courier', name: 'ساعي النيون', description: 'سترة قصيرة بحواف مضيئة، حقيبة كتف وشعر حادّ الأطراف.', accent: '#f19adc', main: '#744b91', shade: '#422e69', trim: '#79e0dd', legs: '#282640', skin: '#c08468', hair: '#e583c7', shoulders: .18, hips: .086 },
-    { id: 'nomad', name: 'رحّالة الرمال', description: 'رداء ملفوف وعمامة ووشاح يتحرّك مع الجري.', accent: '#ffc882', main: '#e9b97f', shade: '#9f655b', trim: '#efdeaa', legs: '#6f4654', skin: '#a76343', hair: '#472d34', shoulders: .205, hips: .09 },
-    { id: 'diver', name: 'غوّاص الأعماق', description: 'خوذة نحاسية مستديرة وأسطوانة هواء وبدلة غوص.', accent: '#72ded6', main: '#427571', shade: '#244b55', trim: '#d8ab76', legs: '#253f50', skin: '#367d82', hair: '#987051', shoulders: .225, hips: .105 },
+    { id: 'nomad', name: 'رحّالة الرمال', description: 'معطف رملي بفتحتين، عمامة ووشاح قرميدي.', accent: '#ffc882', main: '#cb9c68', shade: '#86584e', trim: '#f0cb93', legs: '#573d49', skin: '#a76343', hair: '#472d34', shoulders: .205, hips: .09 },
+    { id: 'diver', name: 'غوّاص الأعماق', description: 'خوذة نحاسية بخراطيم خلفية وأسطوانة هواء.', accent: '#72ded6', main: '#427571', shade: '#244b55', trim: '#d8ab76', legs: '#253f50', skin: '#367d82', hair: '#987051', shoulders: .225, hips: .105 },
   ].map(Object.freeze);
   const byId = new Map(characters.map(character => [character.id, character]));
   const get = id => byId.get(id) || characters[0];
@@ -41,17 +41,27 @@
     ctx.fillRect(x, y, width, height);
   }
 
-  function outerLayer(ctx, c, phase) {
-    const flap = Math.sin(phase * .55) * .038;
+  function outerLayer(ctx, c, phase, sliding) {
+    const flap = Math.sin(phase * .55) * .025;
     if (c.id === 'ranger') {
-      polygon(ctx, '#355b45', [-.16,-.71,.08,-.77,.24,-.61,.21+flap,-.34,.10,-.41,.02,-.32,-.08,-.41,-.21,-.35,-.24,-.51]);
-      polygon(ctx, '#69894e', [-.16,-.70,.06,-.75,.20,-.64,.07,-.58,-.02,-.51,-.15,-.54,-.23,-.57]);
-      stroke(ctx, '#aac379', .018, -.14,-.65,-.018,-.62,.12,-.65);
+      // A single mantle ends above the belt, with a seam and one leaf clasp.
+      polygon(ctx, '#294b3b', [-.12,-.75,.10,-.75,.19,-.66,.15+flap,-.49,-.06,-.46,-.17,-.51,-.19,-.65]);
+      polygon(ctx, '#618456', [-.12,-.75,0,-.76,.025,-.69,-.015,-.50,-.07,-.46,-.17,-.51,-.19,-.65]);
+      stroke(ctx, '#8faa68', .013, -.16,-.65,-.065,-.68,.047,-.68,.155,-.65);
+      polygon(ctx, '#bcd182', [-.02,-.661,.051,-.635,.063,-.587,.010,-.606]);
+      stroke(ctx, '#4c734a', .010, .054,-.600,-.005,-.646);
+      rect(ctx, '#82674d', -.09,-.411,.17,.032);
     } else if (c.id === 'nomad') {
-      polygon(ctx, c.shade, [-.17,-.49,.16,-.5,.23+flap,-.23,.07,-.29,-.03,-.24,-.19,-.29]);
-      polygon(ctx, c.main, [-.15,-.69,.14,-.72,.20,-.37,.07,-.32,-.19,-.35]);
-      polygon(ctx, '#f8d5a1', [-.16,-.7,.08,-.75,.16,-.67,-.04,-.53,-.18,-.51]);
-      polygon(ctx, '#a65e59', [.04,-.72,.14,-.72,.20+flap,-.43,.1+flap,-.46,.07,-.59]);
+      const hem = sliding ? -.29 : -.21;
+      polygon(ctx, c.shade, [-.14,-.42,.13,-.42,.17+flap,hem,.06,hem-.018,0,-.34,-.052,hem+.008,-.185+flap,hem-.018]);
+      polygon(ctx, '#ddb17c', [-.17,-.69,-.11,-.75,.018,-.72,-.068,-.35,-.052,hem+.008,-.185+flap,hem-.018,-.142,-.39]);
+      polygon(ctx, '#ba845a', [.018,-.72,.13,-.74,.18,-.67,.126,-.38,.17+flap,hem,.06,hem-.018,0,-.34]);
+      stroke(ctx, '#edcb96', .016, -.139,-.61,-.11,-.51,-.13,-.36,-.14+flap,hem-.034);
+      stroke(ctx, '#62414a', .038, -.137,-.411,.135,-.409);
+      rect(ctx, c.trim, -.027,-.434,.064,.049);
+      polygon(ctx, '#87444c', [-.106,-.747,.111,-.739,.136,-.688,.088,-.656,-.083,-.663,-.132,-.708]);
+      polygon(ctx, '#ae6556', [.058,-.687,.122,-.702,.146+flap,-.509,.073+flap,-.542]);
+      stroke(ctx, '#e39a75', .014, -.099,-.729,.0,-.705,.087,-.706);
     } else if (c.id === 'alpinist') {
       ellipse(ctx, c.trim, 0, -.717, .191, .072);
       for (const y of [-.61, -.51, -.41]) stroke(ctx, c.shade, .016, -.198,y,-.15,y+.025,.15,y+.025,.198,y);
@@ -74,17 +84,25 @@
       polygon(ctx, '#293950', [-.028,-.529,.161,-.568,.192,-.425,.01,-.39]);
       stroke(ctx, c.trim, .016, .012,-.49,.146,-.516,.155,-.481,.023,-.456);
     } else if (c.id === 'diver') {
-      for (const x of [-.12, .12]) stroke(ctx, '#153a46', .029, x,-.71,x*1.25,-.47,x,-.40);
-      ellipse(ctx, '#996744', 0, -.548, .118, .166);
-      ellipse(ctx, c.trim, -.028, -.55, .084, .153);
-      rect(ctx, '#2d4e51', -.114,-.566,.228,.043);
-      stroke(ctx, '#294a57', .023, .079,-.644,.142,-.694,.137,-.81);
-      ellipse(ctx, c.accent, -.028, -.612, .027, .024);
+      stroke(ctx, '#1a3942', .037, -.12,-.72,-.144,-.47,-.12,-.399);
+      stroke(ctx, '#1a3942', .037, .12,-.72,.144,-.47,.12,-.399);
+      ellipse(ctx, '#735043', .017, -.549, .111, .157);
+      ellipse(ctx, '#ab7953', -.019, -.55, .085, .151);
+      stroke(ctx, '#e4bb85', .024, -.049,-.648,-.059,-.581,-.055,-.502);
+      for (const y of [-.609, -.474]) {
+        rect(ctx, '#2d4e51', -.109,y,.235,.028);
+        rect(ctx, '#d4a66d', .047,y-.003,.032,.033);
+      }
+      stroke(ctx, '#16353c', .037, .042,-.683,.116,-.702,.142,-.762,.13,-.828);
+      stroke(ctx, '#6b9590', .012, .049,-.693,.114,-.717,.133,-.759,.12,-.818);
     }
   }
 
   function helmet(ctx, c, phase, sliding) {
-    ellipse(ctx, c.skin, 0, -.851, .104, .117);
+    if (c.id !== 'diver') {
+      ellipse(ctx, c.skin, 0, -.851, .104, .117);
+      ellipse(ctx, '#fff0c52a', -.05, -.858, .039, .072);
+    }
     if (c.id === 'mechanic') {
       ellipse(ctx, c.hair, 0, -.878, .109, .103);
       const tip = sliding ? -.743 : -.672;
@@ -94,9 +112,12 @@
       polygon(ctx, c.main, [-.117,-.907,-.085,-.97,.065,-.973,.117,-.925,.135,-.89,-.13,-.89]);
       stroke(ctx, c.trim, .018, -.114,-.901,.122,-.902);
     } else if (c.id === 'ranger') {
-      for (const [x, y, r] of [[-.076,-.906,.054],[0,-.929,.058],[.076,-.907,.055],[-.066,-.855,.059],[.056,-.853,.061],[0,-.873,.08]]) ellipse(ctx, c.hair, x, y, r, r);
-      stroke(ctx, '#98715b', .014, -.082,-.931,-.058,-.942,-.041,-.932);
-      polygon(ctx, c.trim, [.07,-.84,.119,-.89,.118,-.847,.091,-.818]);
+      ellipse(ctx, c.hair, 0, -.883, .106, .101);
+      ellipse(ctx, c.hair, -.067,-.935,.059,.049);
+      ellipse(ctx, c.hair, .045,-.943,.067,.047);
+      ellipse(ctx, c.hair, .087,-.905,.045,.053);
+      stroke(ctx, '#785647', .017, -.097,-.924,-.065,-.946,-.025,-.937);
+      stroke(ctx, '#533d38', .019, -.073,-.883,-.033,-.904,.012,-.897);
     } else if (c.id === 'alpinist') {
       ellipse(ctx, '#567293', 0, -.889, .132, .114);
       rect(ctx, c.trim, -.118,-.9,.236,.048);
@@ -109,52 +130,87 @@
       stroke(ctx, '#f6abd4', .016, -.077,-.927,.001,-.952,.058,-.937);
       rect(ctx, c.trim, .067,-.887,.059,.035);
     } else if (c.id === 'nomad') {
-      ellipse(ctx, '#c28568', 0, -.884, .14, .117);
-      ellipse(ctx, c.trim, -.013,-.906,.135,.092);
-      stroke(ctx, '#c28568', .025, -.13,-.892,-.034,-.878,.075,-.924,.11,-.948);
-      stroke(ctx, '#f5c18f', .024, -.123,-.85,-.044,-.841,.119,-.882);
+      ellipse(ctx, '#a66d58', .007, -.885, .131, .105);
+      ellipse(ctx, '#e3b681', -.015,-.913,.115,.080);
+      stroke(ctx, '#f2d3a0', .025, -.121,-.896,-.067,-.882,.026,-.894,.102,-.930);
+      stroke(ctx, '#c58e69', .023, -.104,-.860,-.036,-.847,.057,-.867,.123,-.911);
+      ellipse(ctx, '#a87259', .061,-.857,.04,.033);
     } else if (c.id === 'diver') {
-      ellipse(ctx, '#8c634c', 0, -.867, .145,.145);
-      ellipse(ctx, '#eac186', -.029,-.883,.113,.118);
-      ellipse(ctx, '#694d48', .015,-.866,.084,.079);
-      ellipse(ctx, c.skin, .015,-.866,.064,.059);
-      stroke(ctx, '#96e8d9', .017, -.016,-.893,.034,-.891);
-      for (const x of [-.146, .146]) ellipse(ctx, c.trim, x,-.864,.027,.039);
+      ellipse(ctx, '#533b3b', 0, -.777, .139,.046);
+      ellipse(ctx, '#81553e', .008, -.879, .133,.126);
+      ellipse(ctx, '#c9925c', -.017,-.894,.114,.109);
+      ellipse(ctx, '#edbb80', -.050,-.934,.057,.044);
+      stroke(ctx, '#704d3c', .026, -.116,-.853,-.044,-.825,.045,-.826,.118,-.853);
+      stroke(ctx, '#e5b27b', .014, -.093,-.841,-.037,-.822,.042,-.823,.093,-.843);
+      for (const x of [-.125, .125]) {
+        ellipse(ctx, '#775342', x,-.867,.021,.045);
+        ellipse(ctx, c.trim, x,-.875,.012,.027);
+      }
+      ellipse(ctx, '#27454a', .098,-.814,.028,.018);
     }
   }
 
   function draw(ctx, c, height, phase, pose) {
-    const slide = pose.action === 'slide', jump = pose.action === 'jump';
-    const stride = Math.sin(phase), tuck = jump ? Math.sin(Math.PI * pose.fraction) : 0;
+    const sliding = pose.action === 'slide', jumping = pose.action === 'jump';
+    const stride = Math.sin(phase), tuck = jumping ? Math.sin(Math.PI * pose.fraction) : 0;
+    const settle = sliding ? 1 - (1 - Math.min(1, pose.fraction * 5)) ** 2 : 0;
+    const hipY = sliding ? -.155 : -.345;
     ctx.save();
     ctx.scale(height, height);
-    // Both outfits and gear follow the same rig and collision-height poses.
     for (const side of [-1, 1]) {
-      const x = side * c.hips, lift = jump ? tuck * (.17 + side * .05) : Math.max(0, side * stride) * .20;
-      const foot = slide ? (side > 0 ? -.045 : 0) : -lift;
-      const footX = x + side * (slide ? .056 : -.025 * tuck);
-      const knee = slide ? -.092 : -.17 - lift * .47;
-      stroke(ctx, c.legs, c.hips + .024, x,slide ? -.15 : -.345, x + side*.026,knee, footX,foot);
-      stroke(ctx, c.shade, .027, x + side*.008,knee, footX,foot);
-      stroke(ctx, c.trim, .058, footX-.044,foot,footX+.044,foot);
+      const x = side * c.hips;
+      const lift = jumping ? tuck * (.13 + side * .048) : Math.max(0, side * stride) * .20;
+      // The far knee stays folded. The near leg extends toward the viewer
+      // as the runner's weight settles onto the slide.
+      const foot = sliding ? (side < 0 ? -.064 - settle * .032 : -.012) : -lift;
+      const footX = x + side * (sliding ? .020 + settle * .018 : -.018 * tuck);
+      const kneeX = x + side * (sliding && side < 0 ? .063 : .022);
+      const knee = sliding ? (side < 0 ? -.205 : -.089 + settle * .014) : -.17 - lift * .47;
+      stroke(ctx, side < 0 ? '#0c1721' : c.legs, c.hips + .027, x,hipY,kneeX,knee,footX,foot);
+      stroke(ctx, c.legs, c.hips * .74, x-.011,hipY,kneeX-.011,knee,footX-.011,foot);
+      stroke(ctx, '#e0cda328', .021, kneeX-.014,knee,footX-.014,foot);
+      const boot = sliding && side > 0 ? .060 : .042;
+      stroke(ctx, '#182631', .065, footX-boot,foot,footX+boot,foot);
+      stroke(ctx, c.trim, .032, footX-boot,foot-.012,footX+boot*.78,foot-.012);
     }
-    if (slide) ctx.scale(1.08, .406);
     const shoulder = c.shoulders, hip = c.hips + .045;
-    for (const side of [-1, 1]) {
-      const swing = slide || jump ? 0 : -side * stride;
-      const elbow = side * (shoulder + .055 + tuck * .045);
-      const wrist = side * (shoulder + .027 + tuck * .08);
-      const y = -.386 + swing * .10 - tuck * .26;
-      stroke(ctx, c.shade, .093, side*shoulder,-.672,elbow,-.49+swing*.06-tuck*.12,wrist,y);
-      stroke(ctx, c.main, .064, side*shoulder,-.671,elbow,-.49+swing*.06-tuck*.12);
-      ellipse(ctx, c.id === 'diver' ? c.trim : c.skin, wrist,y,.037,.043);
+    if (sliding) {
+      ctx.save();
+      // Foreshorten only the torso and its gear. The limbs and helmet
+      // have their own positions and keep their volume.
+      ctx.transform(1.02, .10, -.23 - settle * .06, .296, -.086, -.055);
+    } else {
+      for (const side of [-1, 1]) {
+        const swing = -side * stride;
+        const raised = tuck * (side < 0 ? 1 : .43);
+        const elbowX = side * (shoulder + .055 + raised * .014);
+        const elbowY = -.464 + swing * .056 * (1 - tuck) - raised * .115;
+        const handX = side * (shoulder + .019 - raised * .021);
+        const handY = -.348 + swing * .088 * (1 - tuck) - raised * .316;
+        arm(ctx, c, side * shoulder, -.66, elbowX, elbowY, handX, handY);
+      }
     }
-    polygon(ctx, c.main, [-shoulder,-.68,-shoulder*.7,-.754,shoulder*.7,-.754,shoulder,-.68,hip,-.34,-hip,-.34]);
-    polygon(ctx, c.shade, [shoulder*.58,-.755,shoulder,-.68,hip,-.34,hip*.62,-.34]);
+    polygon(ctx, c.shade, [-shoulder,-.69,-shoulder*.7,-.751,shoulder*.7,-.751,shoulder,-.676,hip,-.34,-hip,-.34]);
+    polygon(ctx, c.main, [-shoulder,-.673,-shoulder*.68,-.746,shoulder*.54,-.746,shoulder*.78,-.69,hip*.67,-.356,-hip,-.34]);
+    stroke(ctx, '#fff4d42b', .019, -shoulder*.91,-.671,-shoulder*.64,-.723,shoulder*.29,-.731);
     stroke(ctx, c.trim, .025, -hip,-.354,hip,-.354);
-    outerLayer(ctx, c, slide ? 0 : phase);
-    helmet(ctx, c, slide ? 0 : phase, slide);
+    outerLayer(ctx, c, phase, sliding);
+    if (sliding) {
+      ctx.restore();
+      arm(ctx, c, -.117,-.259,-.202,-.166,-.211,-.105-settle*.012);
+      arm(ctx, c, .171,-.226,.213,-.154,.135,-.086);
+      ctx.translate(.036 + settle * .027, .218);
+      ctx.rotate(.13);
+      ctx.scale(.67, .58);
+    }
+    helmet(ctx, c, phase, sliding);
     ctx.restore();
+  }
+  function arm(ctx, c, shoulderX, shoulderY, elbowX, elbowY, handX, handY) {
+    stroke(ctx, c.shade, .089, shoulderX,shoulderY,elbowX,elbowY,handX,handY);
+    stroke(ctx, c.main, .062, shoulderX-.009,shoulderY-.011,elbowX-.009,elbowY-.011,handX-.009,handY-.011);
+    ellipse(ctx, c.id === 'diver' ? c.trim : c.skin, handX,handY,.035,.038);
+    ellipse(ctx, '#ffe3b744', handX-.010,handY-.012,.017,.013);
   }
   root.LootLinguaRunnerCharacters = Object.freeze({ list: Object.freeze(characters), get, draw });
 })(window);

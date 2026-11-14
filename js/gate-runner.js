@@ -107,7 +107,7 @@
     });
     const css = document.querySelector('link[data-runner-style]');
     const styles = css ? Promise.resolve() : new Promise((resolve, reject) => {
-      const link = document.createElement('link'); link.rel = 'stylesheet'; link.href = 'runner.css?v=20261114-characters-1';
+      const link = document.createElement('link'); link.rel = 'stylesheet'; link.href = 'runner.css?v=20261114-characters-2';
       link.dataset.runnerStyle = ''; link.onload = resolve; link.onerror = () => { link.remove(); reject(new Error('Runner styles unavailable')); };
       document.head.append(link);
     });
@@ -115,7 +115,7 @@
       styles,
       module('LootLinguaRunnerMaps', 'js/runner-maps.js?v=20261114-maps-3'),
       module('LootLinguaRunnerEngine', 'js/runner-engine.js?v=20261114-maps-3'),
-      module('LootLinguaRunnerCharacters', 'js/runner-characters.js?v=20261114-characters-1'),
+      module('LootLinguaRunnerCharacters', 'js/runner-characters.js?v=20261114-characters-2'),
       module('LootLinguaRunnerRenderer', 'js/runner-renderer.js?v=20261114-characters-1'),
     ]).catch(error => { resources = null; throw error; });
     return resources;
@@ -381,7 +381,8 @@
     try { characterIndex = characters.list.indexOf(characters.get(localStorage.getItem(characterKey))); } catch {}
     function runPicker(free) {
       const panel = node('div', 'llr-map-picker');
-      let choosingCharacter = false;
+      let choosingCharacter = false, pickerReady = false, previewTransition, captionTransition;
+      const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
       const tabs = node('div', 'llr-picker-tabs');
       tabs.setAttribute('role', 'group'); tabs.setAttribute('aria-label', 'تجهيز الجولة');
       const mapsButton = button('الخريطة', 'llr-picker-tab', () => switchPicker(false));
@@ -392,8 +393,12 @@
       checkbox.addEventListener('change', () => { rotateMaps = checkbox.checked; });
       const carousel = node('div', 'llr-map-carousel'); carousel.dir = 'ltr';
       const card = node('figure', 'llr-map-card'), preview = node('canvas', 'llr-map-preview'); preview.setAttribute('aria-hidden', 'true');
+      const stage = node('div', 'llr-picker-stage');
+      const outgoing = node('canvas', 'llr-map-preview llr-preview-outgoing');
+      outgoing.setAttribute('aria-hidden', 'true'); outgoing.hidden = true;
+      stage.append(preview, outgoing, toggle);
       const caption = node('figcaption'), title = node('strong'), count = node('small'), description = node('span');
-      caption.dir = 'rtl'; caption.setAttribute('aria-live', 'polite'); caption.append(title, count, description); card.append(preview, caption);
+      caption.dir = 'rtl'; caption.setAttribute('aria-live', 'polite'); caption.append(title, count, description); card.append(stage, caption);
       const select = step => {
         if (choosingCharacter) characterIndex = (characterIndex + step + characters.list.length) % characters.list.length;
         else mapIndex = (mapIndex + step + maps.length) % maps.length;
@@ -401,7 +406,7 @@
       };
       const prev = button('‹', 'llr-map-arrow', () => select(-1)), next = button('›', 'llr-map-arrow', () => select(1));
       carousel.append(prev, card, next);
-      panel.append(tabs, toggle, carousel, node('p', 'llr-map-tip', free ? 'جري حر · لا توجد معانٍ كافية لبوابات الأسئلة.' : 'اعبر بوابة المعنى الصحيح أثناء الجري.'));
+      panel.append(tabs, carousel, node('p', 'llr-map-tip', free ? 'جري حر · لا توجد معانٍ كافية لبوابات الأسئلة.' : 'اعبر بوابة المعنى الصحيح أثناء الجري.'));
       const sample = E.createState([], { random: () => .5 }); sample.running = false;
       sample.distance = 145;
       sample.entities = [
@@ -412,7 +417,21 @@
       ];
       const still = window.LootLinguaRunnerRenderer.createRenderer(preview, { dprCap: 1 });
       function switchPicker(character) {
+        if (pickerReady && character === choosingCharacter) return;
+        previewTransition?.cancel(); captionTransition?.cancel();
+        outgoing.hidden = true;
+        if (pickerReady && !reduceMotion.matches && !document.body.classList.contains('perf-turbo') && outgoing.animate) {
+          outgoing.width = preview.width; outgoing.height = preview.height;
+          outgoing.toggleAttribute('data-portrait', choosingCharacter);
+          outgoing.getContext('2d').drawImage(preview, 0, 0);
+          outgoing.hidden = false;
+          previewTransition = outgoing.animate([{ opacity: 1 }, { opacity: 0 }], { duration: 210, easing: 'ease-out' });
+          previewTransition.onfinish = () => { outgoing.hidden = true; };
+          captionTransition = caption.animate([{ opacity: .45, transform: 'translateY(4px)' }, { opacity: 1, transform: 'translateY(0)' }], { duration: 190, easing: 'ease-out' });
+        }
         choosingCharacter = character;
+        pickerReady = true;
+        tabs.toggleAttribute('data-character', character);
         mapsButton.setAttribute('aria-pressed', String(!character));
         charactersButton.setAttribute('aria-pressed', String(character));
         toggle.hidden = character;
@@ -435,7 +454,10 @@
         }
       }
       let touchX = null;
-      card.addEventListener('pointerdown', event => { touchX = event.clientX; card.setPointerCapture?.(event.pointerId); });
+      card.addEventListener('pointerdown', event => {
+        if (event.target.closest('.llr-map-toggle')) return;
+        touchX = event.clientX; card.setPointerCapture?.(event.pointerId);
+      });
       card.addEventListener('pointerup', event => {
         if (touchX !== null && Math.abs(event.clientX - touchX) > 30) select(event.clientX < touchX ? 1 : -1);
         touchX = null;
@@ -446,7 +468,11 @@
         event.preventDefault(); select(event.key === 'ArrowLeft' ? -1 : 1);
       });
       switchPicker(false);
-      return { panel, release: () => still.destroy() };
+      return { panel, release: () => {
+        previewTransition?.cancel(); captionTransition?.cancel(); outgoing.hidden = true;
+        outgoing.width = outgoing.height = 1;
+        still.destroy();
+      } };
     }
     let releasePicker;
     const saveRun = () => {
