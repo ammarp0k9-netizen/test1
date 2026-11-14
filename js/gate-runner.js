@@ -107,11 +107,17 @@
     });
     const css = document.querySelector('link[data-runner-style]');
     const styles = css ? Promise.resolve() : new Promise((resolve, reject) => {
-      const link = document.createElement('link'); link.rel = 'stylesheet'; link.href = 'runner.css?v=20261114-maps-2';
+      const link = document.createElement('link'); link.rel = 'stylesheet'; link.href = 'runner.css?v=20261114-characters-1';
       link.dataset.runnerStyle = ''; link.onload = resolve; link.onerror = () => { link.remove(); reject(new Error('Runner styles unavailable')); };
       document.head.append(link);
     });
-    resources = Promise.all([styles, module('LootLinguaRunnerMaps', 'js/runner-maps.js?v=20261114-maps-3'), module('LootLinguaRunnerEngine', 'js/runner-engine.js?v=20261114-maps-3'), module('LootLinguaRunnerRenderer', 'js/runner-renderer.js?v=20261114-maps-3')]).catch(error => { resources = null; throw error; });
+    resources = Promise.all([
+      styles,
+      module('LootLinguaRunnerMaps', 'js/runner-maps.js?v=20261114-maps-3'),
+      module('LootLinguaRunnerEngine', 'js/runner-engine.js?v=20261114-maps-3'),
+      module('LootLinguaRunnerCharacters', 'js/runner-characters.js?v=20261114-characters-1'),
+      module('LootLinguaRunnerRenderer', 'js/runner-renderer.js?v=20261114-characters-1'),
+    ]).catch(error => { resources = null; throw error; });
     return resources;
   }
   function button(label, cls, action) {
@@ -364,14 +370,23 @@
     const catalog = window.LootLinguaRunnerMaps;
     const maps = catalog.maps;
     const mapIds = maps.map(map => map.id);
+    const characters = window.LootLinguaRunnerCharacters;
     const mapKey = 'lootlingua.runner.map.v1';
-    let mapIndex = 0, rotateMaps = false;
+    const characterKey = 'lootlingua.runner.character.v1';
+    let mapIndex = 0, characterIndex = 0, rotateMaps = false;
     try {
       const preference = JSON.parse(localStorage.getItem(mapKey));
       mapIndex = Math.max(0, mapIds.indexOf(preference?.mapId)); rotateMaps = preference?.rotate === true;
     } catch {}
-    function mapPicker(free) {
+    try { characterIndex = characters.list.indexOf(characters.get(localStorage.getItem(characterKey))); } catch {}
+    function runPicker(free) {
       const panel = node('div', 'llr-map-picker');
+      let choosingCharacter = false;
+      const tabs = node('div', 'llr-picker-tabs');
+      tabs.setAttribute('role', 'group'); tabs.setAttribute('aria-label', 'تجهيز الجولة');
+      const mapsButton = button('الخريطة', 'llr-picker-tab', () => switchPicker(false));
+      const charactersButton = button('الشخصية', 'llr-picker-tab', () => switchPicker(true));
+      tabs.append(mapsButton, charactersButton);
       const toggle = node('label', 'llr-map-toggle'), checkbox = node('input'); checkbox.type = 'checkbox'; checkbox.checked = rotateMaps;
       toggle.append(checkbox, node('span', '', 'التنقّل بين الخرائط'));
       checkbox.addEventListener('change', () => { rotateMaps = checkbox.checked; });
@@ -379,11 +394,14 @@
       const card = node('figure', 'llr-map-card'), preview = node('canvas', 'llr-map-preview'); preview.setAttribute('aria-hidden', 'true');
       const caption = node('figcaption'), title = node('strong'), count = node('small'), description = node('span');
       caption.dir = 'rtl'; caption.setAttribute('aria-live', 'polite'); caption.append(title, count, description); card.append(preview, caption);
-      const select = step => { mapIndex = (mapIndex + step + maps.length) % maps.length; paint(); };
+      const select = step => {
+        if (choosingCharacter) characterIndex = (characterIndex + step + characters.list.length) % characters.list.length;
+        else mapIndex = (mapIndex + step + maps.length) % maps.length;
+        paint();
+      };
       const prev = button('‹', 'llr-map-arrow', () => select(-1)), next = button('›', 'llr-map-arrow', () => select(1));
-      prev.setAttribute('aria-label', 'الخريطة السابقة'); next.setAttribute('aria-label', 'الخريطة التالية');
       carousel.append(prev, card, next);
-      panel.append(toggle, carousel, node('p', 'llr-map-tip', free ? 'جري حر · لا توجد معانٍ كافية لبوابات الأسئلة.' : 'اعبر بوابة المعنى الصحيح أثناء الجري.'));
+      panel.append(tabs, toggle, carousel, node('p', 'llr-map-tip', free ? 'جري حر · لا توجد معانٍ كافية لبوابات الأسئلة.' : 'اعبر بوابة المعنى الصحيح أثناء الجري.'));
       const sample = E.createState([], { random: () => .5 }); sample.running = false;
       sample.distance = 145;
       sample.entities = [
@@ -392,11 +410,29 @@
         { id: 3, kind: 'obstacle', obstacleType: 'overhead', lane: 1, z: 29 },
         { id: 4, kind: 'coin', lane: 1, z: 9 }, { id: 5, kind: 'coin', lane: 1, z: 13 },
       ];
-      const still = window.LootLinguaRunnerRenderer.createRenderer(preview, { width: 512, height: 240, dprCap: 1 });
+      const still = window.LootLinguaRunnerRenderer.createRenderer(preview, { dprCap: 1 });
+      function switchPicker(character) {
+        choosingCharacter = character;
+        mapsButton.setAttribute('aria-pressed', String(!character));
+        charactersButton.setAttribute('aria-pressed', String(character));
+        toggle.hidden = character;
+        prev.setAttribute('aria-label', character ? 'الشخصية السابقة' : 'الخريطة السابقة');
+        next.setAttribute('aria-label', character ? 'الشخصية التالية' : 'الخريطة التالية');
+        still.resize(character ? 320 : 512, 240);
+        preview.toggleAttribute('data-portrait', character);
+        paint();
+      }
       function paint() {
-        const map = maps[mapIndex];
-        title.textContent = map.name; count.textContent = `${mapIndex + 1} / ${maps.length}`; description.textContent = map.description;
-        sample.mapId = map.id; still.draw(sample);
+        const character = characters.list[characterIndex];
+        const item = choosingCharacter ? character : maps[mapIndex];
+        const index = choosingCharacter ? characterIndex : mapIndex;
+        const total = choosingCharacter ? characters.list.length : maps.length;
+        title.textContent = item.name; count.textContent = `${index + 1} / ${total}`; description.textContent = item.description;
+        if (choosingCharacter) still.portrait(character);
+        else {
+          sample.mapId = item.id; sample.characterId = character.id;
+          still.draw(sample);
+        }
       }
       let touchX = null;
       card.addEventListener('pointerdown', event => { touchX = event.clientX; card.setPointerCapture?.(event.pointerId); });
@@ -409,7 +445,7 @@
         if (!['ArrowLeft', 'ArrowRight'].includes(event.key)) return;
         event.preventDefault(); select(event.key === 'ArrowLeft' ? -1 : 1);
       });
-      paint();
+      switchPicker(false);
       return { panel, release: () => still.destroy() };
     }
     let releasePicker;
@@ -574,18 +610,22 @@
       window.LootLinguaModalFocus?.open(overlay, { dialog: game, onEscape: cleanup });
       syncHUD(); renderer.draw(state);
       const free = new Set(words.map(w => w.meaning)).size < 3;
-      showScreen('اختر خريطة البداية', '', 'انطلق', () => {
+      showScreen('جهّز جولتك', '', 'انطلق', () => {
         if (state.running || destroyed) return;
         const mapId = maps[mapIndex].id;
         E.configureMaps(state, mapId, rotateMaps ? mapIds : []);
-        try { localStorage.setItem(mapKey, JSON.stringify({ mapId, rotate: rotateMaps })); } catch {}
+        state.characterId = characters.list[characterIndex].id;
+        try {
+          localStorage.setItem(mapKey, JSON.stringify({ mapId, rotate: rotateMaps }));
+          localStorage.setItem(characterKey, state.characterId);
+        } catch {}
         releasePicker?.(); releasePicker = null;
         screen.classList.remove('llr-map-screen');
         renderer.draw(state);
         audio.unlock(); screen.hidden = true; state.running = true; state.paused = false; previous = performance.now(); viewport.focus({ preventScroll: true }); raf = requestAnimationFrame(frame);
       });
       screen.classList.add('llr-map-screen');
-      const picker = mapPicker(free); releasePicker = picker.release;
+      const picker = runPicker(free); releasePicker = picker.release;
       screen.querySelector('p').replaceWith(picker.panel);
       return true;
     } catch (error) { cleanup(); window.showToast?.('تعذّر تشغيل الرسومات. حاول مجددًا.', 'warning'); return false; }

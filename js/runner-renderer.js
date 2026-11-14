@@ -858,7 +858,36 @@
         if (impact.kind === 'hit' && age < 140) context.scale(1.07, .9);
       }
       if ((!impact || state.elapsed > impact.freezeUntil) && Number(state.invulnerableUntil) > Number(state.elapsed) && Math.floor(activeTime / 80) % 2) context.globalAlpha = .58;
-      drawExplorer(state, h, phase, pose);
+      drawCharacter(state, h, phase, pose);
+      context.restore();
+    }
+    function drawCharacter(state, h, phase, pose) {
+      const catalog = root.LootLinguaRunnerCharacters;
+      const character = catalog?.get(state.characterId);
+      if (character && character.id !== 'explorer') catalog.draw(context, character, h, phase, pose);
+      else drawExplorer(state, h, phase, pose);
+    }
+    function portrait(character) {
+      if (destroyed) return;
+      const x = width / 2, y = height * .85, h = height * .64;
+      context.setTransform(dpr, 0, 0, dpr, 0, 0);
+      context.globalAlpha = 1;
+      context.lineCap = 'butt';
+      const backdrop = context.createRadialGradient(x, height * .5, 0, x, height * .5, width * .48);
+      backdrop.addColorStop(0, character.accent + '42');
+      backdrop.addColorStop(1, '#091923');
+      context.fillStyle = '#091923'; context.fillRect(0, 0, width, height);
+      context.fillStyle = backdrop; context.fillRect(0, 0, width, height);
+      context.strokeStyle = character.accent + '45'; context.lineWidth = 1;
+      for (const radius of [height * .36, height * .42]) {
+        context.beginPath(); context.arc(x, height * .49, radius, 0, Math.PI * 2); context.stroke();
+      }
+      context.fillStyle = '#122d39'; context.beginPath();
+      context.ellipse(x, y + h * .05, h * .52, h * .095, 0, 0, Math.PI * 2); context.fill();
+      context.strokeStyle = character.accent + '8c'; context.stroke();
+      shadow(x, y + h * .03, h * .31, h * .065, .64);
+      context.save(); context.translate(x, y);
+      drawCharacter({ characterId: character.id }, h, .24, { action: 'run', fraction: 0 });
       context.restore();
     }
     function drawExplorer(state, h, phase, pose) {
@@ -1046,7 +1075,7 @@
       context.clearRect(0, 0, canvas.width, canvas.height);
     }
     resize(options.width || 1, options.height || 1);
-    return Object.freeze({ resize, draw, project, destroy });
+    return Object.freeze({ resize, draw, portrait, project, destroy });
   }
   root.LootLinguaRunnerRenderer = Object.freeze({ createRenderer, FAR, laneColors, palette });
 })(window);

@@ -146,8 +146,38 @@ try {
     await wait(`!!document.querySelector('.llr-screen .llr-primary')`, 'intro');
     const intro = await evaluate(`({title:document.querySelector('.llr-screen h2').textContent,inside:document.querySelector('.llr-game').contains(document.activeElement),locked:document.documentElement.classList.contains('modal-scroll-locked'),inert:document.getElementById('fixtureBackground').inert,dom:document.querySelector('.llr-overlay').querySelectorAll('*').length})`);
     assert.ok(intro.inside && intro.locked && intro.inert);
+    if (width === 320) {
+      const portraits = await evaluate(`(() => {
+        const [mapTab, characterTab] = document.querySelectorAll('.llr-picker-tab');
+        const [prev, next] = document.querySelectorAll('.llr-map-arrow');
+        const preview = document.querySelector('.llr-map-preview');
+        characterTab.click();
+        const captures = [];
+        for (let i = 0; i < 7; i++) {
+          captures.push([document.querySelector('.llr-map-card strong').textContent, preview.toDataURL()]);
+          next.click();
+        }
+        const initial = captures[0][0] === document.querySelector('.llr-map-card strong').textContent;
+        prev.click();
+        const selected = document.querySelector('.llr-map-card strong').textContent;
+        mapTab.click();
+        const map = document.querySelector('.llr-map-card strong').textContent;
+        characterTab.click();
+        return { names: captures.map(c => c[0]), distinct: new Set(captures.map(c => c[1])).size,
+          initial, selected, map, retained: document.querySelector('.llr-map-card strong').textContent };
+      })()`);
+      assert.equal(portraits.names[0], 'المستكشف');
+      assert.equal(portraits.distinct, 7);
+      assert.ok(portraits.initial);
+      assert.equal(portraits.selected, 'غوّاص الأعماق');
+      assert.equal(portraits.retained, portraits.selected);
+      assert.equal(portraits.map, 'المدينة القديمة');
+      await screenshot('characters-mobile');
+      report.checks.push({ name: 'seven distinct character previews, independent map selection and carousel wrap', names: portraits.names });
+    }
     await evaluate(`window.fixtureNotes=0;const NativeAudio=window.AudioContext;if(NativeAudio&&!window.fixtureAudioInstrumented){window.fixtureAudioInstrumented=true;const original=NativeAudio.prototype.createOscillator;NativeAudio.prototype.createOscillator=function(...args){window.fixtureNotes++;return original.apply(this,args)}}document.querySelector('.llr-screen .llr-primary').click()`);
     await wait(`LootLinguaGateRunner.getDiagnostics()?.distance>0`, 'running');
+    if (width === 320) assert.ok(await evaluate(`fixtureLiveState.characterId === 'diver' && localStorage.getItem('lootlingua.runner.character.v1') === 'diver'`));
     await key('Enter'); assert.equal(await evaluate('fixtureAdds'), 0, 'Enter must not submit the background dictionary');
     if (width === 1280) {
       await key('ArrowLeft'); assert.equal((await evaluate('LootLinguaGateRunner.getDiagnostics()')).lane, 0);
