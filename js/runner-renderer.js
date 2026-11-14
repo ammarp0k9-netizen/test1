@@ -3,8 +3,22 @@
   'use strict';
   const FAR = 112;
   const clamp = (value, low, high) => Math.max(low, Math.min(high, value));
+  const smooth = value => {
+    const t = clamp(value, 0, 1);
+    return t * t * (3 - 2 * t);
+  };
   const laneColors = ['#53e5d2', '#f6c56a', '#82a8ff'];
   const palette = Object.freeze({ sky: '#071722', dark: '#061019', stone: '#24414b', edge: '#4d7272', gold: '#efc578', teal: '#5be6d1' });
+  const profiles = {
+    classic:  { roof: [0,.55,.75,.55,0], facade: [.8,1.6,1.8,1.55,.85] },
+    volcano:  { roof: [0,.42,.68,.35,0], facade: [.75,1.35,2.25,1.62,.88] },
+    forest:   { roof: [0,.46,.74,.46,0], facade: [.62,1.52,1.94,1.52,.62] },
+    summit:   { roof: [0,.56,.78,.62,0], facade: [.68,1.72,2.38,1.48,.75] },
+    desert:   { roof: [0,.36,.36,.36,0], facade: [.65,1.24,1.24,1.24,.65] },
+    harbor:   { roof: [0,.2,.2,.2,0], facade: [1.15,1.48,1.48,1.48,1.15] },
+    neon:     { roof: [0,.3,.3,.3,0], facade: [.72,1.32,1.32,1.32,.72] },
+  };
+  const profile = style => profiles[style?.scene] || profiles.classic;
 
   function createRenderer(canvas, options = {}) {
     const { NEAR, VEHICLE_HEIGHT, VEHICLE_RAMP, VEHICLE_EXIT } = root.LootLinguaRunnerEngine.constants;
@@ -14,9 +28,9 @@
     const background = document.createElement('canvas');
     const back = background.getContext('2d', { alpha: false });
     let width = 1, height = 1, dpr = 1, laneWidth = 1, horizon = 1, ground = 1, actorHeight = 1;
-    let destroyed = false, visualLane = 1, lastElapsed = null, activeTime = 0, horizonFog;
+    let destroyed = false, visualLane = 1, lastElapsed = null, activeTime = 0, horizonFog, travelFog, travelFogStyle;
     const getMap = id => root.LootLinguaRunnerMaps?.get(id);
-    let map = getMap('classic'), distance = 0, changeDistance = -100, curve = 0, climb = 0;
+    let map = getMap('classic'), distance = 0, mapOrigin = 0, lastTunnelExit = -Infinity, curve = 0, climb = 0;
     const ordered = [], vehicles = [];
     const metrics = { drawn: 0, culled: 0, dpr: 1 };
     function paintDepth(entity) {
@@ -165,14 +179,14 @@
       laneWidth = Math.min(width * .94, height * 1.24) / 3;
       horizon = height * .285; ground = height * .84;
       actorHeight = clamp(Math.min(height * .2, laneWidth * .85), 57, 128);
-      metrics.dpr = dpr; cacheScene();
+      metrics.dpr = dpr; travelFog = null; cacheScene();
     }
     function cacheScene() {
       cacheBackground();
       const fog = map?.fog || '#355b60';
-      const top = horizon - height * (map?.road ? .23 : .05);
-      horizonFog = context.createLinearGradient(0, top, 0, horizon + height * (map?.road ? .19 : .16));
-      const stops = map?.road ? [[0, '00'], [.21, '16'], [.46, '63'], [.69, 'ab'], [.80, '7a'], [.93, '19'], [1, '00']] :
+      const top = horizon - height * .05;
+      horizonFog = context.createLinearGradient(0, top, 0, horizon + height * (map?.road ? .22 : .16));
+      const stops = map?.road ? [[0, '00'], [.14, '68'], [.28, 'ec'], [.51, 'f2'], [.63, 'd9'], [.81, '52'], [1, '00']] :
         [[0, '00'], [.18, '59'], [.34, 'db'], [.53, 'e0'], [.70, 'ad'], [.86, '38'], [1, '00']];
       for (const [stop, alpha] of stops) horizonFog.addColorStop(stop, fog + alpha);
     }
@@ -305,7 +319,7 @@
       const far = 100 - distance % gap;
       for (let z = far; z >= -9; z -= gap) {
         context.globalAlpha = clamp((96 - z) / 21, 0, 1);
-        for (const lane of [-.93, 2.93]) {
+        for (const lane of [-1.41, 3.41]) {
           const p = project(lane, z), x = p.x, y = p.y, w = laneWidth * p.scale * .65, h = actorHeight * p.scale;
           if (x < -w * 2 || x > width + w * 2) continue;
           if (scene === 'forest') {
@@ -332,6 +346,30 @@
         }
       }
       context.globalAlpha = 1;
+      biomeWalls();
+    }
+    function biomeWalls() {
+      const { scene, face, shade, edge, dark, mark } = map;
+      const wallHeight = scene === 'forest' ? .86 : scene === 'harbor' || scene === 'neon' ? 1.06 : 1.28;
+      const joints = distance % 14;
+      for (const side of [-1, 1]) {
+        const inner = 1 + side * 1.67, outer = inner + side * .23;
+        // Draw the continuous wall over the feet of the scenery behind it.
+        const surface = (lane, level, farthestFirst) => Array.from({ length: 9 }, (_, i) =>
+          [lane, farthestFirst ? FAR - i * (FAR - NEAR) / 8 : NEAR + i * (FAR - NEAR) / 8, level]);
+        mesh([...surface(inner, 0, false), ...surface(inner, wallHeight, true)], face);
+        mesh([...surface(inner, wallHeight, false), ...surface(outer, wallHeight, true)], edge);
+        mesh(surface(inner, wallHeight * .28, false), shade, 1.5);
+        for (let z = 70 - joints; z >= NEAR; z -= 14) {
+          const p = project(inner, z), top = p.y - actorHeight * wallHeight * p.scale;
+          line(context, p.x, p.y, p.x, top, dark, Math.max(1, p.scale * 3));
+          if (z < 39) {
+            const a = project(inner, z + 3), b = project(inner, z + 8), h = wallHeight * .63;
+            mesh([[inner,z+3,h],[inner,z+8,h],[inner,z+8,h*.62],[inner,z+3,h*.62]], shade);
+            line(context, a.x, a.y - actorHeight * h * a.scale, b.x, b.y - actorHeight * h * b.scale, mark, Math.max(.7, a.scale * 1.5));
+          }
+        }
+      }
     }
     function shadow(x, y, w, h, alpha = .3) {
       context.fillStyle = `rgba(0,7,12,${alpha})`; context.beginPath(); context.ellipse(x, y, w, h, 0, 0, Math.PI * 2); context.fill();
@@ -353,8 +391,8 @@
       context.beginPath(); context.arc(0, 0, radius * .65, 0, Math.PI * 2); context.stroke();
       context.fillStyle = '#fff0a6'; context.beginPath(); context.moveTo(0, -radius * .45); context.lineTo(radius * .3, 0); context.lineTo(0, radius * .45); context.lineTo(-radius * .3, 0); context.fill(); context.restore();
     }
-    function biomeObstacle(type, p, w, h) {
-      const { scene, face, shade, light, edge, dark } = map;
+    function biomeObstacle(type, p, w, h, style) {
+      const { scene, face, shade, light, edge, dark } = style;
       const x = p.x, y = p.y, a = x - w / 2, b = x + w / 2;
       if (type === 'overhead' || type === 'duckwall') {
         const bottom = y - h * .58, top = y - h * (type === 'duckwall' ? 1.65 : .76);
@@ -393,7 +431,8 @@
         line(context,a+w*.19,y-(y-top)*.32,b-w*.19,y-(y-top)*.32,light,Math.max(1,p.scale*3));
       }
     }
-    function obstacle(entity, p, foreground = false) {
+    function obstacle(entity, p, foreground = false, style = map) {
+      const map = entity.mapId ? getMap(entity.mapId) : style;
       const type = entity.obstacleType || entity.type;
       const w = laneWidth * .72 * p.scale, h = actorHeight * p.scale;
       if (!foreground && (type !== 'train' || entity.z >= NEAR)) shadow(p.x, p.y, w * .58, h * .1, .36);
@@ -492,7 +531,7 @@
         }
         return;
       }
-      if (map?.road) { biomeObstacle(type, p, w, h); return; }
+      if (map?.road) { biomeObstacle(type, p, w, h, map); return; }
       if (type === 'duckwall') {
         const left = p.x - w / 2, top = p.y - h * 1.65, bottom = p.y - h * .58, panelHeight = bottom - top, depth = h * .1;
         for (const post of [left, left + w * .9]) {
@@ -549,79 +588,108 @@
     }
     function archPath(x, y, w, foot, scene, open = false) {
       context.moveTo(x, foot);
-      if (scene === 'harbor' || scene === 'neon') {
-        const bevel = w * (scene === 'neon' ? .19 : .065);
+      if (scene === 'harbor' || scene === 'neon' || scene === 'desert') {
+        const bevel = w * (scene === 'neon' ? .19 : scene === 'desert' ? .12 : .045);
         context.lineTo(x, y + bevel); context.lineTo(x + bevel, y); context.lineTo(x + w - bevel, y);
         context.lineTo(x + w, y + bevel);
-      } else if (scene === 'volcano' || scene === 'summit') {
+      } else if (scene === 'volcano') {
         context.lineTo(x, y + w * .52); context.lineTo(x + w * .22, y + w * .11);
         context.lineTo(x + w * .59, y); context.lineTo(x + w * .88, y + w * .19); context.lineTo(x + w, y + w * .48);
+      } else if (scene === 'summit') {
+        context.lineTo(x, y + w * .63); context.lineTo(x + w * .31, y + w * .14);
+        context.lineTo(x + w * .48, y); context.lineTo(x + w * .77, y + w * .22); context.lineTo(x + w, y + w * .58);
+      } else if (scene === 'forest') {
+        context.lineTo(x, y + w * .52);
+        context.quadraticCurveTo(x + w * .06, y + w * .20, x + w * .5, y);
+        context.quadraticCurveTo(x + w * .94, y + w * .20, x + w, y + w * .52);
       } else {
-        context.lineTo(x, y + w * (scene === 'desert' ? .26 : .48));
+        context.lineTo(x, y + w * .48);
         context.quadraticCurveTo(x, y, x + w / 2, y); context.quadraticCurveTo(x + w, y, x + w, y + w * .48);
       }
       context.lineTo(x + w, foot); if (!open) context.closePath();
     }
-    function portalPath(z, transit = false, scene = map?.scene) {
-      const headroom = Math.max(2.4, (ground - horizon) / actorHeight + .7);
-      const first = transit ? 1 : 0, last = transit ? 1 : 2;
-      for (let lane = first; lane <= last; lane++) {
-        const p = project(lane, z), w = laneWidth * (transit ? 3.24 : .9) * p.scale, h = actorHeight * headroom * p.scale;
-        archPath(p.x - w / 2, p.y - h, w, p.y, scene);
+    function tunnelHeadroom(style) {
+      return style?.road ? 2.85 : Math.max(2.4, (ground - horizon) / actorHeight + .7);
+    }
+    function portalPath(z, transit, style, open = false) {
+      if (transit) { ringPath(tunnelRing(z, style), open); return; }
+      const headroom = tunnelHeadroom(style);
+      for (let lane = 0; lane < 3; lane++) {
+        const p = project(lane, z), w = laneWidth * .9 * p.scale, h = actorHeight * headroom * p.scale;
+        archPath(p.x - w / 2, p.y - h, w, p.y, style?.scene, open);
       }
     }
     function tunnelFloor(entity) {
       const front = Math.max(NEAR, entity.z), end = Math.min(FAR + 12, entity.z + (entity.length || 42));
       if (end <= front) return;
-      const style = getMap(entity.mapId) || map;
+      const style = entity.mapId ? getMap(entity.mapId) : map;
       strip(-.62, 2.62, front, end, style?.dark || '#10232d');
       for (const lane of [.5, 1.5]) {
-        strip(lane - .009, lane + .009, front, end, style?.mark || '#406a70');
+        const half = style?.road ? .009 : .006;
+        strip(lane - half, lane + half, front, end, style?.mark || '#406a70');
       }
     }
     function tunnelRing(z, style = map) {
-      const headroom = Math.max(2.4, (ground - horizon) / actorHeight + .7);
-      const squared = style?.scene === 'harbor' || style?.scene === 'neon';
-      const rises = squared ? [0, .23, .23, .23, 0] : [0, .55, .75, .55, 0];
+      const headroom = tunnelHeadroom(style);
+      const rises = profile(style).roof;
       return [0, .25, .5, .75, 1].map((t, index) => {
         const p = project(-.62 + 3.24 * t, z), h = headroom + rises[index];
         return { x: p.x, y: p.y - actorHeight * h * p.scale, ground: p.y, scale: p.scale };
       });
     }
+    function ringPath(arch, open = false) {
+      context.moveTo(arch[0].x, arch[0].ground);
+      for (const p of arch) context.lineTo(p.x, p.y);
+      context.lineTo(arch[4].x, arch[4].ground);
+      if (!open) context.closePath();
+    }
     function clipToTunnel(entity, passage) {
-      if (!passage || entity.z < passage.z) return;
+      const end = passage ? passage.z + (passage.length || 42) : NEAR;
+      if (!passage || entity.z < passage.z || end <= NEAR) return;
       context.beginPath();
-      const style = getMap(passage.mapId) || map;
-      if (passage.z >= 0) portalPath(passage.z, passage.kind === 'passage', style?.scene);
+      const style = passage.mapId ? getMap(passage.mapId) : map;
+      if (passage.z >= 0) portalPath(passage.z, passage.kind === 'passage', style);
       else {
         // Bound each depth slice to the same ceiling and walls as the shell.
         // Beyond the exit, the visible world is framed by the exit aperture.
-        const arch = tunnelRing(Math.max(NEAR, Math.min(entity.z, passage.z + passage.length)), style);
-        context.moveTo(arch[0].x, arch[0].ground);
-        for (const point of arch) context.lineTo(point.x, point.y);
-        context.lineTo(arch[4].x, arch[4].ground); context.closePath();
+        ringPath(tunnelRing(Math.max(NEAR, Math.min(entity.z, end)), style));
       }
       context.clip();
     }
     function tunnelInterior(entity) {
       const length = entity.length || 42, front = Math.max(NEAR, entity.z), end = entity.z + length;
-      const style = getMap(entity.mapId) || map, transit = entity.kind === 'passage';
+      const style = entity.mapId ? getMap(entity.mapId) : map, transit = entity.kind === 'passage';
       if (end < NEAR) return;
       context.save();
-      if (entity.z > NEAR) { context.beginPath(); portalPath(entity.z, transit, style?.scene); context.clip(); }
+      if (entity.z > NEAR) { context.beginPath(); portalPath(entity.z, transit, style); context.clip(); }
       const ring = z => tunnelRing(z, style);
       const near = ring(front), far = ring(end);
-      if (transit && entity.z <= NEAR && end > 0) {
+      if (entity.z <= NEAR) {
+        // An opaque shell backing closes subpixel gaps between wall faces.
+        // The outdoor world is visible only through the far opening.
         context.beginPath(); context.rect(0, 0, width, height);
-        context.moveTo(far[0].x, far[0].ground); for (const point of far) context.lineTo(point.x, point.y);
-        context.lineTo(far[4].x, far[4].ground); context.closePath();
+        ringPath(far);
         context.fillStyle = style?.dark || '#10232d'; context.fill('evenodd');
         tunnelFloor(entity);
-        if (!entity.changed) {
-          context.beginPath(); context.moveTo(far[0].x, far[0].ground);
-          for (const point of far) context.lineTo(point.x, point.y);
-          context.lineTo(far[4].x, far[4].ground); context.closePath();
-          context.fillStyle = style?.dark || '#10232d'; context.fill();
+      }
+      if (transit) {
+        // Keep the exit opaque across the map swap. Reveal the new landscape
+        // through the aperture only after it has been drawn behind the shell.
+        const alpha = travelHaze(entity);
+        if (alpha > 0) {
+          if (!travelFog || travelFogStyle !== style) {
+            travelFogStyle = style;
+            travelFog = context.createLinearGradient(0, horizon - height * .12, 0, horizon + height * .25);
+            travelFog.addColorStop(0, style?.shade || '#203d46');
+            travelFog.addColorStop(.62, style?.fog || '#355b60');
+            travelFog.addColorStop(1, style?.dark || '#10232d');
+          }
+          const previous = context.globalAlpha;
+          context.globalAlpha = previous * alpha;
+          context.beginPath(); ringPath(far);
+          context.fillStyle = travelFog; context.fill();
+          context.strokeStyle = travelFog; context.lineWidth = 1.5; context.stroke();
+          context.globalAlpha = previous;
         }
       }
       quad(context, near[0].x, near[0].ground, far[0].x, far[0].ground, far[0].x, far[0].y, near[0].x, near[0].y, style?.face || '#203d46');
@@ -632,9 +700,7 @@
         if (z < NEAR || z > FAR) continue;
         const arch = ring(z);
         context.strokeStyle = offset === length ? style?.edge || '#7ca7a0' : style?.face || '#36575f'; context.lineWidth = Math.max(1, arch[0].scale * 4);
-        context.beginPath(); context.moveTo(arch[0].x, arch[0].ground);
-        for (const p of arch) context.lineTo(p.x, p.y);
-        context.lineTo(arch[4].x, arch[4].ground); context.stroke();
+        context.beginPath(); ringPath(arch, true); context.stroke();
       }
       for (let offset = 8; offset < length; offset += 18) {
         const z = entity.z + offset;
@@ -646,41 +712,97 @@
       }
       context.restore();
     }
+    function travelHaze(passage) {
+      return 1 - smooth((54 - (passage.z + passage.length)) / 56);
+    }
     function gate(entity, state) {
       if (entity.z <= NEAR) return;
-      const headroom = Math.max(2.4, (ground - horizon) / actorHeight + .7);
-      const style = getMap(entity.mapId) || map, scene = style?.scene, transit = entity.kind === 'passage';
-      if (!entity.resolved) {
-        if (!transit) { context.beginPath(); portalPath(entity.z, false, scene); context.fillStyle = '#030a12'; context.fill(); }
+      const style = entity.mapId ? getMap(entity.mapId) : map;
+      const headroom = tunnelHeadroom(style);
+      const scene = style?.scene, transit = entity.kind === 'passage';
+      if (!entity.resolved && !transit) {
+        context.beginPath(); portalPath(entity.z, false, style);
+        context.fillStyle = style?.road ? style.dark : '#030a12'; context.fill();
+        if (style?.road) {
+          const alpha = context.globalAlpha;
+          context.globalAlpha = alpha * .68; context.fillStyle = '#030a12'; context.fill();
+          context.globalAlpha = alpha;
+        }
       }
       const left = project(-2.4, entity.z), right = project(4.4, entity.z), center = project(1, entity.z);
-      const peak = center.y - actorHeight * (headroom + 1.8) * center.scale;
+      const unit = actorHeight * center.scale, roofBase = center.y - headroom * unit;
+      const crest = profile(style).facade;
+      // Footings occupy the same ground plane as the shoulders. Leave the
+      // lane openings clear and build the facade up from these foundations.
+      for (const side of [-1, 1]) {
+        const inner = 1 + side * 1.48, outer = 1 + side * 3.4;
+        mesh([[inner,entity.z,0],[outer,entity.z,0],[outer,entity.z-4,0],[inner,entity.z-4,0]], style?.shade || '#28414b');
+        mesh([[inner,entity.z,0],[inner,entity.z-4,0],[inner,entity.z-4,.32],[inner,entity.z,.32]], style?.face || '#3c565d');
+      }
       const mountainPath = () => {
-        if (scene === 'harbor' || scene === 'neon' || scene === 'desert') {
-          context.moveTo(left.x, left.y); context.lineTo(left.x, peak + actorHeight * .69 * center.scale);
-          context.lineTo(right.x, peak + actorHeight * .69 * center.scale); context.lineTo(right.x, right.y); context.closePath(); return;
+        context.moveTo(left.x, left.y);
+        if (!style?.road) {
+          const peak = roofBase - unit * 1.8;
+          context.lineTo(left.x, peak + unit); context.lineTo(center.x - laneWidth * center.scale, peak + unit * .2);
+          context.lineTo(center.x + laneWidth * .3 * center.scale, peak); context.lineTo(right.x, peak + unit * .95);
+        } else {
+          crest.forEach((h, i) => context.lineTo(left.x + (right.x - left.x) * i / (crest.length - 1), roofBase - h * unit));
         }
-        context.moveTo(left.x, left.y); context.lineTo(left.x, peak + actorHeight * center.scale);
-        context.lineTo(center.x - laneWidth * center.scale, peak + actorHeight * .2 * center.scale);
-        context.lineTo(center.x + laneWidth * .3 * center.scale, peak);
-        context.lineTo(right.x, peak + actorHeight * .95 * center.scale); context.lineTo(right.x, right.y); context.closePath();
+        context.lineTo(right.x, right.y); context.closePath();
       };
-      context.save(); context.beginPath(); mountainPath(); portalPath(entity.z, transit, scene); context.clip('evenodd');
+      context.save(); context.beginPath(); mountainPath(); portalPath(entity.z, transit, style); context.clip('evenodd');
+      const peak = roofBase - unit * (style?.road ? 2.45 : 1.8);
       context.fillStyle = style?.shade || '#28414b'; context.fillRect(0, 0, width, height);
       quad(context, left.x, left.y, left.x, peak, center.x, peak, center.x - laneWidth * center.scale, center.y, style?.face || '#3c565d');
       quad(context, center.x, peak, right.x, peak, right.x, right.y, center.x + laneWidth * .8 * center.scale, center.y, style?.dark || '#1d3440');
-      line(context, left.x, peak + actorHeight * center.scale, right.x, peak + actorHeight * .95 * center.scale, style?.edge || '#526c6d', Math.max(1, center.scale * 3));
-      if (style?.road) for (let i = -2; i <= 2; i++) {
-        const p = project(1 + i * 1.1, entity.z), top = peak + actorHeight * 1.05 * center.scale;
-        line(context, p.x, top, p.x + (scene === 'forest' ? i * laneWidth * .2 * center.scale : 0), p.y, style.face, Math.max(1, center.scale * 4));
+      if (!style?.road) {
+        line(context, left.x, roofBase - unit * .8, right.x, roofBase - unit * .85, '#526c6d', Math.max(1, center.scale * 3));
+      } else {
+        const built = scene === 'desert' || scene === 'harbor' || scene === 'neon';
+        for (let i = -3; i <= 3; i++) {
+          const p = project(1 + i * .78, entity.z);
+          const dx = built ? 0 : laneWidth * center.scale * (.21 + i * .04);
+          line(context, p.x - dx, peak, p.x + dx, p.y, style.face, Math.max(1, center.scale * 6));
+        }
+        if (built) {
+          line(context, left.x, roofBase - unit * .74, right.x, roofBase - unit * .74, style.edge, Math.max(1, center.scale * 3));
+          line(context, left.x, roofBase - unit * .46, right.x, roofBase - unit * .46, style.mark, Math.max(1, center.scale * 2));
+          for (const side of [-1, 1]) {
+            const x = center.x + side * laneWidth * center.scale * 1.97;
+            const w = laneWidth * center.scale * (scene === 'desert' ? .32 : .56);
+            const y = roofBase + unit * .56;
+            context.fillStyle = style.dark; context.fillRect(x - w / 2, y, w, unit * .65);
+            for (let i = 0; i < 3; i++) {
+              const stripe = y + unit * (.14 + i * .16);
+              line(context, x - w * .35, stripe, x + w * .35, stripe, style.light, Math.max(1, center.scale * 2));
+            }
+          }
+        } else {
+          for (const side of [-1, 1]) {
+            const x = center.x + side * laneWidth * center.scale * 1.94;
+            const w = laneWidth * center.scale * .76;
+            if (scene === 'forest') {
+              polygon(context, [x-w*.63,center.y,x-w*.3,roofBase-unit*.3,x-w*.08,roofBase-unit*1.12,x+w*.16,roofBase-unit*.32,x+w*.55,center.y], '#344936');
+              line(context, x-w*.14, center.y, x-w*.06, roofBase-unit*.93, style.mark, Math.max(1, center.scale * 4));
+            } else {
+              const color = scene === 'summit' ? style.light : style.edge;
+              polygon(context, [x-w*.57,center.y-unit*.75,x-w*.16,roofBase-unit*.49,x+w*.32,roofBase-unit*.83,x+w*.04,roofBase+unit*.33,x+w*.42,roofBase+unit*.57], color);
+            }
+          }
+        }
       }
       context.restore();
-      for (let lane = transit ? 1 : 0; lane <= (transit ? 1 : 2); lane++) {
-        const p = project(lane, entity.z), w = laneWidth * (transit ? 3.24 : .9) * p.scale, h = actorHeight * headroom * p.scale;
+      if (transit) {
+        context.beginPath(); portalPath(entity.z, true, style, true);
+        context.strokeStyle = style?.edge || '#7ca7a0'; context.lineWidth = Math.max(2, center.scale * 7); context.stroke();
+        return;
+      }
+      for (let lane = 0; lane < 3; lane++) {
+        const p = project(lane, entity.z), w = laneWidth * .9 * p.scale, h = actorHeight * headroom * p.scale;
         const x = p.x - w / 2, y = p.y - h, rim = Math.max(2, w * .085);
-        context.strokeStyle = style?.face || '#405861'; context.lineWidth = rim * (transit ? .75 : 1.5);
+        context.strokeStyle = style?.face || '#405861'; context.lineWidth = rim * 1.5;
         context.beginPath(); archPath(x, y, w, p.y, scene, true); context.stroke();
-        context.strokeStyle = transit ? style?.edge || '#7ca7a0' : entity.resolved && state.feedback?.chosenLane === lane ? state.feedback.correct ? '#81f6a5' : '#fa8278' : laneColors[lane];
+        context.strokeStyle = entity.resolved && state.feedback?.chosenLane === lane ? state.feedback.correct ? '#81f6a5' : '#fa8278' : laneColors[lane];
         context.lineWidth = Math.max(1, rim * .25); context.stroke();
       }
     }
@@ -808,13 +930,23 @@
       const nextMap = getMap(state.mapId);
       if (nextMap !== map) {
         map = nextMap;
-        changeDistance = state.mapTunnel ? distance : distance - 100;
+        mapOrigin = distance;
         cacheScene();
       }
       const corridor = state.mapTunnel;
-      const shapeMix = corridor ? (corridor.changed ? clamp((distance - changeDistance) / 42, 0, 1) : clamp((corridor.z + 27) / 42, 0, 1)) : 1;
-      curve = (map?.curve || 0) * Math.sin(distance / 160) * shapeMix;
-      climb = (map?.climb || 0) * (.67 + .33 * Math.sin(distance / 95)) * shapeMix;
+      const tunnel = state.gate || corridor || (state.entities || []).find(item => item.kind === 'gate' && item.active !== false);
+      const tunnelEnd = tunnel ? tunnel.z + (tunnel.length || 42) : NEAR;
+      if (tunnel) lastTunnelExit = distance + Math.max(0, tunnelEnd - NEAR);
+      const travelled = Math.max(0, distance - mapOrigin);
+      const section = Math.floor(travelled / 330);
+      const progress = (travelled % 330 - 108) / 142;
+      const pulse = progress > 0 && progress < 1 ? Math.sin(progress * Math.PI) ** 2 : 0;
+      // Leave straight stretches between bends and rises, and lead into
+      // each portal along a level road without changing lane coordinates.
+      const clearance = tunnel ? smooth((tunnel.z - 22) / 42) : smooth((distance - lastTunnelExit) / 30);
+      const tilt = pulse * clearance;
+      curve = section % 3 !== 1 ? (map?.curve || 0) * tilt * (section % 2 ? -1 : 1) : 0;
+      climb = section % 3 === 1 ? (map?.climb || 0) * tilt : 0;
       const elapsed = Number(state.elapsed) || 0;
       const delta = lastElapsed === null ? 16 : clamp(elapsed - lastElapsed, 0, 80);
       if (lastElapsed === null || elapsed < lastElapsed) visualLane = clamp(Number(state.lane) || 0, 0, 2);
@@ -822,6 +954,13 @@
       context.setTransform(dpr, 0, 0, dpr, 0, 0); context.globalAlpha = 1;
       context.drawImage(background, 0, 0, background.width, background.height, 0, 0, width, height);
       road(distance); environment(distance);
+      const inside = tunnel && tunnel.z <= 0;
+      const paintFog = () => {
+        context.fillStyle = horizonFog;
+        context.fillRect(0, horizon - height * .05, width, height * (map?.road ? .27 : .21));
+      };
+      const passage = tunnel && tunnel.z <= FAR && tunnelEnd > NEAR ? tunnel : null;
+      if (inside) paintFog();
       ordered.length = vehicles.length = 0; metrics.drawn = 0; metrics.culled = 0; metrics.foreground = 0;
       for (const entity of state.entities || []) {
         if (!entity || entity.active === false || entity.z + (entity.length || 0) + (entity.obstacleType === 'train' ? VEHICLE_EXIT : 0) < NEAR || entity.z > FAR || entity.collected || entity.hit || !inViewport(entity)) { metrics.culled++; continue; }
@@ -829,31 +968,33 @@
         if (entity.obstacleType === 'train') vehicles.push(entity);
       }
       ordered.sort(byDepth);
-      const readingGate = ordered.find(item => item.kind === 'gate' && !item.resolved);
-      const passage = ordered.find(item => item.kind === 'gate') || (corridor?.z <= FAR ? corridor : null);
+      const readingGate = passage?.kind === 'gate' && !passage.resolved ? passage : null;
       const tunnelAlpha = passage?.kind === 'passage' ? clamp((96 - passage.z) / 17, 0, 1) : passage ? opacity(passage, elapsed) : 0;
       if (passage) { context.globalAlpha = tunnelAlpha; tunnelFloor(passage); tunnelInterior(passage); context.globalAlpha = 1; }
       const pose = root.LootLinguaRunnerEngine.getPose(state);
       const inFront = entity => entity.kind === 'obstacle' && entity.obstacleType !== 'train' && entity.z < 0 && (entity.obstacleType !== 'overhead' || pose.floor < .88);
-      for (const entity of ordered) {
-        if (readingGate && entity !== readingGate && entity.z > readingGate.z) { metrics.culled++; continue; }
-        if (entity.kind === 'gate' || inFront(entity)) continue;
+      const drawEntity = entity => {
+        if (readingGate && entity !== readingGate && entity.z > readingGate.z) { metrics.culled++; return; }
+        if (entity.kind === 'gate' || inFront(entity)) return;
+        const exitReveal = corridor && entity.z >= corridor.z + corridor.length ? 1 - travelHaze(corridor) : 1;
+        const alpha = opacity(entity, elapsed) * exitReveal;
+        if (alpha <= 0) { metrics.culled++; return; }
         context.save(); clipToTunnel(entity, passage);
-        context.globalAlpha = opacity(entity, elapsed);
+        context.globalAlpha = alpha;
         const p = project(entity.lane ?? 1, entity.z);
         if (entity.kind === 'coin') coin(entity, p, elapsed);
-        else obstacle(entity, p);
+        else obstacle(entity, p, false, corridor && entity.z < corridor.z + corridor.length ? getMap(corridor.mapId) : map);
         context.restore();
         metrics.drawn++;
-      }
+      };
+      for (const entity of ordered) if (!passage || entity.z >= passage.z) drawEntity(entity);
       context.globalAlpha = 1;
       // One cached gradient softens distant births without hiding the road's
       // nearby hazards. The tunnel facade stays opaque in front of this haze.
-      if (!corridor || corridor.z > NEAR) {
-        context.fillStyle = horizonFog; context.fillRect(0, horizon - height * (map?.road ? .23 : .05), width, height * (map?.road ? .42 : .21));
-      }
+      if (!inside) paintFog();
       if (passage) { context.globalAlpha = tunnelAlpha; gate(passage, state); metrics.drawn++; }
       context.globalAlpha = 1;
+      if (passage) for (const entity of ordered) if (entity.z < passage.z) drawEntity(entity);
       actor(state, delta);
       // The vehicle supports the feet, so it stays behind the actor. A beam
       // already passed by the feet is in front of the crouched body instead.

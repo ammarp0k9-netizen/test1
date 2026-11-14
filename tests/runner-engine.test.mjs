@@ -5,6 +5,7 @@ import vm from 'node:vm';
 
 const root = {};
 vm.runInNewContext(await readFile(new URL('../js/runner-engine.js', import.meta.url), 'utf8'), { window: root });
+vm.runInNewContext(await readFile(new URL('../js/runner-maps.js', import.meta.url), 'utf8'), { window: root });
 const engine = root.LootLinguaRunnerEngine;
 const words = [{ word: 'apple', meaning: 'تفاحة' }, { word: 'book', meaning: 'كتاب' }, { word: 'sun', meaning: 'شمس' }, { word: 'moon', meaning: 'قمر' }];
 const copy = value => structuredClone(value);
@@ -14,23 +15,33 @@ function entity(state, values) { const item = state._pool.pop(); Object.assign(i
 
 test('map rotation starts in the selected map and changes only deep inside a separate tunnel', () => {
   const state = make([]);
-  const maps = ['volcano', 'forest', 'summit', 'desert', 'harbor', 'neon'];
+  const maps = root.LootLinguaRunnerMaps.maps.map(map => map.id);
+  assert.equal(maps.length, 7);
+  assert.ok(maps.includes('classic'));
   engine.configureMaps(state, 'forest', maps);
   const visited = new Set([state.mapId]);
   const { MAP_INTERVAL_MIN, MAP_INTERVAL_MAX, MAP_SWITCH_DEPTH } = engine.constants;
   assert.equal(state.mapId, 'forest');
-  for (let step = 0; step < 6500 && visited.size < maps.length; step++) {
+  let arrivals = 0;
+  for (let step = 0; step < 9000 && arrivals < maps.length - 1; step++) {
     const previous = state.mapId;
     engine.update(state, 50);
     assert.ok(state._nextMapAt >= MAP_INTERVAL_MIN && state._nextMapAt <= MAP_INTERVAL_MAX);
+    if (state.mapTunnel) assert.ok(state._mapTime >= 34000);
+    for (const event of state.events) if (event.type === 'map-arrival') {
+      assert.equal(event.mapId, state.mapId);
+      assert.ok(state.mapTunnel.changed && state.mapTunnel.z + state.mapTunnel.length <= 14);
+      arrivals++;
+    }
     if (state.mapId === previous) continue;
-    assert.ok(state.mapTunnel?.z <= MAP_SWITCH_DEPTH && state.mapTunnel.z + state.mapTunnel.length > 0);
+    assert.ok(state.mapTunnel?.z <= MAP_SWITCH_DEPTH && state.mapTunnel.z + state.mapTunnel.length > 54);
     assert.equal(state.mapTunnel.mapId, previous);
-    assert.equal(state.events.filter(event => event.type === 'map-change').length, 1);
+    assert.equal(state.events.some(event => event.type === 'map-arrival'), false);
     assert.ok(!visited.has(state.mapId));
     visited.add(state.mapId);
   }
   assert.equal(visited.size, maps.length);
+  assert.equal(arrivals, maps.length - 1);
 });
 
 test('a fixed map persists and a due translation gate waits for the travel tunnel to clear', () => {
@@ -50,6 +61,7 @@ test('a fixed map persists and a due translation gate waits for the travel tunne
   assert.equal(fixed.mapId, 'desert');
   engine.update(fixed, 50);
   assert.equal(fixed.gate?.kind, 'gate');
+  assert.equal(fixed.gate.mapId, 'desert');
 });
 
 test('normalization and seeded updates are deterministic and never mutate source dictionary records', () => {

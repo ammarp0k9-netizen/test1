@@ -6,7 +6,7 @@
   const TUNNEL_LENGTH = 42, LONG_TUNNEL_MIN = 240, MIN_ROW_MS = 780;
   const IMPACT_FREEZE_MS = 260, RECOVERY_START_MS = 140;
   const GATE_BLOCKER_OFFSET = 6, GATE_COMMIT_Z = 2.5;
-  const MAP_INTERVAL_MIN = 16000, MAP_INTERVAL_MAX = 24000, MAP_TUNNEL_LENGTH = 72, MAP_SWITCH_DEPTH = -28;
+  const MAP_INTERVAL_MIN = 34000, MAP_INTERVAL_MAX = 48000, MAP_TUNNEL_LENGTH = 92, MAP_SWITCH_DEPTH = -36;
   const MAX_VEHICLE_LENGTH = 20;
   // Templates describe relationships, then lanes are shuffled. A truck can
   // accompany any normal hazard, not just another truck.
@@ -192,7 +192,9 @@
     const entity = state._pool.pop();
     if (!entity) return null;
     for (const key of Object.keys(entity)) delete entity[key];
-    Object.assign(entity, { id: state._nextId++, active: true, resolved: false, bornAt: state.elapsed }, data);
+    const passage = state.mapTunnel;
+    const mapId = passage && data.z >= passage.z + passage.length ? passage.destination : state.mapId;
+    Object.assign(entity, { id: state._nextId++, active: true, resolved: false, bornAt: state.elapsed, mapId }, data);
     state.entities.push(entity); return entity;
   }
   function retire(state, index) {
@@ -252,7 +254,7 @@
       }
     }
     const length = state._tunnelLengths.pop();
-    return { kind: 'gate', lane: 1, z: GATE_SPAWN_Z, length, word: prompt.word,
+    return { kind: 'gate', lane: 1, z: GATE_SPAWN_Z, length, mapId: state.mapId, word: prompt.word,
       options, correctLane: options.indexOf(prompt.meaning), correctMeaning: prompt.meaning };
   }
   function hasGateWords(state) { return state._canGate; }
@@ -373,6 +375,7 @@
       // Recoil the whole scene together, keeping row geometry and tunnel depth intact.
       const recoil = Math.max(0, 3 - obstacle.z);
       for (const item of state.entities) item.z += recoil;
+      if (state.mapTunnel) state.mapTunnel.z += recoil;
       state.distance = Math.max(0, state.distance - recoil);
       state.action = 'run'; state.actionUntil = 0; state._queuedAction = null; state.jumpOrigin = 0;
       const plan = state.autoRecovery ? chooseRecovery(state, obstacle) : null;
@@ -442,7 +445,10 @@
       if (!mapTunnel.changed && mapTunnel.z <= MAP_SWITCH_DEPTH) {
         mapTunnel.changed = true;
         state.mapId = mapTunnel.destination;
-        emit(state, { type: 'map-change', mapId: state.mapId });
+      }
+      if (!mapTunnel.arrived && mapTunnel.z + mapTunnel.length <= 14) {
+        mapTunnel.arrived = true;
+        emit(state, { type: 'map-arrival', mapId: state.mapId });
       }
       if (mapTunnel.z + mapTunnel.length < NEAR) {
         state.mapTunnel = null; state._mapTime = 0; state._nextMapAt = mapInterval(state);

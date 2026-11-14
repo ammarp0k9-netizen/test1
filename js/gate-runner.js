@@ -107,11 +107,11 @@
     });
     const css = document.querySelector('link[data-runner-style]');
     const styles = css ? Promise.resolve() : new Promise((resolve, reject) => {
-      const link = document.createElement('link'); link.rel = 'stylesheet'; link.href = 'runner.css?v=20261114-maps-1';
+      const link = document.createElement('link'); link.rel = 'stylesheet'; link.href = 'runner.css?v=20261114-maps-2';
       link.dataset.runnerStyle = ''; link.onload = resolve; link.onerror = () => { link.remove(); reject(new Error('Runner styles unavailable')); };
       document.head.append(link);
     });
-    resources = Promise.all([styles, module('LootLinguaRunnerMaps', 'js/runner-maps.js?v=20261114-maps-1'), module('LootLinguaRunnerEngine', 'js/runner-engine.js?v=20261114-maps-1'), module('LootLinguaRunnerRenderer', 'js/runner-renderer.js?v=20261114-maps-1')]).catch(error => { resources = null; throw error; });
+    resources = Promise.all([styles, module('LootLinguaRunnerMaps', 'js/runner-maps.js?v=20261114-maps-2'), module('LootLinguaRunnerEngine', 'js/runner-engine.js?v=20261114-maps-2'), module('LootLinguaRunnerRenderer', 'js/runner-renderer.js?v=20261114-maps-2')]).catch(error => { resources = null; throw error; });
     return resources;
   }
   function button(label, cls, action) {
@@ -512,7 +512,7 @@
       E.update(state, delta);
       if (mapNoticeUntil && state.elapsed >= mapNoticeUntil) { mapNotice.hidden = true; mapNoticeUntil = 0; }
       for (const event of state.events) {
-        if (event.type === 'map-change') {
+        if (event.type === 'map-arrival') {
           mapNotice.textContent = catalog.get(event.mapId).name;
           mapNotice.hidden = false; mapNoticeUntil = state.elapsed + 2200;
         }
