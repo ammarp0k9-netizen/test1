@@ -44,7 +44,7 @@ test('map rotation starts in the selected map and changes only deep inside a sep
   assert.equal(arrivals, maps.length - 1);
 });
 
-test('a fixed map persists and a due translation gate waits for the travel tunnel to clear', () => {
+test('a fixed map persists and even an overdue question leaves a stretch of outdoor running after a travel tunnel', () => {
   const fixed = make();
   engine.configureMaps(fixed, 'harbor');
   for (let i = 0; i < 1000; i++) engine.update(fixed, 50);
@@ -52,6 +52,10 @@ test('a fixed map persists and a due translation gate waits for the travel tunne
   assert.equal(fixed.mapTunnel, null);
   engine.configureMaps(fixed, 'summit', ['summit', 'desert']);
   fixed._mapTime = fixed._nextMapAt;
+  fixed._nextGateAt = fixed.elapsed + 8500;
+  engine.update(fixed, 50);
+  assert.equal(fixed.mapTunnel?.kind, 'passage');
+  // Simulate a question becoming due while the travel tunnel is active.
   fixed._nextGateAt = fixed.elapsed;
   for (let i = 0; i < 500; i++) {
     engine.update(fixed, 50);
@@ -59,9 +63,55 @@ test('a fixed map persists and a due translation gate waits for the travel tunne
     assert.equal(fixed.gate, null);
   }
   assert.equal(fixed.mapId, 'desert');
+  const { TUNNEL_GAP_MS } = engine.constants;
+  for (let duration = 0; duration < TUNNEL_GAP_MS; duration += 50) {
+    engine.update(fixed, 50);
+    assert.equal(fixed.gate, null);
+  }
   engine.update(fixed, 50);
   assert.equal(fixed.gate?.kind, 'gate');
   assert.equal(fixed.gate.mapId, 'desert');
+  assert.equal(fixed.gate.destination, undefined);
+});
+
+test('a nearby map change can share a question tunnel, preserving answers and revealing the new map once', () => {
+  const state = make();
+  engine.configureMaps(state, 'forest', ['forest', 'volcano']);
+  state._mapTime = state._nextMapAt;
+  state._nextGateAt = 800;
+  engine.update(state, 50);
+  assert.equal(state.mapTunnel, null);
+  assert.equal(state.gate, null);
+  state._random = () => 0;
+  while (!state.gate) engine.update(state, 50);
+  const gate = state.gate;
+  assert.equal(gate.destination, 'volcano');
+  assert.equal(gate.mapId, 'forest');
+  assert.ok(gate.length >= 92);
+  assert.equal(state.mapId, 'forest');
+  assert.equal(state.mapTunnel, null);
+  engine.move(state, gate.correctLane);
+  let answers = 0;
+  let arrivals = 0;
+  while (state.gate) {
+    engine.update(state, 50);
+    for (const event of state.events) {
+      if (event.type === 'gate') {
+        assert.equal(event.correct, true);
+        assert.equal(state.mapId, 'forest');
+        answers++;
+      } else if (event.type === 'map-arrival') {
+        assert.ok(gate.resolved && gate.changed && gate.z + gate.length <= 14);
+        assert.equal(event.mapId, 'volcano');
+        arrivals++;
+      }
+    }
+  }
+  assert.equal(answers, 1);
+  assert.equal(arrivals, 1);
+  assert.equal(state.mapId, 'volcano');
+  assert.equal(state._mapTime, 0);
+  assert.equal(state._outdoorSinceTunnel, 0);
 });
 
 test('normalization and seeded updates are deterministic and never mutate source dictionary records', () => {

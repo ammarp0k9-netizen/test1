@@ -111,7 +111,7 @@
       link.dataset.runnerStyle = ''; link.onload = resolve; link.onerror = () => { link.remove(); reject(new Error('Runner styles unavailable')); };
       document.head.append(link);
     });
-    resources = Promise.all([styles, module('LootLinguaRunnerMaps', 'js/runner-maps.js?v=20261114-maps-2'), module('LootLinguaRunnerEngine', 'js/runner-engine.js?v=20261114-maps-2'), module('LootLinguaRunnerRenderer', 'js/runner-renderer.js?v=20261114-maps-2')]).catch(error => { resources = null; throw error; });
+    resources = Promise.all([styles, module('LootLinguaRunnerMaps', 'js/runner-maps.js?v=20261114-maps-3'), module('LootLinguaRunnerEngine', 'js/runner-engine.js?v=20261114-maps-3'), module('LootLinguaRunnerRenderer', 'js/runner-renderer.js?v=20261114-maps-3')]).catch(error => { resources = null; throw error; });
     return resources;
   }
   function button(label, cls, action) {

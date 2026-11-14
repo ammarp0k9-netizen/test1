@@ -28,7 +28,7 @@
     const background = document.createElement('canvas');
     const back = background.getContext('2d', { alpha: false });
     let width = 1, height = 1, dpr = 1, laneWidth = 1, horizon = 1, ground = 1, actorHeight = 1;
-    let destroyed = false, visualLane = 1, lastElapsed = null, activeTime = 0, horizonFog, travelFog, travelFogStyle;
+    let destroyed = false, visualLane = 1, lastElapsed = null, activeTime = 0, horizonFog, travelFog, travelFogStyle, interiorFog, interiorFogStyle;
     const getMap = id => root.LootLinguaRunnerMaps?.get(id);
     let map = getMap('classic'), distance = 0, mapOrigin = 0, lastTunnelExit = -Infinity, curve = 0, climb = 0;
     const ordered = [], vehicles = [];
@@ -80,7 +80,7 @@
     }
     function project(lane, z) {
       const depth = Number(z) || 0, scale = 17 / Math.max(2, 17 + depth);
-      const sweep = curve || climb ? Math.max(-.12, Math.min(1, depth / 100)) : 0;
+      const sweep = curve || climb ? clamp(depth / 78, 0, 1) : 0;
       const bend = curve * sweep * sweep * width;
       const grade = climb * sweep * height;
       const y = horizon + (ground - horizon) * scale - grade;
@@ -179,16 +179,15 @@
       laneWidth = Math.min(width * .94, height * 1.24) / 3;
       horizon = height * .285; ground = height * .84;
       actorHeight = clamp(Math.min(height * .2, laneWidth * .85), 57, 128);
-      metrics.dpr = dpr; travelFog = null; cacheScene();
+      metrics.dpr = dpr; travelFog = interiorFog = null; cacheScene();
     }
     function cacheScene() {
       cacheBackground();
       const fog = map?.fog || '#355b60';
-      const top = horizon - height * .05;
-      horizonFog = context.createLinearGradient(0, top, 0, horizon + height * (map?.road ? .22 : .16));
-      const stops = map?.road ? [[0, '00'], [.14, '68'], [.28, 'ec'], [.51, 'f2'], [.63, 'd9'], [.81, '52'], [1, '00']] :
-        [[0, '00'], [.18, '59'], [.34, 'db'], [.53, 'e0'], [.70, 'ad'], [.86, '38'], [1, '00']];
-      for (const [stop, alpha] of stops) horizonFog.addColorStop(stop, fog + alpha);
+      const tint = [1, 3, 5].map(offset => Number.parseInt(fog.slice(offset, offset + 2), 16)).join(',');
+      horizonFog = context.createLinearGradient(0, horizon - height * .05, 0, horizon + height * .16);
+      const stops = [[0, 0], [.18, .35], [.34, .86], [.53, .88], [.70, .68], [.86, .22], [1, 0]];
+      for (const [stop, alpha] of stops) horizonFog.addColorStop(stop, `rgba(${tint},${alpha})`);
     }
     function strip(left, right, front, end, color, step = 12) {
       const count = Math.max(1, Math.ceil((end - front) / step));
@@ -672,7 +671,7 @@
         context.fillStyle = style?.dark || '#10232d'; context.fill('evenodd');
         tunnelFloor(entity);
       }
-      if (transit) {
+      if (entity.destination) {
         // Keep the exit opaque across the map swap. Reveal the new landscape
         // through the aperture only after it has been drawn behind the shell.
         const alpha = travelHaze(entity);
@@ -714,6 +713,27 @@
     }
     function travelHaze(passage) {
       return 1 - smooth((54 - (passage.z + passage.length)) / 56);
+    }
+    const interiorFogDepth = 30;
+    function paintInteriorFog(passage, end) {
+      const alpha = smooth(-passage.z / 12) * smooth((end - interiorFogDepth) / 18);
+      if (alpha <= 0) return;
+      const style = passage.mapId ? getMap(passage.mapId) : map;
+      const arch = tunnelRing(interiorFogDepth, style);
+      if (!interiorFog || interiorFogStyle !== style) {
+        interiorFogStyle = style;
+        const tint = style?.fog || '#355b60';
+        interiorFog = context.createLinearGradient(0, arch[2].y, 0, arch[2].ground);
+        interiorFog.addColorStop(0, tint + '12');
+        interiorFog.addColorStop(.57, tint + '40');
+        interiorFog.addColorStop(.81, tint + '27');
+        interiorFog.addColorStop(1, tint + '00');
+      }
+      context.save();
+      context.globalAlpha = alpha;
+      context.beginPath(); ringPath(arch);
+      context.fillStyle = interiorFog; context.fill();
+      context.restore();
     }
     function gate(entity, state) {
       if (entity.z <= NEAR) return;
@@ -938,15 +958,16 @@
       const tunnelEnd = tunnel ? tunnel.z + (tunnel.length || 42) : NEAR;
       if (tunnel) lastTunnelExit = distance + Math.max(0, tunnelEnd - NEAR);
       const travelled = Math.max(0, distance - mapOrigin);
-      const section = Math.floor(travelled / 330);
-      const progress = (travelled % 330 - 108) / 142;
+      const section = Math.floor(travelled / 310);
+      const progress = (travelled % 310 - 90) / 135;
       const pulse = progress > 0 && progress < 1 ? Math.sin(progress * Math.PI) ** 2 : 0;
       // Leave straight stretches between bends and rises, and lead into
       // each portal along a level road without changing lane coordinates.
       const clearance = tunnel ? smooth((tunnel.z - 22) / 42) : smooth((distance - lastTunnelExit) / 30);
       const tilt = pulse * clearance;
-      curve = section % 3 !== 1 ? (map?.curve || 0) * tilt * (section % 2 ? -1 : 1) : 0;
-      climb = section % 3 === 1 ? (map?.climb || 0) * tilt : 0;
+      const direction = section % 4 < 2 ? 1 : -1;
+      curve = section % 2 === 0 ? (map?.curve || 0) * tilt * direction : 0;
+      climb = section % 2 === 1 ? (map?.climb || 0) * tilt * direction : 0;
       const elapsed = Number(state.elapsed) || 0;
       const delta = lastElapsed === null ? 16 : clamp(elapsed - lastElapsed, 0, 80);
       if (lastElapsed === null || elapsed < lastElapsed) visualLane = clamp(Number(state.lane) || 0, 0, 2);
@@ -957,7 +978,7 @@
       const inside = tunnel && tunnel.z <= 0;
       const paintFog = () => {
         context.fillStyle = horizonFog;
-        context.fillRect(0, horizon - height * .05, width, height * (map?.road ? .27 : .21));
+        context.fillRect(0, horizon - height * .05, width, height * .21);
       };
       const passage = tunnel && tunnel.z <= FAR && tunnelEnd > NEAR ? tunnel : null;
       if (inside) paintFog();
@@ -976,18 +997,26 @@
       const drawEntity = entity => {
         if (readingGate && entity !== readingGate && entity.z > readingGate.z) { metrics.culled++; return; }
         if (entity.kind === 'gate' || inFront(entity)) return;
-        const exitReveal = corridor && entity.z >= corridor.z + corridor.length ? 1 - travelHaze(corridor) : 1;
+        const exitReveal = passage?.destination && entity.z >= tunnelEnd ? 1 - travelHaze(passage) : 1;
         const alpha = opacity(entity, elapsed) * exitReveal;
         if (alpha <= 0) { metrics.culled++; return; }
         context.save(); clipToTunnel(entity, passage);
         context.globalAlpha = alpha;
         const p = project(entity.lane ?? 1, entity.z);
         if (entity.kind === 'coin') coin(entity, p, elapsed);
-        else obstacle(entity, p, false, corridor && entity.z < corridor.z + corridor.length ? getMap(corridor.mapId) : map);
+        else obstacle(entity, p, false, passage?.destination && entity.z < tunnelEnd ? getMap(passage.mapId) : map);
         context.restore();
         metrics.drawn++;
       };
-      for (const entity of ordered) if (!passage || entity.z >= passage.z) drawEntity(entity);
+      let interiorFogPending = inside && passage;
+      for (const entity of ordered) {
+        if (interiorFogPending && entity.z < interiorFogDepth) {
+          paintInteriorFog(passage, tunnelEnd);
+          interiorFogPending = false;
+        }
+        if (!passage || entity.z >= passage.z) drawEntity(entity);
+      }
+      if (interiorFogPending) paintInteriorFog(passage, tunnelEnd);
       context.globalAlpha = 1;
       // One cached gradient softens distant births without hiding the road's
       // nearby hazards. The tunnel facade stays opaque in front of this haze.

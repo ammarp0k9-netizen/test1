@@ -236,26 +236,34 @@ try {
   const swap = await evaluate(`(() => {
     const s = fixtureEngine.createState([]);
     s.mapId = 'volcano';
-    s.mapTunnel = { kind: 'passage', z: -36, length: 92, mapId: 'volcano', destination: 'forest' };
-    s.entities = [{ id: 1, kind: 'obstacle', obstacleType: 'train', lane: 2, z: 13, length: 20, mapId: 'volcano' }];
+    const tunnel = { kind: 'passage', z: -36, length: 92, mapId: 'volcano', destination: 'forest' };
+    const truck = { id: 1, kind: 'obstacle', obstacleType: 'train', lane: 2, z: 13, length: 20, mapId: 'volcano' };
     const ctx = fixtureCanvas.getContext('2d');
     const snapshot = () => {
       fixtureRenderer.draw(s);
       return ctx.getImageData(0, 0, fixtureCanvas.width, fixtureCanvas.height).data;
     };
-    const previous = snapshot();
-    s.mapId = 'forest';
-    s.mapTunnel.changed = true;
-    const current = snapshot();
-    let changed = 0;
-    for (let i = 0; i < previous.length; i += 4) {
-      const difference = Math.max(Math.abs(previous[i] - current[i]), Math.abs(previous[i + 1] - current[i + 1]), Math.abs(previous[i + 2] - current[i + 2]));
-      if (difference > 8) changed++;
+    const checks = [];
+    for (const kind of ['passage', 'gate']) {
+      const gate = kind === 'gate' ? { ...tunnel, kind, resolved: true } : null;
+      s.gate = gate;
+      s.mapTunnel = gate ? null : tunnel;
+      s.entities = gate ? [truck, gate] : [truck];
+      s.mapId = 'volcano';
+      const previous = snapshot();
+      s.mapId = 'forest';
+      const current = snapshot();
+      let changed = 0;
+      for (let i = 0; i < previous.length; i += 4) {
+        const difference = Math.max(Math.abs(previous[i] - current[i]), Math.abs(previous[i + 1] - current[i + 1]), Math.abs(previous[i + 2] - current[i + 2]));
+        if (difference > 8) changed++;
+      }
+      checks.push({ kind, changed, pixels: current.length / 4 });
     }
-    return { changed, pixels: current.length / 4 };
+    return checks;
   })()`);
-  assert.ok(swap.changed / swap.pixels < .001, 'map swaps stay hidden by the tunnel shell and haze');
-  report.checks.push({ name: 'map swap behind the tunnel exit', ...swap });
+  for (const result of swap) assert.ok(result.changed / result.pixels < .001, `map swap stays hidden in a ${result.kind}`);
+  report.checks.push({ name: 'map swaps behind both tunnel exits', tunnels: swap });
   await evaluate('fixtureRenderer.destroy();fixtureCanvas.remove()');
   for (const [width, action, imageName] of [[390, 'jump', 'mobile-gate-jump'], [320, 'slide', 'small-mobile-slide'], [1280, 'run', 'train-rooftop'], [1280, 'slide', 'under-beam-depth'], [1280, 'run', 'mixed-vehicles'], [1280, 'run', 'truck-cab-support'], [1280, 'run', 'near-edge-crate'], [1280, 'run', 'coins-occluded'], [1280, 'run', 'roof-coins'], [1280, 'slide', 'duckwall'], [1280, 'run', 'tunnel-approach'], [1280, 'run', 'tunnel-inside'], [1280, 'run', 'tunnel-exit'], [1280, 'run', 'long-tunnel-hazards'], [390, 'run', 'fog-reveal']]) {
     await send('Emulation.setDeviceMetricsOverride', { width, height: 844, deviceScaleFactor: 3, mobile: true });
