@@ -52,6 +52,12 @@ test('persistent guidance survives background input, highlights only its target,
   api.open({id:'help',anchor,content:'ordinary help'});
   handlers.get('pointerdown')({target:{}});
   assert.equal(api.getActiveId(),'', 'ordinary help retains outside-click dismissal');
+
+  api.open({ id: 'contextual-stats', anchor, content: 'stats', persistent: true, yieldToHelp: true });
+  assert.equal(api.open({ id: 'another-guide', anchor, content: 'another guide', persistent: true }), null);
+  assert.equal(api.getActiveId(), 'contextual-stats');
+  api.open({ id: 'help', anchor, content: 'ordinary help' });
+  assert.equal(api.getActiveId(), 'help', 'requested help takes priority over the contextual guide');
 });
 
 test('reading time gates only this step and survives an anchor rerender without starting over', () => {

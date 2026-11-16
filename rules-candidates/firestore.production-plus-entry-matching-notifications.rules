@@ -6,6 +6,10 @@ service cloud.firestore {
       return request.auth != null;
     }
 
+    function hasPermanentAccount() {
+      return signedIn() && request.auth.token.firebase.sign_in_provider != 'anonymous';
+    }
+
     function isOwner(uid) {
       return signedIn() && request.auth.uid == uid;
     }
@@ -782,7 +786,7 @@ service cloud.firestore {
           'displayName', 'addedGameWords', 'dailyLootState', 'titlesState',
           'activeTitleId', 'dailyQuestDate', 'dailyQuestState',
           'streakFreezes', 'freezeSaves', 'gameDictAdds', 'perfectQuizzes',
-          'extraChests', 'updatedAt'
+          'extraChests', 'updatedAt', '_syncRevision'
         ];
     }
 
@@ -815,15 +819,18 @@ service cloud.firestore {
     }
 
     function validProfileCreate(data) {
-      return data.keys().hasOnly(profileFieldNames()) && validProfileValues(data);
+      return data.keys().hasOnly(profileFieldNames()) && validProfileValues(data) &&
+        data.get('_syncRevision', 1) is int && data.get('_syncRevision', 1) == 1;
     }
 
     function validProfileUpdate(before, after) {
       // A legacy field may remain untouched on an existing document, but a
       // client cannot add, delete, or mutate it. All current fields retain the
       // same strict value validation used for new profiles.
-      return after.diff(before).affectedKeys().hasOnly(profileFieldNames()) &&
-        validProfileValues(after);
+      let changed = after.diff(before).affectedKeys();
+      return changed.hasOnly(profileFieldNames()) && validProfileValues(after) &&
+        (!changed.hasAny(['_syncRevision']) ||
+          (after._syncRevision is int && after._syncRevision == before.get('_syncRevision', 0) + 1));
     }
 
     function validEntryExperienceInterestIds(ids) {
@@ -1756,6 +1763,7 @@ service cloud.firestore {
         progress.nextRankId == after.activeRankId &&
         progress.nextGateId == after.activeGateId &&
         nonEmptyString(progress.lastClearAttemptId, 500) &&
+        attempt.get('serverVerified', false) == true &&
         attempt.status == 'passed' && attempt.result == 'passed' &&
         attempt.worldId == worldId &&
         attempt.rankId == before.activeRankId &&
@@ -1801,6 +1809,7 @@ service cloud.firestore {
         progress.status == 'cleared' && progress.clearedBy == 'gate-clear' &&
         progress.nextRankId == '' && progress.nextGateId == '' &&
         nonEmptyString(progress.lastClearAttemptId, 500) &&
+        attempt.get('serverVerified', false) == true &&
         attempt.status == 'passed' && attempt.result == 'passed' &&
         attempt.worldId == worldId &&
         attempt.rankId == before.activeRankId &&
@@ -2577,12 +2586,41 @@ service cloud.firestore {
         ).data.levelPlacementStatus == after.status;
     }
 
-    function validQuizEvidenceSession(data, sessionId) {
+    function validOfficialReviewGate(data, uid) {
+      let progress = get(
+        /databases/$(database)/documents/users/$(uid)/contentProgress/$(data.officialReviewWorldId)/ranks/$(data.officialReviewRankId)/gates/$(data.officialReviewGateId)
+      ).data;
+      return (progress.status == 'learning' || progress.status == 'ready') &&
+        progress.loadedAt is timestamp && progress.loadedAt <= request.time &&
+        progress.loadedWordKeys.hasAll(data.wordKeys);
+    }
+
+    function validOfficialReviewFields(data, uid) {
+      let worldId = data.get('officialReviewWorldId', '');
+      let rankId = data.get('officialReviewRankId', '');
+      let gateId = data.get('officialReviewGateId', '');
+      let due = data.get('officialReviewDueWordKeys', []);
+      return (worldId == '' && rankId == '' && gateId == '' && due == []) ||
+        (
+          data.evidenceVersion == 2 && data.sourceType == 'personal' && data.privateWorldId == '' &&
+          nonEmptyString(worldId, 128) && nonEmptyString(rankId, 128) && nonEmptyString(gateId, 128) &&
+          due is list && due.size() > 0 && due.size() <= data.wordKeys.size() &&
+          due.toSet().size() == due.size() && data.wordKeys.hasAll(due) &&
+          validOfficialReviewGate(data, uid)
+        );
+    }
+
+    function validQuizEvidenceSession(data, uid, sessionId) {
       return data.keys().hasOnly([
           'sessionId', 'status', 'mode', 'sourceType', 'privateWorldId',
           'wordKeys', 'correctWordKeys', 'totalCount', 'correctCount',
+          'evidenceVersion', 'completedAt', 'officialReviewWorldId',
+          'officialReviewRankId', 'officialReviewGateId', 'officialReviewDueWordKeys'
+        ]) && data.keys().hasAll([
+          'sessionId', 'status', 'mode', 'sourceType', 'privateWorldId',
+          'wordKeys', 'correctWordKeys', 'totalCount', 'correctCount',
           'evidenceVersion', 'completedAt'
-        ]) && data.keys().size() == 11 &&
+        ]) &&
         data.sessionId == sessionId &&
         nonEmptyString(data.sessionId, 220) &&
         data.status == 'completed' &&
@@ -2599,7 +2637,7 @@ service cloud.firestore {
         data.totalCount == data.wordKeys.size() &&
         data.correctCount == data.correctWordKeys.size() &&
         (data.evidenceVersion == 1 || data.evidenceVersion == 2) &&
-        data.completedAt == request.time;
+        data.completedAt == request.time && validOfficialReviewFields(data, uid);
     }
 
     function legacyEvidenceIntervalSatisfied(canonical) {
@@ -2620,6 +2658,8 @@ service cloud.firestore {
           lastAt <= request.time - duration.value(2, 'h')) ||
         (count == 2 && lastAt is timestamp &&
           lastAt <= request.time - duration.value(30, 'm') &&
+          int((request.time.toMillis() - data.timezoneOffsetMinutes * 60000) / 86400000) >
+            int((lastAt.toMillis() - data.timezoneOffsetMinutes * 60000) / 86400000) &&
           (
             canonical.get('evidenceVersion', 1) == 1 ||
             data.localDayKey > canonical.get('lastEvidenceLocalDayKey', data.localDayKey)
@@ -2627,6 +2667,9 @@ service cloud.firestore {
     }
 
     function validEvidenceEvent(data, uid, wordKey, eventId) {
+      let summary = getAfter(
+        /databases/$(database)/documents/users/$(uid)/contentWords/$(wordKey)
+      ).data;
       let canonical = get(
         /databases/$(database)/documents/users/$(uid)/contentWords/$(wordKey)
       ).data;
@@ -2653,6 +2696,9 @@ service cloud.firestore {
         data.occurredAt == request.time &&
         data.sequence == canonical.get('eligibleEvidenceCount', 0) + 1 &&
         data.sequence <= 3 &&
+        summary.get('lastEvidenceEventId', '') == eventId &&
+        summary.get('eligibleEvidenceCount', 0) == data.sequence &&
+        summary.get('lastEligibleEvidenceAt', null) == request.time &&
         (
           (
             data.evidenceVersion == 1 &&
@@ -2665,7 +2711,8 @@ service cloud.firestore {
             data.eventId == 'e2~' + uid + '~' + data.sessionId + '~' + wordKey &&
             data.timezoneOffsetMinutes is int &&
             data.timezoneOffsetMinutes >= -840 && data.timezoneOffsetMinutes <= 840 &&
-            data.localDayKey is int &&
+            data.localDayKey is int && data.localDayKey >= 0 &&
+            data.localDayKey <= (request.time.toMillis() - data.timezoneOffsetMinutes * 60000) / 86400000 &&
             (
               !('evidenceTimezoneOffsetMinutes' in canonical) ||
               data.timezoneOffsetMinutes == canonical.evidenceTimezoneOffsetMinutes
@@ -2733,6 +2780,7 @@ service cloud.firestore {
         event.wordKey == wordKey &&
         event.eventId == after.lastEvidenceEventId &&
         event.sequence == after.eligibleEvidenceCount &&
+        event.evidenceVersion == after.evidenceVersion &&
         event.occurredAt == request.time;
     }
 
@@ -2927,11 +2975,26 @@ service cloud.firestore {
         gatePublished(worldId, rankId, gateId);
     }
 
-    function validAvailableGateProgress(data, worldId, rankId, gateId) {
+    function validGateUnlockReceipt(data, uid, worldId, rankId, gateId) {
+      let before = get(/databases/$(database)/documents/users/$(uid)/contentProgress/$(worldId)).data;
+      let after = getAfter(/databases/$(database)/documents/users/$(uid)/contentProgress/$(worldId)).data;
+      let previousGate = getAfter(
+        /databases/$(database)/documents/users/$(uid)/contentProgress/$(worldId)/ranks/$(before.activeRankId)/gates/$(before.activeGateId)
+      ).data;
+      return data.unlockedAt == request.time && data.unlockedByGateId == before.activeGateId &&
+        before.activeGateId != gateId && after.activeGateId == gateId && after.activeRankId == rankId &&
+        previousGate.status == 'cleared' && previousGate.clearedBy == 'gate-clear' &&
+        previousGate.clearedAt == request.time &&
+        previousGate.nextGateId == gateId && previousGate.nextRankId == rankId;
+    }
+
+    function validAvailableGateProgress(data, uid, worldId, rankId, gateId) {
       return data.keys().hasOnly([
           'worldId', 'rankId', 'gateId', 'status', 'journeyVersion',
-          'lastActivityAt', 'readyEvidenceCount', 'clearAttempts'
-        ]) && data.keys().size() == 8 &&
+          'lastActivityAt', 'readyEvidenceCount', 'clearAttempts', 'unlockedByGateId', 'unlockedAt'
+        ]) && (data.keys().size() == 8 || (
+          data.keys().size() == 10 && validGateUnlockReceipt(data, uid, worldId, rankId, gateId)
+        )) &&
         data.worldId == worldId && data.rankId == rankId && data.gateId == gateId &&
         data.status == 'available' && data.journeyVersion == 1 &&
         data.lastActivityAt == request.time &&
@@ -3067,7 +3130,9 @@ service cloud.firestore {
         after.gateId == gateId &&
         after.journeyVersion == 1 &&
         after.lastActivityAt == request.time &&
-        after.get('readyEvidenceCount', 0) == after.get('readyWordCount', 0) &&
+        after.get('readyEvidenceCount', 0) == 0 && after.get('readyWordCount', 0) == 0 &&
+        after.get('waitingLaterTodayCount', 0) == 0 && after.get('waitingNextDayCount', 0) == 0 &&
+        after.get('readinessNextAt', null) == null &&
         after.clearAttempts == before.clearAttempts &&
         validLoadedGateSnapshot(after) &&
         after.get('readyWordCount', 0) >= 0 &&
@@ -3097,50 +3162,30 @@ service cloud.firestore {
         !('clearedBy' in after);
     }
 
-    function validGateReadinessUpdate(before, after, uid, worldId, rankId, gateId) {
+    function validGateReviewCompletion(before, after, uid, worldId, rankId, gateId) {
+      let sessionId = after.get('runnerReviewCompletedSessionId', '');
+      let previousId = before.get('runnerReviewCompletedSessionId', '');
       return (before.status == 'learning' || before.status == 'ready') &&
-        (after.status == 'learning' || after.status == 'ready') &&
-        journeyAllowsGate(uid, worldId, rankId, gateId) &&
         after.diff(before).affectedKeys().hasOnly([
-          'status', 'readyEvidenceCount', 'readyWordCount',
-          'requiredWordCount', 'needsEvidenceWordCount',
-          'availableForReviewNowCount', 'waitingLaterTodayCount',
-          'waitingNextDayCount', 'readinessNextAt',
-          'readinessTimezoneOffsetMinutes',
-          'readinessVersion', 'readyAt', 'lastActivityAt'
-        ]) &&
-        after.worldId == before.worldId &&
-        after.rankId == before.rankId &&
-        after.gateId == before.gateId &&
-        after.loadedWordKeys == before.loadedWordKeys &&
-        after.requiredWordCount == before.loadedWordKeys.size() &&
-        after.readyEvidenceCount == after.readyWordCount &&
-        after.readyWordCount >= before.get('readyWordCount', 0) &&
-        after.readyWordCount >= 0 &&
-        after.readyWordCount <= after.requiredWordCount &&
-        after.needsEvidenceWordCount == after.requiredWordCount - after.readyWordCount &&
-        (after.readinessVersion == 1 || after.readinessVersion == 2) &&
-        after.get('availableForReviewNowCount', 0) +
-          after.get('waitingLaterTodayCount', 0) +
-          after.get('waitingNextDayCount', 0) + after.readyWordCount ==
-            after.requiredWordCount &&
+          'runnerReviewCompletedSessionId', 'runnerReviewCompletedDueWordKeys', 'lastActivityAt'
+        ]) && nonEmptyString(sessionId, 220) && sessionId != previousId &&
         after.lastActivityAt == request.time &&
-        (
-          (
-            after.status == 'learning' &&
-            after.readyWordCount < after.requiredWordCount
-          ) ||
-          (
-            after.status == 'ready' &&
-            after.requiredWordCount > 0 &&
-            after.readyWordCount == after.requiredWordCount &&
-            after.readyAt == request.time
-          ) ||
-          (
-            before.status == 'ready' && after.status == 'ready' &&
-            after.readyAt == before.readyAt
-          )
-        );
+        matchesCompletedGateReview(after, uid, worldId, rankId, gateId, sessionId, previousId);
+    }
+
+    function matchesCompletedGateReview(progress, uid, worldId, rankId, gateId, sessionId, previousId) {
+      let session = get(
+        /databases/$(database)/documents/users/$(uid)/quizEvidenceSessions/$(sessionId)
+      ).data;
+      return session.get('officialReviewWorldId', '') == worldId &&
+        session.get('officialReviewRankId', '') == rankId &&
+        session.get('officialReviewGateId', '') == gateId &&
+        session.status == 'completed' && session.completedAt >= progress.loadedAt &&
+        progress.runnerReviewCompletedDueWordKeys == session.officialReviewDueWordKeys &&
+        progress.loadedWordKeys.hasAll(session.officialReviewDueWordKeys) &&
+        (previousId == '' || session.completedAt > get(
+          /databases/$(database)/documents/users/$(uid)/quizEvidenceSessions/$(previousId)
+        ).data.completedAt);
     }
 
     function validGateClearAnswer(answer, expectedContentWordId, questionOrder) {
@@ -3156,40 +3201,6 @@ service cloud.firestore {
         nonEmptyString(answer.selectedContentWordId, 128) &&
         answer.selectedContentWordId in questionOrder &&
         answer.correct == (answer.selectedContentWordId == answer.contentWordId);
-    }
-
-    function validGateClearAttemptCreate(data, uid, worldId, attemptId) {
-      let progress = getAfter(
-        /databases/$(database)/documents/users/$(uid)/contentProgress/$(worldId)/ranks/$(data.rankId)/gates/$(data.gateId)
-      ).data;
-      let journey = getAfter(
-        /databases/$(database)/documents/users/$(uid)/contentProgress/$(worldId)
-      ).data;
-      return data.keys().hasOnly([
-          'attemptId', 'worldId', 'rankId', 'gateId', 'questionOrder',
-          'answers', 'currentQuestionIndex', 'correctCount', 'totalCount',
-          'passRatio', 'requiredCorrect', 'status', 'gateClearVersion',
-          'startedAt', 'updatedAt'
-        ]) && data.keys().size() == 15 &&
-        data.attemptId == attemptId && data.worldId == worldId &&
-        nonEmptyString(data.rankId, 128) && nonEmptyString(data.gateId, 128) &&
-        data.questionOrder is list && data.questionOrder.size() > 0 &&
-        data.questionOrder.size() <= 2000 &&
-        data.questionOrder.toSet().size() == data.questionOrder.size() &&
-        data.answers is list && data.answers.size() == 0 &&
-        data.currentQuestionIndex == 0 && data.correctCount == 0 &&
-        data.totalCount == data.questionOrder.size() &&
-        data.passRatio is number && data.passRatio > 0 && data.passRatio <= 1 &&
-        data.requiredCorrect is int &&
-        data.requiredCorrect >= data.totalCount * data.passRatio &&
-        data.requiredCorrect - 1 < data.totalCount * data.passRatio &&
-        data.status == 'active' && data.gateClearVersion == 1 &&
-        data.startedAt == request.time && data.updatedAt == request.time &&
-        progress.status == 'ready' &&
-        progress.activeClearAttemptId == attemptId &&
-        journey.status == 'active' &&
-        journey.activeRankId == data.rankId &&
-        journey.activeGateId == data.gateId;
     }
 
     function validGateClearAnswerUpdate(before, after) {
@@ -3245,22 +3256,6 @@ service cloud.firestore {
         after.abandonedAt == request.time && after.updatedAt == request.time;
     }
 
-    function validGateClearStartProgressUpdate(before, after, uid, worldId, rankId, gateId) {
-      let attempt = getAfter(
-        /databases/$(database)/documents/users/$(uid)/contentProgress/$(worldId)/gateClearAttempts/$(after.activeClearAttemptId)
-      ).data;
-      return before.status == 'ready' && after.status == 'ready' &&
-        before.get('activeClearAttemptId', '') == '' &&
-        after.diff(before).affectedKeys().hasOnly([
-          'activeClearAttemptId', 'clearAttempts', 'lastActivityAt'
-        ]) &&
-        nonEmptyString(after.activeClearAttemptId, 500) &&
-        after.clearAttempts == before.clearAttempts + 1 &&
-        after.lastActivityAt == request.time &&
-        attempt.status == 'active' && attempt.worldId == worldId &&
-        attempt.rankId == rankId && attempt.gateId == gateId;
-    }
-
     function validGateClearProgressResult(before, after, uid, worldId, rankId, gateId) {
       let attempt = getAfter(
         /databases/$(database)/documents/users/$(uid)/contentProgress/$(worldId)/gateClearAttempts/$(before.activeClearAttemptId)
@@ -3268,7 +3263,8 @@ service cloud.firestore {
       let journey = getAfter(
         /databases/$(database)/documents/users/$(uid)/contentProgress/$(worldId)
       ).data;
-      return before.status == 'ready' &&
+      return before.status == 'ready' && before.get('readinessVerifiedAt', null) is timestamp &&
+        attempt.get('serverVerified', false) == true &&
         nonEmptyString(before.activeClearAttemptId, 500) &&
         after.diff(before).affectedKeys().hasOnly([
           'status', 'activeClearAttemptId', 'lastClearAttemptId',
@@ -3937,13 +3933,16 @@ service cloud.firestore {
 
         match /gateClearAttempts/{attemptId} {
           allow read: if isOwner(uid);
-          allow create: if isOwner(uid) &&
-            validGateClearAttemptCreate(request.resource.data, uid, worldId, attemptId);
-          allow update: if isOwner(uid) &&
+          allow create: if false;
+          allow update: if isOwner(uid) && resource.data.get('serverVerified', false) == true &&
             (
-              validGateClearAnswerUpdate(resource.data, request.resource.data) ||
-              validGateClearAttemptFinish(resource.data, request.resource.data) ||
-              validGateClearAttemptAbandon(resource.data, request.resource.data)
+              (resource.data.status == 'active' &&
+                request.resource.data.status != 'abandoned' &&
+                validGateClearAnswerUpdate(resource.data, request.resource.data)) ||
+              (resource.data.status == 'submitting' &&
+                validGateClearAttemptFinish(resource.data, request.resource.data)) ||
+              (request.resource.data.status == 'abandoned' &&
+                validGateClearAttemptAbandon(resource.data, request.resource.data))
             );
           allow delete: if false;
         }
@@ -3959,7 +3958,7 @@ service cloud.firestore {
                 request.resource.data.status == 'available' &&
                 journeyAllowsGate(uid, worldId, rankId, gateId) &&
                 validAvailableGateProgress(
-                  request.resource.data, worldId, rankId, gateId
+                  request.resource.data, uid, worldId, rankId, gateId
                 )
               ) ||
               (
@@ -3970,12 +3969,12 @@ service cloud.firestore {
                 )
               ) ||
               (
-                request.resource.data.status != 'available' &&
+                request.resource.data.status == 'learning' &&
+                request.resource.data.readyEvidenceCount == 0 &&
                 request.resource.data.get('masteryComplete', false) == false &&
-                !(request.resource.data.status == 'cleared' &&
-                  request.resource.data.get('clearedBy', '') == 'level-placement') &&
+                !('readyAt' in request.resource.data) &&
+                !('activeClearAttemptId' in request.resource.data) &&
                 journeyAllowsGate(uid, worldId, rankId, gateId) &&
-                request.resource.data.status != 'cleared' &&
                 validGateProgress(request.resource.data, worldId, rankId, gateId)
               )
             );
@@ -4003,10 +4002,7 @@ service cloud.firestore {
                     validLearningGateProgressUpdate(
                       resource.data, request.resource.data, worldId, rankId, gateId
                     ) ||
-                    validGateReadinessUpdate(
-                      resource.data, request.resource.data, uid, worldId, rankId, gateId
-                    ) ||
-                    validGateClearStartProgressUpdate(
+                    validGateReviewCompletion(
                       resource.data, request.resource.data, uid, worldId, rankId, gateId
                     ) ||
                     validGateClearProgressResult(
@@ -4032,7 +4028,7 @@ service cloud.firestore {
       match /quizEvidenceSessions/{sessionId} {
         allow read: if isOwner(uid);
         allow create: if isOwner(uid) &&
-          validQuizEvidenceSession(request.resource.data, sessionId);
+          validQuizEvidenceSession(request.resource.data, uid, sessionId);
         allow update, delete: if false;
       }
 
@@ -4119,12 +4115,12 @@ service cloud.firestore {
     // validated cache entries. Only admins may remove poisoned/obsolete entries.
     match /ai_global_cache/{cacheId} {
       allow read: if true;
-      allow create: if signedIn() &&
+      allow create: if hasPermanentAccount() &&
         validAiCache(request.resource.data) &&
         'caches' in request.resource.data &&
         newCacheDocumentUsesServerTime(request.resource.data);
       allow update: if isAdmin() || (
-        signedIn() &&
+        hasPermanentAccount() &&
         validAiCache(request.resource.data) &&
         'caches' in request.resource.data &&
         request.resource.data.word == resource.data.word &&
@@ -4136,7 +4132,7 @@ service cloud.firestore {
     }
 
     match /suggestions/{suggestionId} {
-      allow create: if signedIn() && validSuggestion(request.resource.data);
+      allow create: if hasPermanentAccount() && validSuggestion(request.resource.data);
       allow read, delete: if isAdmin();
       allow update: if false;
     }

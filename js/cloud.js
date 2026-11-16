@@ -1,18 +1,23 @@
 
-  import { initializeApp }    from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
+  import { getApps, initializeApp }    from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
   import {
-    getAuth, signInWithPopup, signInWithRedirect, signOut,
-    GoogleAuthProvider, onAuthStateChanged, getRedirectResult,
+    getAuth, signInWithPopup, signInWithRedirect, signOut, signInWithCredential, getAdditionalUserInfo,
+    browserLocalPersistence, inMemoryPersistence,
+    GoogleAuthProvider, onIdTokenChanged, getRedirectResult, signInAnonymously, connectAuthEmulator,
+    EmailAuthProvider, linkWithCredential, linkWithPopup, linkWithRedirect,
     signInWithEmailAndPassword, createUserWithEmailAndPassword, sendPasswordResetEmail
   } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js";
   import {
-    getFirestore, collection, addDoc, query,
+    getFirestore, connectFirestoreEmulator, collection, addDoc, query,
     orderBy, deleteDoc, doc, updateDoc, onSnapshot, serverTimestamp,
     getDoc, setDoc, getDocs, runTransaction, writeBatch,
     limit, startAfter, documentId, where, getCountFromServer
   } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
   import { publicLandingPath, runLogoutSequence } from './logout-flow.js?v=20261106-session-1';
-  import { mountAppAuth } from './app-auth-ui.js?v=20260811-2';
+  import { mountAppAuth } from './app-auth-ui.js?v=saved-guest-1';
+  import { createGuestJourneyAuth, isPermanentAccount } from './guest-journey-auth.js?v=saved-guest-1';
+  import { firebaseDemoConfig, firebaseEmulatorSelected } from './firebase-emulator-mode.js';
+  import { createSavedGuestFlow, useGoogleRedirect } from './saved-guest-flow.js?v=full-merge-1';
 
   const firebaseConfig = {
     apiKey:            "AIzaSyDQB5N4wxJw69-tb8suI2T2SfEfCpwFA2c",
@@ -24,9 +29,31 @@
     measurementId:     "G-C06S6C7JYT"
   };
 
-  const app  = initializeApp(firebaseConfig);
+  const emulator = firebaseEmulatorSelected(location, sessionStorage);
+  const app  = initializeApp(emulator ? firebaseDemoConfig : firebaseConfig);
   const auth = getAuth(app);
   const db   = getFirestore(app);
+  if (emulator) {
+    connectAuthEmulator(auth, 'http://127.0.0.1:9099', { disableWarnings: true });
+    connectFirestoreEmulator(db, '127.0.0.1', 8080);
+  }
+  const guestAuth = createGuestJourneyAuth(auth, {
+    signInAnonymously, EmailAuthProvider, linkWithCredential, linkWithPopup, linkWithRedirect,
+    createUserWithEmailAndPassword, signInWithEmailAndPassword, signInWithPopup, signInWithRedirect, getRedirectResult,
+  }, { beforeStart: () => window.preserveLegacyGuestProfile?.() });
+  const savedGuest = createSavedGuestFlow({
+    app, appSdk: { getApps, initializeApp }, auth, guestAuth, emulator, mainDb: db,
+    sdk: { getAuth, connectAuthEmulator, onIdTokenChanged, signOut, signInWithEmailAndPassword, signInWithCredential,
+      GoogleAuthProvider, getAdditionalUserInfo, browserLocalPersistence, inMemoryPersistence },
+    openLogin: () => window.openAppAuth?.('login'),
+    onAuthenticated(_user, action) {
+      const message = action === 'merge' ? 'تم دمج تقدّم الضيف في حسابك.'
+        : action === 'restore' ? 'تمت استعادة جلسة الضيف.' : 'تقدّم الضيف محفوظ. تقدر تستعيده من الملف الشخصي.';
+      window.showToast?.(message, 'success', 3600);
+    },
+  });
+  window.hasSavedGuestForOtherAccount = savedGuest.hasSavedGuestForOtherAccount;
+  window.beginGuestJourneySession = async () => (await savedGuest.restoreForStart()) || guestAuth.start();
   window.db = db;
   window.auth = auth;
   let wordsUnsubscribe = null;
@@ -61,14 +88,14 @@
       setLoginLoading(true, 'جاري إكمال تسجيل الدخول...');
     }
     try {
-      const result = await getRedirectResult(auth);
+      const result = await savedGuest.finishRedirect();
       if (result?.user && typeof showToast === 'function') {
         showToast('تم تسجيل الدخول بنجاح', 'success', 3200);
       }
     } catch (e) {
       console.error(e.code || 'auth/redirect-error', e.message);
       if (typeof showToast === 'function') {
-        showToast('صار خطأ أثناء تسجيل الدخول. جرّب مرة ثانية.', 'danger', 4200);
+        showToast(e.code === 'guest-account/conflict' ? 'الحساب موجود. سجّل الدخول بطريقة الحساب الأصلية واختَر ما تريد فعله بتقدّم الضيف.' : 'صار خطأ أثناء تسجيل الدخول. جرّب مرة ثانية.', 'danger', 4200);
       }
     } finally {
       sessionStorage.removeItem(LOGIN_REDIRECT_PENDING_KEY);
@@ -82,7 +109,36 @@
     handleLoginRedirectResult();
   }
 
-  onAuthStateChanged(auth, (user) => {
+  let observedUid;
+  let observedAnonymous;
+  function refreshAccountControls(user) {
+    const registered = isPermanentAccount(user);
+    document.getElementById('logoutBtn').style.display = registered ? 'block' : 'none';
+    const loginButton = document.getElementById('loginBtn');
+    loginButton.style.display = registered ? 'none' : 'block';
+    if (registered) setLoginLoading(false);
+    const label = loginButton.querySelector('[data-profile-auth-label]');
+    if (label) {
+      label.textContent = user?.isAnonymous === true ? 'اربط رحلة الضيف' : 'تسجيل الدخول';
+      loginButton.dataset.defaultHtml = loginButton.innerHTML;
+    }
+    window.refreshGuestSearchLocks?.();
+    if (registered && user.displayName) window.setLootlinguaDisplayName?.(user.displayName);
+  }
+  onIdTokenChanged(auth, (user) => {
+    const uid = user?.uid || '';
+    const anonymous = user?.isAnonymous === true;
+    if (observedUid === uid) {
+      if (observedAnonymous && !anonymous) {
+        observedAnonymous = false;
+        window.__lootlinguaAuthUser = user;
+        refreshAccountControls(user);
+        window.dispatchEvent(new CustomEvent('lootlingua:guest-account-linked', { detail: { uid } }));
+      }
+      return;
+    }
+    observedUid = uid;
+    observedAnonymous = anonymous;
     window.__lootlinguaAuthResolved = true;
     window.__lootlinguaAuthUser = user || null;
     window.__lootlinguaAuthGeneration = (Number(window.__lootlinguaAuthGeneration) || 0) + 1;
@@ -114,15 +170,7 @@
       wordMasteryUnsubscribe();
       wordMasteryUnsubscribe = null;
     }
-    document.getElementById('logoutBtn').style.display = user ? 'block' : 'none';
-    document.getElementById('loginBtn').style.display  = user ? 'none'  : 'block';
-    if (user) setLoginLoading(false);
-    if (typeof window.refreshGuestSearchLocks === 'function') {
-      window.refreshGuestSearchLocks();
-    }
-    if (user && user.displayName && window.setLootlinguaDisplayName) {
-      window.setLootlinguaDisplayName(user.displayName);
-    }
+    refreshAccountControls(user);
     if (user) {
       if (typeof window.beginInitialFeatureLoad === "function") {
         window.beginInitialFeatureLoad(["words", "profile", "mastery"]);
@@ -174,14 +222,15 @@
   async function performGoogleLogin() {
     const provider = new GoogleAuthProvider();
     provider.setCustomParameters({ prompt: 'select_account' });
-    setLoginLoading(true, isIOSDevice() ? 'جاري توجيهك لتسجيل الدخول...' : 'جاري فتح تسجيل الدخول...');
+    const redirect = useGoogleRedirect(auth, isIOSDevice());
+    setLoginLoading(true, redirect ? 'جاري توجيهك لتسجيل الدخول...' : 'جاري فتح تسجيل الدخول...');
     try {
-      if (isIOSDevice()) {
+      if (redirect) {
         sessionStorage.setItem(LOGIN_REDIRECT_PENDING_KEY, '1');
-        await signInWithRedirect(auth, provider);
+        await savedGuest.google(provider, true);
         return { redirecting: true };
       }
-      const result = await signInWithPopup(auth, provider);
+      const result = await savedGuest.google(provider);
       setLoginLoading(false);
       return result;
     } catch (e) {
@@ -201,7 +250,9 @@
         ? 'منع المتصفح نافذة تسجيل الدخول. اسمح بالنوافذ المنبثقة ثم حاول مرة أخرى.'
         : (e.code === 'auth/popup-closed-by-user' || e.code === 'auth/cancelled-popup-request')
           ? 'تم إغلاق تسجيل الدخول. لم نفقد أيًا من اختياراتك.'
-          : 'لم يكتمل تسجيل الدخول. يمكنك المحاولة مرة أخرى.';
+          : e.code === 'guest-account/conflict'
+            ? 'الحساب موجود. سجّل الدخول بطريقة الحساب الأصلية واختَر ما تريد فعله بتقدّم الضيف.'
+            : 'لم يكتمل تسجيل الدخول. يمكنك المحاولة مرة أخرى.';
       window.showToast?.(message, e.code === 'auth/popup-blocked' ? 'danger' : 'info', 4600, { critical: true });
       return false;
     }
@@ -209,14 +260,14 @@
 
   mountAppAuth({
     gateway: Object.freeze({
-      observeAuth: (callback) => onAuthStateChanged(auth, callback),
+      observeAuth: (callback) => onIdTokenChanged(auth, callback),
       currentUser: () => auth.currentUser,
       hasPendingRedirect: () => false,
       clearPendingRedirect: () => sessionStorage.removeItem(LOGIN_REDIRECT_PENDING_KEY),
       finishRedirect: async () => null,
       signInWithGoogle: performGoogleLogin,
-      signIn: (email, password) => signInWithEmailAndPassword(auth, email, password),
-      createAccount: (email, password) => createUserWithEmailAndPassword(auth, email, password),
+      signIn: savedGuest.signIn,
+      createAccount: guestAuth.register,
       sendPasswordReset: (email) => sendPasswordResetEmail(auth, email),
     }),
   }).catch((error) => {
@@ -224,7 +275,7 @@
   });
 
   window.confirmLogout = async function() {
-    if (window.__lootlinguaLogoutPending) return;
+    if (window.__lootlinguaLogoutPending || auth.currentUser?.isAnonymous === true) return;
     window.__lootlinguaLogoutPending = true;
     const logoutButtons = [...document.querySelectorAll('#logoutModal button')];
     const confirmButton = document.querySelector('#logoutModal .btn-confirm');
@@ -259,7 +310,9 @@
         waitForAccountCleanup,
         signOut: () => signOut(auth),
         clearAccountState: () => window.clearDictionaryState?.(),
-        purgeGuestIsolationState: () => window.purgeStaleGuestLocalData?.(),
+        purgeGuestIsolationState: () => {
+          if (!window.hasPreservedLegacyGuestProfile?.()) window.purgeStaleGuestLocalData?.();
+        },
         resetProfileState: () => window.resetLootlinguaProfileState?.({ clearDisplayName: true, resetTheme: true }),
         closeLogoutUi: () => hideModal('logoutModal'),
         afterCleanup: () => Promise.resolve(),
@@ -569,7 +622,7 @@
       const next = incoming?.[field];
       const currentEmpty = Array.isArray(current)
         ? current.length === 0
-        : !String(current ?? '').trim() || (field === 'category' && current === 'عام');
+        : !String(current ?? '').trim() || (field === 'category' && current === 'عام' && next !== current);
       const nextPresent = Array.isArray(next)
         ? next.length > 0
         : Boolean(String(next ?? '').trim());
@@ -988,7 +1041,7 @@
   }
 
   // Guest words are normally new for the destination account. Creating the
-  // lifecycle trio in small batches avoids a transaction round-trip per word.
+  // lifecycle trio in one transaction per chunk avoids a round-trip per word.
   // Existing records still use the transactional lifecycle writer so their
   // account data is merged rather than overwritten.
   async function migrateGuestWordsToCloud(guestWords, options = {}) {
@@ -1057,61 +1110,59 @@
           };
         });
         assertCurrentOwner();
-        const existence = await Promise.all(chunk.flatMap((item) => [
-          getDoc(item.canonicalRef),
-          getDoc(item.sourceRef),
-          getDoc(item.legacyRef),
-        ]));
-        assertCurrentOwner();
-        trace?.count('firestoreReads', existence.length);
-        const fresh = [];
-        const existing = [];
-        chunk.forEach((item, index) => {
-          const base = index * 3;
-          const known = existence[base].exists() || existence[base + 1].exists() || existence[base + 2].exists();
-          (known ? existing : fresh).push(item);
-        });
-
-        if (fresh.length) {
-          const batch = writeBatch(db);
-          fresh.forEach((item) => {
-            // create() protects an account write racing this migration; a
-            // create conflict is handled through the merge path below.
-            batch.create(item.canonicalRef, canonicalWordPayload(
-              item.word,
-              item.identity,
-              item.legacyWordId,
-              item.source
-            ));
-            batch.create(item.legacyRef, legacyWordPayload(ownerId, item.word, item.identity, {
-              hiddenOnCreate: false,
-              personalDictionaryState: 'active',
-            }));
-            batch.create(item.sourceRef, sourceDocumentPayload(item.source, operationId));
+        let existing;
+        try {
+          // The Web SDK has no create-only batch operation. Read the destination
+          // inside the transaction so a concurrent write reroutes to the merge.
+          const completed = await runTransaction(db, async (transaction) => {
+            assertCurrentOwner();
+            const existence = await Promise.all(chunk.flatMap((item) => [
+              transaction.get(item.canonicalRef),
+              transaction.get(item.sourceRef),
+              transaction.get(item.legacyRef),
+            ]));
+            assertCurrentOwner();
+            trace?.count('firestoreReads', existence.length);
+            const fresh = [];
+            const known = [];
+            chunk.forEach((item, index) => {
+              const base = index * 3;
+              if (existence.slice(base, base + 3).some(snapshot => snapshot.exists())) {
+                known.push(item);
+                return;
+              }
+              transaction.set(item.canonicalRef, canonicalWordPayload(
+                item.word, item.identity, item.legacyWordId, item.source
+              ));
+              transaction.set(item.legacyRef, legacyWordPayload(ownerId, item.word, item.identity, {
+                hiddenOnCreate: false,
+                personalDictionaryState: 'active',
+              }));
+              transaction.set(item.sourceRef, sourceDocumentPayload(item.source, operationId));
+              fresh.push(item);
+            });
+            return { fresh, known };
           });
-          try {
-            assertCurrentOwner();
-            await batch.commit();
-            assertCurrentOwner();
-            trace?.count('firestoreWrites', fresh.length * 3);
-            fresh.forEach((item) => results.push({
-              status: 'created',
-              created: true,
-              wordId: item.legacyWordId,
-              wordKey: item.identity.wordKey,
-              wordIndex: item.index,
-            }));
-          } catch (error) {
-            assertCurrentOwner();
-            if (error?.code === 'permission-denied' || error?.code === 'unauthenticated') {
-              throw guestMigrationError(
-                'guest-migration/firestore-write-denied',
-                'Firestore rejected the guest-word migration batch.',
-                { cause: error, firestoreCode: error?.code || '' }
-              );
-            }
-            existing.push(...fresh);
+          assertCurrentOwner();
+          existing = completed.known;
+          trace?.count('firestoreWrites', completed.fresh.length * 3);
+          completed.fresh.forEach((item) => results.push({
+            status: 'created',
+            created: true,
+            wordId: item.legacyWordId,
+            wordKey: item.identity.wordKey,
+            wordIndex: item.index,
+          }));
+        } catch (error) {
+          assertCurrentOwner();
+          if (error?.code === 'permission-denied' || error?.code === 'unauthenticated') {
+            throw guestMigrationError(
+              'guest-migration/firestore-write-denied',
+              'Firestore rejected the guest-word migration transaction.',
+              { cause: error, firestoreCode: error?.code || '' }
+            );
           }
+          existing = chunk;
         }
 
         for (const item of existing) {
@@ -2217,7 +2268,7 @@
   /** حفظ نتائج AI للجميع — word, meanings, type, createdAt */
   window.saveAiGlobalCache = async function(word, type, meanings) {
     const docId = normalizeAiCacheDocId(word);
-    if (!docId || !type || !Array.isArray(meanings) || !meanings.length) return false;
+    if (!isPermanentAccount(auth.currentUser) || !docId || !type || !Array.isArray(meanings) || !meanings.length) return false;
     try {
       await setDoc(doc(db, AI_CACHE_COLLECTION, docId), {
         word: String(word).trim(),
@@ -2243,7 +2294,7 @@
     const game = String(payload.game || '').trim();
     if (!word || !ar) return { ok: false, error: 'الكلمة والمعنى مطلوبان' };
     const user = auth.currentUser;
-    if (!user) return { ok: false, error: 'سجّل دخولك أولاً' };
+    if (!isPermanentAccount(user)) return { ok: false, error: 'سجّل دخولك أولاً' };
     try {
       await addDoc(collection(db, 'suggestions'), {
         word,

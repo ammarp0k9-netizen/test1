@@ -723,7 +723,7 @@
         <p id="entryInterestHint" class="entry-helper${selected.size ? ' ready' : ''}">${selected.size ? `اخترت ${selected.size} — يمكنك اختيار أكثر من اهتمام` : 'اختر اهتمامًا واحدًا على الأقل، أو تخطَّ هذا السؤال'}</p>
         <div class="entry-actions">
           ${runtime.settingsMode ? '' : '<button type="button" class="entry-secondary" data-entry-action="skip-interests">تخطي الاهتمامات</button>'}
-          <button type="button" class="entry-primary" data-entry-action="continue-interests" ${selected.size ? '' : 'disabled'}>${runtime.settingsMode ? 'حفظ الاهتمامات' : 'كمّل'} <i class="fa-solid fa-arrow-left" aria-hidden="true"></i></button>
+          <button type="button" class="entry-primary" data-entry-action="continue-interests" ${selected.size ? '' : 'disabled'}>${runtime.settingsMode ? 'حفظ الاهتمامات' : 'عاين الثيم'} <i class="fa-solid fa-arrow-left" aria-hidden="true"></i></button>
         </div>
       </footer>
     `;
@@ -741,7 +741,7 @@
         <span class="entry-welcome-icon"><i class="fa-solid fa-hand-sparkles" aria-hidden="true"></i></span>
         <div class="entry-copy">
           <h1 id="entryExperienceTitle">تعلّم الكلمات داخل رحلة واضحة</h1>
-          <p>ابدأ باهتماماتك، ثم اختر عالمًا عامًا منشورًا. كل عالم يحتوي مستويات وبوابات وكلمات جاهزة، وتبقى كلماتك وتقدّمك تحت سيطرتك.</p>
+          <p>اختَر اهتماماتك والثيم اللي يعجبك، وبعدها عالمًا تتعلّم كلماته. بتقدر تبدأ كضيف وتحفظ رحلتك على هذا المتصفح.</p>
         </div>
         <div class="entry-welcome-route" aria-label="كيف تعمل الرحلة">
           <span><i class="fa-solid fa-earth-americas" aria-hidden="true"></i><strong>عالم</strong><small>اختر موضوعًا</small></span>
@@ -750,9 +750,9 @@
           <i class="fa-solid fa-angle-left" aria-hidden="true"></i>
           <span><i class="fa-solid fa-dungeon" aria-hidden="true"></i><strong>بوابة</strong><small>كلمات وخطوة تالية</small></span>
         </div>
-        <p class="entry-helper">سنشرح لك البوابة الأولى داخل العالم نفسه عبر الإرشاد التفاعلي، ويمكنك متابعة الرحلة على الهاتف أو الكمبيوتر.</p>
+        <p class="entry-helper">أول ما تبدأ البوابة، أضف كلماتها إلى قاموسك وابدأ مراجعتها.</p>
       </section>
-      <footer class="entry-footer"><div class="entry-actions entry-actions-single"><button type="button" class="entry-primary" data-entry-action="continue-welcome">ابدأ الرحلة <i class="fa-solid fa-arrow-left" aria-hidden="true"></i></button></div></footer>`;
+      <footer class="entry-footer"><div class="entry-actions entry-actions-single"><button type="button" class="entry-primary" data-entry-action="continue-welcome">اختر اهتماماتك <i class="fa-solid fa-arrow-left" aria-hidden="true"></i></button></div></footer>`;
     bindPanelActions();
   }
 
@@ -817,10 +817,18 @@
     return root.LootLinguaWorldsEntryPreview;
   }
 
+  function usesSelectedWorldStart() {
+    return runtime.presentation?.classification === 'brand-new' && runtime.presentation?.audience === 'new';
+  }
+
   function currentNextAction() {
     runtime.action = api().resolveNextAction(runtime.signals || {}, {
       selectedWorldId: runtime.state?.selectedWorldId || '',
     });
+    if (runtime.action.id === 'open-selected-world' && usesSelectedWorldStart()) {
+      runtime.action = { ...runtime.action, label: 'افتح عالمك',
+        hint: 'ابدأ من البوابة الأولى، وأضف كلماتها حتى تقدر تراجعها.' };
+    }
     return runtime.action;
   }
 
@@ -950,6 +958,7 @@
     const loading = state.status === 'loading' || state.status === 'waiting' || state.status === 'idle';
     const empty = state.status === 'ready' && !state.items.length;
     const failed = state.status === 'error';
+    const hasSelection = state.status === 'ready' && state.items.some((world) => String(world.worldId) === selectedId);
     let content = '';
     if (loading) {
       content = `<div class="entry-world-grid" aria-label="جاري تحميل العوالم">
@@ -968,13 +977,14 @@
         ${state.items.map((world) => {
           const selected = String(world.worldId || '') === selectedId;
           const recommended = world.recommendation?.kind === 'interest-match';
+          const matchedInterest = recommended && api().INTERESTS.find((interest) => interest.id === world.recommendation.matchedInterestId);
           return `<button type="button" role="radio" aria-checked="${selected}" class="entry-world-card${selected ? ' selected' : ''}${recommended ? ' recommended' : ''}" data-entry-world="${escapeHtml(world.worldId)}">
             <span class="entry-world-visual">${worldPreviewVisual(world)}</span>
             <span class="entry-world-copy">
-              ${recommended ? '<small><i class="fa-solid fa-wand-magic-sparkles" aria-hidden="true"></i> مقترح حسب اهتماماتك</small>' : '<small>عالم منشور</small>'}
+              ${recommended ? `<small><i class="fa-solid fa-wand-magic-sparkles" aria-hidden="true"></i> ${matchedInterest ? `من اهتماماتك: ${escapeHtml(matchedInterest.label)}` : 'مقترح حسب اهتماماتك'}</small>` : '<small>عالم منشور</small>'}
               <strong>${escapeHtml(world.title || world.name || 'عالم تعلّم')}</strong>
               <span>${escapeHtml(world.description || world.subtitle || 'مجموعة كلمات حول موضوع أو اهتمام.')}</span>
-              <em>${Number(world.gateCount) || 0} بوابة</em>
+              ${Number(world.gateCount) > 0 ? `<em>${Number(world.gateCount)} بوابة</em>` : ''}
             </span>
             <i class="fa-solid fa-circle-check entry-world-check" aria-hidden="true"></i>
           </button>`;
@@ -985,16 +995,16 @@
       <header class="entry-header"><div><span class="entry-eyebrow">اهتماماتك تفتح لك أبوابًا حقيقية</span><span class="entry-step-label">${stepIndicator('worlds')}</span></div></header>
       <div class="entry-copy entry-copy-compact">
         <h1 id="entryExperienceTitle">اختر عالمًا يثير فضولك</h1>
-        <p>كل بطاقة هنا عالم منشور فعليًا. اختيارك يحدد ما ستراه في هذه الجولة فقط؛ لن يبدأ رحلة تعلم ولن يغيّر تقدمك.</p>
+        <p>اختَر موضوع الكلمات اللي بدّك تتعلّمها. رتّبنا العوالم المقترحة حسب اهتماماتك.</p>
       </div>
       ${content}
       <footer class="entry-footer">
-        <p class="entry-helper${selectedId || failed || empty ? ' ready' : ''}">${selectedId ? 'اختيارك محفوظ — سنريك كيف تسير رحلة هذا العالم.' : (failed || empty ? 'يمكنك التعرّف إلى طريقة التعلم، ثم فتح العوالم المتاحة.' : 'اختر عالمًا واحدًا للمتابعة.')}</p>
+        <p class="entry-helper${hasSelection || failed || empty ? ' ready' : ''}">${hasSelection ? 'اخترت عالمك. تقدر تشوف معاينة قبل البداية.' : (failed || empty ? 'يمكنك التعرّف إلى طريقة التعلم، ثم فتح العوالم المتاحة.' : 'اختر عالمًا واحدًا للمتابعة.')}</p>
         <div class="entry-actions">
           <button type="button" class="entry-secondary" data-entry-action="back"><i class="fa-solid fa-arrow-right" aria-hidden="true"></i> رجوع</button>
           ${failed || empty
             ? '<button type="button" class="entry-primary" data-entry-action="continue-worlds-fallback">تعرّف إلى شكل الرحلة <i class="fa-solid fa-route" aria-hidden="true"></i></button>'
-            : `<button type="button" class="entry-primary" data-entry-action="continue-worlds" ${selectedId ? '' : 'disabled'}>استكشف رحلته <i class="fa-solid fa-arrow-left" aria-hidden="true"></i></button>`}
+            : `<button type="button" class="entry-primary" data-entry-action="continue-worlds" ${hasSelection ? '' : 'disabled'}>عاين البداية <i class="fa-solid fa-arrow-left" aria-hidden="true"></i></button>`}
         </div>
       </footer>`;
     bindPanelActions();
@@ -1099,7 +1109,7 @@
     if (!state.selectedGateId) {
       return `<section class="entry-gate-preview entry-gate-preview-empty" aria-live="polite">
         <i class="fa-regular fa-hand-pointer" aria-hidden="true"></i>
-        <div><small> معاينة البوابة</small><strong> لم تختر بوابة بعد</strong><span>اضغط على أي بوابة أعلاه لترى محتواها، ولن يتغير تقدمك.</span></div>
+        <div><small> معاينة البوابة</small><strong> لم تختر بوابة بعد</strong><span>اضغط على أي بوابة لتشوف عينة من كلماتها.</span></div>
       </section>`;
     }
     const gate = state.gatePreview?.gate || selectedGate || {};
@@ -1137,11 +1147,12 @@
     const loading = selectedId && ['idle', 'waiting', 'loading'].includes(status);
     const failed = selectedId && status === 'error';
     const world = model?.world || selectedWorldPreview();
+    const canSkipPreview = usesSelectedWorldStart() && Boolean(selectedId && String(world?.worldId || '') === selectedId);
     panel.innerHTML = `
       <header class="entry-header"><div><span class="entry-eyebrow">معاينة تعليمية — لا تغيّر تقدمك</span><span class="entry-step-label">${stepIndicator('journey')}</span></div></header>
       <div class="entry-copy entry-copy-compact">
         <h1 id="entryExperienceTitle">${escapeHtml(world?.title || 'من العالم إلى بوابة تتقنها')}</h1>
-        <p>كل عالم منظّم حسب مستوى لغتك، ثم بوابات تتعلم منها الكلمات خطوة بخطوة.</p>
+        <p>اختر بوابة إذا بدّك تعاين كلماتها، أو تابع لتبدأ من أول بوابة متاحة.</p>
       </div>
       <section class="entry-route-preview${explored ? ' explored' : ''}" aria-label="كيف تسير رحلة التعلم">
         <div class="entry-route-world"><span>${worldPreviewVisual(world)}</span><div><small>العالم</small><strong>${escapeHtml(world?.title || 'عالم التعلّم')}</strong></div></div>
@@ -1150,7 +1161,7 @@
       </section>
       ${loading ? '' : gatePreviewMarkup(structure)}
       <section class="entry-learning-explainer" aria-label="كيف يعمل التعلم في LootLingua">
-        <div class="entry-learning-heading"><small>ماذا يحدث بعد بدء الرحلة؟</small><strong>تعلّم كلمات البوابة، ثم راجعها وتقدّم</strong><p>هذه معاينة للتعرّف على المحتوى. في الخطوة التالية تختار وجهتك وتبدأ التعلّم الفعلي.</p></div>
+        <div class="entry-learning-heading"><small>ماذا يحدث بعد بدء الرحلة؟</small><strong>تعلّم كلمات البوابة، ثم راجعها وتقدّم</strong><p>بعد إضافة الكلمات، راجعها من داخل البوابة لتتابع تقدّمك.</p></div>
         <div class="entry-learning-loop">
         <span><i class="fa-solid fa-book-open" aria-hidden="true"></i><strong>تتعلّم</strong><small>كلمات البوابة</small></span>
         <i class="fa-solid fa-arrow-left" aria-hidden="true"></i>
@@ -1159,8 +1170,8 @@
         <span><i class="fa-solid fa-unlock-keyhole" aria-hidden="true"></i><strong>تتقدّم</strong><small>إلى البوابة التالية</small></span>
         </div>
       </section>
-      <footer class="entry-footer"><p class="entry-helper${explored ? ' ready' : ''}">${explored ? 'استكشفت بوابة فعلية، وعرفت كيف تسير الرحلة.' : 'اختر بوابة واحدة على الأقل لإكمال هذه الخطوة.'}</p>
-        <div class="entry-actions"><button type="button" class="entry-secondary" data-entry-action="back"><i class="fa-solid fa-arrow-right" aria-hidden="true"></i> رجوع</button><button type="button" class="entry-primary" data-entry-action="continue-journey" ${explored ? '' : 'disabled'}>حدد خطوتي التالية <i class="fa-solid fa-arrow-left" aria-hidden="true"></i></button></div>
+      <footer class="entry-footer"><p class="entry-helper${explored || canSkipPreview ? ' ready' : ''}">${explored ? 'عالمك جاهز لتفتحه.' : (canSkipPreview ? 'معاينة الكلمات اختيارية.' : 'اختر بوابة لتعاين طريقة التعلّم.')}</p>
+        <div class="entry-actions"><button type="button" class="entry-secondary" data-entry-action="back"><i class="fa-solid fa-arrow-right" aria-hidden="true"></i> رجوع</button><button type="button" class="entry-primary" data-entry-action="continue-journey" ${explored || canSkipPreview ? '' : 'disabled'}>${!explored && canSkipPreview ? 'تخطي المعاينة' : 'تابع للبدء'} <i class="fa-solid fa-arrow-left" aria-hidden="true"></i></button></div>
       </footer>`;
     bindPanelActions();
   }
@@ -1246,6 +1257,26 @@
       .replace(/'/g, '&#039;');
   }
 
+  function updateReadingHint(panel) {
+    const remaining = runtime.readUntil - Date.now();
+    if (!panel || runtime.settingsMode || remaining <= 0) return;
+    const button = panel.querySelector('.entry-primary[data-entry-action]:not([disabled]), .entry-primary[data-entry-cta]:not([disabled])') ||
+      panel.querySelector('[data-entry-action="skip-interests"]');
+    const actions = button?.closest?.('.entry-actions, .entry-action-destinations');
+    if (!actions?.before) return;
+    let hint = panel.querySelector('#entryReadingHint');
+    if (!hint) {
+      hint = document.createElement('p');
+      hint.id = 'entryReadingHint';
+      hint.className = 'entry-helper';
+      actions.before(hint);
+    }
+    hint.textContent = `اقرأ أولًا، ثم اضغط «${button.textContent.trim()}».`;
+    panel.querySelectorAll('[aria-describedby="entryReadingHint"]').forEach((node) => node.removeAttribute('aria-describedby'));
+    button.setAttribute('aria-describedby', hint.id);
+    setTimeout(() => { hint.remove(); button.removeAttribute('aria-describedby'); }, remaining);
+  }
+
   function bindPanelActions() {
     const panel = panelElement();
     if (!panel) return;
@@ -1257,6 +1288,7 @@
         runtime.readUntil = Date.now() + (length >= 105 ? 4000 : 3000);
       }
     }
+    updateReadingHint(panel);
     panel.querySelectorAll('[data-entry-interest]').forEach((button) => {
       button.addEventListener('click', () => toggleInterest(button.dataset.entryInterest, button));
     });
@@ -1322,6 +1354,7 @@
     }
     const continueButton = panelElement()?.querySelector('[data-entry-action="continue-interests"]');
     if (continueButton) continueButton.disabled = ids.size === 0;
+    updateReadingHint(panelElement());
   }
 
   function selectTheme(themeId) {
@@ -1620,7 +1653,14 @@
         await ensureStructurePreview(true);
         return;
       }
-      else if (action === 'continue-journey') transition({ type: 'continue-journey' });
+      else if (action === 'continue-journey') {
+        const world = selectedWorldPreview();
+        if (runtime.state.journeyStatus !== 'structure-explored' && usesSelectedWorldStart() &&
+            world?.worldId && String(world.worldId) === runtime.state.selectedWorldId) {
+          transition({ type: 'explore-structure' });
+        }
+        transition({ type: 'continue-journey' });
+      }
       else if (action === 'review-return') transition({ type: 'review-return' });
       else if (action === 'continue-return') transition({ type: 'continue-return' });
       else if (action === 'complete') {
@@ -1755,7 +1795,7 @@
     if (!prompt) return;
     if (event.key === 'Escape') {
       event.preventDefault();
-      dismissJourneyAuthPrompt();
+      if (prompt.getAttribute('aria-busy') !== 'true') dismissJourneyAuthPrompt();
       return;
     }
     if (event.key !== 'Tab') return;
@@ -1775,18 +1815,8 @@
   function showJourneyAuthPrompt(intent) {
     closeJourneyAuthPrompt({ silent: true });
     runtime.authPromptFocus = document.activeElement;
-    const guidedState = root.LootLinguaGuidedFirstJourney?.getState?.();
-    const dictionaryGuide = root.LootLinguaPersonalDictionaryOnboarding?.getState?.();
-    const isGuidedGuestFallback = Boolean(
-      guidedState?.worldId && guidedState.phase !== 'completed' &&
-      dictionaryGuide?.phase === 'awaiting-journey' && !root.auth?.currentUser
-    );
-    const title = isGuidedGuestFallback
-      ? 'سجّل دخولك لتتابع رحلتك'
-      : 'سجّل دخولك لبدء الرحلة';
-    const body = isGuidedGuestFallback
-      ? 'سجّل دخولك لمتابعة رحلة العالم، أو تابع كضيف لنتعرف على قاموسك الشخصي ونضيف أول كلمة.'
-      : 'سنحفظ بيانات الضيف أولًا، ثم نعيدك إلى العالم نفسه ونكمل طلبك مرة واحدة.';
+    const title = 'ابدأ رحلتك';
+    const body = 'تابع كضيف لتحفظ تقدّم رحلتك في هذا المتصفح. تقدر تربطها بحساب جديد لاحقًا.';
     const prompt = document.createElement('div');
     prompt.id = 'journeyAuthPrompt';
     prompt.className = 'journey-auth-prompt';
@@ -1798,18 +1828,38 @@
         <p id="journeyAuthBody">${body}</p>
         <p class="journey-auth-status" id="journeyAuthStatus" role="status" aria-live="polite"></p>
         <div class="journey-auth-actions">
-          <button type="button" class="entry-primary" data-journey-auth="login">اختيار طريقة تسجيل الدخول</button>
-          <button type="button" class="entry-secondary" data-journey-auth="guest">متابعة كضيف</button>
+          <button type="button" class="entry-primary" data-journey-auth="guest">متابعة كضيف</button>
+          <button type="button" class="entry-secondary" data-journey-auth="login">تسجيل الدخول</button>
         </div>
       </section>`;
     document.body.appendChild(prompt);
     document.documentElement.classList.add('journey-auth-active');
     document.body.classList.add('journey-auth-active');
     setBackgroundInert(true);
-    prompt.querySelector('[data-journey-auth="guest"]')?.addEventListener('click', () => {
-      if (isGuidedGuestFallback) root.LootLinguaGuidedFirstJourney?.enableGuestDictionary?.();
-      dismissJourneyAuthPrompt();
-      if (isGuidedGuestFallback) root.LootLinguaPersonalDictionaryOnboarding?.beginGuestDictionary?.();
+    prompt.querySelector('[data-journey-auth="guest"]')?.addEventListener('click', async () => {
+      const buttons = [...prompt.querySelectorAll('button')];
+      if (prompt.getAttribute('aria-busy') === 'true') return;
+      prompt.setAttribute('aria-busy', 'true');
+      buttons.forEach(button => { button.disabled = true; });
+      const status = prompt.querySelector('#journeyAuthStatus');
+      status.textContent = 'جارٍ تجهيز رحلة الضيف…';
+      try {
+        const user = await root.beginGuestJourneySession?.();
+        if (!user?.uid) throw new Error('guest-journey/unavailable');
+        if (prompt.isConnected) closeJourneyAuthPrompt({ silent: true });
+        if (user.isAnonymous === true && root.auth?.currentUser?.uid === user.uid) {
+          // This is the action just requested from the World, which can start
+          // before the unrelated profile and dictionary panels finish loading.
+          await consumePendingJourneyIntent({ allowWhileOpen: true });
+        }
+      } catch (_) {
+        if (prompt.isConnected) status.textContent = 'تعذّر بدء رحلة الضيف. بقي اختيارك محفوظًا؛ حاول مرة ثانية.';
+      } finally {
+        if (prompt.isConnected) {
+          buttons.forEach(button => { button.disabled = false; });
+          prompt.setAttribute('aria-busy', 'false');
+        }
+      }
     });
     prompt.querySelector('[data-journey-auth="login"]')?.addEventListener('click', async (event) => {
       const button = event.currentTarget;
@@ -1836,7 +1886,7 @@
       }
     });
     document.addEventListener('keydown', onJourneyAuthPromptKeydown, true);
-    requestAnimationFrame(() => prompt.querySelector('[data-journey-auth="login"]')?.focus());
+    requestAnimationFrame(() => prompt.querySelector('[data-journey-auth="guest"]')?.focus());
     return intent;
   }
 
@@ -1898,7 +1948,7 @@
     }
     if (intent.status === 'consuming' && intent.leaseUntil > Date.now()) return false;
     const dictionaryGuide = root.LootLinguaPersonalDictionaryOnboarding?.getState?.();
-    if (dictionaryGuide?.requiresFirstWord && dictionaryGuide.phase !== 'awaiting-journey' && !options?.explicitDiscovery) {
+    if (user.isAnonymous !== true && dictionaryGuide?.requiresFirstWord && dictionaryGuide.phase !== 'awaiting-journey' && !options?.explicitDiscovery) {
       const store = root.LootLinguaNotificationStore;
       const key = 'onboarding:resume-public-world';
       if (!store?.find?.(key)) store?.upsert?.({
@@ -2002,6 +2052,10 @@
     }
     if (id === 'open-selected-world') {
       const worldId = expected?.worldId || runtime.state?.selectedWorldId;
+      if (worldId && usesSelectedWorldStart() && typeof root.openPublishedWorld === 'function') {
+        await root.openPublishedWorld(worldId);
+        return { type: 'world', worldId, selectedStart: true };
+      }
       if (typeof root.loadWorldsView !== 'function') throw new Error('Worlds destination is unavailable.');
       root.loadWorldsView();
       return { type: 'worlds', suggestedWorldId: worldId };
@@ -2035,7 +2089,7 @@
         root.LootLinguaGuidedFirstJourneyContract?.shouldStartForPresentation(runtime.presentation);
       const destination = await openEntryDestination(id, expected);
       if (epoch !== runtime.authEpoch) return;
-      if (startsGuidedFirstJourney && destination?.type === 'worlds') {
+      if (startsGuidedFirstJourney && (destination?.type === 'worlds' || destination?.selectedStart)) {
         // Dictionary guidance is its own tiny, resumable hand-off.  It is
         // planned before the public gate journey but cannot surface until that
         // journey completes, so the two overlays never compete.
@@ -2046,8 +2100,8 @@
         // not a new Product Entry state or learning/progression mutation.
         await root.LootLinguaGuidedFirstJourney?.beginFromEntry({
           presentation: runtime.presentation,
-          worldId: destination.suggestedWorldId || runtime.state.selectedWorldId,
-          chooseWorld: true,
+          worldId: destination.worldId || destination.suggestedWorldId || runtime.state.selectedWorldId,
+          chooseWorld: !destination.selectedStart,
         });
       }
       if (epoch !== runtime.authEpoch) return;

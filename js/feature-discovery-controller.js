@@ -104,13 +104,13 @@
   function isInteractiveJourneyActive() {
     const journey = root.LootLinguaGuidedFirstJourney;
     const journeyState = journey?.getState?.();
-    const dictionary = root.LootLinguaPersonalDictionaryOnboarding?.getState?.();
+    const dictionary = root.LootLinguaPersonalDictionaryOnboarding;
     return Boolean(
       root.__entryExperienceActive ||
       root.hasActiveLearningQuiz?.() ||
       (typeof document !== 'undefined' && document.getElementById('appAuthDialogShell')?.hidden === false) ||
       (typeof document !== 'undefined' && document.documentElement.classList.contains('journey-auth-active')) ||
-      ['awaiting-journey', 'intro', 'awaiting-first-word'].includes(dictionary?.phase) ||
+      dictionary?.isPresenting?.() ||
       (journey?.isPresenting?.() ?? (root.LootLinguaGuidedFirstJourneyContract?.isActive?.(journeyState) &&
         !(journeyState?.guestDictionaryAvailable && !user())))
     );
@@ -199,8 +199,9 @@
   function open(feature) {
     if (!api().FEATURES.includes(feature) || !eligible(feature) || isInteractiveJourneyActive()) return false;
     const active = root.LootLinguaFeatureMiniOnboarding?.getActiveFeature?.();
-    if (active && active !== feature) return false;
+    if (active && active !== feature) root.LootLinguaFeatureMiniOnboarding?.pause?.();
     if (['completed', 'skipped'].includes(getStatus(feature, true))) return false;
+    root.LootLinguaSmartOnboarding?.close?.();
     start(feature);
     if (feature === 'treasure') root.loadTreasureView?.();
     else if (feature === 'quiz') root.loadQuizView?.();
@@ -224,6 +225,7 @@
     .forEach((eventName) => root.addEventListener(eventName, requestEvaluation));
   if (typeof document !== 'undefined') {
     document.addEventListener('click', (event) => {
+      if (root.LootLinguaSmartOnboarding) return;
       const target = event.target?.closest?.('[data-feature], #worldsGrid .world-card-add');
       if (!target) return;
       const feature = target.classList.contains('world-card-add') ? 'custom-worlds' : target.dataset.feature;

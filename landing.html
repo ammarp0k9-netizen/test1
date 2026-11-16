@@ -18,8 +18,9 @@
   <link rel="icon" type="image/png" href="Lootlingua_LOGO_2.png">
   <title>LootLingua | تعلّم الإنجليزية من الأشياء اللي تحبها</title>
   <link rel="stylesheet" href="landing.css?v=20261107-runner-1">
-  <script type="module" src="js/landing.js?v=20260811-2"></script>
+  <script type="module" src="js/landing.js?v=full-merge-1"></script>
   <script type="module" src="js/landing-runner-preview.js?v=20261111-jump-4"></script>
+  <link rel="stylesheet" href="saved-guest.css?v=full-merge-1">
 </head>
 <body data-auth-state="pending">
   <a class="skip-link" href="#mainContent">انتقل إلى المحتوى</a>
@@ -55,6 +56,8 @@
           </div>
           <p class="guest-note" data-guest-only><span aria-hidden="true">✓</span> تقدر تبدأ كضيف، وتسجّل لاحقًا لحفظ تقدّمك.</p>
           <p class="return-note" data-user-only hidden><span aria-hidden="true">✓</span> أنت مسجّل بالفعل؛ سيفتح التطبيق رحلتك المحفوظة.</p>
+          <div><button type="button" class="button button-quiet" data-saved-guest-restore hidden>استعادة تقدّم الضيف المحفوظ</button>
+          <small data-saved-guest-restore-status role="status"></small></div>
           <p class="auth-inline-status" data-auth-inline-status role="status" aria-live="polite"></p>
         </div>
 

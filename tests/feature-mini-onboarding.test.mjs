@@ -10,6 +10,7 @@ function harness(feature, step = 0) {
   const root = {
     LootLinguaFeatureDiscovery: {
       getState: () => ({ features: { [feature]: state } }),
+      getStatus: () => state.status,
       checkpoint: (_, value) => { state = { ...state, step: value }; },
       complete: () => { state = { ...state, status: 'completed' }; },
       skip: () => { throw new Error('Step skipping must never dismiss the whole tour'); },
@@ -24,7 +25,10 @@ function harness(feature, step = 0) {
   };
   const document = {
     createElement: () => ({ children: [], listeners: {}, append(...nodes) { this.children.push(...nodes); }, addEventListener(name, fn) { this.listeners[name] = fn; } }),
-    querySelector: () => ({ getClientRects: () => [{}], scrollIntoView() {} }),
+    querySelector: selector => ({
+      getClientRects: () => !['#customWorldNameInput', '#customWorldSaveBtn'].includes(selector) || panelVisible ? [{}] : [],
+      scrollIntoView() {},
+    }),
     querySelectorAll: () => [],
     getElementById: () => ({ getClientRects: () => panelVisible ? [{}] : [], classList: { contains: name => name === 'active' } }),
     addEventListener() {},
@@ -34,6 +38,7 @@ function harness(feature, step = 0) {
     start: () => root.LootLinguaFeatureMiniOnboarding.start(feature),
     state: () => state,
     panelVisible: () => panelVisible,
+    openForm: () => { panelVisible = true; },
     skip() {
       const actions = coach.content.children.at(-1);
       const button = actions.children.find(node => node.className === 'feature-mini-onboarding-skip');
@@ -48,18 +53,17 @@ test('skip advances one checkpoint and keeps the remaining discovery active', ()
   assert.deepEqual(h.state(), { status: 'in-progress', step: 1 });
   h.skip(); assert.equal(h.state().step, 2);
 });
-test('skipping an interaction prepares the next screen without saving data', () => {
+test('skipping an interaction saves its checkpoint without opening a form', () => {
   const h = harness('custom-worlds', 2); h.start(); h.skip();
   assert.equal(h.state().step, 3);
   assert.equal(h.state().status, 'in-progress');
-  assert.equal(h.panelVisible(), true);
+  assert.equal(h.panelVisible(), false);
 });
-test('resuming a form checkpoint restores the form; saving continues to the final explanation', () => {
-  const h = harness('custom-worlds', 4); h.start();
-  assert.equal(h.panelVisible(), true);
+test('saving from a form opened by the user reaches the final explanation', () => {
+  const h = harness('custom-worlds', 4); h.openForm(); h.start();
   h.emit('lootlingua:custom-world-saved');
   assert.equal(h.state().step, 5);
   assert.equal(h.state().status, 'in-progress');
-  h.skip();
+  h.start(); h.skip();
   assert.equal(h.state().status, 'completed');
 });

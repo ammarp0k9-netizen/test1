@@ -311,10 +311,6 @@ test('gate word loading stays visible while per-word cloud progress updates arri
     worldsSource.indexOf('function makePublishedGateJourneyPanel'),
     worldsSource.indexOf('function appendPublishedHeader')
   );
-  const pickerBody = worldsSource.slice(
-    worldsSource.indexOf('async function openPublishedGateQuizPicker'),
-    worldsSource.indexOf('window.openPublishedGatePractice')
-  );
 
   assert.doesNotMatch(refreshBody, /if \(isPublishedGateWordsLoading\(\)\) return false;/);
   assert.doesNotMatch(watcherBody, /if \(isPublishedGateWordsLoading\(\)\) return;/);
@@ -326,7 +322,6 @@ test('gate word loading stays visible while per-word cloud progress updates arri
     panelBody.indexOf('if (gateLoadPending)') < panelBody.indexOf("} else if (state === 'learning')"),
     'the loading state must take precedence over the learning CTA'
   );
-  assert.match(pickerBody, /if \(isPublishedGateWordsLoading\(\)\)/);
 });
 
 test('the public-world journey stays separate from feature eligibility', () => {

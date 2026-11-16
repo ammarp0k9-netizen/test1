@@ -17,18 +17,18 @@ const QUIZ_MODE_META = {
   },
   runner: {
     title: 'تجهيز رحلة الجري',
-    desc: 'تدرّب على الكلمات واجمع العملات. لرفع الإتقان اختر مطابقة الكلمات أو الصندوق المشفّر أو الهروب من النسيان.'
+    desc: 'تدرّب على الكلمات واجمع العملات. نتائج الجري تدريبية ولا تُحتسب ضمن الإتقان أو جاهزية البوابة.'
   },
   flashcards: {
     title: 'بطاقات الذاكرة',
-    desc: 'اقلب البطاقة وحدد إذا تذكرت الكلمة أو نسيتها. هذا تدريب، والإتقان يرتفع في الاختبارات الموثّقة.'
+    desc: 'اقلب البطاقة وحدد إذا تذكرت الكلمة أو نسيتها. نتائج البطاقات تدريبية ولا تُحتسب ضمن الإتقان أو جاهزية البوابة.'
   },
   timeAttack: {
     title: 'الهروب من النسيان',
     desc: 'اختيار من متعدد بسرعة. الوقت ضدك والـ HP معك.'
   },
   scramble: {
-    title: 'الصندوق المشفر',
+    title: 'الصندوق المشفّر',
     desc: SCRAMBLE_DIRECTION_COPY['ar-to-en']
   },
   matching: {
@@ -41,7 +41,24 @@ const quizCore = window.LootLinguaQuizCore;
 const quizSourceRequestCoordinator = quizCore.createSourceRequestCoordinator();
 const quizSourceLoadStates = new Map();
 let currentQuizSelectionPlan = null;
+let configuredProgressQuiz = null;
 let matchingQuizState = null;
+let quizReturnGate = null;
+
+function rememberQuizGate({ journeyWorldId, journeyRankId, journeyGateId } = {}) {
+  quizReturnGate = journeyWorldId && journeyRankId && journeyGateId
+    ? [journeyWorldId, journeyRankId, journeyGateId] : null;
+  const button = document.getElementById('quizReturnToGate');
+  if (button) button.hidden = !quizReturnGate;
+}
+
+function returnToQuizGate() {
+  if (quizReturnGate && currentView === 'quiz' && !activeQuizSession) window.openPublishedGate?.(...quizReturnGate);
+}
+
+for (const event of ['lootlingua:dictionary-navigation', 'lootlingua:auth-state']) {
+  window.addEventListener(event, () => rememberQuizGate());
+}
 
 function getScrambleDirectionText(direction = scrambleDirection) {
   return SCRAMBLE_DIRECTION_COPY[direction] || SCRAMBLE_DIRECTION_COPY['ar-to-en'];
@@ -135,12 +152,20 @@ async function loadStoredActiveQuizSession() {
   return loadJSON(ACTIVE_QUIZ_SESSION_KEY, null);
 }
 
+function quizDraftWordCount(session) {
+  return (Array.isArray(session.runtimeWords) && session.runtimeWords.length) || session.words.length;
+}
+
+function isQuizResultAwaitingSave(session) {
+  return Number(session.quizIndex) === quizDraftWordCount(session) &&
+    Array.isArray(session.quizSessionResults) && session.quizSessionResults.length > 0;
+}
+
 function isResumableQuizSession(session) {
   if (!session || !isVerifiedQuizMode(session.mode) || !Array.isArray(session.words) || !session.words.length) return false;
-  const index = Math.max(0, Number(session.quizIndex) || 0);
-  if (index >= session.words.length) return false;
   if (session.completedAt || session.finishedAt) return false;
-  return true;
+  const index = Math.max(0, Number(session.quizIndex) || 0);
+  return index < quizDraftWordCount(session) || isQuizResultAwaitingSave(session);
 }
 
 function clearActiveQuizSessionStorage() {
@@ -267,6 +292,7 @@ function applyStoredQuizSession(session) {
     selectionPlanVersion: Number(session.selectionPlanVersion) || 1,
     direction: session.direction || {}
   };
+  rememberQuizGate(activeQuizSession);
   currentQuizExposureSessionId = activeQuizSession.id;
   currentQuizExposureMode = 'verified';
   flashcardSessionOutcomes = new Map();
@@ -279,7 +305,7 @@ function applyStoredQuizSession(session) {
   quizIndex = Math.max(0, Math.min(Number(session.quizIndex) || 0, currentQuizWords.length));
   currentStreak = Number(session.currentStreak) || 0;
   currentQuizMistakes = Number(session.currentQuizMistakes) || 0;
-  timeAttackHp = Number(session.timeAttackHp) || 3;
+  timeAttackHp = session.timeAttackHp == null ? 3 : Math.max(0, Number(session.timeAttackHp) || 0);
   quizSessionResults = Array.isArray(session.quizSessionResults) ? session.quizSessionResults : [];
   matchingQuizState = session.matchingState || null;
   hasStartedAnswering = Boolean(session.hasStartedAnswering);
@@ -290,15 +316,16 @@ function applyStoredQuizSession(session) {
 
 window.resumeActiveQuizSession = function() {
   hideQuizResumePrompt();
-  if (!activeQuizSession && window.__pendingQuizResumeSession) {
-    applyStoredQuizSession(window.__pendingQuizResumeSession);
-  }
+  const saved = window.__pendingQuizResumeSession;
+  const finishSavedResult = !activeQuizSession && saved && applyStoredQuizSession(saved) &&
+    isQuizResultAwaitingSave(saved);
   if (!activeQuizSession) return;
   hideQuizPlayPanels();
   document.getElementById('quizViewSetup').style.display = 'none';
   const exitBtn = document.querySelector('#quizView .quiz-exit-btn');
   if (exitBtn) exitBtn.style.display = 'none';
   setQuizImmersive(true);
+  if (finishSavedResult) return finishQuizRun();
   if (activeQuizSession.mode === 'timeAttack') {
     document.getElementById('quizTimeAttackView').style.display = 'block';
     renderTimeAttackQuestion();
@@ -346,6 +373,7 @@ function showQuizModes(options = {}) {
     window.requestQuizExit();
     return;
   }
+  configuredProgressQuiz = null;
   stopTimeAttackTimer();
   setQuizImmersive(false);
   hideQuizPlayPanels();
@@ -355,6 +383,7 @@ function showQuizModes(options = {}) {
   if (exitBtn) exitBtn.style.display = 'flex';
   syncQuizSourceOptions();
   refreshQuizAvailableCount();
+  window.dispatchEvent(new CustomEvent('lootlingua:quiz-modes-opened', { detail: { origin: options.guideOrigin } }));
 }
 
 function closeQuizSetup() {
@@ -374,6 +403,7 @@ function openQuizModeSettings(mode) {
   if (exitBtn) exitBtn.style.display = 'none';
   document.getElementById('quizViewSetup').style.display = 'none';
   document.getElementById('quizSettingsPanel').style.display = 'block';
+  window.dispatchEvent(new CustomEvent('lootlingua:quiz-settings-opened'));
   document.getElementById('quizSettingsTitle').textContent = QUIZ_MODE_META[selectedQuizMode].title;
   document.getElementById('quizSettingsDesc').textContent = QUIZ_MODE_META[selectedQuizMode].desc;
   const isRunner = selectedQuizMode === 'runner';
@@ -497,6 +527,7 @@ function normalizeQuizWord(item, source, index) {
     hiddenFromDictionary: item.hiddenFromDictionary === true,
     wordKey: identity.wordKey || window.LootLinguaWordLifecycle?.wordKeyOf?.(item) || '',
     storedWordKey: item.wordKey || '',
+    ...(sourceId.startsWith('journey:') && item.contentWordId ? { contentWordId: String(item.contentWordId) } : {}),
     customWorldId: sourceId.startsWith('custom:') ? sourceId.slice(7) : '',
     isGameQuizWord: false,
     quizSource: sourceId
@@ -612,6 +643,7 @@ async function ensureQuizSourceReady(scope = currentQuizSource, options = {}) {
         status: 'ready',
         token,
         loadedAt: Date.now(),
+        fromCache: response?.fromCache === true,
         localFallback: keepScopedCache,
       });
       const snapshot = resolveQuizSourceSnapshot(source.scope, { ...options, ownerId, status: 'ready' });
@@ -679,6 +711,7 @@ window.addEventListener('lootlingua:auth-state', () => {
   quizSourceRequestCoordinator.invalidate();
   quizSourceLoadStates.clear();
   currentQuizSelectionPlan = null;
+  configuredProgressQuiz = null;
   quizSourceRefreshScheduled = false;
   quizSourceRefreshOwnerId = '';
   quizSourceRefreshPendingAfterCommit = false;
@@ -1112,10 +1145,52 @@ function getConfiguredQuizWords(options = {}) {
   return buildSmartQuizDeck(sourceWords, count, options);
 }
 
-const personalQuizPracticeLockCopy = 'حان وقت اختبار قاموسك الشخصي. اختر المطابقة أو الصندوق المشفّر أو الهروب من النسيان، وحدّد القاموس الشخصي مصدرًا للكلمات. الاختبار الموثوق يقيس مستواك ويرفع إتقانك. الألعاب متوقفة مؤقتًا، وبطاقات الذاكرة متاحة للتدريب.';
+function getConfiguredProgressQuizKey() {
+  return JSON.stringify([getQuizSourceOwnerId(), window.__lootlinguaAuthGeneration, selectedQuizMode, currentQuizSource, quizQuestionCount]);
+}
+
+function prepareConfiguredProgressQuiz(candidates, now) {
+  const key = getConfiguredProgressQuizKey();
+  const previous = configuredProgressQuiz?.key === key ? configuredProgressQuiz : null;
+  const sessionId = previous?.sessionId || makeQuizSessionId();
+  const candidateKeys = JSON.stringify(candidates.map(word => [word.wordKey, word.id]).sort());
+  const count = quizQuestionCount === "all" ? candidates.length : Number(quizQuestionCount);
+  // Keep the chosen deck for this setup. Read fresh word data when checking
+  // eligibility or starting the session, and reselect only if membership changes.
+  const select = () => createBalancedQuizPlan(candidates, count, { now, seed: sessionId });
+  const plan = previous?.candidateKeys === candidateKeys ? previous.plan :
+    window.withWordMasterySnapshot ? window.withWordMasterySnapshot(select) : select();
+  configuredProgressQuiz = { key, sessionId, candidateKeys, plan };
+  const candidatesByKey = new Map(candidates.map(word => [word.wordKey, word]));
+  return { sessionId, plan, words: plan.deck.map(word => candidatesByKey.get(word.wordKey)) };
+}
+
+function updateQuizMasteryOpportunity(opportunity, candidates, sourceReady, preparedQuiz) {
+  if (!isVerifiedQuizMode(selectedQuizMode) || !sourceReady ||
+      document.getElementById('quizSettingsPanel')?.style.display !== 'block') {
+    opportunity.hidden = true;
+    return;
+  }
+  const ownerId = getQuizSourceOwnerId();
+  const load = quizSourceLoadStates.get(getQuizSourceLoadKey(ownerId, currentQuizSource));
+  const pages = window.LootLinguaDictionaryPages?.current(ownerId)?.state();
+  if ((pages && (!pages.complete || pages.offline)) || load?.fromCache || load?.localFallback) {
+    opportunity.hidden = true;
+    return;
+  }
+  const now = Date.now();
+  const quiz = preparedQuiz || prepareConfiguredProgressQuiz(candidates, now);
+  const hasPromotion = () => quiz.words.some(word => {
+    const update = computeSrsUpdate(word, true, quiz.sessionId, now);
+    return update.transition && update.previousStatus !== update.nextStatus;
+  });
+  opportunity.hidden = !(window.withWordMasterySnapshot ? window.withWordMasterySnapshot(hasPromotion) : hasPromotion());
+}
+
+const personalQuizPracticeLockCopy = 'حان وقت مراجعة قاموسك. اختر اختبار تقدّم بالقاموس الشخصي. الألعاب وبطاقات الذاكرة مقفلة حتى تكمّل المراجعة.';
 
 function isQuizPracticeMode(mode) {
-  return mode === 'runner' || mode === 'lootBots';
+  return mode === 'runner' || mode === 'lootBots' || mode === 'flashcards';
 }
 
 function personalQuizDueAt() {
@@ -1135,7 +1210,7 @@ function refreshQuizPracticeAvailability() {
     explanation.hidden = !locked;
     if (locked) explanation.textContent = personalQuizPracticeLockCopy;
   }
-  for (const id of ['runnerDictionary', 'lootBotsDictionary']) {
+  for (const id of ['flashcardsDictionary', 'runnerDictionary', 'lootBotsDictionary']) {
     const button = document.getElementById(id);
     if (button) {
       button.disabled = locked;
@@ -1195,7 +1270,17 @@ function refreshQuizSettingsSummary() {
   const summary = document.getElementById('quizSettingsSummary');
   const sourceText = getQuizSourceLabel(currentQuizSource);
   const startButton = document.getElementById('quizStartButton');
-  if (isQuizPracticeMode(selectedQuizMode) && isPersonalQuizDue()) {
+  const opportunity = document.getElementById('quizMasteryOpportunity');
+  if (opportunity && (status !== 'ready' || !isVerifiedQuizMode(selectedQuizMode))) opportunity.hidden = true;
+  const practiceLocked = isQuizPracticeMode(selectedQuizMode) && isPersonalQuizDue();
+  if (selectedQuizMode === 'flashcards') {
+    document.querySelectorAll('#flashcardPresetOptions .setup-btn').forEach(button => {
+      button.disabled = practiceLocked;
+      if (practiceLocked) button.setAttribute('aria-describedby', 'quizSettingsSummary');
+      else button.removeAttribute('aria-describedby');
+    });
+  }
+  if (practiceLocked) {
     if (summary) summary.textContent = personalQuizPracticeLockCopy;
     if (startButton) startButton.disabled = true;
     return;
@@ -1233,6 +1318,7 @@ function refreshQuizSettingsSummary() {
       : `${sourceText}: ${total} كلمة مؤهلة؛ تحتاج ${eligibility.required} لبدء الاختبار.`;
   }
   if (startButton) startButton.disabled = !eligibility.allowed;
+  if (opportunity) updateQuizMasteryOpportunity(opportunity, candidates, status === 'ready' && eligibility.allowed);
 }
 
 function startConfiguredQuiz() {
@@ -1298,7 +1384,20 @@ async function startDictionaryRunner() {
 
 let personalQuizPreparation = null;
 async function startActualQuiz(mode, options = {}) {
-  const pages = window.LootLinguaDictionaryPages?.current();
+  const flashcardsLocked = () => !isVerifiedQuizMode(mode) &&
+    (options.journeyGateId ? options.isGateFlashcardsLocked?.() : isPersonalQuizDue());
+  const showPracticeLock = () => {
+    refreshQuizPracticeAvailability();
+    showToast(options.journeyGateId ? 'حان وقت المراجعة الرسمية للبوابة. اختر اختبار تقدّم.' : personalQuizPracticeLockCopy, 'info');
+    return false;
+  };
+  if (flashcardsLocked()) return showPracticeLock();
+  const usePreparedQuiz = options.configured && isVerifiedQuizMode(mode) && !Array.isArray(options.words);
+  const setupKey = usePreparedQuiz ? getConfiguredProgressQuizKey() : '';
+  const setupIsCurrent = () => !usePreparedQuiz || (mode === selectedQuizMode && currentView === 'quiz' &&
+    document.getElementById('quizSettingsPanel')?.style.display === 'block' && getConfiguredProgressQuizKey() === setupKey);
+  const hasGateCohort = options.journeyGateId && Array.isArray(options.words);
+  const pages = hasGateCohort ? null : window.LootLinguaDictionaryPages?.current();
   if (pages && !pages.state().complete) {
     if (personalQuizPreparation) return personalQuizPreparation;
     const scope = currentQuizSource, selection = selectedQuizMode;
@@ -1307,7 +1406,7 @@ async function startActualQuiz(mode, options = {}) {
     if (button) { button.disabled = true; button.textContent = 'جارٍ تجهيز الكلمات…'; button.setAttribute('aria-busy', 'true'); }
     const request = Promise.resolve().then(async () => {
       if (await window.LootLinguaDictionaryPages.requireComplete() === false) return false;
-      if (!options.words && (scope !== currentQuizSource || selection !== selectedQuizMode)) return false;
+      if (!setupIsCurrent() || (!options.words && (scope !== currentQuizSource || selection !== selectedQuizMode))) return false;
       return startActualQuiz(mode, options);
     }).finally(() => {
       if (personalQuizPreparation === request) personalQuizPreparation = null;
@@ -1320,16 +1419,18 @@ async function startActualQuiz(mode, options = {}) {
   stopTimeAttackTimer();
   const explicitWords = Array.isArray(options.words) ? options.words.filter(Boolean) : null;
   const sessionSource = String(options.source || currentQuizSource || 'personal');
-  const sessionId = options.sessionId || makeQuizSessionId();
   if (!explicitWords) {
     const ready = await ensureQuizSourceReady(currentQuizSource, { mode });
-    if (ready?.stale || ready?.error || currentQuizSource !== sessionSource) return false;
+    if (!setupIsCurrent() || ready?.stale || ready?.error || currentQuizSource !== sessionSource) return false;
   }
+  if (flashcardsLocked()) return showPracticeLock();
   const resolvedSourceWords = explicitWords || getQuizSourceWords(currentQuizSource, { mode });
-  let words = explicitWords || (options.configured
+  const preparedQuiz = usePreparedQuiz ? prepareConfiguredProgressQuiz(resolvedSourceWords, Date.now()) : null;
+  const sessionId = preparedQuiz?.sessionId || options.sessionId || makeQuizSessionId();
+  let words = explicitWords || preparedQuiz?.words || (options.configured
     ? getConfiguredQuizWords({ seed: sessionId })
     : resolvedSourceWords);
-  if (!options.configured || explicitWords) currentQuizPool = resolvedSourceWords;
+  if (!options.configured || explicitWords || preparedQuiz) currentQuizPool = resolvedSourceWords;
   const verifiedMode = isVerifiedQuizMode(mode);
   const starredCount = getQuizSourceWords('starred', { mode }).length;
 
@@ -1373,6 +1474,15 @@ async function startActualQuiz(mode, options = {}) {
     return false;
   }
 
+  if (preparedQuiz) {
+    const opportunity = document.getElementById('quizMasteryOpportunity');
+    if (opportunity) updateQuizMasteryOpportunity(opportunity, resolvedSourceWords,
+      getQuizSourceResolutionStatus(currentQuizSource, getQuizSourceOwnerId()) === 'ready', preparedQuiz);
+    currentQuizSelectionPlan = preparedQuiz.plan;
+    window.__lootlinguaQuizSelectionReport = preparedQuiz.plan;
+    configuredProgressQuiz = null;
+  }
+  rememberQuizGate(options);
   const selectedWords = words.map(word => ({ ...word }));
   currentQuizWords = selectedWords.map(word => ({ ...word }));
   quizIndex = 0;
@@ -1481,6 +1591,7 @@ window.startGateQuiz = async function(mode, input = {}) {
     journeyWorldId: input.worldId || '',
     journeyRankId: input.rankId || '',
     journeyGateId: input.gateId || '',
+    isGateFlashcardsLocked: input.isGateFlashcardsLocked,
     skipAvailabilityCheck: true,
   });
 };
@@ -1616,20 +1727,22 @@ function updateQuizForgetState(w, nextForget) {
   return { updatedWord, prevForget };
 }
 
-function recordQuizAnswer(w, correct) {
+function recordQuizAnswer(w, correct, answer = {}) {
   if (!activeQuizSession || !isVerifiedQuizMode(activeQuizSession.mode) || !w) return;
   hasStartedAnswering = true;
   quizSessionResults.push({
     wordId: w.id,
     correct: Boolean(correct),
+    submittedAnswer: answer.submittedAnswer || '',
+    answerDirection: answer.answerDirection || '',
     answeredAt: Date.now()
   });
   saveActiveQuizSession();
 }
 
-function rememberQuizWord(w) {
+function rememberQuizWord(w, answer) {
   if (activeQuizSession && isVerifiedQuizMode(activeQuizSession.mode)) {
-    recordQuizAnswer(w, true);
+    recordQuizAnswer(w, true, answer);
     return { updatedWord: w, prevForget: w.forgetCount || 0 };
   }
   const nextForget = Math.max((w.forgetCount || 0) - 1, 0);

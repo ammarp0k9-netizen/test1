@@ -271,9 +271,12 @@ function createCommitHarness(mode = 'matching', correctness = Array(10).fill(tru
     activeQuizSession: { id: 'session-a', mode, source: 'personal', words },
     quizSessionResults: correctness.map((correct, index) => ({ wordId: `word-${index}`, correct, answeredAt: index + 1 })),
     currentQuizSource: 'personal',
+    SRS_STATUSES: ['New', 'Learning', 'Reviewing', 'Mastered'],
     isVerifiedQuizMode(value) { return ['matching', 'timeAttack', 'scramble'].includes(value); },
-    computeSrsUpdate(_word, correct) {
-      return { state: makeMasteryState(correct ? 1 : 0), advanced: correct, mastered: false, nextStatus: correct ? 'Learning' : 'New' };
+    computeSrsUpdate(_word, correct, sessionId) {
+      const nextStatus = correct ? 'Learning' : 'New';
+      return { state: { ...makeMasteryState(correct ? 1 : 0), mastery_status: nextStatus, last_recall_session_id: correct ? sessionId : '' },
+        advanced: correct, mastered: false, previousStatus: 'New', nextStatus };
     },
     async awardWordTransitionXPBatch(entries) {
       stats.rewardBatches += 1;
@@ -295,7 +298,7 @@ function createCommitHarness(mode = 'matching', correctness = Array(10).fill(tru
     Math,
     console,
   });
-  const commitSource = between(runtimeSource, 'async function commitVerifiedQuizResults', 'function markRemember');
+  const commitSource = between(runtimeSource, 'let quizResultMasteryBaseline', 'function markRemember');
   new vm.Script(`${commitSource}\nthis.commitVerifiedQuizResults = commitVerifiedQuizResults;`).runInContext(context);
   return { context, stats };
 }
@@ -321,6 +324,7 @@ test('Matching errors retain the verified correct count and do not become correc
   assert.equal(result.correctCount, 8);
   assert.equal(result.total, 10);
   assert.equal(result.xp, 16);
+  assert.equal(result.promotedCount, 8);
 });
 
 test('notification feedback failure after a Matching commit does not hide or repeat learning success', async () => {
@@ -376,6 +380,66 @@ test('Quiz cloud payload contains SRS fields only and cannot introduce dictionar
   assert.equal('starred' in update, false);
   assert.equal('order' in update, false);
   assert.equal('userId' in update, false);
+});
+
+test('quiz normalization preserves the published word ID in Gate questions', () => {
+  const context = vm.createContext({ window: {}, getWordMasteryState: () => ({}) });
+  vm.runInContext(between(quizSource, 'function normalizeQuizWord(', 'function getQuizSourceOwnerId('), context);
+  const word = { id: 'dictionary-id', word: 'apple', meaning: 'تفاحة', contentWordId: 'published-id' };
+  const normalized = context.normalizeQuizWord(word, 'journey:world~rank~gate', 0);
+  assert.equal(normalized.id, 'dictionary-id');
+  assert.equal(normalized.contentWordId, 'published-id');
+  assert.equal(context.normalizeQuizWord(word, 'personal', 0).contentWordId, undefined);
+});
+
+test('a fully answered draft resumes saving and a longer requeued round still resumes playing', () => {
+  const saved = { mode: 'matching', words: [{ id: 'word-1' }], quizIndex: 1, quizSessionResults: [{ wordId: 'word-1', correct: true }] };
+  let saves = 0;
+  let matchingBoards = 0;
+  const window = { __pendingQuizResumeSession: saved };
+  const context = vm.createContext({
+    window, activeQuizSession: null,
+    document: { getElementById: () => ({ style: {} }), querySelector: () => null },
+    isVerifiedQuizMode: mode => ['matching', 'scramble'].includes(mode),
+    applyStoredQuizSession(session) { context.activeQuizSession = session; return true; },
+    hideQuizPlayPanels() {}, hideQuizResumePrompt() {}, setQuizImmersive() {},
+    finishQuizRun() { saves++; }, renderMatchingBoard() { matchingBoards++; },
+  });
+  vm.runInContext([
+    between(quizSource, 'function quizDraftWordCount(', 'function clearActiveQuizSessionStorage('),
+    between(quizSource, 'window.resumeActiveQuizSession =', 'window.forfeitActiveQuizSession ='),
+  ].join('\n'), context);
+  assert.equal(context.isResumableQuizSession(saved), true);
+  assert.equal(context.isResumableQuizSession({ ...saved, quizSessionResults: [] }), false);
+  assert.equal(context.isResumableQuizSession({ ...saved, finishedAt: 123 }), false);
+  assert.equal(context.isResumableQuizSession({ ...saved, mode: 'scramble', runtimeWords: [...saved.words, ...saved.words] }), true);
+  window.resumeActiveQuizSession();
+  assert.equal(saves, 1);
+  assert.equal(matchingBoards, 0);
+});
+
+test("reloading Quiz waits for the current owner's data before restoring the route", () => {
+  const listeners = new Map();
+  const applied = [];
+  const route = { kind: 'view', key: 'quiz' };
+  const window = {
+    addEventListener(type, listener, options) {
+      assert.equal(options.once, true);
+      listeners.set(type, listener);
+    },
+  };
+  const context = vm.createContext({
+    window, appRoutingReady: false,
+    location: { pathname: '/app/quiz' }, history: { replaceState() {} },
+    parseAppRoute: () => route, getAppRoutePath: () => '/app/quiz',
+    applyAppRoute: value => applied.push(value),
+  });
+  vm.runInContext(between(scriptSource, 'function handleInitialRouting()', "window.addEventListener('popstate'"), context);
+  context.handleInitialRouting();
+  assert.equal(applied.length, 0);
+  window.__lootlinguaInitialDataReady = true;
+  listeners.get('lootlingua:initial-data-ready')();
+  assert.deepEqual(applied, [route]);
 });
 
 function createFinishHarness({ fail = false, pending = false, notificationPermissionDenied = false } = {}) {
@@ -517,7 +581,7 @@ test('account Matching finish is single-flight and leaves loading on the complet
   assert.equal(result.total, 10);
   assert.equal(harness.commits, 1);
   assert.equal(harness.context.getFinishState(), 'completed');
-  assert.deepEqual(harness.learningStats.activityIntents, [{ type: 'quiz-activity', eventId: 'quiz:matching-session', day: '2026-11-05', answers: 10, perfect: true, advanceAfterFreeze: true }]);
+  assert.deepEqual(harness.learningStats.activityIntents, [{ type: 'quiz-activity', eventId: 'quiz:matching-session', day: '2026-11-05', answers: 10, perfect: true, advanceAfterFreeze: true, personalAt: 0 }]);
   assert.ok(harness.statuses.includes('completed'));
   assert.equal(harness.scheduled.filter((timer) => !timer.cleared).length, 1);
 });
@@ -629,10 +693,12 @@ test('Quiz source refresh stays suppressed during learning commit and coalesces 
 test('unscoped account profile cache is not guest migration data, while dirty guest progress remains migratable', () => {
   const snapshotSource = between(scriptSource, 'function getGuestProgressSnapshot', 'function getGuestProgressSummary');
   const payload = { userXP: 250, dailyStreak: 4 };
-  const build = new Function('window', 'hasDirtyGuestData', `${snapshotSource}\nreturn getGuestProgressSnapshot;`);
-  const accountSnapshot = build({ getLootlinguaProfilePayload: () => payload }, () => false);
+  const build = new Function('window', 'hasDirtyGuestData', 'loadJSON', 'LEGACY_GUEST_PROFILE_KEY',
+    `${snapshotSource}\nreturn getGuestProgressSnapshot;`);
+  const profileWindow = { getLootlinguaProfilePayload: () => payload };
+  const accountSnapshot = build(profileWindow, () => false, () => null, 'legacy-guest-profile');
   assert.deepEqual(accountSnapshot(), {});
-  const guestSnapshot = build({ getLootlinguaProfilePayload: () => payload }, () => true);
+  const guestSnapshot = build(profileWindow, () => true, () => null, 'legacy-guest-profile');
   assert.deepEqual(guestSnapshot(), payload);
 
   const meaningfulSource = between(storageSource, 'function hasMeaningfulGuestLoot(snapshot)', 'function reconcileEmptyGuestSessionState');

@@ -1,3 +1,5 @@
+let quizResultMasteryBaseline = null;
+
 async function commitVerifiedQuizResults(trace, onStage) {
   if (!activeQuizSession || !isVerifiedQuizMode(activeQuizSession.mode)) return { xp: 0, masteredCount: 0, correctCount: 0, total: 0 };
   window.LootLinguaOperations?.diagnostic?.('commitVerifiedQuizResults', {
@@ -11,6 +13,8 @@ async function commitVerifiedQuizResults(trace, onStage) {
     const existing = byWord.get(key);
     byWord.set(key, {
       wordId: key,
+      submittedAnswer: result.submittedAnswer,
+      answerDirection: result.answerDirection,
       correct: existing ? Boolean(existing.correct && result.correct) : Boolean(result.correct),
       answeredAt: Math.max(Number(existing?.answeredAt) || 0, Number(result.answeredAt) || 0) || Date.now()
     });
@@ -28,6 +32,15 @@ async function commitVerifiedQuizResults(trace, onStage) {
   const sourceWords = Array.isArray(activeQuizSession.words)
     ? activeQuizSession.words
     : [];
+  const sessionId = activeQuizSession.id;
+  const ownerId = window.auth?.currentUser?.uid || 'guest';
+  if (quizResultMasteryBaseline?.sessionId !== sessionId || quizResultMasteryBaseline?.ownerId !== ownerId) {
+    quizResultMasteryBaseline = { ownerId, sessionId, statuses: new Map() };
+  }
+  // A cloud failure can leave the local word state updated. Keep the original
+  // status for the result of a retry without using it to apply learning again.
+  const originalStatuses = quizResultMasteryBaseline.statuses;
+  const finalMasteryByWord = new Map();
   const committedWordIds = new Set();
   for (const word of sourceWords) {
     const wordId = String(word.id);
@@ -35,7 +48,12 @@ async function commitVerifiedQuizResults(trace, onStage) {
     if (!result || committedWordIds.has(wordId)) continue;
     committedWordIds.add(wordId);
     if (result.correct) correctCount++;
-    const update = computeSrsUpdate(word, result.correct, activeQuizSession.id, result.answeredAt || Date.now());
+    const update = computeSrsUpdate(word, result.correct, sessionId, result.answeredAt || Date.now());
+    const wordKey = getWordMasteryKey(word);
+    if (wordKey) {
+      if (!originalStatuses.has(wordKey)) originalStatuses.set(wordKey, update.previousStatus);
+      finalMasteryByWord.set(wordKey, { correct: result.correct, state: update.state });
+    }
     transitionEntries.push({ word, result, update });
   }
   trace?.stage('srs-calculated', { transitionCount: transitionEntries.length });
@@ -126,6 +144,12 @@ async function commitVerifiedQuizResults(trace, onStage) {
   }
 
   const totalUnique = byWord.size;
+  let promotedCount = 0;
+  for (const [wordKey, { correct, state }] of finalMasteryByWord) {
+    if (!correct || state?.last_recall_session_id !== sessionId) continue;
+    const before = SRS_STATUSES.indexOf(originalStatuses.get(wordKey));
+    if (before >= 0 && SRS_STATUSES.indexOf(state.mastery_status) > before) promotedCount++;
+  }
 
   if (xp > 0) {
     showXPBadge(xp, null, false);
@@ -147,7 +171,9 @@ async function commitVerifiedQuizResults(trace, onStage) {
   }
   return {
     xp,
+    ownerId,
     masteredCount,
+    promotedCount,
     correctCount,
     total: totalUnique,
     pendingRewards: Number(batch.pendingCount) || 0,
@@ -258,6 +284,46 @@ function waitForQuizCommit(promise) {
     .finally(() => clearTimeout(timeoutId));
 }
 
+function getOfficialQuizReadinessMessage(session, evidence) {
+  const gate = session?.officialReviewGate || {
+    worldId: session?.journeyWorldId,
+    rankId: session?.journeyRankId,
+    gateId: session?.journeyGateId,
+  };
+  if (!gate.worldId || !gate.rankId || !gate.gateId) return '';
+  const change = evidence?.readinessChange;
+  if (!evidence?.readinessError && change &&
+      change.ownerId === window.auth?.currentUser?.uid &&
+      change.worldId === gate.worldId && change.rankId === gate.rankId && change.gateId === gate.gateId &&
+      Number.isInteger(change.steps) && Number.isInteger(change.total) && change.total > 0) {
+    if (Number.isInteger(change.previousSteps) && change.previousTotal === change.total) {
+      const added = change.steps - change.previousSteps;
+      if (added > 0) return 'جاهزية البوابة: +' + added + ' · ' + change.steps + '/' + change.total + ' خطوة.';
+      if (added === 0) return 'جاهزية البوابة: ما تغيّرت.';
+    }
+    return 'جاهزية البوابة: ' + change.steps + '/' + change.total + ' خطوة.';
+  }
+  if (!evidence?.readinessError && evidence?.recorded === 0 && evidence.duplicate === 0) {
+    return 'جاهزية البوابة: ما تسجّلت زيادة بهالمراجعة.';
+  }
+  return 'جاهزية البوابة: راجع حالتها من صفحة البوابة.';
+}
+
+function formatVerifiedQuizResult(commit, accuracy, session) {
+  const xp = commit.xp ? ' · +' + commit.xp + ' XP' : '';
+  const parts = ['حُفظت النتيجة · ' + Math.round(accuracy * 100) + '٪ دقة' + xp + '.'];
+  const count = commit.promotedCount || 0;
+  if (count === 1) parts.push('الإتقان: تقدّمت كلمة واحدة.');
+  else if (count === 2) parts.push('الإتقان: تقدّمت كلمتان.');
+  else if (count > 2) parts.push('الإتقان: تقدّمت ' + count + (count <= 10 ? ' كلمات.' : ' كلمة.'));
+  else if (commit.correctCount > 0) parts.push('أحسنت! ما في انتقال إتقان جديد بهالجلسة. التقدّم القادم إله شروط مراجعة متباعدة.');
+  else parts.push('الإتقان: ما في انتقال جديد.');
+  const readiness = getOfficialQuizReadinessMessage(session, commit.evidence);
+  if (readiness) parts.push(readiness);
+  if (commit.pendingRewards > 0) parts.push('بعض مكافآت XP بانتظار المزامنة.');
+  return parts.join(' ');
+}
+
 function finishQuizRun() {
   window.LootLinguaOperations?.diagnostic?.('finishQuizRun', {
     ownerId: window.auth?.currentUser?.uid || 'guest',
@@ -337,6 +403,8 @@ function finishQuizRun() {
       sessionId: String(activeQuizSession?.id || ''),
       completedAt,
       correctCount: Number(commit.correctCount) || 0,
+      promotedCount: Number(commit.promotedCount) || 0,
+      ownerId: commit.ownerId,
       total: Number(commit.total) || 0,
       source: sessionSource,
       journeyContext: Boolean(activeQuizSession?.journeyWorldId && activeQuizSession?.journeyGateId),
@@ -354,23 +422,24 @@ function finishQuizRun() {
     if (typeof evaluateTitleUnlocks === 'function') evaluateTitleUnlocks(true);
     requestProfileCloudSave();
   }
+  const resultMessage = verified
+    ? formatVerifiedQuizResult(commit, accuracy, activeQuizSession)
+    : 'أكملت التدريب ببطاقات الذاكرة. ما بيرفع الإتقان أو جاهزية البوابة.';
   if (verified) {
     trace?.stage('primary-result-ready', { accuracy });
     if (commit.pendingRewards > 0) {
       setQuizFinishState('save-partial-failure', {
-        message: 'حُفظت نتيجتك، وبعض مكافآت XP ستُعاد مزامنتها.',
+        message: resultMessage,
         retry: () => retryPendingXPEvents(),
       });
     } else {
-      setQuizFinishState('completed', {
-        message: `تم حفظ النتيجة: ${Math.round(accuracy * 100)}% دقة.`,
-      });
+      setQuizFinishState('completed', { message: resultMessage });
     }
     playQuizCompletionSound();
     trace?.stage('audio-started');
     if (accuracy >= 0.9 || commit.xp > 0) launchConfetti();
   } else {
-    setQuizFinishState('completed', { message: 'تمت مراجعة البطاقات.' });
+    setQuizFinishState('completed', { message: resultMessage });
   }
   clearActiveQuizSessionStorage();
   activeQuizSession = null;
@@ -380,11 +449,9 @@ function finishQuizRun() {
   quizSessionResults = [];
   matchingQuizState = null;
   hasStartedAnswering = false;
-    showToast(verified
-    ? `تم حفظ الاختبار: ${Math.round(accuracy * 100)}% دقة${commit.xp ? `، +${commit.xp} XP` : ''}`
-    : 'تمت مراجعة البطاقات بدون XP. أحسنت!',
-      'success',
-      3600);
+    showToast(resultMessage, commit.pendingRewards > 0 ? 'warning' : 'success', 4600, {
+      wrap: true,
+    });
     trace?.stage('quiz-finish-complete', {
       accuracy,
       xp: commit.xp,
@@ -526,7 +593,7 @@ function answerTimeAttack(answerId, options = {}) {
   const w = currentQuizWords[quizIndex];
   if (!w) return;
   if (answerId === w.id) {
-    rememberQuizWord(w);
+    rememberQuizWord(w, { submittedAnswer: answerId });
     currentStreak++;
     showStreakMsg(currentStreak);
   } else {
@@ -588,7 +655,7 @@ function submitScrambleAnswer() {
   const normalize = s => String(s || '').toLowerCase().replace(/[\s_-]+/g, '');
   const expected = scrambleDirection === 'en-to-ar' ? w.meaning : w.word;
   if (normalize(input.value) === normalize(expected)) {
-    rememberQuizWord(w);
+    rememberQuizWord(w, { submittedAnswer: input.value, answerDirection: scrambleDirection });
     currentStreak++;
     showStreakMsg(currentStreak);
   } else {
@@ -760,6 +827,7 @@ window.submitMatchingAnswers = function() {
       const word = getMatchingWordById(answer.wordId);
       quizSessionResults.push({
         ...answer,
+        submittedAnswer: board.firstAttemptSelections?.[answer.wordId],
         wordKey: word?.wordKey || getWordMasteryKey(word),
       });
       if (!answer.correct) currentQuizMistakes += 1;

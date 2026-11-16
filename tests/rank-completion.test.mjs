@@ -166,7 +166,7 @@ test('Gate Clear owns the atomic Rank completion commit and the CTA returns to t
   );
   const resultUi = worldsSource.slice(
     worldsSource.indexOf('function renderPublishedGateClearResult'),
-    worldsSource.indexOf('async function maybeRenderPublishedGateClearResume')
+    worldsSource.indexOf('function publishedTimestampMillis')
   );
   assert.match(finalize, /completedRankIds/);
   assert.match(finalize, /rankCompletionVersions/);

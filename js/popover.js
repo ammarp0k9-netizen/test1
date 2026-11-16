@@ -88,9 +88,9 @@
     banner.onclick = next?.open || null;
   }
 
-  function open({ id, className, anchor, content, labelledBy, onClose, persistent = false, reading }) {
+  function open({ id, className, anchor, content, labelledBy, onClose, persistent = false, reading, yieldToHelp = false }) {
     if (!anchor || anchor.isConnected === false || (anchor.getClientRects && !anchor.getClientRects().length)) return null;
-    if (active?.persistent && active.id !== id) return null;
+    if (active?.persistent && active.id !== id && !(active.yieldToHelp && !persistent)) return null;
     const sameStep = reading?.step && active?.id === id && active.readStep === reading.step;
     if (sameStep && active.anchor === anchor) return active.element;
     const previousReadUntil = sameStep ? active.readUntil : 0;
@@ -121,7 +121,7 @@
       if (event.key === 'Escape' && !persistent) { event.preventDefault(); close(); }
       if (['Enter', ' '].includes(event.key)) onClick?.(event);
     };
-    active = { id: id || '', element, anchor, reposition, onPointerDown, onKeydown, onClick, onClose, persistent, highlighted, reading };
+    active = { id: id || '', element, anchor, reposition, onPointerDown, onKeydown, onClick, onClose, persistent, highlighted, reading, yieldToHelp };
     if (reading) {
       const duration = String(reading.text || '').length >= 105 ? 4000 : 3000;
       const now = Date.now();
@@ -132,7 +132,7 @@
         element.classList.add('coach-reading');
         const hint = document.createElement('small');
         hint.className = 'coach-reading-hint';
-        hint.textContent = 'اقرأ الخطوة، ثم تابع.';
+        hint.textContent = reading.actionLabel ? `اقرأ أولًا، ثم اضغط «${reading.actionLabel}».` : 'اقرأ الخطوة، ثم تابع.';
         element.append(hint);
         active.readTimer = setTimeout(() => {
           element.classList.remove('coach-reading');

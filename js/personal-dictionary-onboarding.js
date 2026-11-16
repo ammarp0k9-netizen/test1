@@ -6,8 +6,13 @@
   const VERSION = 1;
   const KEY_PREFIX = 'lootlingua:personal-dictionary-onboarding:v1:';
   const COACH_ID = 'personalDictionaryOnboardingCoach';
+  const STATS_COACH_ID = 'contextualStatsCoach';
+  const STATS_KEY_PREFIX = 'lootlingua:contextual-onboarding:v1:full-stats:';
+  const statsChoices = new Set();
+  let statsVisit = null;
   let renderToken = 0;
   let pausedForOverlay = false;
+  let fullTourRequested = false;
   const STEPS = [
     ['dictionary', '#legendDock [data-dock-view="personal"]', 'قاموسك الشخصي', 'اضغط قاموسك هنا لنضيف كلمة تتعلمها.', 'click'],
     ['search', '#searchBtn', 'جرّب البحث', 'اقترحنا journey: اكتبها أو اختر كلمة أخرى، ثم اضغط «ابحث عن معنى».', 'search'],
@@ -43,12 +48,96 @@
     if (forOwner !== 'guest' && forOwner === owner()) root.queueProfileIntent?.({ type: 'onboarding', tour: 'personal-dictionary', state: next });
     return next;
   }
-  function advance() {
+  function statsSeen(key = owner()) {
+    if (statsChoices.has(key)) return true;
+    try {
+      const state = localStorage.getItem(STATS_KEY_PREFIX + key);
+      return state === 'completed' || state === 'skipped';
+    } catch (_) { return false; }
+  }
+
+  function closeStatsGuide() {
+    statsVisit?.observer.disconnect();
+    statsVisit = null;
+    root.LootLinguaPopover?.closeIf?.(STATS_COACH_ID, { silent: true });
+  }
+
+  function showStatsGuide() {
+    const visit = statsVisit;
+    if (!visit) return;
+    const { panel, key } = visit;
+    if (key !== owner() || !panel.isConnected || panel.getAttribute('aria-hidden') === 'true') {
+      closeStatsGuide(); return;
+    }
+    const state = read();
+    const stepIndex = STEPS.findIndex(([id]) => id === 'full-stats');
+    if (statsSeen(key) || state?.phase === 'completed' || state?.step > stepIndex) {
+      closeStatsGuide(); return;
+    }
+    const popover = root.LootLinguaPopover;
+    const busy = document.hidden || root.__entryExperienceActive || root.__lootlinguaAuthResolved === false ||
+      root.hasActiveLearningQuiz?.() || root.__lootlinguaRunnerInputActive || root.__lootlinguaQuizLearningCommitDepth > 0 ||
+      document.documentElement.classList.contains('journey-auth-active') ||
+      document.body.matches('.quiz-active, .published-placement-mode') || panel.closest('[inert]') ||
+      [...document.querySelectorAll('#quizViewCard, #publishedGateQuizPicker, .published-gate-clear-view, #appAuthDialogShell, [aria-busy="true"], .operation-status-long-wait, #toastMessage.show')].some(node =>
+        node.getClientRects().length && getComputedStyle(node).visibility !== 'hidden');
+    if (busy) { popover?.closeIf?.(STATS_COACH_ID, { silent: true }); return; }
+    if (visit.shown || !panel.classList.contains('show') || popover?.getActiveId?.()) return;
+
+    const [, , titleText, text] = STEPS[stepIndex];
+    const anchor = panel.querySelector('#statsPanelTitle');
+    if (!anchor?.getClientRects().length) return;
+    const content = document.createElement('div');
+    content.className = 'feature-mini-onboarding-content';
+    const title = document.createElement('strong');
+    title.id = 'contextualStatsTitle'; title.textContent = titleText;
+    const copy = document.createElement('p'); copy.textContent = text;
+    const actions = document.createElement('div'); actions.className = 'feature-mini-onboarding-actions';
+    for (const [label, status, buttonClass] of [
+      ['فهمت', 'completed', 'feature-mini-onboarding-next'],
+      ['تخطي', 'skipped', 'feature-mini-onboarding-skip'],
+    ]) {
+      const button = document.createElement('button');
+      button.type = 'button'; button.className = buttonClass; button.textContent = label;
+      button.addEventListener('click', () => {
+        if (statsVisit !== visit || owner() !== key) return;
+        statsChoices.add(key);
+        try { localStorage.setItem(STATS_KEY_PREFIX + key, status); } catch (_) { /* Keep this choice for the current page. */ }
+        closeStatsGuide();
+      });
+      actions.append(button);
+    }
+    content.append(title, copy, actions);
+    visit.shown = Boolean(popover?.open({
+      id: STATS_COACH_ID, className: 'lootlingua-popover feature-mini-onboarding-coach',
+      anchor, content, labelledBy: title.id, persistent: true, yieldToHelp: true,
+    }));
+  }
+
+  function onStatsOpened(panel, hasUsefulStats) {
+    closeStatsGuide();
+    const state = read();
+    if (root.LootLinguaPopover?.getActiveId?.() === COACH_ID && STEPS[state?.step]?.[0] !== 'full-stats') {
+      fullTourRequested = false;
+      pausedForOverlay = true;
+      closeCoach(); offerResume(state);
+    }
+    if (!hasUsefulStats || typeof MutationObserver !== 'function') return;
+    // Observe only during this open panel, so an interrupted explanation can
+    // wait for the current action without polling or loading more data.
+    const observer = new MutationObserver(showStatsGuide);
+    statsVisit = { panel, key: owner(), observer, shown: false };
+    observer.observe(document.body, { subtree: true, childList: true, attributes: true,
+      attributeFilter: ['class', 'hidden', 'aria-hidden', 'aria-busy', 'style', 'inert', 'open'] });
+    showStatsGuide();
+  }
+
+  function advance(allowSurfaceOpen = false) {
     const state = read();
     if (!state || state.phase === 'completed') return;
     const step = Math.min(STEPS.length - 1, (Number(state.step) || 0) + 1);
     write({ ...state, step });
-    renderStep();
+    renderStep({ allowSurfaceOpen });
   }
   function onDictionary() { return root.getOnboardingView?.() === 'personal'; }
   function closeCoach() {
@@ -61,20 +150,30 @@
       label: 'تابع إرشاد قاموسك',
       priority: 3,
       open: () => {
+        const smart = root.LootLinguaSmartOnboarding;
+        if (smart?.busy()) return;
+        smart?.close();
+        root.LootLinguaFeatureMiniOnboarding?.pause?.();
         pausedForOverlay = false;
-        if (!onDictionary()) root.loadPersonalDictionary?.();
-        renderStep();
+        if (!onDictionary() && state.step !== 0) root.loadPersonalDictionary?.();
+        fullTourRequested = true;
+        renderStep({ allowSurfaceOpen: true });
       },
     } : null);
   }
-  function renderStep() {
+  function renderStep({ allowSurfaceOpen = false } = {}) {
     const state = read();
     if (!state || ['completed', 'awaiting-journey'].includes(state.phase) || root.__entryExperienceActive ||
         document.getElementById('appAuthDialogShell')?.hidden === false) {
       closeCoach(); offerResume(null); return;
     }
+    const smart = root.LootLinguaSmartOnboarding;
+    if (smart && (!fullTourRequested || smart.busy())) {
+      closeCoach(); offerResume(state); return;
+    }
     const index = Number(state.step) || 0;
-    if ((index !== 0 && !onDictionary()) || pausedForOverlay) {
+    const statsOpen = document.getElementById('statsPanel')?.getAttribute('aria-hidden') === 'false';
+    if ((index !== 0 && !onDictionary()) || pausedForOverlay || (statsOpen && (statsVisit || STEPS[index][0] !== 'full-stats'))) {
       closeCoach(); offerResume(state); return;
     }
     let [id, selector, titleText, text, action] = STEPS[index] || STEPS[0];
@@ -128,16 +227,23 @@
       if (input && !input.value) { input.value = 'journey'; input.dispatchEvent(new Event('input', { bubbles: true })); }
     }
     if (id === 'full-stats' && !document.getElementById('statsPanel')?.classList.contains('show')) {
-      root.closeProfileModal?.(true); root.openStatsPanel?.();
+      if (!allowSurfaceOpen) { closeCoach(); offerResume(state); return; }
+      root.closeProfileModal?.(true); root.openStatsPanel?.({ fromTour: true });
     }
     if (index >= 8 && index <= 15 && id !== 'full-stats') {
-      if (!document.getElementById('profileModal')?.classList.contains('open')) root.toggleProfileModal?.();
+      if (!document.getElementById('profileModal')?.classList.contains('open')) {
+        if (smart && !allowSurfaceOpen) { closeCoach(); offerResume(state); return; }
+        if (id === 'titles') root.closeStatsPanel?.(true);
+        root.toggleProfileModal?.();
+      }
     }
-    if (id === 'titles') { root.closeStatsPanel?.(true); if (!document.getElementById('profileModal')?.classList.contains('open')) root.toggleProfileModal?.(); }
-    if (id === 'ready') root.closeProfileModal?.(true);
+    if (id === 'ready' && (!smart || allowSurfaceOpen)) root.closeProfileModal?.(true);
     let attempts = 0;
     const show = () => {
       if (token !== renderToken || currentOwner !== owner() || (index !== 0 && !onDictionary())) return;
+      if (smart?.busy() || statsVisit || (id !== 'full-stats' && document.getElementById('statsPanel')?.getAttribute('aria-hidden') === 'false')) {
+        offerResume(state); return;
+      }
       const target = document.querySelector(selector);
       if (!target?.getClientRects().length) {
         if (++attempts < 30) setTimeout(show, 100);
@@ -152,8 +258,9 @@
       content.append(title, copy);
       if (!action || (!requiresFirstWord && ['search', 'meaning', 'saved'].includes(action))) {
         const next = document.createElement('button'); next.type = 'button'; next.className = 'entry-primary';
-        next.textContent = id === 'ready' ? 'يلا نكمل التعلّم' : 'التالي';
-        next.addEventListener('click', () => id === 'ready' ? finish(read()) : advance());
+        const transition = { stats: 'افتح الإحصائيات', 'full-stats': 'افتح الملف الشخصي', account: 'ارجع للقاموس' };
+        next.textContent = id === 'ready' ? 'يلا نكمل التعلّم' : transition[id] || 'التالي';
+        next.addEventListener('click', () => id === 'ready' ? finish(read()) : advance(true));
         content.append(next);
       }
       const popover = root.LootLinguaPopover;
@@ -162,7 +269,7 @@
         : (action ? [target] : []);
       const shown = popover?.open({
         id: COACH_ID, className: 'lootlingua-popover personal-dictionary-onboarding-coach', anchor: target,
-        content, persistent: true, reading: { step: `${index}:${selector}`, text, actions },
+        content, persistent: true, yieldToHelp: true, reading: { step: `${index}:${selector}`, text, actions },
       });
       offerResume(shown ? null : state);
     };
@@ -189,6 +296,7 @@
   function finish(state) {
     if (!state || state.phase === 'completed') return state;
     const next = write({ ...state, phase: 'completed', completedAt: Date.now() });
+    fullTourRequested = false;
     closeCoach();
     offerResume(null);
     root.dispatchEvent(new CustomEvent('lootlingua:personal-dictionary-onboarding-change', { detail: { state: next } }));
@@ -199,7 +307,8 @@
     if (!state || state.phase === 'completed') return;
     const phase = state.requiresFirstWord ? 'awaiting-first-word' : 'intro';
     const next = state.phase === 'awaiting-journey' ? write({ ...state, phase }) : state;
-    if (!onDictionary()) root.loadPersonalDictionary?.();
+    if (!root.LootLinguaSmartOnboarding && !onDictionary()) root.loadPersonalDictionary?.();
+    if (next !== state) root.dispatchEvent(new CustomEvent('lootlingua:personal-dictionary-onboarding-change', { detail: { state: next } }));
     renderStep();
     return next;
   }
@@ -238,6 +347,22 @@
       return state;
     },
     getState: () => read(),
+    isPresenting: () => root.LootLinguaPopover?.getActiveId?.() === COACH_ID,
+    pause() {
+      if (!api.isPresenting()) return;
+      fullTourRequested = false;
+      closeCoach(); offerResume(read());
+    },
+    getStep(id) {
+      const step = STEPS.find(([stepId]) => stepId === id);
+      return step && { selector: step[1], title: step[2], text: step[3] };
+    },
+    hasCoveredStep(id) {
+      const index = STEPS.findIndex(([stepId]) => stepId === (id === 'mastery-result' ? 'xp' : id));
+      const state = read();
+      return index >= 0 && Boolean(state && (state.phase === 'completed' || state.step > index));
+    },
+    onStatsOpened,
     continueWhenReady,
   };
   Object.defineProperty(root, 'LootLinguaPersonalDictionaryOnboarding', { value: Object.freeze(api), configurable: false });
@@ -246,7 +371,12 @@
   root.addEventListener('lootlingua:onboarding-cloud-change', () => {
     continueWhenReady();
   });
-  root.addEventListener('lootlingua:dictionary-navigation', closeCoach);
+  root.addEventListener('lootlingua:dictionary-navigation', () => { fullTourRequested = false; closeStatsGuide(); closeCoach(); });
+  root.addEventListener('lootlingua:popover-closed', event => {
+    if (statsVisit) queueMicrotask(showStatsGuide);
+    if (fullTourRequested && event.detail?.id === COACH_ID) offerResume(read());
+  });
+  document.addEventListener('visibilitychange', showStatsGuide);
   root.addEventListener('lootlingua:surface-ready', () => continueWhenReady());
   root.addEventListener('lootlingua:entry-closed', () => continueWhenReady());
   root.addEventListener('lootlingua:auth-dialog-opened', closeCoach);
@@ -254,6 +384,7 @@
   root.addEventListener('lootlingua:profile-guide-closed', () => {
     const state = read();
     if (!state || state.phase === 'completed' || state.step < 8 || state.step > 15) return;
+    fullTourRequested = false;
     pausedForOverlay = true;
     closeCoach(); offerResume(state);
   });
@@ -296,12 +427,15 @@
     if (step?.[4] !== 'click' || !event.target.closest?.(step[1]) ||
         !root.LootLinguaPopover?.canAct?.(COACH_ID)) return;
     const currentOwner = owner();
+    const requested = fullTourRequested;
     setTimeout(() => {
-      if (currentOwner === owner() && read()?.step === state.step) advance();
+      if (currentOwner !== owner() || read()?.step !== state.step) return;
+      if (requested && onDictionary()) fullTourRequested = true;
+      advance();
     }, 0);
   }, true);
   root.addEventListener('lootlingua:auth-state', () => {
-    closeCoach(); offerResume(null); pausedForOverlay = false; migrateGuestState(); setTimeout(continueWhenReady, 0);
+    fullTourRequested = false; closeStatsGuide(); closeCoach(); offerResume(null); pausedForOverlay = false; migrateGuestState(); setTimeout(continueWhenReady, 0);
   });
   root.addEventListener('lootlingua:initial-data-ready', () => { migrateGuestState(); setTimeout(continueWhenReady, 0); });
 })(window);

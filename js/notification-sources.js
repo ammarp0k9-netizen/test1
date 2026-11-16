@@ -179,7 +179,7 @@
     }
   }
 
-  async function journeyFacts() {
+  async function journeyFacts(options) {
     const api = root.LootLinguaJourneyCloud;
     if (!root.auth?.currentUser || !api?.getActiveJourney) return {};
     try {
@@ -195,7 +195,12 @@
         gateLabel = String(gate?.name || gate?.title || gate?.label || '');
       } catch (_) {}
       let trusted = null;
-      try { trusted = await api.getGateNotificationFacts?.(worldId, rankId, gateId, { progress }); } catch (_) {}
+      const reviewAction = options?.reason === 'review-action';
+      if (progress?.status === 'learning' || reviewAction) {
+        try {
+          trusted = await api.getGateNotificationFacts?.(worldId, rankId, gateId, { progress, fresh: reviewAction });
+        } catch (_) {}
+      }
       const readyAt = timestamp(progress?.readyAt);
       const reviewAt = timestamp(progress?.readinessNextAt);
       const reviewDue = progress?.status === 'learning' && root.LootLinguaGateRunner?.reviewIsDue?.(progress) === true;
@@ -258,7 +263,7 @@
       try { quiz.lastTrustedQuizAt = Math.max(quiz.lastTrustedQuizAt, await root.LootLinguaNotificationCloud.latestTrustedQuizAt()); } catch (_) {}
     }
     const weakWords = weakFacts(review, now);
-    const journey = await journeyFacts();
+    const journey = await journeyFacts(options);
     const quizView = document.getElementById('quizView');
     const quizOpen = Boolean(quizView && quizView.offsetParent !== null && quizView.style.display !== 'none');
     const feedbackSubmitted = localStorage.getItem(`lootlingua_feedback_submitted_v1_${ownerId}`) === '1';

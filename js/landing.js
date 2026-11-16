@@ -1,5 +1,8 @@
 import { AUTH_MODES } from './auth-controller.js';
-import { createAuthSurface } from './auth-surface.js';
+import { createAuthSurface } from './auth-surface.js?v=saved-guest-1';
+import { createGuestJourneyAuth, isPermanentAccount } from './guest-journey-auth.js?v=saved-guest-1';
+import { firebaseDemoConfig, firebaseEmulatorSelected } from './firebase-emulator-mode.js';
+import { createSavedGuestFlow, useGoogleRedirect } from './saved-guest-flow.js?v=full-merge-1';
 
 const FIREBASE_CONFIG = Object.freeze({
   apiKey: 'AIzaSyDQB5N4wxJw69-tb8suI2T2SfEfCpwFA2c',
@@ -26,8 +29,8 @@ function internalPath(pathname) {
   return `${projectBasePath()}/${String(pathname || '').replace(/^\/+/, '')}`;
 }
 
-function appUrl() {
-  return new URL(internalPath('/app'), location.origin);
+function appUrl(returningGuest = false) {
+  return new URL(internalPath(returningGuest ? '/app/worlds' : '/app'), location.origin);
 }
 
 function privacyUrl() {
@@ -47,11 +50,13 @@ function goToApp() {
 }
 
 function renderLandingAuthState(state) {
-  const user = state.user || null;
+  const user = isPermanentAccount(state.user) ? state.user : null;
   const resolved = state.authResolved === true;
+  const journeyLink = appUrl(state.user?.isAnonymous === true).href;
+  document.querySelectorAll('[data-app-link][data-journey-cta]').forEach((link) => { link.href = journeyLink; });
   document.body.dataset.authState = user ? 'user' : (resolved ? 'guest' : 'pending');
   document.querySelectorAll('[data-journey-label]').forEach((label) => {
-    label.textContent = user ? 'تابع رحلتك' : (resolved ? 'ابدأ رحلتك' : 'فتح التطبيق');
+    label.textContent = state.user ? 'تابع رحلتك' : (resolved ? 'ابدأ رحلتك' : 'فتح التطبيق');
   });
   document.querySelectorAll('[data-user-only]').forEach((node) => { node.hidden = !user; });
   document.querySelectorAll('[data-guest-only]').forEach((node) => { node.hidden = Boolean(user); });
@@ -71,31 +76,39 @@ function isIOSDevice() {
 
 async function createFirebaseGateway() {
   const [appSdk, authSdk] = await Promise.all([import(FIREBASE_APP_MODULE), import(FIREBASE_AUTH_MODULE)]);
-  const app = appSdk.getApps()[0] || appSdk.initializeApp(FIREBASE_CONFIG);
+  const emulator = firebaseEmulatorSelected(location, sessionStorage);
+  const app = appSdk.getApps()[0] || appSdk.initializeApp(emulator ? firebaseDemoConfig : FIREBASE_CONFIG);
   const auth = authSdk.getAuth(app);
+  if (emulator) authSdk.connectAuthEmulator(auth, 'http://127.0.0.1:9099', { disableWarnings: true });
+  const guestAuth = createGuestJourneyAuth(auth, authSdk);
+  const savedGuest = createSavedGuestFlow({ app, appSdk, auth, sdk: authSdk, guestAuth, emulator,
+    openLogin: () => window.__lootlinguaLandingAuth?.open(AUTH_MODES.LOGIN), onAuthenticated: goToApp,
+  });
   auth.useDeviceLanguage();
   return Object.freeze({
-    observeAuth: (callback) => authSdk.onAuthStateChanged(auth, callback),
+    observeAuth: (callback) => authSdk.onIdTokenChanged(auth, callback),
     currentUser: () => auth.currentUser,
     hasPendingRedirect: () => sessionStorage.getItem(LANDING_REDIRECT_PENDING_KEY) === '1',
     clearPendingRedirect: () => sessionStorage.removeItem(LANDING_REDIRECT_PENDING_KEY),
     finishRedirect: async () => {
       const wasPending = sessionStorage.getItem(LANDING_REDIRECT_PENDING_KEY) === '1';
-      const result = await authSdk.getRedirectResult(auth);
-      return result?.user || (wasPending && auth.currentUser) ? { user: result?.user || auth.currentUser } : null;
+      const result = await savedGuest.finishRedirect();
+      if (result?.guestDecision) return result;
+      const user = result?.user || (wasPending ? auth.currentUser : null);
+      return isPermanentAccount(user) ? { user } : null;
     },
     signInWithGoogle: async () => {
       const provider = new authSdk.GoogleAuthProvider();
       provider.setCustomParameters({ prompt: 'select_account' });
-      if (isIOSDevice()) {
+      if (useGoogleRedirect(auth, isIOSDevice())) {
         sessionStorage.setItem(LANDING_REDIRECT_PENDING_KEY, '1');
-        await authSdk.signInWithRedirect(auth, provider);
+        await savedGuest.google(provider, true);
         return { redirecting: true };
       }
-      return authSdk.signInWithPopup(auth, provider);
+      return savedGuest.google(provider);
     },
-    signIn: (email, password) => authSdk.signInWithEmailAndPassword(auth, email, password),
-    createAccount: (email, password) => authSdk.createUserWithEmailAndPassword(auth, email, password),
+    signIn: savedGuest.signIn,
+    createAccount: guestAuth.register,
     sendPasswordReset: (email) => authSdk.sendPasswordResetEmail(auth, email),
   });
 }

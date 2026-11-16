@@ -157,6 +157,7 @@
     });
   }
   root.LootLinguaModalFocus = Object.freeze({ open, close,
+    currentSurface: () => layer()?.surface || null,
     closeAll() { frames.clear(); stop(); },
   });
 })(window);

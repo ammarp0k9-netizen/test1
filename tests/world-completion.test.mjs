@@ -250,7 +250,7 @@ test('Gate Clear and Level Placement own the atomic World completion writes', ()
 test('World completion CTA remains routed through the central Journey resolver', () => {
   const resultUi = worldsSource.slice(
     worldsSource.indexOf('function renderPublishedGateClearResult'),
-    worldsSource.indexOf('async function maybeRenderPublishedGateClearResume')
+    worldsSource.indexOf('function publishedTimestampMillis')
   );
   assert.match(resultUi, /openPublishedJourneyDestination/);
   assert.doesNotMatch(resultUi, /activeRankId\s*=|activeGateId\s*=/);

@@ -3,12 +3,15 @@ import { getAuth } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-aut
 import {
   collection,
   deleteDoc,
+  deleteField,
   doc,
   documentId,
   endBefore,
   getCountFromServer,
   getDoc,
+  getDocFromServer,
   getDocs,
+  getDocsFromServer,
   getFirestore,
   increment,
   limit,
@@ -17,31 +20,19 @@ import {
   query,
   runTransaction,
   serverTimestamp,
+  setDoc,
   startAfter,
   Timestamp,
   updateDoc,
   where,
+  writeBatch,
 } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
-import {
-  getFunctions,
-  httpsCallable,
-} from "https://www.gstatic.com/firebasejs/10.12.0/firebase-functions.js";
 
 const app = getApps()[0];
 const auth = app ? getAuth(app) : null;
 const db = app ? getFirestore(app) : null;
-const functions = app ? getFunctions(app) : null;
 const contentWorlds = db ? collection(db, 'content_worlds') : null;
 const contentWordImportStaging = db ? collection(db, 'content_word_import_staging') : null;
-const duplicateContentRank = functions ? httpsCallable(functions, 'duplicateContentRank') : null;
-const deleteContentRank = functions ? httpsCallable(functions, 'deleteContentRank') : null;
-const duplicateContentGate = functions ? httpsCallable(functions, 'duplicateContentGate') : null;
-const moveContentGate = functions ? httpsCallable(functions, 'moveContentGate') : null;
-const deleteContentGate = functions ? httpsCallable(functions, 'deleteContentGate') : null;
-const duplicateContentWord = functions ? httpsCallable(functions, 'duplicateContentWord') : null;
-const moveContentWord = functions ? httpsCallable(functions, 'moveContentWord') : null;
-const bulkUpdateContentWords = functions ? httpsCallable(functions, 'bulkUpdateContentWords') : null;
-const deleteContentWord = functions ? httpsCallable(functions, 'deleteContentWord') : null;
 const CONTENT_STATUSES = Object.freeze(['draft', 'published', 'archived']);
 const WORLD_EDITABLE_FIELDS = Object.freeze([
   'slug',
@@ -246,7 +237,7 @@ async function refreshAdminAccess(options = {}) {
 
   // Clear the previous account's privilege before any asynchronous token work.
   emitAdminState({ resolved: false, isAdmin: false, canUseTestClock: false, uid, errorCode: '' });
-  if (!user || !uid) {
+  if (!user || !uid || user.isAnonymous === true) {
     return emitAdminState({ resolved: true, isAdmin: false, canUseTestClock: false, uid: null, errorCode: '' });
   }
 
@@ -375,20 +366,7 @@ async function requireAdminContext() {
   if (!uid || auth?.currentUser?.uid !== uid) {
     throw adminCloudError('admin/account-changed', 'The signed-in account changed during the request.');
   }
-  if (
-    !db ||
-    !contentWorlds ||
-    !functions ||
-    !duplicateContentRank ||
-    !deleteContentRank ||
-    !duplicateContentGate ||
-    !moveContentGate ||
-    !deleteContentGate ||
-    !duplicateContentWord ||
-    !moveContentWord ||
-    !bulkUpdateContentWords ||
-    !deleteContentWord
-  ) {
+  if (!db || !contentWorlds) {
     throw adminCloudError('admin/firebase-unavailable', 'Firebase services are not available.');
   }
   return Object.freeze({ uid });
@@ -1843,6 +1821,485 @@ async function setRankStatus(worldId, rankId, status, expectedVersion) {
   }
 }
 
+// Spark operations use the same claim-gated content paths as the editor.
+// Each receipt commits with the content changes, so a response lost after
+// commit cannot replay a move, decrement a counter again, or create a copy.
+function sparkAdminRequest(context, settings, operation, input) {
+  const fingerprint = JSON.stringify([operation, input]);
+  const token = resolveOperationToken(settings, fingerprint, context.uid);
+  const ref = doc(db, 'admin_spark_content_operations', context.uid, 'receipts', token.operationId);
+  return { fingerprint, token, ref };
+}
+
+function sparkAdminResult(snapshot, request) {
+  if (!snapshot.exists()) return null;
+  const { fingerprint, result } = snapshot.data();
+  if (fingerprint !== request.fingerprint) {
+    completeOperationToken(request.token);
+    throw adminCloudError('admin/conflict', 'This operation ID belongs to another request.');
+  }
+  return result;
+}
+
+async function commitSparkAdminRequest(context, request, apply) {
+  const result = await runTransaction(db, async (transaction) => {
+    assertAdminContext(context);
+    const saved = sparkAdminResult(await transaction.get(request.ref), request);
+    if (saved) return saved;
+    const result = await apply(transaction);
+    transaction.set(request.ref, {
+      adminUid: context.uid, fingerprint: request.fingerprint, result, completedAt: serverTimestamp(),
+    });
+    return result;
+  });
+  assertAdminContext(context);
+  completeOperationToken(request.token);
+  return result;
+}
+
+function sparkHierarchy({ worldId, rankId, gateId }) {
+  const world = doc(contentWorlds, worldId);
+  const rank = doc(ranksCollection(worldId), rankId);
+  return { world, rank, gate: gateId ? doc(gatesCollection(worldId, rankId), gateId) : null };
+}
+
+async function readSparkContent(transaction, references) {
+  const unique = new Map(references.map((ref) => [ref.path, ref]));
+  const snapshots = await Promise.all([...unique.values()].map((ref) => transaction.get(ref)));
+  return new Map(snapshots.map((snapshot) => [snapshot.ref.path, snapshot]));
+}
+
+function storedSparkContent(rows, ref) {
+  const data = rows.get(ref.path)?.data();
+  if (!data) throw adminCloudError('admin/not-found', 'The content no longer exists.');
+  return data;
+}
+
+function assertSparkUnlocked(record, level) {
+  const lease = record['_admin' + level + 'Operation'];
+  const leaseAt = Number(lease?.leaseAt?.toMillis?.());
+  const copy = level === 'Rank' ? '_adminCopyOperation' : '_adminGateCopyOperation';
+  if ((level !== 'World' && Object.hasOwn(record, copy)) ||
+      (lease !== undefined && (!leaseAt || Date.now() - leaseAt < 15 * 60 * 1000))) {
+    throw adminCloudError('admin/operation-in-progress', 'Another content operation is using this hierarchy.');
+  }
+}
+
+function validateSparkHierarchy(rows, refs, identity) {
+  const world = storedSparkContent(rows, refs.world);
+  const rank = storedSparkContent(rows, refs.rank);
+  assertStoredWorld(world, identity.worldId);
+  assertStoredRank(rank, identity.worldId, identity.rankId);
+  assertSparkUnlocked(world, 'World');
+  assertSparkUnlocked(rank, 'Rank');
+  if (refs.gate) {
+    const gate = storedSparkContent(rows, refs.gate);
+    assertStoredGate(gate, identity.worldId, identity.rankId, identity.gateId);
+    assertSparkUnlocked(gate, 'Gate');
+  }
+}
+
+function sparkCheckVersion(data, version) {
+  if (data.version !== version) throw adminCloudError('admin/version-conflict', 'The content changed. Refresh and try again.');
+}
+
+function applySparkCounters(transaction, rows, changes, uid) {
+  const paths = new Map();
+  for (const [ref, deltas, fields] of changes) {
+    if (!paths.has(ref.path)) paths.set(ref.path, { ref, deltas: {}, fields: {} });
+    const aggregate = paths.get(ref.path);
+    for (const [field, amount] of Object.entries(deltas)) aggregate.deltas[field] = (aggregate.deltas[field] || 0) + amount;
+    Object.assign(aggregate.fields, fields);
+  }
+  for (const { ref, deltas, fields } of paths.values()) {
+    const current = storedSparkContent(rows, ref);
+    const patch = { ...fields };
+    for (const [field, delta] of Object.entries(deltas)) if (delta) patch[field] = Math.max(0, current[field] + delta);
+    if (Object.keys(patch).length) transaction.update(ref, { ...patch, updatedBy: uid, updatedAt: serverTimestamp() });
+  }
+}
+
+async function changeSparkWords(context, settings, operation, source, items, destination, confirmation) {
+  const request = sparkAdminRequest(context, settings, operation, [source, items, destination, confirmation]);
+  const from = sparkHierarchy(source);
+  const to = destination && sparkHierarchy(destination);
+  const copying = operation === 'duplicate';
+  const sourceRefs = items.map((item) => doc(collection(from.gate, 'words'), item.contentWordId));
+
+  return commitSparkAdminRequest(context, request, async (transaction) => {
+    const rows = await readSparkContent(transaction, [from.world, from.rank, from.gate, ...sourceRefs,
+      ...(to ? [to.world, to.rank, to.gate] : [])]);
+    validateSparkHierarchy(rows, from, source);
+    if (to) validateSparkHierarchy(rows, to, destination);
+    const words = sourceRefs.map((ref, index) => {
+      const word = storedSparkContent(rows, ref);
+      assertStoredWord(word, source.worldId, source.rankId, source.gateId, ref.id);
+      sparkCheckVersion(word, items[index].expectedVersion);
+      if (confirmation !== null && word.word !== confirmation) throw adminCloudError('content/exact-word-required', 'The confirmation word does not match.');
+      if (!to && word.status !== 'archived') throw adminCloudError('content/archive-required', 'Archive the word before deletion.');
+      return word;
+    });
+
+    const targetRefs = to ? await Promise.all(words.map(async (word) => doc(collection(to.gate, 'words'),
+      await deriveContentWordId(word.normalizedWord, word.normalizationVersion)))) : [];
+    if (to) {
+      if (new Set(targetRefs.map((ref) => ref.id)).size !== targetRefs.length) {
+        throw adminCloudError('content/duplicate-word-in-gate', 'The selected words contain a duplicate.');
+      }
+      // Legacy imports may use different IDs for an identical normalized word.
+      const targetWords = collection(to.gate, 'words');
+      const matching = [];
+      for (let start = 0; start < words.length; start += 30) {
+        matching.push(getDocsFromServer(query(targetWords,
+          where('normalizedWord', 'in', words.slice(start, start + 30).map((word) => word.normalizedWord)), limit(1))));
+      }
+      const matches = await Promise.all(matching);
+      if (matches.some((snapshot) => !snapshot.empty)) {
+        throw adminCloudError('content/duplicate-word-in-gate', 'The destination already contains this word.');
+      }
+      const targets = await readSparkContent(transaction, targetRefs);
+      if ([...targets.values()].some((snapshot) => snapshot.exists())) {
+        throw adminCloudError('content/duplicate-word-in-gate', 'The destination already contains this word.');
+      }
+    }
+    assertAdminContext(context);
+    const published = (ref) => storedSparkContent(rows, ref).publishedWordIds;
+    const beforeIds = published(from.gate);
+    const afterIds = to ? published(to.gate) : null;
+    const removed = new Set(sourceRefs.map((ref) => ref.id));
+    const changes = copying ? [] : [
+      [from.world, { wordCount: -words.length }], [from.rank, { wordCount: -words.length }],
+      [from.gate, { wordCount: -words.length }, Array.isArray(beforeIds) ? { publishedWordIds: beforeIds.filter((id) => !removed.has(id)) } : {}],
+    ];
+    if (to) {
+      const incomingPublished = targetRefs.filter((_, i) => !copying && words[i].status === 'published').map((ref) => ref.id);
+      changes.push([to.world, { wordCount: words.length }], [to.rank, { wordCount: words.length }],
+        [to.gate, { wordCount: words.length }, Array.isArray(afterIds) ? { publishedWordIds: [...new Set([...afterIds, ...incomingPublished])] } : {}]);
+    }
+    const publicWords = [];
+    const results = words.map((word, index) => {
+      if (!copying) transaction.delete(sourceRefs[index]);
+      if (!to) return { contentWordId: word.contentWordId };
+      const ref = targetRefs[index];
+      const fields = { ...word };
+      delete fields.createdAt;
+      delete fields.updatedAt;
+      const saved = copying
+        ? buildWordCreateCandidate({ ...sparkCopyFields(fields, WORD_EDITABLE_FIELDS), status: 'draft' },
+          destination.worldId, destination.rankId, destination.gateId, ref.id, context.uid)
+        : cleanWordForStorage({ ...fields, ...destination, contentWordId: ref.id, version: word.version + 1,
+          updatedBy: context.uid }, destination.worldId, destination.rankId, destination.gateId, ref.id);
+      transaction.set(ref, { ...saved, ...sparkContentStamp(context.uid, copying ? null : word) });
+      publicWords.push(saved);
+      return { contentWordId: ref.id, status: saved.status, version: saved.version, target: destination };
+    });
+    applySparkCounters(transaction, rows, changes, context.uid);
+    const base = { operationId: request.token.operationId, affectedCounts: { wordCount: results.length } };
+    if (operation === 'bulk-move') return { ...base, updated: true, action: 'move', items: results, itemCount: results.length };
+    const sourceWord = { ...source, contentWordId: words[0].contentWordId };
+    if (!to) return { ...base, deleted: true, source: sourceWord };
+    const word = publicWords[0];
+    return { ...base, [copying ? 'duplicated' : 'moved']: true, source: sourceWord,
+      target: { ...destination, contentWordId: word.contentWordId }, contentWordId: word.contentWordId, word };
+  });
+}
+
+const SPARK_CONTENT_PAGE = 120;
+
+async function* sparkContentPages(context, source) {
+  let last;
+  for (;;) {
+    assertAdminContext(context);
+    const bounds = last ? [startAfter(last)] : [];
+    const page = await getDocsFromServer(query(source, orderBy(documentId()), ...bounds, limit(SPARK_CONTENT_PAGE)));
+    if (page.empty) return;
+    yield page.docs;
+    if (page.size < SPARK_CONTENT_PAGE) return;
+    last = page.docs.at(-1);
+  }
+}
+
+async function eraseSparkWords(context, gate) {
+  const words = collection(gate, 'words');
+  for await (const page of sparkContentPages(context, words)) {
+    assertAdminContext(context);
+    const batch = writeBatch(db);
+    page.forEach((word) => batch.delete(word.ref));
+    await batch.commit();
+  }
+  if ((await getCountFromServer(words)).data().count !== 0) {
+    throw adminCloudError('admin/conflict', 'Some gate words are still present. Retry to finish.');
+  }
+}
+
+async function eraseSparkDescendants(context, root, isGate) {
+  if (isGate) return eraseSparkWords(context, root);
+  const gates = collection(root, 'gates');
+  for await (const page of sparkContentPages(context, gates)) {
+    for (const gate of page) {
+      await eraseSparkWords(context, gate.ref);
+      assertAdminContext(context);
+      await deleteDoc(gate.ref);
+    }
+  }
+  if ((await getCountFromServer(gates)).data().count !== 0) {
+    throw adminCloudError('admin/conflict', 'Some rank gates are still present. Retry to finish.');
+  }
+}
+
+function sparkCopyFields(data, fields) {
+  return Object.fromEntries(fields.filter((field) => field in data).map((field) => [field, data[field]]));
+}
+
+function sparkContentStamp(uid, original) {
+  return {
+    createdAt: original?.createdAt ?? serverTimestamp(), createdBy: original?.createdBy || uid,
+    updatedAt: serverTimestamp(), updatedBy: uid,
+  };
+}
+
+async function copySparkGateWords(context, sourceRef, targetRef, targetIds, moving) {
+  let count = 0;
+  const rank = sourceRef.parent.parent;
+  const world = rank.parent.parent;
+  const targetWords = collection(targetRef, 'words');
+  for await (const page of sparkContentPages(context, collection(sourceRef, 'words'))) {
+    assertAdminContext(context);
+    const batch = writeBatch(db);
+    for (const row of page) {
+      const original = row.data();
+      assertStoredWord(original, world.id, rank.id, sourceRef.id, row.id);
+      const draft = buildWordCreateCandidate({ ...sparkCopyFields(original, WORD_EDITABLE_FIELDS),
+        status: moving ? original.status : 'draft' }, targetIds.worldId, targetIds.rankId, targetIds.gateId, row.id, context.uid);
+      batch.set(doc(targetWords, row.id), { ...draft, version: moving ? original.version : 1,
+        ...sparkContentStamp(context.uid, moving ? original : null) });
+    }
+    await batch.commit();
+    count += page.length;
+  }
+  if ((await getCountFromServer(targetWords)).data().count !== count) {
+    throw adminCloudError('admin/conflict', 'The target gate did not receive the complete copy. Retry to finish.');
+  }
+  return count;
+}
+
+function sparkSourceRow(rows, refs, source, version, confirmation = null, archiveRequired = false) {
+  validateSparkHierarchy(rows, refs, source);
+  const root = storedSparkContent(rows, refs.gate || refs.rank);
+  sparkCheckVersion(root, version);
+  if (archiveRequired && root.status !== 'archived') {
+    throw adminCloudError('content/archive-required', 'Archive the content before deleting it.');
+  }
+  if (confirmation !== null && root.title !== confirmation) {
+    throw adminCloudError('content/exact-title-required', 'The confirmation title does not match.');
+  }
+  return root;
+}
+
+function sparkParentRefs(refs) {
+  return [refs.world, refs.rank, ...(refs.gate ? [refs.gate] : [])];
+}
+
+async function reserveSparkDraft(context, request, refs, source, version, target, makeDraft, confirmation = null, parents = null) {
+  const marker = source.gateId ? '_adminGateCopyOperation' : '_adminCopyOperation';
+  const reservation = await runTransaction(db, async (transaction) => {
+    const rows = await readSparkContent(transaction, [...sparkParentRefs(refs), target,
+      ...(parents ? sparkParentRefs(parents).slice(0, 2) : [])]);
+    const root = sparkSourceRow(rows, refs, source, version, confirmation);
+    if (parents) validateSparkHierarchy(rows, { world: parents.world, rank: parents.rank }, { worldId: parents.world.id, rankId: parents.rank.id });
+    const existing = rows.get(target.path).data();
+    if (existing && (existing[marker] !== request.token.operationId || existing.status !== 'draft')) {
+      throw adminCloudError('admin/conflict', 'The destination already contains this content ID.');
+    }
+    assertAdminContext(context);
+    if (!existing) transaction.set(target, { ...makeDraft(root), [marker]: request.token.operationId });
+    return Boolean(existing);
+  });
+  if (reservation) await eraseSparkDescendants(context, target, Boolean(source.gateId));
+  return marker;
+}
+
+async function duplicateSparkHierarchy(context, settings, source, expectedVersion) {
+  const operation = source.gateId ? 'duplicateContentGate' : 'duplicateContentRank';
+  const request = sparkAdminRequest(context, settings, operation, [source, expectedVersion]);
+  const replay = sparkAdminResult(await getDocFromServer(request.ref), request);
+  if (replay) { completeOperationToken(request.token); return replay; }
+  const refs = sparkHierarchy(source);
+  const id = (await deriveContentWordId(`${context.uid}:${request.token.operationId}`, 1)).replace(/^word_/, 'copy_');
+  const target = doc((refs.gate || refs.rank).parent, id);
+  const { worldId } = source;
+  const rankId = source.gateId ? source.rankId : id;
+  const stamp = sparkContentStamp(context.uid);
+  const gateDraft = (gate, gateId, title) => ({
+    ...buildGateCreateCandidate({ ...sparkCopyFields(gate, GATE_EDITABLE_FIELDS), title, status: 'draft' },
+      worldId, rankId, gateId, context.uid), ...stamp,
+  });
+  const marker = await reserveSparkDraft(context, request, refs, source, expectedVersion, target, (root) => source.gateId
+    ? gateDraft(root, id, `${root.title.slice(0, 153)} (Copy)`)
+    : { ...buildRankCreateCandidate({ ...sparkCopyFields(root, RANK_EDITABLE_FIELDS),
+      title: `Copy of ${root.title.slice(0, 152)}`, status: 'draft' }, worldId, rankId, context.uid), ...stamp });
+  let gateCount = 0;
+  let wordCount = 0;
+  if (refs.gate) {
+    gateCount = 1;
+    wordCount = await copySparkGateWords(context, refs.gate, target, { worldId, rankId, gateId: id }, false);
+  } else {
+    for await (const page of sparkContentPages(context, collection(refs.rank, 'gates'))) {
+      for (const saved of page) {
+        const gate = saved.data();
+        assertStoredGate(gate, source.worldId, source.rankId, saved.id);
+        assertSparkUnlocked(gate, 'Gate');
+        const targetGate = doc(collection(target, 'gates'), saved.id);
+        assertAdminContext(context);
+        await setDoc(targetGate, gateDraft(gate, saved.id, gate.title));
+        const count = await copySparkGateWords(context, saved.ref, targetGate, { worldId, rankId, gateId: saved.id }, false);
+        await updateDoc(targetGate, { wordCount: count });
+        wordCount += count;
+        gateCount++;
+      }
+    }
+  }
+  return commitSparkAdminRequest(context, request, async (transaction) => {
+    const rows = await readSparkContent(transaction, [...sparkParentRefs(refs), target]);
+    sparkSourceRow(rows, refs, source, expectedVersion);
+    const draft = storedSparkContent(rows, target);
+    if (draft[marker] !== request.token.operationId) throw adminCloudError('admin/conflict', 'The copy reservation changed.');
+    const counts = { wordCount, ...(refs.gate ? {} : { gateCount }) };
+    transaction.update(target, { ...counts, [marker]: deleteField(), updatedAt: serverTimestamp() });
+    const changes = [[refs.world, { wordCount, gateCount, rankCount: refs.gate ? 0 : 1 }]];
+    if (refs.gate) changes.push([refs.rank, { wordCount, gateCount }]);
+    applySparkCounters(transaction, rows, changes, context.uid);
+    const entity = { ...draft, ...counts };
+    delete entity[marker];
+    return { duplicated: true, operationId: request.token.operationId, worldId, rankId,
+      ...(refs.gate ? { sourceGateId: source.gateId, gateId: id, gate: entity } : { sourceRankId: source.rankId, rank: entity }),
+      affectedCounts: { gateCount, wordCount, ...(refs.gate ? {} : { rankCount: 1 }) } };
+  });
+}
+
+function sparkTreeCheckpoint(request) {
+  return doc(request.ref.parent.parent, 'treeJobs', request.token.operationId);
+}
+
+function sparkPendingTree(snapshot, request) {
+  if (!snapshot.exists()) return null;
+  const state = snapshot.data();
+  if (state.fingerprint !== request.fingerprint) {
+    completeOperationToken(request.token);
+    throw adminCloudError('admin/conflict', 'This operation ID belongs to another request.');
+  }
+  return state;
+}
+
+async function checkSparkArchivedRoot(context, root, version, title) {
+  const current = (await getDocFromServer(root)).data();
+  assertAdminContext(context);
+  if (!current) throw adminCloudError('admin/not-found', 'The content no longer exists.');
+  sparkCheckVersion(current, version);
+  if (current.status !== 'archived') throw adminCloudError('content/archive-required', 'Archive the content before deleting it.');
+  if (current.title !== title) throw adminCloudError('content/exact-title-required', 'The confirmation title does not match.');
+}
+
+async function deleteSparkHierarchy(context, settings, source, version) {
+  const refs = sparkHierarchy(source);
+  const root = refs.gate || refs.rank;
+  const request = sparkAdminRequest(context, settings, refs.gate ? 'deleteContentGate' : 'deleteContentRank', [source, version, settings.confirmationTitle]);
+  const replay = sparkAdminResult(await getDocFromServer(request.ref), request);
+  if (replay) { completeOperationToken(request.token); return replay; }
+  const checkpoint = sparkTreeCheckpoint(request);
+  let pending = sparkPendingTree(await getDocFromServer(checkpoint), request);
+  await checkSparkArchivedRoot(context, root, version, settings.confirmationTitle);
+  if (!pending) {
+    const countWords = async (gate) => (await getCountFromServer(collection(gate, 'words'))).data().count;
+    let gateCount = refs.gate ? 1 : 0;
+    let wordCount = refs.gate ? await countWords(root) : 0;
+    if (!refs.gate) {
+      for await (const page of sparkContentPages(context, collection(root, 'gates'))) {
+        for (const gate of page) wordCount += await countWords(gate.ref);
+        gateCount += page.length;
+      }
+    }
+    pending = await runTransaction(db, async (transaction) => {
+      const rows = await readSparkContent(transaction, [...sparkParentRefs(refs), checkpoint]);
+      const existing = sparkPendingTree(rows.get(checkpoint.path), request);
+      sparkSourceRow(rows, refs, source, version, settings.confirmationTitle, true);
+      if (existing) return existing;
+      const saved = { fingerprint: request.fingerprint, gateCount, wordCount };
+      assertAdminContext(context);
+      transaction.set(checkpoint, saved);
+      return saved;
+    });
+  }
+  await eraseSparkDescendants(context, root, Boolean(refs.gate));
+  return commitSparkAdminRequest(context, request, async (transaction) => {
+    const rows = await readSparkContent(transaction, sparkParentRefs(refs));
+    sparkSourceRow(rows, refs, source, version, settings.confirmationTitle, true);
+    const { gateCount, wordCount } = pending;
+    const changes = [[refs.world, { rankCount: refs.gate ? 0 : -1, gateCount: -gateCount, wordCount: -wordCount }]];
+    if (refs.gate) changes.push([refs.rank, { gateCount: -1, wordCount: -wordCount }]);
+    applySparkCounters(transaction, rows, changes, context.uid);
+    transaction.delete(root);
+    transaction.delete(checkpoint);
+    return { deleted: true, operationId: request.token.operationId, ...source, affectedCounts: { gateCount, wordCount } };
+  });
+}
+
+async function moveSparkGate(context, settings, source, target, version) {
+  const request = sparkAdminRequest(context, settings, 'moveContentGate', [source, target, version, settings.confirmationTitle]);
+  const replay = sparkAdminResult(await getDocFromServer(request.ref), request);
+  if (replay) { completeOperationToken(request.token); return replay; }
+  const from = sparkHierarchy(source);
+  const to = sparkHierarchy(target);
+  const checkpoint = sparkTreeCheckpoint(request);
+  let pending = sparkPendingTree(await getDocFromServer(checkpoint), request);
+  if (pending) {
+    await checkSparkArchivedRoot(context, from.gate, version, settings.confirmationTitle);
+    const destination = (await getDocFromServer(to.gate)).data();
+    if (!destination || (await getCountFromServer(collection(to.gate, 'words'))).data().count !== pending.wordCount) {
+      throw adminCloudError('admin/conflict', 'The destination is incomplete. The source words were preserved.');
+    }
+  }
+  if (!pending) {
+    const marker = await reserveSparkDraft(context, request, from, source, version, to.gate, (root) => ({
+      ...buildGateCreateCandidate({ ...sparkCopyFields(root, GATE_EDITABLE_FIELDS), status: 'draft' },
+        target.worldId, target.rankId, target.gateId, context.uid),
+      version: version + 1, ...sparkContentStamp(context.uid, root),
+    }), settings.confirmationTitle, to);
+    const wordCount = await copySparkGateWords(context, from.gate, to.gate, target, true);
+    pending = await runTransaction(db, async (transaction) => {
+      const rows = await readSparkContent(transaction, [...sparkParentRefs(from), ...sparkParentRefs(to), checkpoint]);
+      const saved = sparkPendingTree(rows.get(checkpoint.path), request);
+      if (saved) return saved;
+      const root = sparkSourceRow(rows, from, source, version, settings.confirmationTitle);
+      const draft = storedSparkContent(rows, to.gate);
+      if (draft[marker] !== request.token.operationId) throw adminCloudError('admin/conflict', 'The move reservation changed.');
+      const state = { fingerprint: request.fingerprint, gateCount: 1, wordCount };
+      const manifest = Array.isArray(root.publishedWordIds) ? { publishedWordIds: root.publishedWordIds } : {};
+      assertAdminContext(context);
+      // Keep the source available until the verified destination is ready.
+      transaction.update(to.gate, { status: root.status, wordCount, ...manifest, [marker]: deleteField(), updatedAt: serverTimestamp() });
+      transaction.update(from.gate, { status: 'archived', updatedAt: serverTimestamp() });
+      transaction.set(checkpoint, state);
+      return state;
+    });
+  }
+  await eraseSparkWords(context, from.gate);
+  return commitSparkAdminRequest(context, request, async (transaction) => {
+    const rows = await readSparkContent(transaction, [...sparkParentRefs(from), ...sparkParentRefs(to)]);
+    sparkSourceRow(rows, from, source, version, settings.confirmationTitle, true);
+    const gate = storedSparkContent(rows, to.gate);
+    assertStoredGate(gate, target.worldId, target.rankId, target.gateId);
+    const { wordCount } = pending;
+    const outgoing = { gateCount: -1, wordCount: -wordCount };
+    const incoming = { gateCount: 1, wordCount };
+    applySparkCounters(transaction, rows, [[from.world, outgoing], [from.rank, outgoing], [to.world, incoming], [to.rank, incoming]], context.uid);
+    transaction.delete(from.gate);
+    transaction.delete(checkpoint);
+    return { moved: true, operationId: request.token.operationId, source, target, gate, affectedCounts: { gateCount: 1, wordCount } };
+  });
+}
+
+
 async function duplicateRankAsDraft(worldId, rankId, expectedVersion, options) {
   try {
     const context = await requireAdminContext();
@@ -1855,21 +2312,7 @@ async function duplicateRankAsDraft(worldId, rankId, expectedVersion, options) {
       'Duplicate options must be an object.',
       true
     );
-    const operationToken = resolveOperationToken(
-      settings,
-      JSON.stringify(['duplicateContentRank', parentId, id, version]),
-      context.uid
-    );
-    assertAdminContext(context);
-    const response = await duplicateContentRank({
-      worldId: parentId,
-      rankId: id,
-      expectedVersion: version,
-      operationId: operationToken.operationId,
-    });
-    assertAdminContext(context);
-    completeOperationToken(operationToken);
-    return response.data;
+    return await duplicateSparkHierarchy(context, settings, { worldId: parentId, rankId: id }, version);
   } catch (error) {
     throw mapAdminCloudError(error, 'admin/duplicate-failed');
   }
@@ -1889,28 +2332,7 @@ async function requestDeleteRank(worldId, rankId, options) {
       throw adminCloudError('admin/invalid-argument', 'An exact confirmationTitle is required.');
     }
     const version = requireExpectedVersion(settings.expectedVersion);
-    const operationToken = resolveOperationToken(
-      settings,
-      JSON.stringify([
-        'deleteContentRank',
-        parentId,
-        id,
-        version,
-        settings.confirmationTitle,
-      ]),
-      context.uid
-    );
-    assertAdminContext(context);
-    const response = await deleteContentRank({
-      worldId: parentId,
-      rankId: id,
-      confirmationTitle: settings.confirmationTitle,
-      expectedVersion: version,
-      operationId: operationToken.operationId,
-    });
-    assertAdminContext(context);
-    completeOperationToken(operationToken);
-    return response.data;
+    return await deleteSparkHierarchy(context, settings, { worldId: parentId, rankId: id }, version);
   } catch (error) {
     throw mapAdminCloudError(error, 'admin/delete-failed');
   }
@@ -2242,22 +2664,7 @@ async function duplicateGateAsDraft(worldId, rankId, gateId, expectedVersion, op
       'Duplicate options must be an object.',
       true
     );
-    const operationToken = resolveOperationToken(
-      settings,
-      JSON.stringify(['duplicateContentGate', parentWorldId, parentRankId, id, version]),
-      context.uid
-    );
-    assertAdminContext(context);
-    const response = await duplicateContentGate({
-      worldId: parentWorldId,
-      rankId: parentRankId,
-      gateId: id,
-      expectedVersion: version,
-      operationId: operationToken.operationId,
-    });
-    assertAdminContext(context);
-    completeOperationToken(operationToken);
-    return response.data;
+    return await duplicateSparkHierarchy(context, settings, { worldId: parentWorldId, rankId: parentRankId, gateId: id }, version);
   } catch (error) {
     throw mapAdminCloudError(error, 'admin/duplicate-failed');
   }
@@ -2289,34 +2696,9 @@ async function moveGate(worldId, rankId, gateId, target, expectedVersion, option
     if (typeof settings.confirmationTitle !== 'string' || !settings.confirmationTitle) {
       throw adminCloudError('admin/invalid-argument', 'An exact confirmationTitle is required.');
     }
-    const operationToken = resolveOperationToken(
-      settings,
-      JSON.stringify([
-        'moveContentGate',
-        parentWorldId,
-        parentRankId,
-        id,
-        targetWorldId,
-        targetRankId,
-        version,
-        settings.confirmationTitle,
-      ]),
-      context.uid
-    );
-    assertAdminContext(context);
-    const response = await moveContentGate({
-      worldId: parentWorldId,
-      rankId: parentRankId,
-      gateId: id,
-      targetWorldId,
-      targetRankId,
-      confirmationTitle: settings.confirmationTitle,
-      expectedVersion: version,
-      operationId: operationToken.operationId,
-    });
-    assertAdminContext(context);
-    completeOperationToken(operationToken);
-    return response.data;
+    return await moveSparkGate(context, settings,
+      { worldId: parentWorldId, rankId: parentRankId, gateId: id },
+      { worldId: targetWorldId, rankId: targetRankId, gateId: id }, version);
   } catch (error) {
     throw mapAdminCloudError(error, 'admin/move-failed');
   }
@@ -2337,30 +2719,7 @@ async function requestDeleteGate(worldId, rankId, gateId, options) {
       throw adminCloudError('admin/invalid-argument', 'An exact confirmationTitle is required.');
     }
     const version = requireExpectedVersion(settings.expectedVersion);
-    const operationToken = resolveOperationToken(
-      settings,
-      JSON.stringify([
-        'deleteContentGate',
-        parentWorldId,
-        parentRankId,
-        id,
-        version,
-        settings.confirmationTitle,
-      ]),
-      context.uid
-    );
-    assertAdminContext(context);
-    const response = await deleteContentGate({
-      worldId: parentWorldId,
-      rankId: parentRankId,
-      gateId: id,
-      confirmationTitle: settings.confirmationTitle,
-      expectedVersion: version,
-      operationId: operationToken.operationId,
-    });
-    assertAdminContext(context);
-    completeOperationToken(operationToken);
-    return response.data;
+    return await deleteSparkHierarchy(context, settings, { worldId: parentWorldId, rankId: parentRankId, gateId: id }, version);
   } catch (error) {
     throw mapAdminCloudError(error, 'admin/delete-failed');
   }
@@ -3283,7 +3642,7 @@ async function archiveWord(worldId, rankId, gateId, contentWordId, expectedVersi
   }
 }
 
-async function bulkSetWordStatus(worldId, rankId, gateId, status, items) {
+async function bulkSetWordStatus(worldId, rankId, gateId, status, items, settings) {
   try {
     const context = await requireAdminContext();
     const parentWorldId = requireWorldId(worldId);
@@ -3293,7 +3652,7 @@ async function bulkSetWordStatus(worldId, rankId, gateId, status, items) {
       throw adminCloudError('admin/invalid-argument', 'Bulk word status is invalid.');
     }
     const canonicalItems = requireBulkWordItems(items);
-    const savedWords = await runTransaction(db, async (transaction) => {
+    const apply = async (transaction) => {
       assertAdminContext(context);
       const currentWords = await Promise.all(canonicalItems.map(async (item) => {
         const reference = doc(
@@ -3343,9 +3702,22 @@ async function bulkSetWordStatus(worldId, rankId, gateId, status, items) {
           },
         };
       });
-      updates.forEach(({ reference, saved }) => transaction.set(reference, saved));
+      updates.forEach(({ reference, saved }) => transaction.update(reference, {
+        status, version: saved.version, updatedAt: saved.updatedAt, updatedBy: context.uid,
+      }));
       return updates.map(({ saved }) => saved);
-    });
+    };
+    if (settings) {
+      const action = status === 'published' ? 'publish' : 'archive';
+      const request = sparkAdminRequest(context, settings, action, [parentWorldId, parentRankId, parentGateId, canonicalItems]);
+      return await commitSparkAdminRequest(context, request, async (transaction) => {
+        const words = await apply(transaction);
+        const results = words.map(({ contentWordId, version }) => ({ contentWordId, version, status }));
+        return { updated: true, action, operationId: request.token.operationId,
+          items: results, itemCount: results.length, affectedCounts: { wordCount: 0 } };
+      });
+    }
+    const savedWords = await runTransaction(db, apply);
     assertAdminContext(context);
     return savedWords;
   } catch (error) {
@@ -3386,36 +3758,8 @@ async function duplicateWord(
       'Duplicate options must be an object.',
       true
     );
-    const operationToken = resolveOperationToken(
-      settings,
-      JSON.stringify([
-        'duplicateContentWord',
-        parentWorldId,
-        parentRankId,
-        parentGateId,
-        id,
-        destination.worldId,
-        destination.rankId,
-        destination.gateId,
-        version,
-      ]),
-      context.uid
-    );
-    assertAdminContext(context);
-    const response = await duplicateContentWord({
-      worldId: parentWorldId,
-      rankId: parentRankId,
-      gateId: parentGateId,
-      contentWordId: id,
-      targetWorldId: destination.worldId,
-      targetRankId: destination.rankId,
-      targetGateId: destination.gateId,
-      expectedVersion: version,
-      operationId: operationToken.operationId,
-    });
-    assertAdminContext(context);
-    completeOperationToken(operationToken);
-    return response.data;
+    return await changeSparkWords(context, settings, 'duplicate', { worldId: parentWorldId, rankId: parentRankId, gateId: parentGateId },
+      [{ contentWordId: id, expectedVersion: version }], destination, null);
   } catch (error) {
     throw mapAdminCloudError(error, 'admin/duplicate-failed');
   }
@@ -3453,38 +3797,8 @@ async function moveWord(
     if (typeof settings.confirmationWord !== 'string' || !settings.confirmationWord) {
       throw adminCloudError('admin/invalid-argument', 'An exact confirmationWord is required.');
     }
-    const operationToken = resolveOperationToken(
-      settings,
-      JSON.stringify([
-        'moveContentWord',
-        parentWorldId,
-        parentRankId,
-        parentGateId,
-        id,
-        destination.worldId,
-        destination.rankId,
-        destination.gateId,
-        version,
-        settings.confirmationWord,
-      ]),
-      context.uid
-    );
-    assertAdminContext(context);
-    const response = await moveContentWord({
-      worldId: parentWorldId,
-      rankId: parentRankId,
-      gateId: parentGateId,
-      contentWordId: id,
-      targetWorldId: destination.worldId,
-      targetRankId: destination.rankId,
-      targetGateId: destination.gateId,
-      confirmationWord: settings.confirmationWord,
-      expectedVersion: version,
-      operationId: operationToken.operationId,
-    });
-    assertAdminContext(context);
-    completeOperationToken(operationToken);
-    return response.data;
+    return await changeSparkWords(context, settings, 'move', { worldId: parentWorldId, rankId: parentRankId, gateId: parentGateId },
+      [{ contentWordId: id, expectedVersion: version }], destination, settings.confirmationWord);
   } catch (error) {
     throw mapAdminCloudError(error, 'admin/move-failed');
   }
@@ -3515,37 +3829,10 @@ async function bulkWordOperation(worldId, rankId, gateId, action, items, options
     ) {
       throw adminCloudError('admin/invalid-argument', 'The target gate must differ from the source gate.');
     }
-    const operationToken = resolveOperationToken(
-      settings,
-      JSON.stringify([
-        'bulkUpdateContentWords',
-        action,
-        parentWorldId,
-        parentRankId,
-        parentGateId,
-        canonicalItems,
-        destination,
-      ]),
-      context.uid
-    );
-    const payload = {
-      action,
-      worldId: parentWorldId,
-      rankId: parentRankId,
-      gateId: parentGateId,
-      items: canonicalItems,
-      operationId: operationToken.operationId,
-    };
-    if (destination) {
-      payload.targetWorldId = destination.worldId;
-      payload.targetRankId = destination.rankId;
-      payload.targetGateId = destination.gateId;
-    }
-    assertAdminContext(context);
-    const response = await bulkUpdateContentWords(payload);
-    assertAdminContext(context);
-    completeOperationToken(operationToken);
-    return response.data;
+    if (action !== 'move') return await bulkSetWordStatus(parentWorldId, parentRankId, parentGateId,
+      action === 'publish' ? 'published' : 'archived', canonicalItems, settings);
+    return await changeSparkWords(context, settings, 'bulk-move', { worldId: parentWorldId, rankId: parentRankId, gateId: parentGateId },
+      canonicalItems, destination, null);
   } catch (error) {
     throw mapAdminCloudError(error, 'admin/bulk-update-failed');
   }
@@ -3553,12 +3840,12 @@ async function bulkWordOperation(worldId, rankId, gateId, action, items, options
 
 async function bulkPublishWords(worldId, rankId, gateId, items, options) {
   requireOptions(options, new Set(['operationId']), 'Bulk publish options must be an object.', true);
-  return bulkSetWordStatus(worldId, rankId, gateId, 'published', items);
+  return bulkSetWordStatus(worldId, rankId, gateId, 'published', items, options || {});
 }
 
 async function bulkArchiveWords(worldId, rankId, gateId, items, options) {
   requireOptions(options, new Set(['operationId']), 'Bulk archive options must be an object.', true);
-  return bulkSetWordStatus(worldId, rankId, gateId, 'archived', items);
+  return bulkSetWordStatus(worldId, rankId, gateId, 'archived', items, options || {});
 }
 
 async function bulkMoveWords(worldId, rankId, gateId, items, target, options) {
@@ -3590,32 +3877,8 @@ async function requestDeleteWord(worldId, rankId, gateId, contentWordId, options
       throw adminCloudError('admin/invalid-argument', 'An exact confirmationWord is required.');
     }
     const version = requireExpectedVersion(settings.expectedVersion);
-    const operationToken = resolveOperationToken(
-      settings,
-      JSON.stringify([
-        'deleteContentWord',
-        parentWorldId,
-        parentRankId,
-        parentGateId,
-        id,
-        version,
-        settings.confirmationWord,
-      ]),
-      context.uid
-    );
-    assertAdminContext(context);
-    const response = await deleteContentWord({
-      worldId: parentWorldId,
-      rankId: parentRankId,
-      gateId: parentGateId,
-      contentWordId: id,
-      confirmationWord: settings.confirmationWord,
-      expectedVersion: version,
-      operationId: operationToken.operationId,
-    });
-    assertAdminContext(context);
-    completeOperationToken(operationToken);
-    return response.data;
+    return await changeSparkWords(context, settings, 'delete', { worldId: parentWorldId, rankId: parentRankId, gateId: parentGateId },
+      [{ contentWordId: id, expectedVersion: version }], null, settings.confirmationWord);
   } catch (error) {
     throw mapAdminCloudError(error, 'admin/delete-failed');
   }

@@ -21,17 +21,18 @@ test('gate readiness is computed from every loaded gate word, not the visible pa
   assert.doesNotMatch(evaluation, /wordPager|currentPage|pageSize/);
 });
 
-test('the gate card exposes one aggregate progress bar and the three user categories', () => {
+test('the gate card labels aggregate progress and uses confirmed review counts', () => {
   const panel = worldsSource.slice(
     worldsSource.indexOf('function makePublishedGateJourneyPanel'),
     worldsSource.indexOf('function appendPublishedHeader')
   );
   assert.match(panel, /published-gate-readiness-track/);
   assert.match(panel, /published-gate-readiness-fill/);
-  assert.match(panel, /خطة فتح تحدّي البوابة/);
-  assert.match(panel, /completedSteps\} \/ \$\{totalSteps/);
-  assert.match(panel, /كلمات بانتظار ساعتين:/);
-  assert.match(panel, /كلمات بانتظار يوم جديد:/);
+  assert.match(panel, /جاهزية البوابة/);
+  assert.match(panel, /خطوات الجاهزية/);
+  assert.match(panel, /كلمات مكتملة الجاهزية/);
+  assert.match(panel, /كلمات مستحقة الآن/);
+  assert.match(panel, /كلمات تنتظر المراجعة/);
   assert.doesNotMatch(panel, /published-word-readiness|word-readiness-indicator/);
 });
 

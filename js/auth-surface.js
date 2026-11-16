@@ -1,4 +1,4 @@
-import { AUTH_MODES, createAuthController } from './auth-controller.js';
+import { AUTH_MODES, createAuthController } from './auth-controller.js?v=saved-guest-1';
 
 const COPY = Object.freeze({
   [AUTH_MODES.LOGIN]: {
@@ -94,7 +94,8 @@ export function createAuthSurface({
     const copy = COPY[state.mode] || COPY.login;
     q('[data-auth-eyebrow]').textContent = copy.eyebrow;
     q('[data-auth-title]').textContent = copy.title;
-    q('[data-auth-intro]').textContent = copy.intro;
+    q('[data-auth-intro]').textContent = state.user?.isAnonymous === true && state.mode !== AUTH_MODES.RESET
+      ? (state.mode === AUTH_MODES.SIGNUP ? 'اربط حسابًا جديدًا وكمّل بتقدّم الضيف.' : 'سجّل دخولك أولًا، وبعدين اختر كيف تستخدم تقدّم الضيف المحفوظ.') : copy.intro;
     q('[data-auth-submit-label]').textContent = state.busy ? 'جارٍ التنفيذ…' : copy.submit;
     q('[data-google-label]').textContent = state.busy ? 'جارٍ فتح Google…' : 'المتابعة بحساب Google';
     q('[data-auth-switch-text]').textContent = copy.switchText;

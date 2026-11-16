@@ -1441,7 +1441,7 @@ function loadFeatureScript(src, options = {}) {
 function loadLootLinguaAdminAccess() {
   if (window.LootLinguaAdminCloud) return Promise.resolve();
   if (adminAccessLoadPromise) return adminAccessLoadPromise;
-  adminAccessLoadPromise = loadFeatureScript('js/admin-cloud.js?v=20261106-admin-fixes-1', { module: true }).catch((error) => {
+  adminAccessLoadPromise = loadFeatureScript('js/admin-cloud.js?v=admin-content-3', { module: true }).catch((error) => {
     adminAccessLoadPromise = null;
     throw error;
   });
@@ -1454,7 +1454,7 @@ window.loadLootLinguaAdminFeature = function() {
   adminFeatureLoadPromise = (async () => {
     await loadLootLinguaAdminAccess();
     await loadFeatureScript('js/admin-word-import.js?v=20260729-1');
-    await loadFeatureScript('js/admin.js?v=20261106-admin-fixes-1');
+    await loadFeatureScript('js/admin.js?v=admin-content-3');
     await loadFeatureScript('js/test-clock.js?v=20260729-2', { module: true });
   })().catch((error) => {
     adminFeatureLoadPromise = null;
@@ -1545,6 +1545,11 @@ function applyAppRoute(route = parseAppRoute()) {
 function handleInitialRouting() {
   if (appRoutingReady) return;
   const route = parseAppRoute();
+  if (route.kind === 'view' && route.key === 'quiz' && !window.__lootlinguaInitialDataReady) {
+    // Quiz availability and a saved attempt both depend on the current owner.
+    window.addEventListener('lootlingua:initial-data-ready', handleInitialRouting, { once: true });
+    return;
+  }
   appRoutingReady = true;
   try {
     const path = getAppRoutePath(
@@ -1675,6 +1680,7 @@ function displayNextToast() {
   const content = document.createElement('span');
   content.className = 'toast-text';
   content.textContent = entry.preview;
+  t.classList.toggle('toast-wrap', entry.wrap === true);
   t.replaceChildren(content);
   if (entry.notificationId) {
     const details = document.createElement('button');
@@ -1712,6 +1718,7 @@ function displayNextToast() {
     window.__toastTransitionTimer = setTimeout(() => {
       window.__toastActive = null;
       displayNextToast();
+      if (!window.__toastActive) window.dispatchEvent(new CustomEvent('lootlingua:toast-idle'));
     }, 430);
   }, entry.duration);
 }
@@ -1737,9 +1744,10 @@ function showToast(msg, type = 'info', duration = 2500, options = {}) {
   ) || '';
   const duplicate = findInFlightToast(toastDedupeKey);
   if (duplicate) return notificationId || duplicate.notificationId || '';
-  const preview = window.LootLinguaNotificationPolicy?.toastPreview(fullText) || fullText;
+  const preview = settings.wrap === true ? fullText : (window.LootLinguaNotificationPolicy?.toastPreview(fullText) || fullText);
   const queuedEntry = {
     preview,
+    wrap: settings.wrap === true,
     type,
     duration: Math.min(12000, Math.max(1200, displayDuration || 2500)),
     notificationId,
@@ -2159,7 +2167,18 @@ function getGuestMigrationWords() {
   });
 }
 
+window.hasPreservedLegacyGuestProfile = () => Boolean(loadJSON(LEGACY_GUEST_PROFILE_KEY, null));
+window.preserveLegacyGuestProfile = function() {
+  if (window.auth?.currentUser || window.hasPreservedLegacyGuestProfile()) return;
+  const loot = getGuestLootSnapshot();
+  if (hasMeaningfulGuestLoot(loot) || (hasDirtyGuestData() && Object.keys(loot.profile).length)) {
+    localStorage.setItem(LEGACY_GUEST_PROFILE_KEY, JSON.stringify(loot.profile));
+  }
+};
+
 function getGuestProgressSnapshot() {
+  const retained = loadJSON(LEGACY_GUEST_PROFILE_KEY, null);
+  if (retained) return retained;
   // Legacy profile keys (XP, streak, titles...) are unscoped. They are safe to
   // treat as guest-owned only when a signed-out write marked that namespace as
   // dirty. Account hydration also uses these keys and is not guest evidence.
@@ -2245,7 +2264,9 @@ function renderGuestMigrationModal(summary) {
   setGuestMigrationBusy(false);
   if (msg) {
     const progressText = progressStats.length ? ' ولقينا كمان XP وتقدم وألقاب مخزنة' : '';
-    msg.textContent = `يا بطل! لقينا ${wordCount} كلمات مخبأة في جهازك${progressText}.. بدك تنقلهم لحسابك الأسطوري الجديد عشان ما يضيعوا؟`;
+    msg.textContent = summary.user?.isAnonymous === true
+      ? 'لقينا كلمات أو تقدّم محفوظ على هذا الجهاز. تقدر تنقله إلى رحلة الضيف أو تخليه محفوظ هون.'
+      : `يا بطل! لقينا ${wordCount} كلمات مخبأة في جهازك${progressText}.. بدك تنقلهم لحسابك الأسطوري الجديد عشان ما يضيعوا؟`;
   }
   if (stats) {
     const allStats = [{ label: `${wordCount} كلمات`, hint: 'قاموس الضيف' }, ...progressStats];
@@ -2302,6 +2323,16 @@ window.addEventListener?.('lootlingua:auth-state', () => {
 });
 
 window.prepareGuestMigrationForUser = function(user) {
+  if (user?.isAnonymous === false && window.hasSavedGuestForOtherAccount) {
+    return window.hasSavedGuestForOtherAccount(user.uid).then(
+      (saved) => saved ? 'saved-cloud-guest' : prepareLegacyGuestMigration(user),
+      () => 'saved-cloud-guest'
+    );
+  }
+  return prepareLegacyGuestMigration(user);
+};
+
+function prepareLegacyGuestMigration(user) {
   if (!user?.uid) {
     if (activeGuestMigrationSession && !isGuestMigrationSessionCurrent(activeGuestMigrationSession)) {
       retireGuestMigrationSession(activeGuestMigrationSession);
@@ -2362,7 +2393,7 @@ window.prepareGuestMigrationForUser = function(user) {
   };
   renderGuestMigrationModal(window.__guestMigrationSummary);
   return window.__guestMigrationPromise;
-};
+}
 
 window.confirmGuestMigration = async function() {
   const session = activeGuestMigrationSession;
@@ -2578,13 +2609,14 @@ window.confirmGuestMigration = async function() {
     if (!isCurrent()) return;
     markGuestMigrationCompleteFlag(user, 'accepted', summary.guestSnapshotId);
     if (!isCurrent()) return;
-    purgeStaleGuestLocalData();
+    purgeStaleGuestLocalData({ keepSearchTrial: user.isAnonymous === true });
     if (!isCurrent()) return;
     saveAndRender();
     if (!isCurrent()) return;
     hideModal('guestMigrationModal');
     if (!isCurrent()) return;
-    showToast(uploaded > 0 ? `تم نقل ${uploaded} كلمات لحسابك` : 'ما في كلمات جديدة للنقل، وتم حفظ تقدمك', 'success', 4200);
+    showToast(user.isAnonymous === true ? 'تم حفظ تقدّم هذا الجهاز في رحلة الضيف.'
+      : (uploaded > 0 ? `تم نقل ${uploaded} كلمات لحسابك` : 'ما في كلمات جديدة للنقل، وتم حفظ تقدمك'), 'success', 4200);
     if (!isCurrent()) return;
     session.resolve?.('accepted');
     session.resolve = null;

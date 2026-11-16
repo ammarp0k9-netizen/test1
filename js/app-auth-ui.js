@@ -1,5 +1,5 @@
 import { AUTH_MODES } from './auth-controller.js';
-import { createAuthSurface } from './auth-surface.js';
+import { createAuthSurface } from './auth-surface.js?v=saved-guest-1';
 
 let activeSurface = null;
 

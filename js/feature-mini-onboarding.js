@@ -5,8 +5,9 @@
   let activeFeature = '';
   let stepIndex = 0;
   let internalClose = false;
-  let worldSaveHandled = false;
   let run = 0;
+  let automatic = false;
+  let dismissedOnSurface = '';
 
   const STEPS = Object.freeze({
     treasure: [
@@ -19,7 +20,7 @@
     ],
     quiz: [
       { selector: '#quizAvailableCount', title: 'راجع قاموسك كله', text: 'اختبار البوابة يراجع كلمات تلك البوابة فقط. هنا تراجع القاموس الشخصي أو المصدر الذي تختاره؛ استخدمه باستمرار لتثبيت كلماتك.' },
-      { selector: '#quizViewSetup .quiz-modes-grid', title: 'اختر وضعًا لتجربته', text: 'ارفع إتقانك بالمطابقة أو الصندوق المشفّر أو الهروب من النسيان. لووت رنر وLoot Bots وبطاقات الذاكرة للتدريب.', click: '.quiz-mode-card' },
+      { selector: '#quizViewSetup > h3', title: 'اختر وضعًا لتجربته', text: 'قد تساعد الإجابات الصحيحة في اختبارات التقدّم على تطوير الإتقان عند تحقق شروط المراجعة المتباعدة. الجري وLoot Bots وبطاقات الذاكرة للتدريب.', click: '#quizModeGroups .quiz-mode-card' },
       { selector: '#quizSharedSettings .quiz-source-selector', title: 'مصدر الكلمات', text: 'اختر القاموس الشخصي لمراجعته، أو الكلمات الصعبة أو عالمًا خاصًا إذا كان لديك. المصدر يحدد الكلمات التي ستختبرها.' },
       { selector: '#quizSharedSettings [aria-label="عدد الأسئلة"]', title: 'حجم الجلسة', text: 'اختر عدد الأسئلة المناسب. قد تختلف الخيارات الفعلية حسب الوضع والكلمات المتاحة.' },
       { selector: '#quizStartButton', title: 'ابدأ عندما تكون جاهزًا', text: 'راجع الملخص واتجاه السؤال إن ظهر. بعد البدء اتبع تعليمات الوضع، وستظهر نتيجة أدائك عند إنهاء الجلسة.' },
@@ -59,34 +60,24 @@
     controller()?.evaluate?.();
     offerResume();
   }
-  function prepareStep() {
-    if (activeFeature === 'custom-worlds' && stepIndex >= 3 && stepIndex <= 4) {
-      const modal = document.getElementById('customWorldModal');
-      if (!modal?.getClientRects().length) root.openCustomWorldModal?.();
-    }
-    if (activeFeature === 'custom-worlds' && stepIndex === 5 && !worldSaveHandled) root.hideModal?.('customWorldModal');
-    if (activeFeature === 'quiz' && stepIndex >= 2) {
-      const panel = document.getElementById('quizSettingsPanel');
-      if (!panel?.getClientRects().length) root.openQuizModeSettings?.('flashcards');
-    }
-  }
   function advance() {
     if (!activeFeature) return;
     if (stepIndex + 1 >= STEPS[activeFeature].length) { finish(); return; }
     stepIndex += 1;
     controller()?.checkpoint?.(activeFeature, stepIndex);
-    close(); prepareStep();
+    close();
     const currentRun = run;
     setTimeout(() => { if (currentRun === run) show(); }, 100);
   }
   function targetForCurrentStep() {
     const step = STEPS[activeFeature]?.[stepIndex];
     const target = step ? document.querySelector(step.selector) : null;
-    if (target) target.scrollIntoView?.({ block: 'center', inline: 'nearest', behavior: 'instant' });
+    if (target && !automatic) target.scrollIntoView?.({ block: 'center', inline: 'nearest', behavior: 'instant' });
     return { step, target };
   }
   function show() {
     const { step, target } = targetForCurrentStep();
+    if (root.LootLinguaSmartOnboarding?.canShow(target) === false) { pause(); return; }
     if (!step || !onFeature(activeFeature) || !target?.getClientRects().length || !root.LootLinguaPopover?.open) {
       pause(); return;
     }
@@ -107,13 +98,23 @@
     next.textContent = stepIndex + 1 >= STEPS[activeFeature].length ? 'إنهاء' : 'التالي';
     if (step.click || step.event) next.hidden = true;
     next.addEventListener('click', advance);
-    actions.append(skip, next); content.append(title, copy, actions);
+    actions.append(skip, next);
+    const skipTour = document.createElement('button');
+    skipTour.type = 'button'; skipTour.className = 'feature-mini-onboarding-skip'; skipTour.textContent = 'تخطي الجولة';
+    skipTour.addEventListener('click', () => {
+      const feature = activeFeature;
+      if (!feature) return;
+      controller()?.skip?.(feature);
+      pause(); controller()?.evaluate?.();
+    });
+    actions.append(skipTour);
+    content.append(title, copy, actions);
     const actionsToDelay = step.click ? [...document.querySelectorAll(step.click)]
       : step.event ? [target] : [];
     if (!root.LootLinguaPopover.open({
       id: COACH_ID, className: 'lootlingua-popover feature-mini-onboarding-coach', anchor: target,
-      content, labelledBy: title.id, persistent: true,
-      reading: { step: `${activeFeature}:${stepIndex}`, text: step.text, actions: actionsToDelay },
+      content, labelledBy: title.id, persistent: true, yieldToHelp: true,
+      reading: automatic ? undefined : { step: `${activeFeature}:${stepIndex}`, text: step.text, actions: actionsToDelay },
     })) pause();
   }
   function pause() {
@@ -122,16 +123,18 @@
     close();
     offerResume();
   }
-  function start(feature) {
+  function start(feature, options = {}) {
     if (!STEPS[feature] || !onFeature(feature) || controller()?.isInteractiveJourneyActive?.() ||
+        root.LootLinguaSmartOnboarding?.busy() ||
+        ['completed', 'skipped', 'locked'].includes(controller()?.getStatus?.(feature)) ||
         (activeFeature && activeFeature !== feature)) return false;
     if (activeFeature === feature) return true;
+    automatic = options.automatic === true;
+    dismissedOnSurface = '';
     const currentRun = ++run;
     activeFeature = feature;
     offerResume();
-    worldSaveHandled = false;
     stepIndex = Math.min(controller()?.getState?.()?.features?.[feature]?.step || 0, STEPS[feature].length - 1);
-    prepareStep();
     let attempts = 0;
     const wait = () => {
       if (currentRun !== run || activeFeature !== feature) return;
@@ -142,12 +145,51 @@
     wait();
     return true;
   }
-  Object.defineProperty(root, 'LootLinguaFeatureMiniOnboarding', { value: Object.freeze({ start, finish, getActiveFeature: () => activeFeature }), configurable: false });
-  root.addEventListener('lootlingua:popover-closed', (event) => {
-    if (!internalClose && event.detail?.id === COACH_ID) pause();
+  function visibleCheckpoint() {
+    const discovery = controller();
+    const smart = root.LootLinguaSmartOnboarding;
+    if (activeFeature || !smart || root.LootLinguaPopover?.getActiveId?.() || discovery?.isInteractiveJourneyActive?.()) return null;
+    const feature = Object.keys(STEPS).find(onFeature);
+    if (!feature || feature === dismissedOnSurface || (feature === 'quiz' && !smart.isGeneralQuiz())) return null;
+    if (smart.busy()) return null;
+    const status = discovery.getStatus(feature);
+    if (!['available', 'in-progress'].includes(status)) return null;
+    const step = discovery.getState()?.features?.[feature]?.step || 0;
+    const selector = STEPS[feature][step]?.selector;
+    if (!selector || !smart.canShow(document.querySelector(selector))) return null;
+    return { feature, status };
+  }
+
+  function resumeOnSurface() {
+    const checkpoint = visibleCheckpoint();
+    if (!checkpoint) return false;
+    if (checkpoint.status === 'available') controller().start(checkpoint.feature);
+    return start(checkpoint.feature, { automatic: true });
+  }
+
+  function suspendIfObstructed() {
+    if (!activeFeature || root.LootLinguaPopover?.getActiveId?.() !== COACH_ID) return;
+    const target = document.querySelector(STEPS[activeFeature][stepIndex].selector);
+    if (root.LootLinguaSmartOnboarding?.canShow(target) === false) pause();
+  }
+
+  Object.defineProperty(root, 'LootLinguaFeatureMiniOnboarding', {
+    value: Object.freeze({
+      start, finish, pause, resumeOnSurface, suspendIfObstructed,
+      hasVisibleCheckpoint: () => Boolean(visibleCheckpoint()), getActiveFeature: () => activeFeature,
+    }),
+    configurable: false,
   });
-  root.addEventListener('lootlingua:auth-state', pause);
-  root.addEventListener('lootlingua:dictionary-navigation', pause);
+  root.addEventListener('lootlingua:popover-closed', (event) => {
+    if (!internalClose && event.detail?.id === COACH_ID) {
+      dismissedOnSurface = activeFeature;
+      pause();
+    }
+  });
+  for (const name of ['auth-state', 'dictionary-navigation']) root.addEventListener('lootlingua:' + name, () => {
+    dismissedOnSurface = '';
+    pause();
+  });
   function interruptedFeatures() {
     const discovery = controller();
     if (activeFeature || discovery?.isInteractiveJourneyActive?.()) return [];
@@ -160,27 +202,43 @@
     const [feature] = interruptedFeatures();
     root.LootLinguaPopover?.offerResume?.(COACH_ID, feature ? {
       label: `تابع استكشاف ${FEATURE_NAMES[feature]}`,
-      open: () => { if (onFeature(feature)) start(feature); else controller()?.open?.(feature); },
+      open: () => {
+        root.LootLinguaSmartOnboarding?.close();
+        if (onFeature(feature)) start(feature);
+        else controller()?.open?.(feature);
+      },
     } : null);
   }
   function resume() {
-    const feature = interruptedFeatures().find(onFeature);
-    if (feature) start(feature);
-    else offerResume();
+    offerResume();
+    root.LootLinguaSmartOnboarding?.schedule?.();
   }
   root.addEventListener('lootlingua:surface-ready', () => {
+    if (dismissedOnSurface && !onFeature(dismissedOnSurface)) dismissedOnSurface = '';
     if (activeFeature && (!onFeature(activeFeature) || controller()?.isInteractiveJourneyActive?.())) pause();
     resume();
   });
   root.addEventListener('lootlingua:onboarding-cloud-change', resume);
   root.addEventListener('lootlingua:initial-data-ready', resume);
   root.addEventListener('lootlingua:discovery-display-change', offerResume);
-  root.addEventListener('lootlingua:custom-world-saved', () => {
-    if (activeFeature === 'custom-worlds' && stepIndex >= 3 && stepIndex <= 4) {
-      worldSaveHandled = true;
-      stepIndex = 4; advance();
-    }
+  function reachSurface(feature, next) {
+    const discovery = controller();
+    const status = discovery?.getStatus?.(feature);
+    if (!onFeature(feature) || !['available', 'in-progress'].includes(status)) return;
+    dismissedOnSurface = '';
+    const current = discovery.getState()?.features?.[feature]?.step || 0;
+    if (current >= next) { resume(); return; }
+    if (activeFeature === feature) pause();
+    // The user already took the action those steps describe; continue here.
+    if (status === 'available') discovery.start(feature);
+    discovery.checkpoint(feature, next);
+    resume();
+  }
+  root.addEventListener('lootlingua:quiz-settings-opened', () => {
+    if (root.LootLinguaSmartOnboarding?.isGeneralQuiz()) reachSurface('quiz', 2);
   });
+  root.addEventListener('lootlingua:custom-world-form-opened', () => reachSurface('custom-worlds', 3));
+  root.addEventListener('lootlingua:custom-world-saved', () => reachSurface('custom-worlds', 5));
   document.addEventListener('click', (event) => {
     const step = STEPS[activeFeature]?.[stepIndex];
     if (!step?.click || !event.target.closest?.(step.click) || !root.LootLinguaPopover?.canAct?.(COACH_ID)) return;

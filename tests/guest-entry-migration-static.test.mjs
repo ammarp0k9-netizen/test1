@@ -174,7 +174,7 @@ test('accepted migration commits learning state before purging the guest namespa
     'window.declineGuestMigration = function()'
   );
   const completionIndex = acceptBlock.indexOf("markGuestMigrationCompleteFlag(user, 'accepted', summary.guestSnapshotId)");
-  const purgeIndex = acceptBlock.indexOf('purgeStaleGuestLocalData()', completionIndex);
+  const purgeIndex = acceptBlock.indexOf('purgeStaleGuestLocalData({ keepSearchTrial: user.isAnonymous === true })', completionIndex);
   const recoveryWriteIndex = acceptBlock.indexOf('localStorage.setItem(profileMigrationKey');
   const verifiedProfileCommitIndex = acceptBlock.indexOf('await window.commitPendingGuestProfileMigration(user)');
   assert.ok(completionIndex > 0);
@@ -185,7 +185,7 @@ test('accepted migration commits learning state before purging the guest namespa
   assert.ok(purgeIndex > completionIndex);
   assert.ok(acceptBlock.indexOf('await window.migrateGuestWordsToCloud') < completionIndex);
   assert.match(acceptBlock, /setGuestMigrationBusy\(true, [\s\S]*?جارٍ نقل كلماتك بأمان/);
-  assert.match(cloudSource, /async function migrateGuestWordsToCloud[\s\S]*?batch\.create\(item\.canonicalRef[\s\S]*?batch\.create\(item\.legacyRef[\s\S]*?batch\.create\(item\.sourceRef/);
+  assert.match(cloudSource, /async function migrateGuestWordsToCloud[\s\S]*?runTransaction\(db, async \(transaction\)[\s\S]*?transaction\.get\(item\.canonicalRef\)[\s\S]*?transaction\.set\(item\.canonicalRef[\s\S]*?transaction\.set\(item\.legacyRef[\s\S]*?transaction\.set\(item\.sourceRef/);
   assert.match(cloudSource, /guest-migration\/firestore-write-denied/);
   assert.ok(acceptBlock.indexOf('await window.saveGlobalWordMasteryToCloud') < completionIndex);
   assert.ok(acceptBlock.indexOf('await window.saveActiveQuizSessionToCloud') < completionIndex);
@@ -219,7 +219,7 @@ test('versioned guest migration receipts bind one decision to one account and sn
   const receiptBlock = between(
     storageSource,
     'function guestMigrationReceiptStorageKey(user)',
-    'function purgeStaleGuestLocalData()'
+    'function purgeStaleGuestLocalData('
   );
   const values = new Map([
     ['words_normal_guest', JSON.stringify([{ word: 'legacy' }])],
@@ -329,7 +329,7 @@ test('the real full profile payload retains the current theme and learning-state
     'activeTitleId', 'activityMap', 'addedGameWords', 'dailyLootState',
     'dailyQuestDate', 'dailyQuestState', 'dailyStreak', 'displayName',
     'extraChests', 'freezeSaves', 'gameDictAdds', 'lastActivityDate',
-    'maxStreak', 'oasisMode', 'perfectQuizzes', 'quizExposureHistory',
+    'maxStreak', 'motivationRewards', 'oasisMode', 'perfectQuizzes', 'quizExposureHistory',
     'runnerBestDistance', 'runnerCoins', 'streakFreezes', 'theme',
     'themeIntroSeen', 'titlesState', 'userXP', 'xpEconomyVersion',
   ].sort());

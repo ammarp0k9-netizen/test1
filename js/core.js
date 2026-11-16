@@ -926,6 +926,7 @@ window.toggleProfileModal = function() {
   void window.prepareLootLinguaAdminEntry?.();
   closeSidebarIfOpen();
   setAppRoute('overlay', 'profile');
+  window.dispatchEvent(new CustomEvent('lootlingua:profile-opened'));
 };
 
 window.closeProfileModal = function(silent) {

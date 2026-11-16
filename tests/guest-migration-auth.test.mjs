@@ -341,3 +341,13 @@ test('logout releases a pending prompt and stale preparation cannot replace B se
   assert.equal(await bDecision, 'declined');
   assert.equal(h.values.get('guest-data'), 'retained');
 });
+
+test('a separately authenticated saved guest keeps legacy loot out of the destination account', async () => {
+  const h = createHarness();
+  const user = h.root.auth.currentUser = { uid: 'A', isAnonymous: false };
+  h.root.hasSavedGuestForOtherAccount = async (uid) => uid === 'A';
+  assert.equal(await h.root.prepareGuestMigrationForUser(user), 'saved-cloud-guest');
+  assert.equal(h.values.get('guest-data'), 'retained');
+  assert.equal(h.ui.some((entry) => entry.type === 'prompt'), false);
+  assert.deepEqual(h.calls, []);
+});

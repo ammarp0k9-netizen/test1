@@ -189,12 +189,12 @@ test('coordinator defers invitations while Entry or a public-gate journey is act
   assert.equal(records.size, 0, 'an active public-gate journey also defers discovery');
 
   owner.LootLinguaGuidedFirstJourney = { isPresenting: () => false };
-  let dictionaryPhase = 'awaiting-first-word';
+  let dictionaryVisible = true;
   owner.getOnboardingView = () => 'worlds';
-  owner.LootLinguaPersonalDictionaryOnboarding = { getState: () => ({ phase: dictionaryPhase }) };
+  owner.LootLinguaPersonalDictionaryOnboarding = { getState: () => ({ phase: 'intro', step: 2 }), isPresenting: () => dictionaryVisible };
   controller.evaluate();
-  assert.equal(records.size, 0, 'leaving the dictionary mid-guide does not show discovery');
-  dictionaryPhase = 'completed';
+  assert.equal(records.size, 0, 'a visible legacy coach defers discovery');
+  dictionaryVisible = false;
   controller.evaluate();
   assert.equal(records.has('feature-discovery:treasure'), true);
 });

@@ -125,8 +125,8 @@
     wallet.dataset.runnerWallet = ''; wallet.textContent = String(RunnerCoinWallet.balance());
     best.dataset.runnerBest = ''; best.textContent = String(RunnerBestDistance.value());
     totals.append('عملاتك: ', wallet, ' · أفضل مسافة: ', best, ' م');
-    copy.append(node('strong', '', 'لووت رنر — جري البوابات'),
-      node('span', '', 'تفادَ العوائق واعبر بوابة المعنى الصحيح. الجري لا يزيد الإتقان أو جاهزية البوابة. لرفع الجاهزية اختر المطابقة أو الصندوق المشفّر أو الهروب من النسيان.'),
+    copy.append(node('strong', '', 'جري البوابات'),
+      node('span', '', 'تفادَ العوائق واعبر بوابة المعنى الصحيح. الجري للتدريب وجمع العملات.'),
       totals);
     const play = node('button', 'gate-runner-launch', 'ابدأ الجري'); play.type = 'button';
     const due = practiceLocked(context); play.disabled = due;

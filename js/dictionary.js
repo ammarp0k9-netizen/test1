@@ -49,7 +49,7 @@ function safeClassToken(v) {
 let statsPanelRequest = 0;
 let statsPanelHideTimer = null;
 window.cancelPendingStatsPanel = function() { statsPanelRequest++; clearTimeout(statsPanelHideTimer); };
-async function openStatsPanel() {
+async function openStatsPanel({ fromTour = false } = {}) {
   const request = ++statsPanelRequest;
   const owner = window.auth?.currentUser?.uid || 'guest';
   const generation = Number(window.__lootlinguaAuthGeneration) || 0;
@@ -60,9 +60,15 @@ async function openStatsPanel() {
   clearTimeout(statsPanelHideTimer);
   lockBackgroundScroll('stats');
   p.style.display='flex'; p.setAttribute('aria-hidden', 'false');
-  setTimeout(()=>{ if (request === statsPanelRequest) p.classList.add('show'); },10);
   window.LootLinguaModalFocus?.open(p, { dialog: p.querySelector('.stats-box') || p, onEscape: closeStatsPanel });
-  renderHeatmap(); renderStatsNumbers();
+  renderHeatmap();
+  const hasUsefulStats = renderStatsNumbers();
+  setTimeout(() => {
+    if (request !== statsPanelRequest || owner !== (window.auth?.currentUser?.uid || 'guest') ||
+        generation !== (Number(window.__lootlinguaAuthGeneration) || 0)) return;
+    p.classList.add('show');
+    if (!fromTour) window.LootLinguaPersonalDictionaryOnboarding?.onStatsOpened?.(p, hasUsefulStats);
+  }, 10);
   setAppRoute('overlay', 'stats');
 }
 function closeStatsPanel(silent = false) {
@@ -118,6 +124,7 @@ function renderStatsNumbersFromData() {
   s('statForgot',  personalWords.filter(w => getWordMasteryState(w).mastery_status === 'Mastered').length);
   s('statDays',    Object.keys(map).filter(k=>map[k]>0).length+' يوم');
   s('statBest',    (vals.length?Math.max(...vals):0)+' كلمات');
+  return personalWords.length > 0 || dailyStreak > 0 || vals.length > 0;
 }
 
 // ═══════════════════════════════════════════════════════
@@ -1084,7 +1091,8 @@ const GUEST_LS_NORMAL = 'hasUsedNormalGuestShot';
 const GUEST_LS_GAMER = 'hasUsedGamerGuestShot';
 
 function isAiUserLoggedIn() {
-  return !!window.auth?.currentUser;
+  const user = window.auth?.currentUser;
+  return Boolean(user && user.isAnonymous !== true);
 }
 
 function isGuestSearchLocked(type) {
@@ -1165,7 +1173,7 @@ async function buildAiRequestHeaders() {
   const headers = { 'Content-Type': 'application/json' };
   const user = window.auth?.currentUser;
   const generation = Number(window.__lootlinguaAuthGeneration) || 0;
-  if (user) {
+  if (user && user.isAnonymous !== true) {
     let token;
     try {
       token = await user.getIdToken();
@@ -1330,8 +1338,7 @@ window.submitSuggestionFromUI = async function(wordEnc, arEnc, gameEnc, ev) {
     pushNotification('خدمة الاقتراحات غير جاهزة. حدّث الصفحة.', 'warning');
     return;
   }
-  const user = window.auth?.currentUser;
-  if (!user) {
+  if (!isAiUserLoggedIn()) {
     pushNotification('سجل دخولك أولاً يا بطل عشان تقدر ترسل اقتراحك! 🚀', 'warning');
     const profileModal = document.getElementById('profileModal');
     if (typeof window.toggleProfileModal === 'function' && profileModal && !profileModal.classList.contains('open')) {

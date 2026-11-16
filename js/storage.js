@@ -265,7 +265,10 @@ function markGuestMigrationCompleteFlag(user, status, snapshotId) {
   };
 }
 
-function purgeStaleGuestLocalData() {
+const LEGACY_GUEST_PROFILE_KEY = 'lootlingua:retained-guest-profile:v1';
+
+function purgeStaleGuestLocalData({ keepSearchTrial = false } = {}) {
+  localStorage.removeItem(LEGACY_GUEST_PROFILE_KEY);
   localStorage.removeItem(getWordsStorageKey('normal', 'guest'));
   localStorage.removeItem(getWordsStorageKey('gamer', 'guest'));
   localStorage.removeItem(getCustomWorldsStorageKey('guest'));
@@ -288,7 +291,7 @@ function purgeStaleGuestLocalData() {
       localStorage.removeItem(key);
     }
   });
-  if (typeof clearGuestSearchLocks === 'function') clearGuestSearchLocks();
+  if (!keepSearchTrial && typeof clearGuestSearchLocks === 'function') clearGuestSearchLocks();
   window.LootLinguaNotificationStore?.purgeOwner?.('guest');
 }
 window.purgeStaleGuestLocalData = purgeStaleGuestLocalData;
@@ -344,7 +347,7 @@ function hasMeaningfulGuestLoot(snapshot) {
 }
 
 function reconcileEmptyGuestSessionState() {
-  if (hasSignedInUser()) return;
+  if (hasSignedInUser() || window.hasPreservedLegacyGuestProfile?.()) return;
   if ((Array.isArray(window.words) ? window.words.length : 0) > 0) return;
   if ((Number(userXP) || 0) > 0) return;
   purgeStaleGuestLocalData();

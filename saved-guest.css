@@ -1,0 +1,32 @@
+.saved-guest-dialog {
+  width: min(32rem, calc(100% - 2rem));
+  max-height: calc(100% - 2rem);
+  padding: clamp(1rem, 4vw, 1.75rem);
+  box-sizing: border-box;
+  direction: rtl;
+  color: var(--text-white, CanvasText);
+  background: var(--card-bg, Canvas);
+  border: 1px solid color-mix(in srgb, currentColor 24%, transparent);
+  border-radius: 1rem;
+  font-family: inherit;
+}
+
+.saved-guest-dialog::backdrop { background: rgb(8 12 26 / 72%); }
+.saved-guest-dialog h2 { margin-block: 0 .5rem; }
+.saved-guest-dialog p { line-height: 1.6; margin-block: .55rem; }
+.saved-guest-dialog [data-saved-guest-account] { text-align: right; overflow-wrap: anywhere; font-weight: bold; }
+.saved-guest-dialog [data-saved-guest-status]:empty { display: none; }
+.saved-guest-actions { display: grid; gap: .55rem; margin-top: 1rem; }
+.saved-guest-actions button {
+  padding: .65rem;
+  min-height: 44px;
+  border: 1px solid color-mix(in srgb, currentColor 30%, transparent);
+  border-radius: .65rem;
+  font: inherit;
+  color: inherit;
+  background: transparent;
+  cursor: pointer;
+}
+.saved-guest-actions [data-saved-guest-merge]:not(:disabled) { background: #5835b3; color: white; }
+.saved-guest-actions button:disabled { opacity: .65; cursor: default; }
+[data-saved-guest-restore][hidden] { display: none !important; }

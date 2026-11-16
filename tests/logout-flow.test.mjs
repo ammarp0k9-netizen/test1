@@ -65,7 +65,7 @@ test('the app logout is wired through the listener barrier and sequenced helper'
   assert.match(block, /lootlingua:auth-state/);
   assert.match(block, /await runLogoutSequence\(\{/);
   assert.match(block, /signOut: \(\) => signOut\(auth\)/);
-  assert.match(block, /purgeGuestIsolationState: \(\) => window\.purgeStaleGuestLocalData/);
+  assert.match(block, /purgeGuestIsolationState: \(\) => \{\s*if \(!window\.hasPreservedLegacyGuestProfile\?\.\(\)\) window\.purgeStaleGuestLocalData/);
   assert.match(block, /navigateToLanding: \(\) => location\.assign\(publicLandingPath\(location\)\)/);
   assert.doesNotMatch(block, /signOut\(auth\)\.then/);
 });

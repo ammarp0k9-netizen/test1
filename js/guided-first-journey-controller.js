@@ -175,14 +175,23 @@
       !root.hasActiveLearningQuiz?.() &&
       document.getElementById?.('appAuthDialogShell')?.hidden !== false &&
       !document.documentElement.classList.contains('journey-auth-active') &&
-      (!dictionary || ['awaiting-journey', 'completed'].includes(dictionary.phase)) &&
+      (root.LootLinguaSmartOnboarding
+        ? !root.LootLinguaPersonalDictionaryOnboarding?.isPresenting?.()
+        : !dictionary || ['awaiting-journey', 'completed'].includes(dictionary.phase)) &&
       !(!user() && runtime.state.guestDictionaryAvailable && dictionary?.phase !== 'awaiting-journey');
+  }
+
+  function hasFirstGateStart(route) {
+    return route?.type === 'world' && route.worldId === runtime.state?.worldId &&
+      runtime.state.phase === 'awaiting-first-gate' && !runtime.state.gateId && !runtime.state.placementStage &&
+      Boolean(route.root.querySelector('.published-first-journey-start:not([disabled])'));
   }
 
   function isPresenting() {
     const route = runtime.lastRoute;
     if (!canPresent() || !route?.root?.isConnected || (root.getOnboardingView && root.getOnboardingView() !== 'worlds')) return false;
     if (route.type === 'worlds') return runtime.state.phase === 'choosing-world';
+    if (hasFirstGateStart(route)) return true;
     return (route.worldId === runtime.state.worldId && ['assessment', 'placement-result', 'placement-resume'].includes(route.type)) ||
       root.LootLinguaPopover?.getActiveId?.() === COACH_ID;
   }
@@ -277,6 +286,10 @@
       return;
     }
     if (payload.type === 'world') {
+      if (hasFirstGateStart(payload)) {
+        root.LootLinguaPopover?.closeIf?.(COACH_ID, { silent: true });
+        return;
+      }
       const placementButtons = [...rootNode.querySelectorAll('[data-guide-placement-level]:not([disabled])')];
       const offer = !state.placementStage ? state.phase === 'awaiting-first-gate' && !state.gateId
         : ['assessment', 'offer', 'result'].includes(state.placementStage);
@@ -318,9 +331,11 @@
         ? ' يمكنك أيضًا استخدام قاموسك الشخصي لإضافة كلمات بنفسك.'
         : '';
       const message = state.phase === 'awaiting-quiz-cta'
-        ? 'من هنا تختبر كلمات البوابة وترفع جاهزيتها. لووت رنر وLoot Bots للتدريب؛ لا يزيدان الإتقان أو تقدّم البوابة.'
+        ? (label.includes('المراجعة الرسمية')
+          ? 'كلماتك جاهزة للمراجعة. اختر نمط اختبار للبدء.'
+          : 'تابع من الزر الظاهر. لما ترجع، افتح «العوالم» ثم «تابع رحلتك».')
         : (label.includes('أضف')
-          ? 'هذه كلمات بوابتك التالية. أضفها إلى قاموسك لتبدأ التعلّم.'
+          ? 'أضف كلمات البوابة لقاموسك. بعدها راجعها من هنا.'
           : `هنا تبدأ رحلتك. ${guestHint}`);
       showCoachMark(target, message, { step: `gate:${state.phase}`, actions: [target] });
     }
@@ -360,7 +375,8 @@
       content,
       labelledBy: title.id,
       persistent: true,
-      reading: { step: options.step, text: message, actions: options.actions },
+      reading: { step: options.step, text: message, actions: options.actions,
+        actionLabel: options.next ? (options.label || 'التالي') : options.actions?.[0]?.textContent?.trim() },
     });
   }
 

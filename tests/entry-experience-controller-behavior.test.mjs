@@ -694,7 +694,7 @@ async function createHarness(options = {}) {
     await click('[data-entry-theme="lootlingua"]');
   }
 
-  async function reachRevealedAction() {
+  async function reachRevealedAction({ previewGate = true } = {}) {
     await chooseInterestsAndTheme();
     await click('[data-entry-action="continue-theme"]');
     assert.equal(controller.getState()?.currentStep, 'worlds');
@@ -704,7 +704,7 @@ async function createHarness(options = {}) {
     assert.equal(controller.getState()?.currentStep, 'journey');
     assert.equal(controller.getState()?.status, 'in-progress');
     await settle();
-    await click('[data-entry-route-node]');
+    if (previewGate) await click('[data-entry-route-node]');
     await click('[data-entry-action="continue-journey"]');
     assert.equal(controller.getState()?.currentStep, 'destination');
     assert.ok(panel.querySelector('[data-entry-cta]'));
@@ -752,10 +752,10 @@ function persistedState(storage, key) {
   return raw ? JSON.parse(raw) : null;
 }
 
-test('the destination CTA keeps Entry in progress during reading, then opens the Worlds list', async () => {
+test('a new learner keeps the reading delay, can skip the gate preview, and opens the selected World', async () => {
   const user = freshUser('destination-proof');
   const harness = await createHarness({ user });
-  await harness.reachRevealedAction();
+  await harness.reachRevealedAction({ previewGate: false });
 
   const awaitingAction = harness.controller.getState();
   assert.equal(awaitingAction.status, 'in-progress');
@@ -771,8 +771,8 @@ test('the destination CTA keeps Entry in progress during reading, then opens the
   assert.equal(harness.controller.getState().status, 'in-progress');
   assert.equal(harness.calls.worlds, 0);
   await harness.click('[data-entry-cta="open-selected-world"]');
-  assert.equal(harness.calls.worlds, 1);
-  assert.deepEqual(harness.calls.openedWorlds, []);
+  assert.equal(harness.calls.worlds, 0);
+  assert.deepEqual(harness.calls.openedWorlds, ['world-study']);
   assert.equal(harness.controller.getState().status, 'completed');
   assert.equal(harness.controller.isActive(), false);
   assert.equal(
@@ -1361,6 +1361,37 @@ test('matrix: refresh restores interests, theme, Worlds, and Journey stages with
   assert.equal(journeyRefresh.controller.getState().journeyStatus, 'world-selected');
   assert.ok(journeyRefresh.panel.querySelector('[data-entry-route-node]'));
   assert.equal(journeyRefresh.panel.querySelector('[data-entry-cta]'), null);
+});
+
+test('Continue as guest starts a cloud journey and retries without losing the requested world', async () => {
+  const user = { ...freshUser('anonymous-journey'), isAnonymous: true };
+  const terminal = entryState({ status: 'completed' });
+  const storage = new MemoryStorage({ [contract.entryStorageKey({})]: JSON.stringify(terminal) });
+  const harness = await createHarness({
+    storage,
+    entryLoad: async () => ({ exists: true, state: clone(terminal) }),
+    resumePendingIntent: async () => ({ restored: true, destination: 'world-restored' }),
+  });
+  harness.root.LootLinguaPersonalDictionaryOnboarding = {
+    getState: () => ({ requiresFirstWord: true, phase: 'awaiting-first-word' }),
+  };
+  let attempts = 0;
+  harness.root.beginGuestJourneySession = async () => {
+    if (++attempts === 1) throw new Error('offline');
+    await harness.switchUser(user);
+    return user;
+  };
+  const requested = harness.controller.requestJourneyAuth({ action: 'start-journey', worldId: 'world-restored', source: 'world' });
+  const prompt = harness.document.getElementById('journeyAuthPrompt');
+  await harness.click('[data-journey-auth="guest"]', prompt);
+  assert.match(prompt.querySelector('#journeyAuthStatus').textContent, /حاول مرة ثانية/);
+  assert.equal(persistedState(storage, contract.pendingIntentStorageKey({})).operationId, requested.operationId);
+  await harness.click('[data-journey-auth="guest"]', prompt);
+  const restored = persistedState(storage, contract.pendingIntentStorageKey({ uid: user.uid }));
+  assert.equal(restored.operationId, requested.operationId);
+  assert.equal(restored.status, 'consumed');
+  assert.equal(harness.calls.resumeIntents.length, 1);
+  assert.equal(harness.document.getElementById('journeyAuthPrompt'), null);
 });
 
 test('auth success claims the exact guest operation and consumes it only after restored:true', async () => {

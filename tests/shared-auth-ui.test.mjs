@@ -11,6 +11,7 @@ const landingJs = read('js/landing.js');
 const app = read('index.html');
 const appCss = read('style.css');
 const cloud = read('js/cloud.js');
+const guestAuth = read('js/guest-journey-auth.js');
 const entry = read('js/entry-experience-controller.js');
 const sharedController = read('js/auth-controller.js');
 const sharedSurface = read('js/auth-surface.js');
@@ -50,8 +51,10 @@ test('the only raster image inside the Landing is the real LootLingua logo', () 
 test('Landing and app mount the same Auth controller through separate UI adapters', () => {
   assert.match(landingJs, /createAuthSurface/);
   assert.match(cloud, /mountAppAuth/);
-  assert.match(cloud, /signInWithEmailAndPassword\(auth, email, password\)/);
-  assert.match(cloud, /createUserWithEmailAndPassword\(auth, email, password\)/);
+  assert.match(cloud, /signIn: guestAuth\.login/);
+  assert.match(cloud, /createAccount: guestAuth\.register/);
+  assert.match(guestAuth, /signInWithEmailAndPassword\(auth, email, password\)/);
+  assert.match(guestAuth, /createUserWithEmailAndPassword\(auth, email, password\)/);
   assert.match(cloud, /sendPasswordResetEmail\(auth, email\)/);
   assert.match(sharedSurface, /createAuthController/);
   assert.match(sharedController, /SAFE_RESET_MESSAGE/);
@@ -81,10 +84,10 @@ test('password visibility controls are separate boxes and passwords are never pe
 });
 
 test('app Auth preserves existing account hydration and guest migration ownership', () => {
-  assert.match(cloud, /onAuthStateChanged\(auth, \(user\) =>/);
+  assert.match(cloud, /onIdTokenChanged\(auth, \(user\) =>/);
   assert.match(cloud, /prepareGuestMigrationForUser\(user\)/);
   assert.match(cloud, /loadWordsFromCloud\(user\)/);
-  assert.match(cloud, /observeAuth: \(callback\) => onAuthStateChanged\(auth, callback\)/);
+  assert.match(cloud, /observeAuth: \(callback\) => onIdTokenChanged\(auth, callback\)/);
   assert.match(entry, /root\.openAppAuth\('login'\)/);
   assert.match(entry, /pendingIntentStorageKey/);
   assert.match(entry, /claimGuestPendingIntentForUser/);

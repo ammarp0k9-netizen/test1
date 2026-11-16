@@ -39,6 +39,8 @@ const cache = {
   gateClearAttempts: new Map(),
 };
 const levelPlacementStartRequests = new Map();
+const GATE_NOTIFICATION_FACTS_MAX_AGE_MS = 60_000;
+let gateNotificationFacts = null;
 
 function core() {
   const api = window.LootLinguaJourney;
@@ -186,6 +188,7 @@ function requireUser() {
 
 function resetCache(uid) {
   cache.uid = String(uid || '');
+  gateNotificationFacts = null;
   cache.active = undefined;
   cache.journeys.clear();
   cache.gateProgress.clear();
@@ -1173,15 +1176,19 @@ function currentGateDueWordKeys(words, timezoneOffsetMinutes) {
   }).filter(Boolean))).sort();
 }
 
-async function recordOfficialRunnerReview(user, input, sessionId) {
-  const review = officialReviewGate(input);
+async function recordOfficialRunnerReview(user, review, sessionId, existingSession) {
   if (!review) return false;
   const ref = gateProgressRef(user.uid, review.worldId, review.rankId, review.gateId);
   const saved = await runTransaction(db, async (transaction) => {
     const snapshot = await transaction.get(ref), progress = snapshot.data() || {};
-    if (!snapshot.exists() || !['learning', 'ready'].includes(progress.status)) return false;
+    if (!snapshot.exists() || !['learning', 'ready'].includes(progress.status) ||
+        progress.runnerReviewCompletedSessionId === sessionId) return false;
     const loaded = new Set((progress.loadedWordKeys || []).map(String));
     if (!review.dueWordKeys.every((key) => loaded.has(key))) return false;
+    if (existingSession && progress.runnerReviewCompletedSessionId) {
+      const previous = await transaction.get(quizEvidenceSessionRef(user.uid, progress.runnerReviewCompletedSessionId));
+      if (timestampMillis(previous.data()?.completedAt) >= timestampMillis(existingSession.completedAt)) return false;
+    }
     transaction.update(ref, { runnerReviewCompletedSessionId: sessionId, runnerReviewCompletedDueWordKeys: review.dueWordKeys, lastActivityAt: serverTimestamp() });
     return true;
   });
@@ -1190,6 +1197,10 @@ async function recordOfficialRunnerReview(user, input, sessionId) {
     cache.rankGateProgress.delete(rankCacheKey(review.worldId, review.rankId));
   }
   return saved;
+}
+
+function sameEvidenceWordKeys(left, right) {
+  return JSON.stringify((left || []).slice().sort()) === JSON.stringify((right || []).slice().sort());
 }
 
 async function ensureQuizEvidenceSession(user, input, entries) {
@@ -1201,23 +1212,36 @@ async function ensureQuizEvidenceSession(user, input, entries) {
     window.LootLinguaWordLifecycle?.wordKeyOf?.(entry.word)
   ).filter(Boolean)));
   const review = officialReviewGate(input);
+  const reviewFields = review ? {
+    officialReviewWorldId: review.worldId,
+    officialReviewRankId: review.rankId,
+    officialReviewGateId: review.gateId,
+    officialReviewDueWordKeys: review.dueWordKeys,
+  } : {};
   const correctWordKeys = Array.from(new Set(entries
     .filter((entry) => entry.result?.correct === true)
     .map((entry) => window.LootLinguaWordLifecycle?.wordKeyOf?.(entry.word))
     .filter(Boolean)));
   const targetRef = quizEvidenceSessionRef(user.uid, sessionId);
-  await runTransaction(db, async (transaction) => {
+  const existingSession = await runTransaction(db, async (transaction) => {
     const snapshot = await transaction.get(targetRef);
     if (snapshot.exists()) {
       const saved = snapshot.data() || {};
       if (
         saved.status !== 'completed' ||
         saved.sourceType !== sourceType ||
-        String(saved.privateWorldId || '') !== privateWorldId
+        String(saved.privateWorldId || '') !== privateWorldId ||
+        saved.mode !== String(input?.mode || '') ||
+        String(saved.officialReviewWorldId || '') !== (review?.worldId || '') ||
+        String(saved.officialReviewRankId || '') !== (review?.rankId || '') ||
+        String(saved.officialReviewGateId || '') !== (review?.gateId || '') ||
+        !sameEvidenceWordKeys(saved.officialReviewDueWordKeys, review?.dueWordKeys) ||
+        !sameEvidenceWordKeys(saved.wordKeys, wordKeys) ||
+        !sameEvidenceWordKeys(saved.correctWordKeys, correctWordKeys)
       ) {
         throw journeyCloudError('evidence/session-conflict', 'Evidence session identity changed.');
       }
-      return;
+      return saved;
     }
     transaction.set(targetRef, {
       sessionId,
@@ -1230,15 +1254,13 @@ async function ensureQuizEvidenceSession(user, input, entries) {
       totalCount: wordKeys.length,
       correctCount: correctWordKeys.length,
       evidenceVersion: evidenceCore().EVIDENCE_VERSION,
-      officialReviewWorldId: review?.worldId || '',
-      officialReviewRankId: review?.rankId || '',
-      officialReviewGateId: review?.gateId || '',
-      officialReviewDueWordKeys: review?.dueWordKeys || [],
+      ...reviewFields,
       completedAt: serverTimestamp(),
     });
+    return null;
   });
-  await recordOfficialRunnerReview(user, input, sessionId);
-  return { sessionId, sourceType, privateWorldId, wordKeys, correctWordKeys };
+  if (review && existingSession) review.dueWordKeys = existingSession.officialReviewDueWordKeys;
+  return { sessionId, sourceType, privateWorldId, officialReview: review, existingSession };
 }
 
 async function recordQuizEvidenceBatch(input = {}) {
@@ -1254,11 +1276,26 @@ async function recordQuizEvidenceBatch(input = {}) {
   }
   const session = await ensureQuizEvidenceSession(user, input, entries);
   const correctEntries = entries.filter((entry) => entry.result?.correct === true);
+  const review = session.officialReview;
+  const lifecycle = window.LootLinguaWordLifecycle;
+  const recoveredSourceIds = new Map();
+  if (review && correctEntries.some(({ word }) => !word?.contentWordId)) {
+    // Drafts saved before the quiz retained the published ID can still be
+    // checked against the loaded cohort for their original gate.
+    const { worldId, rankId, gateId } = review;
+    const [progress, words] = await Promise.all([
+      getGateProgress(worldId, rankId, gateId),
+      listAllGateWords(worldId, rankId, gateId),
+    ]);
+    for (const word of core().effectiveLoadedGateWords(progress, words)) {
+      recoveredSourceIds.set(word.wordKey, word.contentWordId);
+    }
+  }
   const results = await Promise.all(correctEntries.map(async (entry) => {
-    const lifecycle = window.LootLinguaWordLifecycle;
     const wordKey = lifecycle?.wordKeyOf?.(entry.word);
     const eventId = evidenceCore().evidenceEventId(user.uid, session.sessionId, wordKey);
-    if (!wordKey || !eventId) return 'ineligible';
+    const submittedAnswer = entry.result?.submittedAnswer;
+    if (!wordKey || !eventId || typeof submittedAnswer !== 'string' || !submittedAnswer || submittedAnswer.length > 1000) return 'ineligible';
     const canonicalRef = doc(db, 'users', user.uid, 'contentWords', wordKey);
     const eventRef = wordEvidenceEventRef(user.uid, wordKey, eventId);
     return runTransaction(db, async (transaction) => {
@@ -1295,7 +1332,7 @@ async function recordQuizEvidenceBatch(input = {}) {
         new Date(answeredAt).getTimezoneOffset()
       );
       const evidenceLocalDayKey = evidenceCore().localDayKey(
-        answeredAt,
+        Date.now(),
         timezoneOffsetMinutes
       );
       const eligible = evidenceCore().isEligibleRecall({
@@ -1311,6 +1348,10 @@ async function recordQuizEvidenceBatch(input = {}) {
         timezoneOffsetMinutes,
       });
       if (!eligible) return 'ineligible';
+      const contentWordId = entry.word.contentWordId || recoveredSourceIds.get(wordKey);
+      if (review && !contentWordId) {
+        throw journeyCloudError('evidence/gate-word-unavailable', 'The published word for this Gate review is unavailable.');
+      }
       const previousCount = Math.max(0, Number(canonical.eligibleEvidenceCount) || 0);
       const nextCount = previousCount + 1;
       transaction.set(eventRef, {
@@ -1323,6 +1364,9 @@ async function recordQuizEvidenceBatch(input = {}) {
         mode: String(input.mode || ''),
         correct: true,
         completed: true,
+        submittedAnswer,
+        answerDirection: entry.result.answerDirection || '',
+        ...(review ? { contentWordId } : {}),
         sequence: nextCount,
         evidenceVersion: evidenceCore().EVIDENCE_VERSION,
         timezoneOffsetMinutes,
@@ -1341,6 +1385,7 @@ async function recordQuizEvidenceBatch(input = {}) {
       return 'recorded';
     });
   }));
+  await recordOfficialRunnerReview(user, review, session.sessionId, session.existingSession);
   const summary = {
     recorded: results.filter((result) => result === 'recorded').length,
     duplicate: results.filter((result) => result === 'duplicate').length,
@@ -1353,9 +1398,11 @@ async function recordQuizEvidenceBatch(input = {}) {
 
 async function projectQuizEvidenceReadiness(summary = {}) {
   let readinessError = null;
+  let readinessChange = null;
   if (Number(summary.recorded) > 0 || Number(summary.duplicate) > 0) {
     try {
-      await evaluateActiveJourneyReadiness();
+      const projected = await evaluateActiveJourneyReadiness();
+      readinessChange = projected?.readinessChange || null;
     } catch (error) {
       readinessError = journeyOperationError(error, 'project-quiz-evidence-readiness');
       console.warn('[Journey] Quiz evidence committed; readiness projection remains retryable.', {
@@ -1365,7 +1412,23 @@ async function projectQuizEvidenceReadiness(summary = {}) {
       });
     }
   }
-  return { ...summary, readinessError };
+  return { ...summary, readinessError, readinessChange };
+}
+
+function confirmGateWordProof(user, worldId, rankId, gateId, progress) {
+  const ref = doc(gateProgressRef(user.uid, worldId, rankId, gateId), 'readiness', 'proof');
+  return (async () => {
+    const ids = [...new Set(progress.loadedContentWordIds || [])];
+    const existing = new Set((await getDoc(ref)).data()?.wordIds || []);
+    for (const contentWordId of ids) {
+      if (existing.has(contentWordId)) continue;
+      await runTransaction(db, async transaction => {
+        const wordIds = (await transaction.get(ref)).data()?.wordIds || [];
+        if (wordIds.includes(contentWordId)) return;
+        transaction.set(ref, { wordIds: [...wordIds, contentWordId], addedWordId: contentWordId });
+      });
+    }
+  })();
 }
 
 let journeyReadinessEvaluation = null;
@@ -1405,6 +1468,7 @@ async function evaluateActiveJourneyReadiness() {
       Date.now(),
       timezoneOffsetMinutes
     );
+    if (readiness.ready) await confirmGateWordProof(user, worldId, rankId, gateId, progress);
     const unchanged = progress.status === readiness.status &&
       Number(progress.readyWordCount) === readiness.readyWordCount &&
       Number(progress.requiredWordCount) === readiness.requiredWordCount &&
@@ -1414,7 +1478,11 @@ async function evaluateActiveJourneyReadiness() {
       Number(progress.waitingLaterTodayCount) === readiness.waitingLaterToday &&
       Number(progress.waitingNextDayCount) === readiness.waitingNextDay &&
       JSON.stringify((progress.runnerReviewDueWordKeys || []).slice().sort()) === JSON.stringify(dueWordKeys);
-    if (unchanged) return readiness;
+    const withChange = before => ({ ...readiness, readinessChange: {
+      ownerId: user.uid, worldId, rankId, gateId, previousSteps: before.evidenceStepCount ?? null,
+      previousTotal: before.totalEvidenceSteps ?? null, steps: readiness.evidenceStepCount, total: readiness.totalEvidenceSteps,
+    } });
+    if (unchanged) return withChange(progress);
     const targetRef = gateProgressRef(user.uid, worldId, rankId, gateId);
     const saved = await runTransaction(db, async (transaction) => {
       const snapshot = await transaction.get(targetRef);
@@ -1440,11 +1508,7 @@ async function evaluateActiveJourneyReadiness() {
         readyAt: readiness.ready && !current.readyAt ? serverTimestamp() : (current.readyAt || null),
         lastActivityAt: serverTimestamp(),
       });
-      return {
-        ...current,
-        ...readiness,
-        gateId,
-      };
+      return withChange(current);
     });
     if (!saved) return { ready: false, reason: 'state-changed' };
     // The transaction's server timestamps and persisted readiness field names
@@ -1454,7 +1518,7 @@ async function evaluateActiveJourneyReadiness() {
     window.dispatchEvent(new CustomEvent('lootlingua:journey-changed', {
       detail: { worldId, rankId, gateId, type: readiness.ready ? 'gate-ready' : 'gate-readiness' },
     }));
-    return readiness;
+    return saved;
   })();
   journeyReadinessEvaluation = task;
   try {
@@ -1508,6 +1572,7 @@ async function startGateClearAttempt(worldId, rankId, gateId) {
   if (progress?.status !== 'ready') {
     throw journeyCloudError('gate-clear/not-ready', 'This gate is not ready for its clear attempt.');
   }
+  await confirmGateWordProof(user, worldId, rankId, gateId, progress);
   if (progress.activeClearAttemptId) {
     const active = await getGateClearAttempt(worldId, progress.activeClearAttemptId, { force: true });
     if (active && ['active', 'submitting'].includes(active.status)) {
@@ -1695,6 +1760,8 @@ async function finalizeGateClearAttempt(worldId, rankId, gateId, attemptId) {
       clearTotal: Number(attempt.totalCount),
       clearedBy: 'gate-clear',
       clearedAt: serverTimestamp(),
+      nextRankId: String(nextTarget?.rank?.rankId || ''),
+      nextGateId: String(nextTarget?.gate?.gateId || ''),
       lastActivityAt: serverTimestamp(),
     });
     let nextJourney = journey;
@@ -2285,11 +2352,9 @@ async function getGateQuizWords(worldId, rankId, gateId, options) {
       legacyWordId,
       wordKey,
       contentWordId,
-      word: canonical.word || legacy.word || legacy.text || word.word || '',
-      meaning: canonical.meaning || canonical.translation || legacy.meaning ||
-        legacy.translation || word.translation || '',
-      translation: canonical.translation || legacy.translation ||
-        legacy.meaning || word.translation || '',
+      word: word.word || canonical.word || legacy.word || legacy.text || '',
+      meaning: word.translation || canonical.meaning || canonical.translation || legacy.meaning || legacy.translation || '',
+      translation: word.translation || canonical.translation || legacy.translation || legacy.meaning || '',
     };
   }));
   return trustedWords.filter(Boolean);
@@ -2303,6 +2368,32 @@ async function getGateNotificationFacts(worldId, rankId, gateId, options) {
   if (!progress?.loadedAt || !['learning', 'ready', 'cleared'].includes(String(progress.status || ''))) {
     return { unpracticedCount: 0, unpracticedWordKeys: [], newestLinkedAt: 0 };
   }
+  const key = JSON.stringify([
+    user.uid, worldId, rankId, gateId, progress.status, timestampMillis(progress.loadedAt),
+    timestampMillis(progress.updatedAt), timestampMillis(progress.lastActivityAt),
+    progress.evidenceStepCount, progress.loadedWordKeys, progress.loadedContentWordIds,
+  ]);
+  if (!options?.fresh && !options?.force && gateNotificationFacts?.key === key &&
+      (gateNotificationFacts.pending || gateNotificationFacts.expiresAt > Date.now())) {
+    return gateNotificationFacts.promise;
+  }
+
+  const entry = { key, pending: true, expiresAt: 0 };
+  gateNotificationFacts = entry;
+  entry.promise = readGateNotificationFacts(user, worldId, rankId, gateId, progress, options)
+    .then((facts) => {
+      entry.expiresAt = Date.now() + GATE_NOTIFICATION_FACTS_MAX_AGE_MS;
+      return facts;
+    })
+    .catch((error) => {
+      if (gateNotificationFacts === entry) gateNotificationFacts = null;
+      throw error;
+    })
+    .finally(() => { entry.pending = false; });
+  return entry.promise;
+}
+
+async function readGateNotificationFacts(user, worldId, rankId, gateId, progress, options) {
   const words = await listAllGateWords(worldId, rankId, gateId, options);
   const loadedKeys = new Set((progress.loadedWordKeys || []).map(String));
   const loadedIds = new Set((progress.loadedContentWordIds || []).map(String));
@@ -4613,6 +4704,7 @@ function invalidate(scope) {
     cache.rankGateProgress.clear();
   }
   if (target === 'all' || target === 'words') cache.gateWords.clear();
+  if (['all', 'active', 'progress', 'words'].includes(target)) gateNotificationFacts = null;
   if (target === 'all' || target === 'placement') cache.placementSessions.clear();
   if (target === 'all' || target === 'level-placement') cache.levelPlacementSessions.clear();
   if (target === 'all' || target === 'gate-clear') cache.gateClearAttempts.clear();
@@ -4770,6 +4862,10 @@ Object.defineProperty(window, 'LootLinguaJourneyCloud', {
 window.addEventListener('lootlingua:auth-state', (event) => {
   resetCache(event.detail?.user?.uid || '');
 });
+
+for (const event of ['lootlingua:journey-changed', 'lootlingua:trusted-quiz-completed']) {
+  window.addEventListener(event, () => { gateNotificationFacts = null; });
+}
 
 window.evaluateActivePublishedJourney = evaluateActiveJourneyProgress;
 

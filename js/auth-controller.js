@@ -13,6 +13,9 @@ function authCode(error) {
 
 export function authErrorMessage(error) {
   const code = authCode(error);
+  if (code === 'guest-account/conflict') return 'الحساب موجود. سجّل الدخول بطريقة الحساب الأصلية، ثم اختر ما تريد فعله بتقدّم الضيف.';
+  if (code === 'guest-saved/another-guest') return 'في رحلة ضيف ثانية محفوظة على هذا المتصفح. بقي تقدّم الرحلة الحالية في جلستها.';
+  if (code === 'guest-saved/session-changed') return 'تغيّرت جلسة تسجيل الدخول. جرّب مرة ثانية من رحلة الضيف.';
   if (['auth/invalid-credential', 'auth/user-not-found', 'auth/wrong-password'].includes(code)) {
     return 'البريد الإلكتروني أو كلمة المرور غير صحيحة.';
   }
@@ -102,6 +105,12 @@ export function createAuthController({ gateway, onStateChange, onAuthenticated =
     return true;
   }
 
+  function guestDecision(result) {
+    if (!result?.guestDecision) return false;
+    emit({ busy: false, open: false, ...clearFeedback() });
+    return true;
+  }
+
   async function completeAuthentication(user, source) {
     emit({ user: user || state.user, busy: false, open: false, ...clearFeedback() });
     await onAuthenticated(user || state.user, source);
@@ -117,6 +126,7 @@ export function createAuthController({ gateway, onStateChange, onAuthenticated =
       const result = await gateway.finishRedirect?.();
       redirectPending = false;
       gateway.clearPendingRedirect?.();
+      if (guestDecision(result)) return;
       if (result?.user) await completeAuthentication(result.user, 'redirect');
       else emit({ busy: false });
     } catch (error) {
@@ -128,15 +138,15 @@ export function createAuthController({ gateway, onStateChange, onAuthenticated =
 
   async function signInWithGoogle() {
     if (state.busy) return false;
-    const existingUser = state.user || gateway.currentUser?.();
-    if (existingUser) {
+    const existingUser = gateway.currentUser?.() || state.user;
+    if (existingUser && existingUser.isAnonymous !== true) {
       await completeAuthentication(existingUser, 'existing');
       return true;
     }
     emit({ busy: true, ...clearFeedback() });
     try {
       const result = await gateway.signInWithGoogle();
-      if (result?.redirecting) return true;
+      if (result?.redirecting || guestDecision(result)) return true;
       if (result?.user) {
         await completeAuthentication(result.user, 'google');
         return true;
@@ -179,6 +189,7 @@ export function createAuthController({ gateway, onStateChange, onAuthenticated =
       const result = state.mode === AUTH_MODES.SIGNUP
         ? await gateway.createAccount(validation.values.email, validation.values.password)
         : await gateway.signIn(validation.values.email, validation.values.password);
+      if (guestDecision(result)) return true;
       if (result?.user) {
         await completeAuthentication(result.user, state.mode);
         return true;

@@ -1518,6 +1518,7 @@ function rerenderPublishedRoute() {
     );
   } else if (
     routeKey === 'gate' &&
+    !publishedContentState.gateClearBundle &&
     publishedContentState.world &&
     publishedContentState.rank &&
     publishedContentState.gate
@@ -1602,6 +1603,7 @@ function watchPublishedGateProgress(worldId, rankId, gateId, initialProgress, ge
         if (!isCurrentPublishedGate(worldId, rankId, gateId, generation)) return;
         publishedContentState.gateProgress = progress || initialProgress || null;
         if (progress) publishedContentState.gateProgressById.set(String(gateId), progress);
+        activePublishedGatePicker?.syncTrainingLocks();
         const forceWords = firstSnapshot;
         firstSnapshot = false;
         // Keep the cloud listener live during a load; its rerender is safe now
@@ -1635,15 +1637,7 @@ function requestJourneySignIn(intent) {
     const pending = entryController.requestJourneyAuth(intent);
     if (pending) return pending;
   }
-  showToast('سجّل دخولك أولًا لبدء رحلة المحتوى الجاهز.', 'info', 4200);
-  const profileModal = document.getElementById('profileModal');
-  if (
-    typeof window.toggleProfileModal === 'function' &&
-    profileModal &&
-    !profileModal.classList.contains('open')
-  ) {
-    window.toggleProfileModal();
-  }
+  showToast('تعذّر تجهيز رحلة الضيف الآن. حاول مرة ثانية.', 'warning', 4200);
   return null;
 }
 
@@ -3024,7 +3018,7 @@ async function performPublishedGateLoad(syncOnly, resumeOptions, taskState) {
         result.partial
           ? `تمت معالجة ${result.completed} من ${result.total}. تعذر حفظ ${result.failures.length} ويمكنك إعادة المحاولة.`
           : (parts.length
-            ? `أصبحت البوابة جاهزة: ${parts.join('، ')}.`
+            ? `تم تحميل كلمات البوابة: ${parts.join('، ')}.`
             : (syncOnly ? 'تمت مزامنة الكلمات الجديدة.' : 'تم تحميل البوابة وبدء التعلم.')),
         result.partial ? 'warning' : 'success',
         5600,
@@ -3775,9 +3769,7 @@ function getPublishedWorldRecommendation(world, viewerInterestIds) {
 async function loadEntryWorldChoices(interestIds, options) {
   const api = getPublishedContentApi();
   const worlds = await api.listPublishedWorlds({ force: Boolean(options?.force) });
-  const available = worlds.filter((world) => world?.comingSoon !== true && world?.isComingSoon !== true);
-  const source = available.length ? available : worlds;
-  return source
+  return worlds.filter((world) => world?.comingSoon !== true && world?.isComingSoon !== true)
     .map((world, index) => ({
       ...world,
       recommendation: getPublishedWorldRecommendation(world, interestIds),
@@ -4150,14 +4142,9 @@ function animatePublishedGateProgress(fill, percent) {
 // Presentation only: translates existing journey state into one immediate
 // objective and one real outcome. It does not alter SRS, XP, Gate Clear, or
 // any journey data.
-function publishedGateMissionBrief(gate, state, progress) {
+function publishedGateMissionBrief(gate, state, progress, action, review) {
   const wordCount = Math.max(0, Number(gate?.wordCount) || 0);
-  const readyWordCount = Math.max(0, Number(progress?.readyWordCount) || 0);
-  const requiredWordCount = Math.max(
-    readyWordCount,
-    Number(progress?.requiredWordCount) || Number(progress?.wordCountAtLoad) || wordCount
-  );
-  const wordsLabel = requiredWordCount ? `${requiredWordCount} كلمة` : 'كلمات البوابة';
+  const continueText = action === 'next' ? 'تابع إلى البوابة التالية.' : (action === 'explore' ? 'استكشف العوالم.' : '');
   const missionByState = {
     locked: {
       label: 'المهمة التالية',
@@ -4167,33 +4154,35 @@ function publishedGateMissionBrief(gate, state, progress) {
     },
     available: {
       label: 'مهمة جديدة',
-      objective: `أضف ${wordCount || ''} ${wordCount ? 'كلمة من البوابة إلى قاموسك.' : 'كلمات البوابة إلى قاموسك.'}`.trim(),
-      outcome: 'تبدأ مرحلة التعلّم والمراجعات.',
+      objective: action === 'choose-start' ? 'اختر نقطة البداية.' : action === 'start' ? 'ابدأ رحلتك في هذا العالم.'
+        : (wordCount ? `أضف كلمات البوابة (${wordCount}) إلى قاموسك.` : 'أضف كلمات البوابة إلى قاموسك.'),
+      outcome: ['start', 'choose-start'].includes(action) ? '' : 'بعد الإضافة، راجع الكلمات من هذه البوابة.',
       icon: 'fa-solid fa-scroll',
     },
     learning: {
       label: 'المهمة الحالية',
-      objective: `أكمل جولات التحقق لـ${wordsLabel}${readyWordCount ? ` — اكتمل ${readyWordCount}.` : '.'}`,
-      outcome: 'تصل إلى تحدّي البوابة عند اكتمال الاستعداد.',
+      objective: review?.kind === 'due' ? 'ابدأ المراجعة الرسمية.'
+        : (review?.kind === 'waiting' ? 'تدرّب لحد موعد المراجعة.' : 'راجع كلمات البوابة.'),
+      outcome: '',
       icon: 'fa-solid fa-crosshairs',
     },
     ready: {
       label: 'تحدّي البوابة',
       objective: progress?.activeClearAttemptId
         ? 'أكمل التحدّي الذي بدأته.'
-        : `اختبر إتقانك لـ${wordsLabel}.`,
+        : 'ابدأ اختبار اجتياز البوابة.',
       outcome: 'النجاح يفتح الطريق التالي في الرحلة.',
       icon: 'fa-solid fa-flag-checkered',
     },
     cleared: {
       label: 'مهمة مكتملة',
-      objective: 'أنجزت تحدّي هذه البوابة.',
-      outcome: 'الطريق التالي أصبح متاحًا لك.',
+      objective: continueText || 'اجتزت هذه البوابة.',
+      outcome: '',
       icon: 'fa-solid fa-unlock-keyhole',
     },
     mastered: {
       label: 'إتقان مُكتسب',
-      objective: 'حافظ على إتقان كلمات البوابة في مراجعاتك.',
+      objective: continueText || 'أتقنت كلمات هذه البوابة.',
       outcome: 'شارة الإتقان محفوظة لك.',
       icon: 'fa-solid fa-crown',
     },
@@ -4201,103 +4190,178 @@ function publishedGateMissionBrief(gate, state, progress) {
   return missionByState[state] || missionByState.available;
 }
 
-function makePublishedGateMissionBrief(gate, state, progress) {
-  const mission = publishedGateMissionBrief(gate, state, progress);
+function makePublishedGateMissionBrief(gate, state, progress, action, review) {
+  const mission = publishedGateMissionBrief(gate, state, progress, action, review);
   const block = publishedElement('aside', `published-gate-mission is-${state}`);
   const icon = publishedElement('span', 'published-gate-mission-icon');
   icon.append(publishedIcon(mission.icon));
   const copy = publishedElement('span', 'published-gate-mission-copy');
   copy.append(
     publishedElement('small', '', mission.label),
-    publishedElement('strong', '', mission.objective),
-    publishedElement('span', 'published-gate-mission-outcome', mission.outcome)
+    publishedElement('strong', '', mission.objective)
   );
+  if (mission.outcome) copy.append(publishedElement('span', 'published-gate-mission-outcome', mission.outcome));
   block.append(icon, copy);
   return block;
 }
 
 const GATE_QUIZ_MODE_CARDS = [
-  { id: 'flashcards', icon: 'fa-solid fa-layer-group', title: 'بطاقات الذاكرة', copy: 'تدريب هادئ على كلمات البوابة فقط. لا يرفع عدّاد الجاهزية وحده.' },
+  { id: 'flashcards', icon: 'fa-solid fa-layer-group', title: 'بطاقات الذاكرة', copy: 'تدريب على كلمات البوابة فقط، بدون رفع الإتقان أو جاهزية البوابة.' },
   { id: 'timeAttack', icon: 'fa-solid fa-stopwatch', title: 'الهروب من النسيان', copy: 'تحدٍّ سريع بكلمات هذه البوابة فقط.' },
   { id: 'scramble', icon: 'fa-solid fa-shuffle', title: 'الصندوق المشفّر', copy: 'رتّب الحروف لتثبيت كلمات هذه البوابة.' },
   { id: 'matching', icon: 'fa-solid fa-link', title: 'مطابقة الكلمات', copy: 'اربط كلمات البوابة بمعانيها.' },
 ];
 
-async function openPublishedGateQuizPicker(world, rank, gate) {
-  if (isPublishedGateWordsLoading()) {
+let activePublishedGatePicker = null;
+
+async function openPublishedGateQuizPicker(world, rank, gate, { gamesOnly = false } = {}) {
+  if (!gamesOnly && isPublishedGateWordsLoading()) {
     showToast('استنى لحد ما يكتمل تحميل كلمات البوابة، وبعدها ابدأ الاختبار.', 'info', 4200);
     return;
   }
-  const existing = document.getElementById('publishedGateQuizPicker');
-  if (existing) { window.LootLinguaModalFocus?.close(existing, { restoreFocus: false }); existing.remove(); }
+  activePublishedGatePicker?.close(false);
   const progress = publishedContentState.gateProgress;
   const origin = currentView;
   const owner = window.__lootlinguaAuthGeneration;
+  const navigation = window.__dictionaryNavigationGeneration;
   const pickerCurrent = () => currentView === origin && window.__lootlinguaAuthGeneration === owner &&
+    window.__dictionaryNavigationGeneration === navigation &&
     (origin !== 'worlds' || isPublishedGateRoute(world.worldId, rank.rankId, gate.gateId));
+  const currentProgress = () => publishedContentState.gateProgress || progress;
   let words = [];
-  try {
-    words = await getJourneyCloudApi().getGateQuizWords(
-      world.worldId,
-      rank.rankId,
-      gate.gateId,
-      { progress, force: true }
-    );
-  } catch (error) {
-    if (pickerCurrent()) showToast(publishedJourneyErrorText(error), 'danger', 4800);
-    return;
+  let quizError = '';
+  if (!gamesOnly) {
+    try {
+      words = await getJourneyCloudApi().getGateQuizWords(world.worldId, rank.rankId, gate.gateId, { progress, force: true });
+    } catch (error) {
+      quizError = publishedJourneyErrorText(error);
+    }
+    if (!quizError && !words.length) quizError = 'لا توجد كلمات محمّلة لاختبارات هذه البوابة.';
   }
-  if (!pickerCurrent() || document.getElementById('publishedGateQuizPicker')) return;
-  if (!words.length) {
-    showToast('لا توجد كلمات محمّلة لهذه البوابة بعد.', 'warning', 4200);
-    return;
-  }
+  if (!pickerCurrent() || activePublishedGatePicker) return;
+  const dueWordKeys = progress?.status === 'learning' ? words.map((word) => {
+    const status = window.LootLinguaLearningEvidence?.getWordGateReadiness?.(word)?.status;
+    return ['needs-first-review', 'second-review-available', 'next-day-review-available'].includes(status) ? String(window.LootLinguaWordLifecycle?.wordKeyOf?.(word) || word?.wordKey || '') : '';
+  }).filter(Boolean) : [];
+  const officialReviewDueWordKeys = window.LootLinguaGateRunner?.reviewIsDue(progress) ? dueWordKeys : [];
+  const isOfficialReview = dueWordKeys.length > 0;
+  const reviewFirst = !gamesOnly && (isOfficialReview || (progress?.status === 'learning' && publishedGateReviewPresentation(progress).kind === 'due'));
+  const pickerTitle = gamesOnly ? 'خيارات التدريب' : (reviewFirst ? 'المراجعة الرسمية للبوابة' : 'مراجعة كلمات البوابة');
   const shell = document.createElement('section');
   shell.id = 'publishedGateQuizPicker';
   shell.className = 'published-gate-quiz-picker';
   shell.setAttribute('role', 'dialog');
   shell.setAttribute('aria-modal', 'true');
-  shell.setAttribute('aria-label', `تدريب بوابة ${gate.title || ''}`);
+  shell.setAttribute('aria-label', pickerTitle);
+  const listeners = new AbortController();
+  let lockTimer = null;
   const close = (returnToGate = true) => {
+    clearTimeout(lockTimer);
+    listeners.abort();
+    if (activePublishedGatePicker?.close === close) activePublishedGatePicker = null;
     window.LootLinguaModalFocus?.close(shell, { restoreFocus: returnToGate });
     shell.remove();
-    if (returnToGate) window.openPublishedGate(world.worldId, rank.rankId, gate.gateId);
+    if (returnToGate && origin !== 'worlds') window.openPublishedGate(world.worldId, rank.rankId, gate.gateId);
+  };
+  const practiceLocked = () => currentProgress()?.status === 'ready' || window.LootLinguaGateRunner?.reviewIsDue(currentProgress()) === true;
+  const flashcardsLocked = () => {
+    const current = currentProgress();
+    return current?.status === 'learning' && ((current === progress && isOfficialReview) || publishedGateReviewPresentation(current).kind === 'due');
   };
   shell.innerHTML = `
     <button type="button" class="published-gate-quiz-backdrop" aria-label="إغلاق"></button>
     <div class="published-gate-quiz-card">
       <button type="button" class="published-gate-quiz-close" aria-label="إغلاق"><i class="fa-solid fa-xmark" aria-hidden="true"></i></button>
-      <span class="published-gate-quiz-kicker"><i class="fa-solid fa-crosshairs" aria-hidden="true"></i> تدريب البوابة</span>
+      <span class="published-gate-quiz-kicker"><i class="fa-solid fa-crosshairs" aria-hidden="true"></i> ${pickerTitle}</span>
       <h2>${escapeHtml(gate.title || 'البوابة الحالية')}</h2>
-      <p>اختر نوع التدريب. الأسئلة ستأتي من <strong>${words.length} كلمة محمّلة لهذه البوابة فقط</strong>، ولن تدخل أي كلمة من قاموسك أو بوابة أخرى.</p>
+      ${words.length ? `<p>الأسئلة من <strong>هذه البوابة فقط (${words.length})</strong>.${isOfficialReview ? ` كلمات مستحقة الآن: ${new Set(dueWordKeys).size}.` : ''}</p>` : ''}
+      ${quizError ? `<p id="publishedGateQuizUnavailable">${escapeHtml(quizError)}</p>` : ''}
       <div class="published-gate-quiz-modes"></div>
-      <small class="published-gate-quiz-note">لرفع الإتقان وجاهزية البوابة، اختر المطابقة أو الصندوق المشفّر أو الهروب من النسيان وأجب صحيحًا من المحاولة الأولى. بطاقات الذاكرة والجري وتصحيح الخطأ داخل المطابقة للتدريب فقط.</small>
+      <small class="published-gate-quiz-note">${gamesOnly ? 'التدريب ما بيرفع الإتقان أو جاهزية البوابة.' : 'الإجابات الصح قد تطوّر الإتقان حسب شروط المراجعة. جاهزية البوابة إلها أدلتها وشروطها. التدريب ما بيرفع أيًّا منهما.'}</small>
     </div>`;
-  const officialReviewDueWordKeys = window.LootLinguaGateRunner?.reviewIsDue(progress) ? words.map((word) => {
-    const status = window.LootLinguaLearningEvidence?.getWordGateReadiness?.(word)?.status;
-    return ['needs-first-review', 'second-review-available', 'next-day-review-available'].includes(status) ? String(window.LootLinguaWordLifecycle?.wordKeyOf?.(word) || word?.wordKey || '') : '';
-  }).filter(Boolean) : [];
   const choose = async (mode) => {
+    if (!pickerCurrent() || !words.length || (mode === 'flashcards' && flashcardsLocked())) return;
     close(false);
     const started = await window.startGateQuiz?.(mode, {
       words,
       worldId: world.worldId,
       rankId: rank.rankId,
       gateId: gate.gateId,
+      isGateFlashcardsLocked: flashcardsLocked,
       officialReviewGate: officialReviewDueWordKeys.length ? { worldId: world.worldId, rankId: rank.rankId, gateId: gate.gateId } : null,
       officialReviewDueWordKeys,
     });
     if (!started) window.openPublishedGate(world.worldId, rank.rankId, gate.gateId);
   };
   const modes = shell.querySelector('.published-gate-quiz-modes');
-  GATE_QUIZ_MODE_CARDS.forEach((mode) => {
+  const [flashcards, ...progressModes] = GATE_QUIZ_MODE_CARDS;
+  const addMode = mode => {
     const button = document.createElement('button');
     button.type = 'button';
     button.className = `published-gate-quiz-mode is-${mode.id}`;
     button.innerHTML = `<i class="${mode.icon}" aria-hidden="true"></i><span><strong>${mode.title}</strong><small>${mode.copy}</small></span>`;
+    button.disabled = !words.length;
+    if (!words.length) button.setAttribute('aria-describedby', 'publishedGateQuizUnavailable');
     button.addEventListener('click', () => { void choose(mode.id); });
     modes.append(button);
-  });
+    return button;
+  };
+  const addProgressModes = () => {
+    modes.append(publishedElement('h3', 'published-gate-quiz-group-label quiz-category-title is-progress', 'اختبارات التقدّم'));
+    progressModes.forEach(addMode);
+  };
+  if (reviewFirst) addProgressModes();
+  const practiceTitle = publishedElement('h3', 'published-gate-quiz-group-label quiz-category-title', 'العب وتدرّب');
+  practiceTitle.append(publishedElement('span', 'quiz-category-tag', 'تدريب فقط'));
+  modes.append(practiceTitle);
+  const lockNote = publishedElement('p', 'gate-runner-review-lock');
+  lockNote.id = 'publishedGatePracticeLock';
+  lockNote.setAttribute('role', 'status');
+  modes.append(lockNote);
+  const flashcardButton = gamesOnly ? null : addMode(flashcards);
+  const gameInputs = {
+    worldId: world.worldId, rankId: rank.rankId, gateId: gate.gateId, title: gate.title, progress, practiceLocked,
+    isCurrent: () => pickerCurrent() && shell.isConnected, isSourceCurrent: () => pickerCurrent() && shell.isConnected,
+  };
+  const games = [
+    ['learning', 'ready'].includes(progress?.status) && window.LootLinguaGateRunner?.render?.(gameInputs),
+    ['learning', 'ready', 'cleared', 'mastered'].includes(progress?.status) && window.LootLinguaBots?.renderGate?.(gameInputs),
+  ].filter(Boolean);
+  modes.append(...games);
+  if (!gamesOnly && !reviewFirst) addProgressModes();
+
+  function syncTrainingLocks() {
+    clearTimeout(lockTimer);
+    const gamesLocked = games.length > 0 && practiceLocked();
+    const cardsLocked = flashcardButton && flashcardsLocked();
+    lockNote.hidden = !gamesLocked && !cardsLocked;
+    if (gamesLocked && currentProgress()?.status === 'ready') {
+      lockNote.textContent = 'الألعاب مقفلة حتى تجتاز البوابة.';
+    } else if (gamesLocked || cardsLocked) {
+      const locked = gamesLocked && cardsLocked ? 'الألعاب وبطاقات الذاكرة' : (gamesLocked ? 'الألعاب' : 'بطاقات الذاكرة');
+      lockNote.textContent = locked + ' مقفلة حتى تكمّل المراجعة الرسمية.';
+    }
+    if (flashcardButton) {
+      flashcardButton.disabled = !words.length || Boolean(cardsLocked);
+      if (cardsLocked) flashcardButton.setAttribute('aria-describedby', lockNote.id);
+      else if (!words.length) flashcardButton.setAttribute('aria-describedby', 'publishedGateQuizUnavailable');
+      else flashcardButton.removeAttribute('aria-describedby');
+    }
+    for (const game of games) {
+      const button = game.querySelector('.gate-runner-launch');
+      if (!button) continue;
+      if (button.getAttribute('aria-busy') !== 'true') button.disabled = gamesLocked;
+      if (gamesLocked) button.setAttribute('aria-describedby', lockNote.id);
+      else button.removeAttribute('aria-describedby');
+    }
+    const delay = publishedTimestampMillis(currentProgress()?.readinessNextAt) - publishedEffectiveNow();
+    if (delay > 0) lockTimer = setTimeout(syncTrainingLocks, Math.min(delay, 2147483647));
+  }
+  activePublishedGatePicker = { close, syncTrainingLocks };
+  for (const event of ['lootlingua:dictionary-navigation', 'lootlingua:auth-state']) {
+    window.addEventListener(event, () => close(false), { signal: listeners.signal });
+  }
+  syncTrainingLocks();
   shell.querySelector('.published-gate-quiz-backdrop')?.addEventListener('click', close);
   shell.querySelector('.published-gate-quiz-close')?.addEventListener('click', close);
   shell.addEventListener('keydown', (event) => { if (event.key === 'Escape') close(); });
@@ -4493,8 +4557,8 @@ function makePublishedJourneyPanel(world, ranks, journey, activeJourney) {
           ? 'تابع من البوابة النشطة دون فقدان تقدمك.'
           : 'يمكنك جعل هذا العالم رحلتك النشطة مع بقاء تقدم العالم الآخر محفوظًا.')
         : (!window.auth?.currentUser
-          ? 'سجّل دخولك لبدء الرحلة وحفظ تقدم البوابات.'
-          : 'تبدأ من أول بوابة متاحة، ثم تختار متى تحمّل الكلمات.')))
+          ? 'ابدأ كضيف، وأضف كلمات البوابة حتى تراجعها.'
+          : 'أضف كلمات البوابة إلى قاموسك، وبعدها ابدأ مراجعتها.')))
     )
   );
   panel.append(copy);
@@ -4518,6 +4582,7 @@ function makePublishedJourneyPanel(world, ranks, journey, activeJourney) {
   }
 
   const choosing = publishedContentState.journeyAction?.type === 'choose-start';
+  const startsAtFirstGate = !existing || journey.placementStatus === 'not-started';
   const pending = Boolean(
     ['start', 'beginning', 'placement-start'].includes(
       publishedContentState.journeyAction?.type
@@ -4542,11 +4607,9 @@ function makePublishedJourneyPanel(world, ranks, journey, activeJourney) {
   const button = publishedButton(
     pending
       ? 'جارٍ تجهيز الرحلة'
-      : (existing && journey?.placementStatus !== 'not-started'
-        ? 'تابع الرحلة'
-        : 'ابدأ الرحلة'),
-    'published-action-btn published-journey-btn published-journey-cta',
-    () => startOrResumePublishedJourney(world),
+      : (startsAtFirstGate ? 'ابدأ من البوابة الأولى' : 'تابع رحلتك'),
+    'published-action-btn published-journey-btn published-journey-cta' + (startsAtFirstGate ? ' published-first-journey-start' : ''),
+    () => startsAtFirstGate ? beginPublishedJourneyFromStart(world) : startOrResumePublishedJourney(world),
     pending ? 'fa-solid fa-circle-notch fa-spin' : 'fa-solid fa-route'
   );
   button.disabled = pending || (!existing && !firstRank);
@@ -4616,7 +4679,7 @@ function makeActiveJourneyBanner(activeJourney, worlds, accountDestination) {
     publishedIcon(completed ? 'fa-solid fa-trophy' : 'fa-solid fa-route'),
     copy,
     publishedButton(
-      completed ? 'استكشف العوالم' : 'متابعة',
+      completed ? 'استكشف العوالم' : 'تابع رحلتك',
       'published-action-btn',
       completed
         ? () => focusPublishedWorldChoices()
@@ -4631,22 +4694,31 @@ function makeActiveJourneyBanner(activeJourney, worlds, accountDestination) {
 
 async function beginPublishedGateClear(world, rank, gate) {
   if (publishedContentState.gateClearPending) return null;
+  const generation = publishedContentState.generation;
+  const navigation = window.__dictionaryNavigationGeneration;
+  const isCurrent = () => currentView === 'worlds' && window.__dictionaryNavigationGeneration === navigation &&
+    isCurrentPublishedGate(world.worldId, rank.rankId, gate.gateId, generation);
   publishedContentState.gateClearPending = true;
+  let bundle;
   try {
     const api = getJourneyCloudApi();
-    const bundle = publishedContentState.gateProgress?.activeClearAttemptId
+    bundle = publishedContentState.gateProgress?.activeClearAttemptId
       ? await api.resumeGateClearAttempt(world.worldId, rank.rankId, gate.gateId)
       : await api.startGateClearAttempt(world.worldId, rank.rankId, gate.gateId);
-    if (!bundle) throw new Error('gate-clear/session-unavailable');
-    publishedContentState.gateClearBundle = bundle;
-    renderPublishedGateClearAssessment(world, rank, gate, bundle);
-    return bundle;
+    if (!bundle?.question && !bundle?.result) throw new Error('gate-clear/session-unavailable');
   } catch (error) {
-    showToast(publishedJourneyErrorText(error), 'danger', 5200);
+    if (isCurrent()) {
+      publishedContentState.gateClearPending = false;
+      rerenderPublishedRoute();
+      showToast(publishedJourneyErrorText(error), 'danger', 5200);
+    }
     return null;
-  } finally {
-    publishedContentState.gateClearPending = false;
   }
+  if (!isCurrent()) return null;
+  publishedContentState.gateClearPending = false;
+  publishedContentState.gateClearBundle = bundle;
+  renderPublishedGateClearAssessment(world, rank, gate, bundle);
+  return bundle;
 }
 
 function renderPublishedGateClearAssessment(world, rank, gate, bundle) {
@@ -4889,41 +4961,11 @@ function renderPublishedGateClearResult(world, rank, gate, bundle) {
   }
 }
 
-async function maybeRenderPublishedGateClearResume(world, rank, gate, progress, generation) {
-  if (!progress?.activeClearAttemptId) return false;
-  try {
-    const bundle = await getJourneyCloudApi().resumeGateClearAttempt(
-      world.worldId,
-      rank.rankId,
-      gate.gateId
-    );
-    if (generation !== publishedContentState.generation) return true;
-    if (!bundle) return false;
-    if (!bundle.result && !bundle.question) {
-      console.warn('[Journey] Gate Clear resume returned no renderable state.', {
-        worldId: String(world.worldId),
-        rankId: String(rank.rankId),
-        gateId: String(gate.gateId),
-        attemptId: String(progress.activeClearAttemptId),
-        status: String(bundle.attempt?.status || ''),
-      });
-      return false;
-    }
-    publishedContentState.gateClearBundle = bundle;
-    renderPublishedGateClearAssessment(world, rank, gate, bundle);
-    return true;
-  } catch (error) {
-    if (generation === publishedContentState.generation) {
-      showToast(publishedJourneyErrorText(error), 'danger', 4800);
-    }
-    return false;
-  }
-}
-
 function publishedTimestampMillis(value) {
   if (!value) return 0;
   if (typeof value.toMillis === 'function') return value.toMillis();
   if (value instanceof Date) return value.getTime();
+  if (typeof value === 'number') return Number.isFinite(value) ? value : 0;
   if (Number.isFinite(Number(value.seconds))) {
     return (Number(value.seconds) * 1000) + Math.floor(Number(value.nanoseconds || 0) / 1e6);
   }
@@ -4937,38 +4979,42 @@ function publishedEffectiveNow() {
     : Date.now();
 }
 
-function formatPublishedReadinessWait(ms) {
-  const minutes = Math.max(1, Math.ceil(Math.max(0, Number(ms) || 0) / 60000));
-  if (minutes < 60) return `${minutes} دقيقة`;
-  const hours = Math.ceil(minutes / 60);
-  return hours === 1 ? 'ساعة تقريبًا' : `${hours} ساعات تقريبًا`;
+function confirmedGateCount(value) {
+  return Number.isSafeInteger(value) && value >= 0 ? value : null;
 }
 
-function schedulePublishedReadinessTimer(progress, statusElement) {
+function publishedGateReviewPresentation(progress, now = publishedEffectiveNow()) {
+  const nextAt = publishedTimestampMillis(progress?.readinessNextAt);
+  const deadlinePassed = nextAt > 0 && nextAt <= now;
+  // The aggregate predates a crossed deadline. A review is available, but
+  // the exact count needs a newer projection or the picker's existing read.
+  const dueCount = deadlinePassed ? null : confirmedGateCount(progress?.availableForReviewNowCount);
+  const waitingSecond = deadlinePassed ? null : confirmedGateCount(progress?.waitingLaterTodayCount);
+  const waitingNextDay = deadlinePassed ? null : confirmedGateCount(progress?.waitingNextDayCount);
+  const kind = Number(progress?.availableForReviewNowCount) > 0 || deadlinePassed || window.LootLinguaGateRunner?.reviewIsDue(progress, now)
+    ? 'due'
+    : (nextAt > now || Number(progress?.waitingLaterTodayCount) > 0 || Number(progress?.waitingNextDayCount) > 0
+      ? 'waiting' : 'practice');
+  return { kind, dueCount, waitingSecond, waitingNextDay, nextAt: nextAt > now ? nextAt : 0 };
+}
+
+function schedulePublishedReadinessTimer(nextAt, statusElement) {
   clearTimeout(publishedContentState.readinessTimer);
   publishedContentState.readinessTimer = null;
-  const nextAt = publishedTimestampMillis(progress?.readinessNextAt);
-  if (!statusElement || !nextAt || Number(progress?.readyWordCount) >= Number(progress?.requiredWordCount)) {
-    return;
-  }
-  const wasWaiting = nextAt > publishedEffectiveNow();
+  const delay = nextAt - publishedEffectiveNow();
+  if (delay <= 0) return;
   const update = () => {
+    publishedContentState.readinessTimer = null;
     if (!statusElement.isConnected) return;
     const remaining = nextAt - publishedEffectiveNow();
-    if (remaining <= 0) {
-      statusElement.textContent = 'حان وقت المراجعة الرسمية. اختر اختبارًا موثوقًا لرفع جاهزية البوابة.';
-      statusElement.classList.add('is-due');
-      publishedContentState.readinessTimer = null;
-      if (wasWaiting) {
-        if (currentView === 'worlds' && publishedContentState.tab === 'published') rerenderPublishedRoute();
-        window.LootLinguaNotificationRuntime?.requestEvaluation?.('gate-review-due');
-      }
+    if (remaining > 0) {
+      publishedContentState.readinessTimer = setTimeout(update, Math.min(remaining, 60000));
       return;
     }
-    statusElement.textContent = `تفتح المراجعة التالية خلال ${formatPublishedReadinessWait(remaining)}.`;
-    publishedContentState.readinessTimer = setTimeout(update, Math.min(remaining, 60000));
+    if (currentView === 'worlds' && publishedContentState.tab === 'published') rerenderPublishedRoute();
+    window.LootLinguaNotificationRuntime?.requestEvaluation?.('gate-review-due');
   };
-  publishedContentState.readinessTimer = setTimeout(update, 0);
+  publishedContentState.readinessTimer = setTimeout(update, Math.min(delay, 60000));
 }
 
 window.addEventListener('lootlingua:test-clock-changed', () => {
@@ -5012,10 +5058,6 @@ function makePublishedGateJourneyPanel(world, rank, gate) {
   );
   const isCurrentGate = () => currentView === 'worlds' && publishedContentState.tab === 'published' &&
     isPublishedGateRoute(world.worldId, rank.rankId, gate.gateId);
-  const practiceLocked = () => {
-    const current = isCurrentGate() ? publishedContentState.gateProgress : progress;
-    return current?.status === 'ready' || window.LootLinguaGateRunner?.reviewIsDue(current) === true;
-  };
   const clearedWithoutLoad = Boolean(
     progress?.status === 'cleared' &&
     progress?.clearedBy === 'level-placement' &&
@@ -5026,6 +5068,17 @@ function makePublishedGateJourneyPanel(world, rank, gate) {
     masteryView?.derivedState === 'cleared-with-gap'
   );
   const gapCount = Math.max(0, Number(masteryView?.gapCount) || 0);
+  const review = state === 'learning' ? publishedGateReviewPresentation(progress) : null;
+  const activeJourney = publishedContentState.activeJourney;
+  const journey = publishedContentState.journey;
+  const activeForWorld = String(activeJourney?.worldId || '') === String(world.worldId);
+  const needsPlacementChoice = publishedContentState.journeyAction?.type === 'choose-start' || journey?.placementStatus === 'not-started';
+  const cleared = state === 'cleared' || state === 'mastered';
+  const worldComplete = journey?.contentJourneyStatus === 'completed-current-content';
+  const hasNextGate = !worldComplete && activeForWorld && Boolean(activeJourney.activeGateId) &&
+    (String(activeJourney.activeGateId) !== String(gate.gateId) || String(activeJourney.activeRankId || rank.rankId) !== String(rank.rankId));
+  const entryAction = needsPlacementChoice ? 'choose-start' : (!journey || !activeForWorld ? 'start' : 'load');
+  const missionAction = hasNextGate ? 'next' : (cleared && worldComplete ? 'explore' : entryAction);
   const presentation = publishedJourneyPresentation(state);
   const stateIcon = publishedElement('span', `published-gate-state-icon is-${state}`);
   stateIcon.append(publishedIcon(presentation.icon));
@@ -5040,13 +5093,11 @@ function makePublishedGateJourneyPanel(world, rank, gate) {
   };
   const stateDescriptions = {
     locked: 'أكمل البوابة السابقة لفتحها.',
-    available: publishedContentState.journey
-      ? 'أضف كلماتها إلى قاموسك عندما تكون مستعدًا.'
-      : 'ابدأ رحلة التعلم أولًا، ثم أضف كلمات البوابة إلى قاموسك.',
-    learning: 'تتعلّم كلمات هذه البوابة الآن، وستعود في مراجعاتك حسب حاجتك.',
-    ready: 'أكملت مراجعاتها المطلوبة، ويمكنك بدء اختبار الاجتياز الآن.',
-    cleared: 'أنجزت هذه البوابة وفتحت الطريق لما بعدها.',
-    mastered: 'أتقنت كلمات هذه البوابة وحصلت على شارة الإتقان.',
+    available: '',
+    learning: '',
+    ready: 'اكتملت جاهزية البوابة.',
+    cleared: 'حُفظ اجتياز البوابة.',
+    mastered: 'شارة الإتقان محفوظة.',
   };
   const heading = publishedElement('strong');
   if (state === 'mastered') heading.append(publishedIcon('fa-solid fa-crown'));
@@ -5057,30 +5108,17 @@ function makePublishedGateJourneyPanel(world, rank, gate) {
         ? `مكتملة — بقي ${gapCount} كلمات لإتقانها`
         : (stateTitles[state] || getJourneyContract().gateStatusLabel(state))
   ));
-  copy.append(
-    heading,
-    publishedElement(
-      'span',
-      '',
-      clearedWithoutLoad
-        ? 'يمكنك إضافة كلماتها الآن ومتابعة إتقانها دون تغيير نتيجة الاختبار.'
-        : clearedWithGap
-          ? 'إنجاز البوابة محفوظ والطريق التالي مفتوح. يمكنك متابعة الكلمات المتبقية في مراجعاتك.'
-          : (stateDescriptions[state] || '')
-    )
-  );
-  panel.append(stateIcon, copy);
-  panel.append(makePublishedGateMissionBrief(gate, state, progress));
+  copy.append(heading);
+  const description = clearedWithoutLoad ? 'إتقان كلمات البوابة متاح بعد إضافتها.' : stateDescriptions[state];
+  if (description) copy.append(publishedElement('span', '', description));
+  const actions = publishedElement('div', 'published-journey-actions');
+  let hasReviewPicker = false;
+  panel.append(stateIcon, copy, makePublishedGateMissionBrief(gate, state, progress, missionAction, review), actions);
 
   if (state === 'learning' || state === 'ready') {
-    const readyWordCount = Math.max(0, Number(progress?.readyWordCount) || 0);
-    const requiredWordCount = Math.max(
-      readyWordCount,
-      Number(progress?.requiredWordCount) || Number(progress?.wordCountAtLoad) || 0
-    );
     const readiness = publishedElement('div', 'published-gate-readiness');
     const heading = publishedElement('div', 'published-gate-readiness-heading');
-    heading.append(publishedElement('strong', '', 'خطة فتح تحدّي البوابة')); 
+    heading.append(publishedElement('strong', '', 'جاهزية البوابة'));
     const info = publishedElement('button', 'published-readiness-info-btn');
     info.type = 'button';
     info.title = 'كيف يتقدم التحدّي؟';
@@ -5088,89 +5126,105 @@ function makePublishedGateJourneyPanel(world, rank, gate) {
     info.append(publishedIcon('fa-solid fa-question'));
     info.addEventListener('click', () => window.openGateReadinessInfo());
     heading.append(info);
-    const track = publishedElement('span', 'published-gate-readiness-track');
-    const fill = publishedElement('span', 'published-gate-readiness-fill');
-    const counts = publishedElement('div', 'published-gate-readiness-counts');
-    const completedSteps = Math.max(0, Number(progress?.evidenceStepCount) || 0);
-    const totalSteps = Math.max(
-      completedSteps,
-      Number(progress?.totalEvidenceSteps) || (requiredWordCount * 3)
-    );
-    const readinessPercent = totalSteps ? Math.round((completedSteps / totalSteps) * 100) : 0;
-    animatePublishedGateProgress(fill, readinessPercent);
-    track.append(fill);
-    const availableToday = Math.max(0, Number(progress?.availableForReviewNowCount) || 0);
-    const waitingToday = Math.max(0, Number(progress?.waitingLaterTodayCount) || 0);
-    const waitingTomorrow = Math.max(0, Number(progress?.waitingNextDayCount) || 0);
-    appendMetaChip(counts, ` ${completedSteps} / ${totalSteps}`, 'fa-solid fa-chart-line');
-    appendMetaChip(counts, `كلمات جاهزة للاختبار: ${readyWordCount} / ${requiredWordCount}`, 'fa-solid fa-circle-check');
-    if (availableToday > 0) {appendMetaChip(counts,`كلمات يمكن تحسينها الآن: ${availableToday}`,'fa-solid fa-play');
-    }
-    if (waitingToday > 0) {appendMetaChip(counts,`كلمات بانتظار ساعتين: ${waitingToday}`,'fa-solid fa-clock');
-    }
-    if (waitingTomorrow > 0) {appendMetaChip(counts,`كلمات بانتظار يوم جديد: ${waitingTomorrow}`,'fa-regular fa-calendar');
-    }
     const readinessCopy = publishedElement('p', 'published-gate-readiness-copy');
     if (state === 'ready') {
-      readinessCopy.textContent = 'اكتمل شريط الاستعداد. أصبح اختبار اجتياز البوابة متاحًا الآن.';
-    } else if (availableToday > 0 && practiceLocked()) {
-      readinessCopy.textContent = `يمكنك رفع الشريط الآن: أجب بشكل صحيح على ${availableToday} كلمات متاحة في كويز هذه البوابة.`;
-    } else if (waitingToday > 0) {
-      readinessCopy.textContent = 'أخذت هذه الكلمات خطوتها الأولى. يمكنك التدريب، لكن الخطوة التالية لها ستفتح بعد ساعتين على الأقل.';
-    } else if (waitingTomorrow > 0) {
-      readinessCopy.textContent = 'بقيت خطوة في يوم جديد لهذه الكلمات. التدريب الآن مفيد، لكنه لن يرفع شريط هذه الكلمات قبل ذلك الموعد.';
-    } else {
-      readinessCopy.textContent = `اكتمل استعداد ${readyWordCount} من ${requiredWordCount} كلمات. لكل كلمة ثلاث إجابات صحيحة متباعدة.`;
+      readinessCopy.textContent = 'اختبار الاجتياز متاح الآن.';
+    } else if (review.kind === 'due') {
+      readinessCopy.textContent = 'المراجعة الرسمية متاحة الآن.';
+    } else if (!review.nextAt) {
+      readinessCopy.textContent = 'موعد المراجعة التالية غير متاح الآن.';
+    }
+    if (review?.nextAt) {
+      const next = new Date(review.nextAt);
+      const localTime = new Intl.DateTimeFormat('ar-JO', {
+        weekday: 'short', day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit',
+      }).format(next);
+      const time = publishedElement('time', '', localTime);
+      time.dateTime = next.toISOString();
+      const dateRow = publishedElement('span', 'published-gate-review-time');
+      dateRow.append(review.kind === 'due' ? 'أقرب موعد للكلمات المنتظرة' : 'موعد المراجعة التالية', time);
+      readinessCopy.append(dateRow);
     }
 
-    readiness.append(heading, track, counts, readinessCopy);
+    if (review && isCurrentGate()) {
+      if (review.kind !== 'practice') readinessCopy.dataset.onboardingGateReview = review.kind;
+      if (readinessCopy.dataset.onboardingGateReview) queueMicrotask(() => {
+        if (readinessCopy.isConnected) window.dispatchEvent(new CustomEvent('lootlingua:gate-guide-state'));
+      });
+    }
+    readiness.append(heading);
+    if (review) {
+      const facts = publishedElement('dl', 'published-gate-review-facts');
+      const confirmedWaiting = review.waitingSecond !== null && review.waitingNextDay !== null;
+      const summaries = [
+        ['كلمات مستحقة الآن', review.dueCount, 'is-due'],
+        ...(confirmedWaiting ? [['كلمات تنتظر المراجعة', review.waitingSecond + review.waitingNextDay]] : [
+          ['كلمات تنتظر المراجعة الثانية', review.waitingSecond],
+          ['كلمات تنتظر يومًا جديدًا', review.waitingNextDay],
+        ]),
+      ];
+      for (const [label, value, tone] of summaries) {
+        if (value === null) continue;
+        const fact = publishedElement('div', 'published-gate-review-fact' + (tone && value > 0 ? ' ' + tone : ''));
+        fact.append(publishedElement('dt', '', label), publishedElement('dd', '', value));
+        facts.append(fact);
+      }
+      if (facts.children.length) readiness.append(facts);
+    }
+    readiness.append(readinessCopy);
+
+    const completedSteps = confirmedGateCount(progress?.evidenceStepCount);
+    const totalSteps = confirmedGateCount(progress?.totalEvidenceSteps);
+    if (completedSteps !== null && totalSteps > 0 && completedSteps <= totalSteps) {
+      const track = publishedElement('span', 'published-gate-readiness-track');
+      const fill = publishedElement('span', 'published-gate-readiness-fill');
+      track.setAttribute('role', 'progressbar');
+      track.setAttribute('aria-label', 'خطوات جاهزية البوابة');
+      track.setAttribute('aria-valuenow', completedSteps);
+      track.setAttribute('aria-valuemax', totalSteps);
+      track.append(fill);
+      readiness.append(track);
+      animatePublishedGateProgress(fill, Math.round((completedSteps / totalSteps) * 100));
+    }
+    const counts = publishedElement('div', 'published-gate-readiness-counts');
+    const readyWordCount = confirmedGateCount(progress?.readyWordCount);
+    const requiredWordCount = confirmedGateCount(progress?.requiredWordCount);
+    for (const [label, done, total] of [
+      ['خطوات الجاهزية', completedSteps, totalSteps],
+      ['كلمات مكتملة الجاهزية', readyWordCount, requiredWordCount],
+    ]) {
+      if (done === null || !(total > 0) || done > total) continue;
+      const item = publishedElement('span', 'published-meta-chip');
+      const fraction = publishedElement('bdi', '', `${done} / ${total}`);
+      fraction.dir = 'ltr';
+      item.append(label, fraction);
+      counts.append(item);
+    }
+    if (counts.children.length) readiness.append(counts);
+    readiness.append(publishedElement('p', 'published-gate-readiness-copy', 'الجاهزية تفتح اختبار الاجتياز. إتقان الكلمات له مراجعاته الخاصة.'));
     panel.append(readiness);
-    const runner = window.LootLinguaGateRunner?.render?.({
-      worldId: world.worldId,
-      rankId: rank.rankId,
-      gateId: gate.gateId,
-      progress,
-      isCurrent: isCurrentGate,
-      practiceLocked,
-    });
-    if (runner) panel.append(runner);
-    if (state === 'learning' && publishedTimestampMillis(progress?.readinessNextAt)) {
-      schedulePublishedReadinessTimer(progress, readinessCopy);
-    }
-  }
-
-  if (['learning', 'ready', 'cleared', 'mastered'].includes(state)) {
-    const bots = window.LootLinguaBots?.renderGate({
-      worldId: world.worldId,
-      rankId: rank.rankId,
-      gateId: gate.gateId,
-      title: gate.title,
-      isSourceCurrent: isCurrentGate,
-      practiceLocked,
-    });
-    if (bots) panel.append(bots);
-  }
-  if (practiceLocked()) {
-    panel.append(publishedElement('p', 'gate-runner-review-lock', state === 'ready'
-      ? 'حان وقت اختبار اجتياز البوابة. أكمله لتتقدم نحو البوابات التالية. ألعاب التدريب متوقفة مؤقتًا.'
-      : 'حان وقت المراجعة الرسمية. اختر المطابقة أو الصندوق المشفّر أو الهروب من النسيان لتتقدم نحو اجتياز البوابة. بطاقات الذاكرة متاحة للتدريب.'));
+    if (review) schedulePublishedReadinessTimer(review.nextAt, readinessCopy);
   }
 
   const action = publishedContentState.journeyAction;
   const journeyError = currentPublishedJourneyError(world.worldId);
   const pending = Boolean(action?.pending);
   const gateLoadPending = isPublishedGateWordsLoading();
-  const actions = publishedElement('div', 'published-journey-actions');
-  const activeForWorld = String(publishedContentState.activeJourney?.worldId || '') ===
-    String(world.worldId);
-  const needsPlacementChoice =
-    publishedContentState.journeyAction?.type === 'choose-start' ||
-    publishedContentState.journey?.placementStatus === 'not-started';
+  const retryable = !pending && Boolean(action?.error || journeyError);
+  const primaryClass = 'published-action-btn published-journey-btn' + (retryable ? '' : ' published-journey-cta');
+  if (retryable) {
+    actions.append(publishedButton(
+      'إعادة المحاولة',
+      'published-action-btn published-journey-retry-btn published-gate-practice-cta',
+      () => journeyError?.retry ? retryPublishedJourneyError() : runPublishedGateLoad(action?.type === 'sync'),
+      'fa-solid fa-rotate-right'
+    ));
+  }
 
   if (gateLoadPending) {
     const loading = publishedButton(
       action?.type === 'sync' ? 'جارٍ مزامنة الكلمات' : 'نضيف الكلمات',
-      'published-action-btn published-journey-btn published-journey-cta',
+      primaryClass,
       () => {},
       'fa-solid fa-circle-notch fa-spin'
     );
@@ -5185,19 +5239,26 @@ function makePublishedGateJourneyPanel(world, rank, gate) {
     );
     locked.disabled = true;
     actions.append(locked);
-  } else if (needsPlacementChoice) {
+  } else if (cleared && (hasNextGate || worldComplete)) {
+    actions.append(publishedButton(
+      hasNextGate ? 'تابع إلى البوابة التالية' : 'استكشف العوالم',
+      primaryClass,
+      hasNextGate ? () => openPublishedJourneyDestination(activeJourney.worldId) : () => window.openPublishedWorldsRoot(),
+      hasNextGate ? 'fa-solid fa-arrow-left' : 'fa-solid fa-compass'
+    ));
+  } else if (entryAction === 'choose-start') {
     const beginning = publishedButton(
       pending ? 'نجهّز رحلتك' : 'ابدأ من البداية',
-      'published-action-btn published-journey-btn published-journey-cta',
+      primaryClass,
       () => beginPublishedJourneyFromStart(world),
       pending ? 'fa-solid fa-circle-notch fa-spin' : 'fa-solid fa-forward-step'
     );
     beginning.disabled = pending;
     actions.append(beginning);
-  } else if (!publishedContentState.journey || !activeForWorld) {
+  } else if (entryAction === 'start' && !(state === 'ready' && progress?.activeClearAttemptId)) {
     const start = publishedButton(
-      pending ? 'نجهّز رحلتك' : 'ابدأ رحلة التعلم',
-      'published-action-btn published-journey-btn published-journey-cta',
+      pending ? 'نجهّز رحلتك' : (journey ? 'تابع رحلة هذا العالم' : 'ابدأ رحلة التعلم'),
+      primaryClass,
       () => startOrResumePublishedJourney(world),
       pending ? 'fa-solid fa-circle-notch fa-spin' : 'fa-solid fa-route'
     );
@@ -5206,18 +5267,19 @@ function makePublishedGateJourneyPanel(world, rank, gate) {
   } else if (state === 'available') {
     const load = publishedButton(
       pending ? 'نضيف الكلمات' : 'أضف كلمات البوابة',
-      'published-action-btn published-journey-btn published-journey-cta',
+      primaryClass,
       () => runPublishedGateLoad(false),
       pending ? 'fa-solid fa-circle-notch fa-spin' : 'fa-solid fa-download'
     );
     load.disabled = pending;
     actions.append(load);
   } else if (state === 'learning') {
+    hasReviewPicker = true;
     actions.append(publishedButton(
-      practiceLocked()
-        ? 'ابدأ المراجعة الرسمية لهذه البوابة'
-        : 'تدرّب على كلمات هذه البوابة — متابعة التعلم',
-      'published-action-btn published-journey-btn published-journey-cta published-gate-practice-cta',
+      review.kind === 'due' ? 'ابدأ المراجعة الرسمية'
+        : (review.kind === 'waiting' ? 'تدرّب على كلمات البوابة' : 'راجع كلمات البوابة'),
+      (review.kind === 'due' ? primaryClass : 'published-action-btn published-journey-btn') +
+        (retryable ? '' : ' published-gate-practice-cta'),
       () => {
         // Do NOT call completeFromQuizCta here — opening the picker is not
         // completion. The guided-first-journey controller listens for
@@ -5239,26 +5301,44 @@ function makePublishedGateJourneyPanel(world, rank, gate) {
     }
   } else if (state === 'ready') {
     const clear = publishedButton(
-      progress?.activeClearAttemptId ? 'متابعة اختبار اجتياز البوابة' : 'ابدأ اختبار اجتياز البوابة النهائي',
-      'published-action-btn published-journey-btn published-journey-cta',
-      () => beginPublishedGateClear(world, rank, gate),
+      progress?.activeClearAttemptId ? 'استأنف اختبار الاجتياز' : 'ابدأ اختبار الاجتياز',
+      primaryClass,
+      () => {
+        clear.disabled = true;
+        return beginPublishedGateClear(world, rank, gate);
+      },
       'fa-solid fa-flag-checkered'
     );
     clear.disabled = pending || publishedContentState.gateClearPending;
     actions.append(clear);
-  } else if (clearedWithoutLoad) {
+  } else if (cleared) {
+    actions.append(publishedButton(
+      'العودة للبوابات', primaryClass,
+      () => window.openPublishedRank(world.worldId, rank.rankId),
+      'fa-solid fa-arrow-right'
+    ));
+  }
+
+  if (!hasReviewPicker && ['learning', 'ready', 'cleared', 'mastered'].includes(state)) {
+    actions.append(publishedButton(
+      'خيارات التدريب', 'published-action-btn published-journey-btn',
+      () => openPublishedGateQuizPicker(world, rank, gate, { gamesOnly: true }), 'fa-solid fa-gamepad'
+    ));
+  }
+
+  if (!gateLoadPending && clearedWithoutLoad && (activeForWorld || worldComplete)) {
     const learn = publishedButton(
-      pending ? 'نضيف الكلمات' : 'تعلّم كلمات هذه البوابة',
+      activeForWorld ? 'أضف كلمات البوابة للإتقان' : 'تابع رحلة هذا العالم لإضافة الكلمات',
       'published-action-btn published-journey-btn',
       () => runPublishedGateLoad(false),
-      pending ? 'fa-solid fa-circle-notch fa-spin' : 'fa-solid fa-book-open-reader'
+      'fa-solid fa-book-open-reader'
     );
     learn.disabled = pending;
     actions.append(learn);
-  } else if (clearedWithGap) {
+  } else if (!gateLoadPending && clearedWithGap) {
     actions.append(publishedButton(
-      'راجع الكلمات المتبقية',
-      'published-action-btn published-journey-btn published-journey-cta',
+      'راجع الكلمات المتبقية للإتقان',
+      'published-action-btn published-journey-btn',
       () => window.startGateGapReview?.(masteryView.gapWordKeys, {
         worldId: world.worldId,
         rankId: rank.rankId,
@@ -5266,19 +5346,7 @@ function makePublishedGateJourneyPanel(world, rank, gate) {
       }),
       'fa-solid fa-arrows-rotate'
     ));
-  } else if (
-    (state === 'cleared' || state === 'mastered') &&
-    publishedContentState.activeJourney?.activeGateId &&
-    String(publishedContentState.activeJourney.activeGateId) !== String(gate.gateId)
-  ) {
-    actions.append(publishedButton(
-      'الانتقال للبوابة المفتوحة',
-      'published-action-btn published-journey-btn published-journey-cta',
-      () => openPublishedJourneyDestination(publishedContentState.activeJourney.worldId),
-      'fa-solid fa-arrow-left'
-    ));
   }
-  panel.append(actions);
 
   if (publishedContentState.newGateWords.length) {
     panel.append(publishedElement(
@@ -5295,22 +5363,8 @@ function makePublishedGateJourneyPanel(world, rank, gate) {
       'published-journey-progress',
       `تم تحميل ${Number(action?.completed) || 0} من ${Number(action?.total) || 0}`
     ));
-  } else if (action?.error || journeyError) {
-    panel.append(
-      publishedElement(
-        'small',
-        'published-journey-message published-journey-error',
-        action?.error || journeyError.text
-      ),
-      publishedButton(
-        'إعادة المحاولة',
-        'published-action-btn published-journey-retry-btn',
-        () => journeyError?.retry
-          ? retryPublishedJourneyError()
-          : runPublishedGateLoad(action?.type === 'sync'),
-        'fa-solid fa-rotate-right'
-      )
-    );
+  } else if (retryable) {
+    panel.append(publishedElement('small', 'published-journey-message published-journey-error', action?.error || journeyError.text));
   }
   return panel;
 }
@@ -5529,7 +5583,8 @@ function renderPublishedRanks(world, ranks, journey, activeJourney) {
       { label: world.title || 'العالم' },
     ],
   });
-  section.append(makePublishedJourneyPanel(world, ranks, journey, activeJourney));
+  const journeyPanel = makePublishedJourneyPanel(world, ranks, journey, activeJourney);
+  section.append(journeyPanel);
   const rewardGoal = window.LootLinguaMotivation?.makeGoal?.(world.worldId, null, { gateCount: world.gateCount, complete: journey?.contentJourneyStatus === 'completed-current-content' });
   if (rewardGoal) section.append(rewardGoal);
   if (!ranks.length) {
@@ -5542,6 +5597,21 @@ function renderPublishedRanks(world, ranks, journey, activeJourney) {
         section.append(makePublishedLevelSection(world, level, levelRanks, journey, activeJourney));
       }
     });
+  }
+  const startButton = journeyPanel.querySelector('.published-first-journey-start:not([disabled])');
+  const levelTest = section.querySelector('.published-level-test-btn[data-guide-placement-level]:not([disabled])');
+  if (startButton && levelTest) {
+    const actions = publishedElement('div', 'published-journey-actions');
+    startButton.replaceWith(actions);
+    actions.append(startButton, publishedButton(
+      'اختبر مستواك (اختياري)',
+      'published-action-btn',
+      () => {
+        levelTest.scrollIntoView({ block: 'center' });
+        levelTest.focus({ preventScroll: true });
+      },
+      'fa-solid fa-location-crosshairs'
+    ));
   }
   content.append(section);
   root.replaceChildren(content);
@@ -6369,9 +6439,6 @@ async function loadPublishedRouteData(route, options) {
     if (await maybeRenderPublishedPlacementResume(journeyContext.journey, generation)) {
       return;
     }
-    if (await maybeRenderPublishedGateClearResume(world, rank, gate, gateProgress, generation)) {
-      return;
-    }
     const gateState = publishedGateJourneyState(
       gate,
       rank,
@@ -6658,6 +6725,7 @@ window.openCustomWorldModal = function(options = {}) {
   }
   setEmojiPickerValue(world?.emoji || '📘');
   showModal('customWorldModal');
+  if (!world && !options.levelPlacementAssessmentId) window.dispatchEvent(new CustomEvent('lootlingua:custom-world-form-opened'));
   setTimeout(() => nameInput?.focus(), 60);
 };
 
@@ -7496,7 +7564,7 @@ window.loadQuizView = function(options = {}) {
   setTreasureEntryVisible(true);
   setTreasureDockActive('quiz');
   document.getElementById('quizView').style.display = 'block';
-  showQuizModes();
+  showQuizModes({ guideOrigin: options.guided ? 'journey' : 'general' });
   if (options?.skipResume !== true) {
     loadStoredActiveQuizSession().then((session) => {
       if (currentView !== 'quiz') return;
