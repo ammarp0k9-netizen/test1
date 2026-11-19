@@ -399,7 +399,7 @@ test('pending Journey resume is account-scoped, revalidated, leased, and retry-s
   const consumeBlock = between(
     controllerSource,
     'async function consumePendingJourneyIntent(options)',
-    'async function runCta(id)'
+    'function setBackgroundInert(active)'
   );
   const resumeBlock = between(
     worldsSource,

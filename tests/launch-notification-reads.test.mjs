@@ -57,12 +57,14 @@ test('background notification checks share per-word reads and refresh at evidenc
 
 test('ready and cleared gates skip background per-word notification reads but an explicit action still refreshes', async () => {
   let status = 'learning';
+  let lessonAllowed = false;
   const calls = [];
   const window = {
     auth: { currentUser: { uid: 'user' } },
     readWordsFromStorage: () => [],
     LootLinguaJourneyCloud: {
       getActiveJourney: async () => ({ worldId: 'world', activeRankId: 'rank', activeGateId: 'gate' }),
+      getGateLessonAccess: async () => ({ allowed: lessonAllowed }),
       getGateProgress: async () => ({ status, loadedAt: 100 }),
       getGateNotificationFacts: async (_world, _rank, _gate, options) => {
         calls.push([status, options.fresh]);
@@ -73,6 +75,10 @@ test('ready and cleared gates skip background per-word notification reads but an
   const context = { window, localStorage: { getItem: () => null }, document: { getElementById: () => null } };
   vm.runInNewContext(read('notification-sources'), context);
   const api = window.LootLinguaNotificationSources;
+  assert.equal((await api.collect()).gatePractice.actionable, false);
+  assert.equal((await api.collect({ reason: 'review-action' })).gatePractice.actionable, false);
+  assert.deepEqual(calls, []);
+  lessonAllowed = true;
   assert.equal((await api.collect()).gatePractice.unpracticedCount, 5);
   for (status of ['ready', 'cleared', 'available']) assert.equal((await api.collect()).gatePractice.actionable, false);
   status = 'ready';

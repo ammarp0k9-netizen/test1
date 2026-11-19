@@ -88,7 +88,7 @@ test('Worlds presents Gates directly under CEFR Levels while retaining rankId on
   );
   const routeSection = sourceSection(
     worldsSource,
-    'window.loadPublishedContentRoute = function(route)',
+    'window.loadPublishedContentRoute = function(route, options)',
     'window.openPublishedWorldsRoot'
   );
   assert.match(levelSection, /published-gate-rail/);
@@ -363,8 +363,11 @@ test('published presentation has compact words, polished states, and responsive 
   assert.doesNotMatch(publishedUi.replace(picker, ''), /innerHTML/);
   assert.doesNotMatch(wordCard, /innerHTML/);
   assert.match(picker, /escapeHtml\(gate\.title \|\| 'البوابة الحالية'\)/);
-  assert.match(picker, /GATE_QUIZ_MODE_CARDS\.forEach\(\(mode\)/);
-  const modeCards = sourceSection(worldsSource, 'const GATE_QUIZ_MODE_CARDS =', 'async function openPublishedGateQuizPicker');
+  assert.match(picker, /const \[flashcards, \.\.\.progressModes\] = GATE_QUIZ_MODE_CARDS/);
+  assert.match(picker, /progressModes\.forEach\(addMode\)/);
+  assert.match(picker, /gamesOnly \? null : addMode\(flashcards\)/);
+  assert.match(picker, /getGateLessonAccess\(lesson\)[\s\S]*?return false/);
+  const modeCards = sourceSection(worldsSource, 'const GATE_QUIZ_MODE_CARDS =', 'function publishedLessonContext');
   assert.doesNotMatch(modeCards, /\bworld\.|\bgate\.|\bword\.|\$\{/);
   assert.match(styleSource, /@media \(max-width: 640px\)/);
   assert.match(styleSource, /@media \(prefers-reduced-motion: reduce\)/);

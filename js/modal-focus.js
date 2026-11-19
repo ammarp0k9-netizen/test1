@@ -2,7 +2,7 @@
   'use strict';
   const frames = new Map();
   const isolated = new Map();
-  const focusSelector = 'button:not(:disabled), [href], input:not(:disabled), select:not(:disabled), textarea:not(:disabled), [tabindex]';
+  const focusSelector = 'button:not(:disabled), [href], input:not(:disabled), select:not(:disabled), textarea:not(:disabled), details > summary:first-child, [tabindex]';
   let observer = null, scheduled = null, activeSurface = null;
 
   function visible(node) {

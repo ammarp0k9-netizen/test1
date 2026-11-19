@@ -171,7 +171,8 @@
 
   function canPresent() {
     const dictionary = root.LootLinguaPersonalDictionaryOnboarding?.getState?.();
-    return active() && !root.__entryExperienceActive &&
+    return active() && !root.LootLinguaGuide && !root.__entryExperienceActive &&
+      !root.LootLinguaGateLessonView?.isOpen?.() &&
       !root.hasActiveLearningQuiz?.() &&
       document.getElementById?.('appAuthDialogShell')?.hidden !== false &&
       !document.documentElement.classList.contains('journey-auth-active') &&

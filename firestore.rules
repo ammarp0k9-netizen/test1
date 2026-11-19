@@ -126,6 +126,304 @@ service cloud.firestore {
       return mode in ['timeAttack', 'scramble', 'matching'];
     }
 
+    function validEntryExperienceInterestIds(ids) {
+      return ids is list && ids.size() <= 6 &&
+        ids.toSet().size() == ids.size() &&
+        ids.toSet().hasOnly([
+          'games', 'movies', 'study', 'general', 'technology', 'travel'
+        ].toSet());
+    }
+
+    function legacyEntryNeedsFirstActionProof(data) {
+      return (data.status == 'completed' || data.status == 'skipped') &&
+        !('actionStatus' in data);
+    }
+
+    function verifiedEntryCompletion(data) {
+      return data.status == 'completed' &&
+        'actionStatus' in data && data.actionStatus == 'completed';
+    }
+
+    function validEntryExperience(data, versionId) {
+      return versionId == 'v1' &&
+        data.keys().hasOnly([
+          'contractVersion', 'experienceVersion', 'status', 'audience',
+          'classification', 'currentStep', 'interestsStatus', 'interestIds',
+          'themeStatus', 'themeId', 'oasisMode', 'themeExplicit', 'actionStatus', 'source',
+          'startedAt', 'updatedAt', 'completedAt', 'skippedAt'
+        ]) && data.keys().size() == 18 &&
+        data.contractVersion == 1 && data.experienceVersion == 1 &&
+        (data.status == 'in-progress' || data.status == 'completed' || data.status == 'skipped') &&
+        (data.audience == 'new' || data.audience == 'returning' || data.audience == 'returning-guest') &&
+        (
+          data.classification == 'brand-new' ||
+          data.classification == 'returning-with-progress' ||
+          data.classification == 'returning-light' ||
+          data.classification == 'returning-guest-with-local-data' ||
+          data.classification == 'existing-account-without-meaningful-progress'
+        ) &&
+        (data.currentStep == 'interests' || data.currentStep == 'theme' || data.currentStep == 'action') &&
+        (data.interestsStatus == 'pending' || data.interestsStatus == 'selected' || data.interestsStatus == 'skipped') &&
+        validEntryExperienceInterestIds(data.interestIds) &&
+        (data.interestsStatus != 'selected' || data.interestIds.size() > 0) &&
+        (data.interestsStatus == 'selected' || data.interestIds.size() == 0) &&
+        (data.themeStatus == 'pending' || data.themeStatus == 'selected' || data.themeStatus == 'preserved') &&
+        (
+          data.themeId == '' || data.themeId == 'lootlingua' || data.themeId == 'ocean' ||
+          data.themeId == 'golden' || data.themeId == 'scroll' || data.themeId == 'glass'
+        ) &&
+        (data.oasisMode == 'light' || data.oasisMode == 'dark') &&
+        data.themeExplicit is bool &&
+        (data.actionStatus == 'pending' || data.actionStatus == 'ready' || data.actionStatus == 'completed') &&
+        (data.source == 'app-entry' || data.source == 'guest-migration' || data.source == 'settings') &&
+        data.startedAt is timestamp && data.updatedAt == request.time &&
+        (data.completedAt == null || data.completedAt is timestamp) &&
+        (data.skippedAt == null || data.skippedAt is timestamp) &&
+        (data.status != 'completed' || (
+          data.currentStep == 'action' && data.actionStatus == 'completed' &&
+          data.completedAt is timestamp && data.skippedAt == null
+        )) &&
+        (data.status != 'skipped' || (data.currentStep == 'action' && data.skippedAt is timestamp && data.completedAt == null)) &&
+        (data.status == 'completed' || data.completedAt == null) &&
+        (data.status == 'skipped' || data.skippedAt == null);
+    }
+
+    function validEntryExperienceUpdate(before, after, versionId) {
+      return validEntryExperience(after, versionId) &&
+        after.contractVersion == before.contractVersion &&
+        after.experienceVersion == before.experienceVersion &&
+        (
+          legacyEntryNeedsFirstActionProof(before) ||
+          after.audience == before.audience
+        ) &&
+        (
+          legacyEntryNeedsFirstActionProof(before) ||
+          after.classification == before.classification
+        ) &&
+        after.startedAt == before.startedAt &&
+        (
+          (before.status == 'in-progress' && after.status != 'skipped') ||
+          (verifiedEntryCompletion(before) && after.status == 'completed') ||
+          (legacyEntryNeedsFirstActionProof(before) &&
+            (after.status == 'in-progress' || after.status == 'completed'))
+        ) &&
+        (
+          !('actionStatus' in before) || before.actionStatus != 'completed' ||
+          after.actionStatus == 'completed'
+        ) &&
+        (
+          legacyEntryNeedsFirstActionProof(before) ||
+          before.completedAt == null || after.completedAt == before.completedAt
+        ) &&
+        (
+          legacyEntryNeedsFirstActionProof(before) ||
+          before.skippedAt == null || after.skippedAt == before.skippedAt
+        );
+    }
+
+    function validEntryExperienceV2(data, versionId) {
+      return versionId == 'v2' &&
+        data.keys().hasOnly([
+          'contractVersion', 'experienceVersion', 'status', 'audience',
+          'classification', 'currentStep', 'interestsStatus', 'interestIds',
+          'themeStatus', 'themeId', 'oasisMode', 'themeExplicit',
+          'journeyStatus', 'selectedWorldId', 'gamerStatus', 'source',
+          'startedAt', 'updatedAt', 'completedAt', 'skippedAt'
+        ]) && data.keys().size() == 20 &&
+        data.contractVersion in [2, 3] && data.experienceVersion == 2 &&
+        (data.status == 'in-progress' || data.status == 'completed') &&
+        (data.audience == 'new' || data.audience == 'returning' || data.audience == 'returning-guest') &&
+        (
+          data.classification == 'brand-new' ||
+          data.classification == 'returning-with-progress' ||
+          data.classification == 'returning-light' ||
+          data.classification == 'returning-guest-with-local-data' ||
+          data.classification == 'existing-account-without-meaningful-progress'
+        ) &&
+        (
+          data.currentStep == 'interests' || data.currentStep == 'theme' ||
+          data.currentStep == 'worlds' || data.currentStep == 'journey' ||
+          data.currentStep == 'context' || data.currentStep == 'destination' ||
+          data.currentStep == 'return' ||
+          (data.contractVersion == 3 && data.currentStep in ['welcome', 'discover'])
+        ) &&
+        (data.interestsStatus == 'pending' || data.interestsStatus == 'selected' || data.interestsStatus == 'skipped') &&
+        validEntryExperienceInterestIds(data.interestIds) &&
+        (data.interestsStatus != 'selected' || data.interestIds.size() > 0) &&
+        (data.interestsStatus == 'selected' || data.interestIds.size() == 0) &&
+        (data.themeStatus == 'pending' || data.themeStatus == 'selected' || data.themeStatus == 'preserved') &&
+        (
+          data.themeId == '' || data.themeId == 'lootlingua' || data.themeId == 'ocean' ||
+          data.themeId == 'golden' || data.themeId == 'scroll' || data.themeId == 'glass'
+        ) &&
+        (data.oasisMode == 'light' || data.oasisMode == 'dark') &&
+        data.themeExplicit is bool &&
+        (
+          data.journeyStatus == 'pending' || data.journeyStatus == 'world-selected' ||
+          data.journeyStatus == 'structure-explored' || data.journeyStatus == 'return-reviewed'
+        ) &&
+        data.selectedWorldId is string && data.selectedWorldId.size() <= 128 &&
+        (
+          data.gamerStatus == 'not-applicable' || data.gamerStatus == 'offered' ||
+          data.gamerStatus == 'running' || data.gamerStatus == 'completed' ||
+          data.gamerStatus == 'unavailable' || data.gamerStatus == 'skipped'
+        ) &&
+        (data.source == 'app-entry' || data.source == 'guest-migration' || data.source == 'settings') &&
+        data.startedAt is timestamp && data.updatedAt == request.time &&
+        (data.completedAt == null || data.completedAt is timestamp) &&
+        data.skippedAt == null &&
+        (data.status != 'completed' || (
+          (data.currentStep == 'destination' || (data.contractVersion == 3 && data.currentStep == 'discover')) &&
+          (data.journeyStatus == 'structure-explored' || data.journeyStatus == 'return-reviewed') &&
+          data.completedAt is timestamp
+        )) &&
+        (data.status == 'completed' || data.completedAt == null);
+    }
+
+    function validEntryExperienceV2Update(before, after, versionId) {
+      return validEntryExperienceV2(after, versionId) &&
+        after.contractVersion >= before.contractVersion &&
+        after.experienceVersion == before.experienceVersion &&
+        after.audience == before.audience &&
+        after.classification == before.classification &&
+        after.startedAt == before.startedAt &&
+        (
+          (before.status == 'in-progress' &&
+            (after.status == 'in-progress' || after.status == 'completed')) ||
+          (before.status == 'completed' && after.status == 'completed')
+        ) &&
+        (before.completedAt == null || after.completedAt == before.completedAt);
+    }
+
+    function gateLessonPath(uid, world, rank, gate) {
+      return /databases/$(database)/documents/users/$(uid)/contentProgress/$(world)/ranks/$(rank)/gates/$(gate)/lesson/progress;
+    }
+
+    function lessonComplete(uid, world, rank, gate, progress) {
+      let checkpoint = get(gateLessonPath(uid, world, rank, gate)).data;
+      let ids = progress.get('loadedContentWordIds', []);
+      return ids.size() > 0 && checkpoint.wordIds.toSet() == ids.toSet() &&
+        checkpoint.completedWordIds.toSet() == ids.toSet();
+    }
+
+    function validTestClock(data, uid) {
+      return data.keys().hasOnly([
+          'version', 'offsetMs', 'updatedAt', 'updatedBy'
+        ]) && data.keys().size() == 4 &&
+        data.version == 1 &&
+        data.offsetMs is int &&
+        data.offsetMs >= -31536000000 &&
+        data.offsetMs <= 31536000000 &&
+        data.updatedAt == request.time &&
+        data.updatedBy == uid;
+    }
+
+    function gateLessonRelease() {
+      return /databases/$(database)/documents/releaseConfig/gateLesson;
+    }
+
+    function gateLessonCutoff() {
+      return get(gateLessonRelease()).data.get('activatedAt', null);
+    }
+
+    function capturingGateDrafts() {
+      return exists(gateLessonRelease()) && get(gateLessonRelease()).data.get('captureStartedAt', null) is timestamp &&
+        !(gateLessonCutoff() is timestamp);
+    }
+
+    function lessonReady(uid, world, rank, gate, progress) {
+      return (exists(gateLessonPath(uid, world, rank, gate)) && lessonComplete(uid, world, rank, gate, progress)) ||
+        (progress.status in ['ready', 'cleared'] && exists(gateLessonRelease()) &&
+          historicallyReady(uid, world, rank, gate, progress));
+    }
+
+    function historicallyReady(uid, world, rank, gate, progress) {
+      let cutoff = gateLessonCutoff();
+      return cutoff is timestamp &&
+        ((progress.status == 'ready' && progress.get('readyAt', null) is timestamp &&
+          progress.readyAt < cutoff && completeGateProof(uid, progress, world, rank, gate, null)) ||
+         (progress.status == 'cleared' && progress.get('clearedBy', '') == 'gate-clear' &&
+          progress.get('clearedAt', null) is timestamp && progress.clearedAt < cutoff));
+    }
+
+    function gateDraft(data) {
+      return data.get('journeyGateId', '') != '' || data.get('source', '').matches('^(journey|gate-gap):.*') ||
+        data.get('officialReviewGate', null) is map;
+    }
+
+    function legacyGateDraftRef(uid) {
+      return /databases/$(database)/documents/users/$(uid)/meta/legacy_gate_quiz;
+    }
+
+    function sealedGateDraft(uid, draft) {
+      let ref = legacyGateDraftRef(uid);
+      return exists(ref) && exists(gateLessonRelease()) &&
+        sameGateDraft(get(ref).data, draft);
+    }
+
+    function sameGateDraft(seal, draft) {
+      let boundary = get(gateLessonRelease()).data.get('captureStartedAt', null);
+      return seal.capturedAt is timestamp && boundary is timestamp && gateLessonCutoff() is timestamp &&
+        seal.capturedAt < boundary && boundary <= gateLessonCutoff() &&
+        seal.sessionId == draft.get('id', '') && seal.mode == draft.get('mode', '') &&
+        seal.source == draft.get('source', '') && seal.words == draft.get('words', []) &&
+        seal.get('officialReviewGate', null) == draft.get('officialReviewGate', null) && coherentSealedScope(seal, draft) &&
+        (draft.get('journeyWorldId', '') == seal.worldId && draft.get('journeyRankId', '') == seal.rankId &&
+          draft.get('journeyGateId', '') == seal.gateId ||
+          draft.get('source', '') == 'journey:' + seal.worldId + '~' + seal.rankId + '~' + seal.gateId ||
+          draft.get('source', '') == 'gate-gap:' + seal.worldId + '~' + seal.rankId + '~' + seal.gateId ||
+          draft.get('officialReviewGate', null) is map) &&
+        draft.get('officialReviewDueWordKeys', []).toSet() == seal.dueWordKeys.toSet();
+    }
+
+    function coherentSealedScope(seal, draft) {
+      let official = draft.get('officialReviewGate', null);
+      return (draft.get('journeyGateId', '') == '' || (draft.journeyWorldId == seal.worldId &&
+          draft.journeyRankId == seal.rankId && draft.journeyGateId == seal.gateId)) &&
+        (official == null || (official.worldId == seal.worldId && official.rankId == seal.rankId && official.gateId == seal.gateId));
+    }
+
+    function legacyGateReview(data, uid, id, world, rank, gate) {
+      let seal = get(legacyGateDraftRef(uid)).data;
+      let active = /databases/$(database)/documents/users/$(uid)/meta/active_quiz_session;
+      return exists(active) && sealedGateDraft(uid, get(active).data) && seal.sessionId == id &&
+        seal.worldId == world && seal.rankId == rank && seal.gateId == gate && seal.mode == data.mode &&
+        seal.wordKeys.hasAll(data.wordKeys) &&
+        seal.dueWordKeys.toSet() == data.get('officialReviewDueWordKeys', []).toSet();
+    }
+
+    function allowedGateDraft(uid, draft) {
+      let world = draft.get('journeyWorldId', '');
+      let rank = draft.get('journeyRankId', '');
+      let gate = draft.get('journeyGateId', '');
+      return nonEmptyString(world, 128) && nonEmptyString(rank, 128) && nonEmptyString(gate, 128) &&
+        draftForLoadedGate(uid, world, rank, gate);
+    }
+
+    function draftForLoadedGate(uid, world, rank, gate) {
+      let progress = get(ownerGatePath(uid, world, rank, gate)).data;
+      return progress.get('loadedAt', null) is timestamp && lessonReady(uid, world, rank, gate, progress);
+    }
+
+    function validGateLessonSession(data, uid, id) {
+      let official = data.get('officialReviewGateId', '') != '';
+      let world = data.get('lessonWorldId', data.get('officialReviewWorldId', ''));
+      let rank = data.get('lessonRankId', data.get('officialReviewRankId', ''));
+      let gate = data.get('lessonGateId', data.get('officialReviewGateId', ''));
+      return (world == '' && rank == '' && gate == '' && !official) ||
+        (nonEmptyString(world, 128) && nonEmptyString(rank, 128) && nonEmptyString(gate, 128) &&
+          (!official || (world == data.officialReviewWorldId && rank == data.officialReviewRankId &&
+            gate == data.officialReviewGateId)) &&
+          gateLessonQuizReady(data, uid, id, world, rank, gate));
+    }
+
+    function gateLessonQuizReady(data, uid, id, world, rank, gate) {
+      let progress = get(ownerGatePath(uid, world, rank, gate)).data;
+      return progress.status in ['learning', 'ready', 'cleared'] &&
+        progress.loadedWordKeys.hasAll(data.wordKeys) &&
+        (lessonReady(uid, world, rank, gate, progress) || legacyGateReview(data, uid, id, world, rank, gate));
+    }
+
     function validOfficialReview(data, uid) {
       let world = data.get('officialReviewWorldId', '');
       let rank = data.get('officialReviewRankId', '');
@@ -147,7 +445,8 @@ service cloud.firestore {
     function validEvidenceSession(data, uid, id) {
       return data.keys().hasOnly(['sessionId', 'status', 'mode', 'sourceType', 'privateWorldId',
           'wordKeys', 'correctWordKeys', 'totalCount', 'correctCount', 'evidenceVersion', 'completedAt',
-          'officialReviewWorldId', 'officialReviewRankId', 'officialReviewGateId', 'officialReviewDueWordKeys']) &&
+          'officialReviewWorldId', 'officialReviewRankId', 'officialReviewGateId', 'officialReviewDueWordKeys',
+          'lessonWorldId', 'lessonRankId', 'lessonGateId']) &&
         data.sessionId == id && nonEmptyString(id, 220) && data.status == 'completed' && validEvidenceMode(data.mode) &&
         data.sourceType in ['personal', 'private-world'] && data.privateWorldId is string && data.privateWorldId.size() <= 500 &&
         (data.sourceType == 'personal' ? data.privateWorldId == '' : data.privateWorldId != '') &&
@@ -155,7 +454,7 @@ service cloud.firestore {
         data.wordKeys.toSet().size() == data.totalCount && data.wordKeys.size() == data.totalCount &&
         data.correctWordKeys is list && data.correctWordKeys.size() == data.correctCount &&
         data.correctWordKeys.toSet().size() == data.correctCount && data.wordKeys.hasAll(data.correctWordKeys) &&
-        data.evidenceVersion == 2 && data.completedAt == request.time && validOfficialReview(data, uid);
+        data.evidenceVersion == 2 && data.completedAt == request.time && validOfficialReview(data, uid) && validGateLessonSession(data, uid, id);
     }
 
     function recallDay(time, offset) {
@@ -371,6 +670,11 @@ service cloud.firestore {
     match /admin_audit_logs/{logId} { allow read: if isAdmin(); allow write: if false; }
     match /admins/{adminId} { allow read, write: if false; }
 
+    match /releaseConfig/gateLesson {
+      allow read: if request.auth != null;
+      allow write: if false;
+    }
+
     match /users/{uid} {
       // No root-document list/write access; all application data is explicit.
       allow get: if isOwner(uid);
@@ -476,7 +780,24 @@ service cloud.firestore {
           request.resource.data.entries is map && request.resource.data.entries.size() <= 5000;
         allow delete: if false;
       }
-      match /meta/active_quiz_session { allow read, create, update, delete: if isOwner(uid); }
+      match /meta/legacy_gate_quiz {
+        allow read: if isOwner(uid);
+        allow write: if false;
+      }
+
+      match /meta/active_quiz_session {
+        function canSaveDraft() {
+          let draft = request.resource.data;
+          return !gateDraft(draft) || allowedGateDraft(uid, draft);
+        }
+        allow read: if isOwner(uid);
+        allow delete: if isOwner(uid) && !(gateDraft(resource.data) && capturingGateDrafts());
+        allow create: if isOwner(uid) && canSaveDraft();
+        allow update: if isOwner(uid) && !(gateDraft(resource.data) && capturingGateDrafts()) && (canSaveDraft() ||
+          (sealedGateDraft(uid, resource.data) && sealedGateDraft(uid, request.resource.data) &&
+            request.resource.data.get('source', '') == resource.data.get('source', '') &&
+            request.resource.data.get('officialReviewGate', null) == resource.data.get('officialReviewGate', null)));
+      }
       match /meta/active_content_journey { allow read, create, update: if isOwner(uid); allow delete: if false; }
       match /meta/{metaId} {
         function validProfileReceipt(data) {
@@ -534,7 +855,11 @@ service cloud.firestore {
         allow delete: if false;
       }
       match /entryExperiences/{versionId} {
-        allow read, create, update: if isOwner(uid) && versionId.matches('v[0-9]+');
+        allow get: if isOwner(uid) && versionId in ['v1', 'v2'];
+        allow create: if isOwner(uid) && request.resource.data.status != 'skipped' &&
+          (validEntryExperience(request.resource.data, versionId) || validEntryExperienceV2(request.resource.data, versionId));
+        allow update: if isOwner(uid) && (validEntryExperienceUpdate(resource.data, request.resource.data, versionId) ||
+          validEntryExperienceV2Update(resource.data, request.resource.data, versionId));
         allow delete: if false;
       }
 
@@ -551,8 +876,11 @@ service cloud.firestore {
       }
 
       match /testSettings/clock {
-        allow read, create, update: if isOwner(uid) && isAdmin() &&
-          'testClock' in request.auth.token && request.auth.token.testClock == true;
+        function canUseTestClock() {
+          return isOwner(uid) && isAdmin() && 'testClock' in request.auth.token && request.auth.token.testClock == true;
+        }
+        allow read: if canUseTestClock();
+        allow create, update: if canUseTestClock() && validTestClock(request.resource.data, uid);
         allow delete: if false;
       }
 
@@ -757,7 +1085,8 @@ service cloud.firestore {
             return journey.status == 'active' && journey.activeGateId == data.gateId && journey.activeRankId == data.rankId &&
               progress.status == 'ready' && progress.get('activeClearAttemptId', '') == '' &&
               data.questionOrder.toSet() == progress.loadedContentWordIds.toSet() &&
-              completeGateProof(uid, progress, worldId, data.rankId, data.gateId, data.passRatio);
+              completeGateProof(uid, progress, worldId, data.rankId, data.gateId, data.passRatio) &&
+              lessonReady(uid, worldId, data.rankId, data.gateId, progress);
           }
 
           function validGateClearAttemptCreate(data) {
@@ -905,7 +1234,9 @@ service cloud.firestore {
           function validReadyGate(before, after) {
             let oldAttempt = before.get('activeClearAttemptId', '');
             let newAttempt = after.get('activeClearAttemptId', '');
+            let readyAt = after.get('readyAt', null);
             return before.status in ['learning', 'ready'] && sameLoadedGate(before, after) &&
+              (!(readyAt is timestamp) || readyAt == request.time || readyAt == before.get('readyAt', null)) &&
               after.readyEvidenceCount == after.loadedWordKeys.size() &&
               (oldAttempt == newAttempt ||
                 (oldAttempt == '' && nonEmptyString(newAttempt, 500) && linkedAttempt(newAttempt)) ||
@@ -921,21 +1252,144 @@ service cloud.firestore {
                 passedActiveAttempt(before, after, uid, worldId, rankId, gateId) : placementGate(after));
           }
           function validGateUpdate(before, after) {
-            return after.status == 'learning' ? validLearningGate(before, after) :
+            return stableLoadedAt(before, after) && (after.status == 'learning' ? validLearningGate(before, after) :
               after.status == 'ready' ? validReadyGate(before, after) :
-              after.status == 'cleared' && validClearedGate(before, after);
+              after.status == 'cleared' && validClearedGate(before, after));
+          }
+          function importedGateKeepsDates(before, after) {
+            let sourceUid = get(savedGuestPermit(uid)).data.sourceUid;
+            let source = get(ownerGatePath(sourceUid, worldId, rankId, gateId)).data;
+            return sameImportedDate(before, after, source, 'loadedAt') &&
+              sameImportedDate(before, after, source, 'readyAt') && sameImportedDate(before, after, source, 'clearedAt');
+          }
+
+          function sameImportedDate(before, after, source, field) {
+            let value = after.get(field, null);
+            return value == null || value == before.get(field, null) || value == source.get(field, null);
+          }
+
+          function stableLoadedAt(before, after) {
+            let previous = before.get('loadedAt', null);
+            let next = after.get('loadedAt', null);
+            return next == previous || (previous == null && next == request.time);
           }
           allow read: if isOwner(uid);
           function unlockedGate() {
             let journey = getAfter(/databases/$(database)/documents/users/$(uid)/contentProgress/$(worldId)).data;
             return rankId in journey.unlockedRankIds && gateId in journey.unlockedGateIds;
           }
-          allow create, update: if importingSavedGuest(uid) && validGateProgress(request.resource.data);
+          allow create: if importingSavedGuest(uid) && validGateProgress(request.resource.data) && importedGateKeepsDates({}, request.resource.data);
+          allow update: if importingSavedGuest(uid) && validGateProgress(request.resource.data) && importedGateKeepsDates(resource.data, request.resource.data);
           allow create: if isOwner(uid) && validGateProgress(request.resource.data) &&
+            stableLoadedAt({}, request.resource.data) &&
             ((request.resource.data.status in ['available', 'learning'] && request.resource.data.readyEvidenceCount == 0 &&
               request.resource.data.get('activeClearAttemptId', '') == '' && unlockedGate()) || placementGate(request.resource.data));
           allow update: if isOwner(uid) && validGateProgress(request.resource.data) && validGateUpdate(resource.data, request.resource.data);
           allow delete: if false;
+
+          match /lesson/legacyCredit {
+            allow get: if isOwner(uid);
+            allow write: if false;
+          }
+
+          match /lesson/progress {
+            function idsWithin(values, parent) {
+              return values is list && values.toSet().size() == values.size() && parent.hasAll(values);
+            }
+
+            function validStudy(data) {
+              let study = data.study;
+              let recalled = study.recalled.toSet();
+              let recallAnswers = study.remembered.toSet().union(study.misses.keys().toSet());
+              let missed = recalled.intersection(study.misses.keys().toSet());
+              let completed = data.creditedIds.toSet().union(data.legacyCompletedIds.toSet())
+                .union(recalled.intersection(study.remembered.toSet())).union(study.retried.toSet());
+              return study.keys().hasOnly(['explained', 'details', 'taught', 'hinted', 'applied',
+                  'remembered', 'recalled', 'reinforced', 'retried', 'applications', 'misses', 'retries']) &&
+                idsWithin(study.explained, data.wordIds) && idsWithin(study.details, study.explained) &&
+                idsWithin(study.taught, study.explained) && idsWithin(study.hinted, study.taught) &&
+                study.applications is map && study.taught.hasAll(study.applications.keys()) &&
+                study.applications.values().hasOnly(['correct', 'wrong', 'revealed', 'assisted']) &&
+                idsWithin(study.applied, study.applications.keys()) &&
+                idsWithin(study.remembered, study.applied) && study.misses is map &&
+                study.applied.hasAll(study.misses.keys()) && study.misses.values().hasOnly(['wrong', 'revealed']) &&
+                idsWithin(study.recalled, recallAnswers) && idsWithin(study.reinforced, missed) &&
+                study.retries is map && missed.hasAll(study.retries.keys()) &&
+                study.retries.values().hasOnly(['correct', 'wrong', 'revealed']) &&
+                idsWithin(study.retried, study.retries.keys()) && data.completedWordIds.toSet() == completed;
+            }
+
+            function validLesson(data) {
+              return data.keys().hasOnly(['version', 'wordIds', 'creditedIds', 'legacyCompletedIds', 'answers',
+                  'passed', 'study', 'completedWordIds', 'updatedAt', '_savedGuestImportedAt']) &&
+                data.version == 2 && data.wordIds is list && data.wordIds.size() > 0 &&
+                data.wordIds.size() <= 2000 && data.wordIds.toSet().size() == data.wordIds.size() &&
+                idsWithin(data.creditedIds, data.wordIds) && idsWithin(data.legacyCompletedIds, data.wordIds) &&
+                idsWithin(data.completedWordIds, data.wordIds) &&
+                data.answers is map && data.answers.size() <= data.wordIds.size() * 2 &&
+                data.answers.values().hasOnly(['correct', 'wrong', 'revealed']) &&
+                idsWithin(data.passed, data.answers.keys()) && validStudy(data) &&
+                data.updatedAt == request.time && (!('_savedGuestImportedAt' in data) || importingSavedGuest(uid));
+            }
+
+            function historicalIds(checkpoint) {
+              return checkpoint.get('version', 0) == 1
+                ? checkpoint.get('completedWordIds', []).toSet().difference(checkpoint.get('creditedIds', []).toSet())
+                : checkpoint.get('legacyCompletedIds', []).toSet();
+            }
+
+            function importedLessonIds(data, before) {
+              let sourceUid = get(savedGuestPermit(uid)).data.sourceUid;
+              let source = get(gateLessonPath(sourceUid, worldId, rankId, gateId)).data;
+              return source.wordIds.toSet() == data.wordIds.toSet() &&
+                historicalIds(before).union(historicalIds(source)).hasAll(data.legacyCompletedIds) &&
+                before.get('creditedIds', []).toSet().union(source.creditedIds.toSet()).hasAll(data.creditedIds);
+            }
+
+            function grantedLegacyCredit(data, before) {
+              let grantPath = /databases/$(database)/documents/users/$(uid)/contentProgress/$(worldId)/ranks/$(rankId)/gates/$(gateId)/lesson/legacyCredit;
+              let grant = get(grantPath).data;
+              return exists(gateLessonRelease()) && gateLessonCutoff() is timestamp &&
+                grant.capturedAt is timestamp && grant.capturedAt < gateLessonCutoff() &&
+                grant.wordIds.toSet() == data.wordIds.toSet() &&
+                before.get('creditedIds', []).toSet().union(grant.creditedIds.toSet()).hasAll(data.creditedIds);
+            }
+
+            function keepsCompatibleCredit(data, before) {
+              return historicalIds(before).hasAll(data.legacyCompletedIds) &&
+                (before.get('creditedIds', []).hasAll(data.creditedIds) || grantedLegacyCredit(data, before));
+            }
+
+            function validCredit(data, before) {
+              return keepsCompatibleCredit(data, before) || (importingSavedGuest(uid) && importedLessonIds(data, before));
+            }
+
+            function keepsStudy(data, before) {
+              let old = before.get('study', {});
+              let next = data.study;
+              return next.explained.hasAll(old.get('explained', [])) && next.details.hasAll(old.get('details', [])) &&
+                next.taught.hasAll(old.get('taught', [])) && next.hinted.hasAll(old.get('hinted', [])) &&
+                next.applied.hasAll(old.get('applied', [])) && next.remembered.hasAll(old.get('remembered', [])) &&
+                next.recalled.hasAll(old.get('recalled', [])) && next.reinforced.hasAll(old.get('reinforced', [])) &&
+                next.retried.hasAll(old.get('retried', [])) &&
+                next.applications.keys().hasAll(old.get('applications', {}).keys()) &&
+                next.misses.keys().hasAll(old.get('misses', {}).keys()) &&
+                next.retries.keys().hasAll(old.get('retries', {}).keys());
+            }
+
+            allow read: if isOwner(uid);
+            allow create: if isOwner(uid) && validLesson(request.resource.data) &&
+              get(gateContentPath(worldId, rankId, gateId)).data.publishedWordIds.toSet() == request.resource.data.wordIds.toSet() &&
+              validCredit(request.resource.data, {});
+            allow update: if isOwner(uid) && validLesson(request.resource.data) &&
+              request.resource.data.wordIds == resource.data.wordIds &&
+              validCredit(request.resource.data, resource.data) &&
+              request.resource.data.creditedIds.hasAll(resource.data.creditedIds) &&
+              request.resource.data.completedWordIds.hasAll(resource.data.completedWordIds) &&
+              request.resource.data.passed.hasAll(resource.data.passed) &&
+              request.resource.data.answers.keys().hasAll(resource.data.answers.keys()) &&
+              keepsStudy(request.resource.data, resource.data);
+          }
 
           match /readiness/proof {
             allow read: if isOwner(uid);

@@ -1,3 +1,5 @@
+import { GUIDE_TOUR, mergeGuideCoverage } from './guide-coverage.mjs';
+
 // Profile synchronization operations are not XP awards. XP remains owned by
 // the existing XP-event transactions; only a receipted guest import can seed it.
 import { purchaseRunnerItem, runnerUnlocks } from './runner-shop.mjs?v=20261114-runner-shop-1';
@@ -96,6 +98,7 @@ function treasureCommand(profile, intent, context, effects) {
 // Onboarding completion is monotonic across devices; replaying an older tour
 // checkpoint must never reopen a completed tour.
 export function mergeOnboardingProgress(tour, left, right) {
+  if (tour === GUIDE_TOUR) return mergeGuideCoverage(left, right);
   if (tour === 'public-world-guide') {
     const normalize = value => {
       const phases = ['choosing-world', 'awaiting-first-gate', 'first-gate-opened', 'awaiting-quiz-cta', 'completed'];

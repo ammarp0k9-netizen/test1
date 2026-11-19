@@ -1,3 +1,4 @@
+import { GUIDE_TOUR, mergeGuideCoverage } from './guide-coverage.mjs';
 import { applyProfileIntent } from './profile-sync-policy.mjs?v=20261114-runner-shop-1';
 
 export const number = value => Number.isFinite(Number(value)) ? Math.max(0, Number(value)) : 0;
@@ -18,6 +19,8 @@ export function mergeProfile(target, source, duplicateXP, consumedIds, countedGa
     if (target[key] == null && source[key] != null) profile[key] = source[key];
   }
   profile.themeIntroSeen = union(target.themeIntroSeen, source.themeIntroSeen);
+  const coverage = mergeGuideCoverage(target.onboardingProgress?.[GUIDE_TOUR], source.onboardingProgress?.[GUIDE_TOUR]);
+  if (coverage) profile.onboardingProgress = { ...target.onboardingProgress, [GUIDE_TOUR]: coverage };
   if (target.lootBots?.audio) profile.lootBots = { ...profile.lootBots, audio: { ...profile.lootBots?.audio, ...target.lootBots.audio } };
   if (profile.extraChests) profile.extraChests = profile.extraChests.filter(item => !consumedIds.has(String(item.id)));
   if (profile.extraChestState?.transferred) {

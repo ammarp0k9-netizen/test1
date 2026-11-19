@@ -326,7 +326,9 @@ test('gate word loading stays visible while per-word cloud progress updates arri
 
 test('the public-world journey stays separate from feature eligibility', () => {
   assert.match(htmlSource, /guided-first-journey-contract\.js/);
-  assert.match(htmlSource, /guided-first-journey-controller\.js/);
+  assert.doesNotMatch(htmlSource, /guided-first-journey-controller\.js/);
+  assert.match(htmlSource, /entry-experience-controller\.js/);
+  assert.match(htmlSource, /gate-lesson\.js/);
   assert.match(htmlSource, /guided-first-journey-cloud\.js/);
   assert.match(controllerSource, /beginFromEntry/);
   assert.doesNotMatch(controllerSource, /minecraft|pubg/);

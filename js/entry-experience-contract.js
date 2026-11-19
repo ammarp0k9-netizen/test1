@@ -2,16 +2,13 @@
   'use strict';
 
   const EXPERIENCE_VERSION = 2;
-  const CONTRACT_VERSION = 2;
+  const CONTRACT_VERSION = 3;
   const RELEASE_AT = Date.UTC(2026, 6, 30, 0, 0, 0);
   const NEW_ACCOUNT_WINDOW_MS = 30 * 60 * 1000;
 
   const STATUSES = Object.freeze(['in-progress', 'completed']);
   const TERMINAL_STATUSES = Object.freeze(['completed']);
-  // Keep the original welcome as a real, resumable Entry step.  The rest of
-  // the route is deliberately the current public-World flow (interests,
-  // Worlds, levels, and gates), not the retired game-dictionary tour.
-  const STEPS = Object.freeze(['welcome', 'interests', 'theme', 'worlds', 'journey', 'destination', 'return']);
+  const STEPS = Object.freeze(['welcome', 'theme', 'interests', 'discover']);
   const JOURNEY_STATUSES = Object.freeze(['pending', 'world-selected', 'structure-explored', 'return-reviewed']);
   const GAMER_STATUSES = Object.freeze(['not-applicable', 'offered', 'running', 'completed', 'unavailable', 'skipped']);
   const AUDIENCES = Object.freeze(['new', 'returning', 'returning-guest']);
@@ -160,12 +157,11 @@
       cleanEnum(source.classification, CLASSIFICATIONS, audience === 'new' ? 'brand-new' : 'returning-light')
     );
     const rawStep = cleanString(raw.currentStep, 80);
-    // v2 previously inserted a game-search context step after the Journey
-    // preview. That surface no longer exists; preserve saved progress by
-    // continuing at the next safe step instead of restarting Entry.
-    const currentStep = rawStep === 'context'
-      ? 'destination'
-      : cleanEnum(rawStep, STEPS, status === 'in-progress' ? 'interests' : 'destination');
+    const legacyDiscovery = ['worlds', 'journey', 'destination', 'return', 'context'].includes(rawStep);
+    const currentStep = status === 'completed' || legacyDiscovery ? 'discover'
+      : rawStep === 'interests' && Number(raw.contractVersion || 2) < CONTRACT_VERSION && raw.themeStatus === 'pending'
+        ? 'theme'
+        : cleanEnum(rawStep, STEPS, 'welcome');
     const interestsStatus = cleanEnum(raw.interestsStatus, INTEREST_STATUSES, 'pending');
     const interestIds = interestsStatus === 'selected'
       ? uniqueStrings(raw.interestIds, INTEREST_IDS, INTEREST_IDS.length)
@@ -234,9 +230,7 @@
       status: 'in-progress',
       audience: context.audience,
       classification: context.classification,
-      currentStep: context.classification === 'returning-with-progress'
-        ? 'return'
-        : (context.classification === 'brand-new' ? 'welcome' : 'interests'),
+      currentStep: context.classification === 'brand-new' ? 'welcome' : 'discover',
       interestsStatus: Array.isArray(saved.interestIds) && saved.interestIds.length ? 'selected' : 'pending',
       interestIds: saved.interestIds,
       themeStatus: existingTheme ? 'preserved' : 'pending',
@@ -252,12 +246,7 @@
 
   function isTerminalState(state) {
     const normalized = normalizeEntryState(state);
-    return Boolean(
-      normalized &&
-      TERMINAL_STATUSES.includes(normalized.status) &&
-      normalized.currentStep === 'destination' &&
-      ['structure-explored', 'return-reviewed'].includes(normalized.journeyStatus)
-    );
+    return Boolean(normalized && TERMINAL_STATUSES.includes(normalized.status));
   }
 
   function recoverUnverifiedTerminal(state, presentation, nowValue) {
@@ -789,7 +778,7 @@
       if (next.currentStep !== 'welcome') {
         throw new RangeError('The welcome step must be active before starting Entry.');
       }
-      next.currentStep = 'interests';
+      next.currentStep = 'theme';
     } else if (type === 'select-interests') {
       const ids = uniqueStrings(action.interestIds, INTEREST_IDS, INTEREST_IDS.length);
       next.interestIds = ids;
@@ -798,11 +787,11 @@
       if (next.interestsStatus !== 'selected' || !next.interestIds.length) {
         throw new RangeError('At least one interest is required to continue.');
       }
-      next.currentStep = 'theme';
+      next.currentStep = 'discover';
     } else if (type === 'skip-interests') {
       next.interestsStatus = 'skipped';
       next.interestIds = [];
-      next.currentStep = 'theme';
+      next.currentStep = 'discover';
     } else if (type === 'select-theme') {
       next.themeId = cleanEnum(action.themeId, THEME_IDS, '');
       if (!next.themeId) throw new RangeError('A supported theme is required.');
@@ -813,66 +802,17 @@
       if (next.currentStep !== 'theme') {
         throw new RangeError('The theme step must be active before Worlds onboarding.');
       }
-      next.currentStep = 'worlds';
-    } else if (type === 'select-world') {
-      if (next.currentStep !== 'worlds') {
-        throw new RangeError('Worlds onboarding must be active before selecting a world.');
-      }
-      const worldId = cleanString(action.worldId, 128);
-      if (!worldId) throw new RangeError('A published world is required.');
-      next.selectedWorldId = worldId;
-      next.journeyStatus = 'world-selected';
-    } else if (type === 'continue-worlds') {
-      if (next.currentStep !== 'worlds' || next.journeyStatus !== 'world-selected') {
-        throw new RangeError('A world must be selected before exploring its structure.');
-      }
-      next.currentStep = 'journey';
-    } else if (type === 'continue-worlds-fallback') {
-      if (next.currentStep !== 'worlds') {
-        throw new RangeError('Worlds onboarding must be active before using its fallback.');
-      }
-      next.selectedWorldId = '';
-      next.journeyStatus = 'world-selected';
-      next.currentStep = 'journey';
-    } else if (type === 'explore-structure') {
-      if (next.currentStep !== 'journey') {
-        throw new RangeError('Journey structure must be active before it can be explored.');
-      }
-      next.journeyStatus = 'structure-explored';
-    } else if (type === 'continue-journey') {
-      if (next.currentStep !== 'journey' || next.journeyStatus !== 'structure-explored') {
-        throw new RangeError('Journey structure must be explored before continuing.');
-      }
-      next.currentStep = 'destination';
-      next.gamerStatus = 'not-applicable';
-    } else if (type === 'review-return') {
-      if (next.currentStep !== 'return') {
-        throw new RangeError('The saved Journey reminder must be active.');
-      }
-      next.journeyStatus = 'return-reviewed';
-    } else if (type === 'continue-return') {
-      if (next.currentStep !== 'return' || next.journeyStatus !== 'return-reviewed') {
-        throw new RangeError('The saved Journey reminder must be reviewed before continuing.');
-      }
-      next.currentStep = 'destination';
+      next.currentStep = 'interests';
     } else if (type === 'complete') {
-      if (next.currentStep !== 'destination') {
-        throw new RangeError('The final destination step must be reached before completion.');
-      }
-      if (!['structure-explored', 'return-reviewed'].includes(next.journeyStatus)) {
-        throw new RangeError('The required Journey interaction must be completed before onboarding completion.');
-      }
+      if (next.currentStep !== 'discover') throw new RangeError('Discover Worlds must be open.');
       next.status = 'completed';
-      next.currentStep = 'destination';
+      next.currentStep = 'discover';
       next.completedAt = now;
       next.skippedAt = 0;
       if (next.themeStatus === 'pending') next.themeStatus = next.themeId ? 'preserved' : 'preserved';
     } else if (type === 'back') {
-      if (next.currentStep === 'interests' && next.classification === 'brand-new') next.currentStep = 'welcome';
-      else if (next.currentStep === 'theme') next.currentStep = 'interests';
-      else if (next.currentStep === 'worlds') next.currentStep = 'theme';
-      else if (next.currentStep === 'journey') next.currentStep = 'worlds';
-      else if (next.currentStep === 'destination') next.currentStep = 'journey';
+      const index = STEPS.indexOf(next.currentStep);
+      next.currentStep = STEPS[Math.max(0, index - 1)];
     } else {
       throw new RangeError('Unsupported entry state transition.');
     }

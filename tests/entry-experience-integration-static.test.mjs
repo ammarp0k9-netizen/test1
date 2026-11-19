@@ -160,9 +160,12 @@ test('Entry cloud adapter scopes every version by owner and writes only its curr
   assert.doesNotMatch(cloudSource, /onboarding\.completed|hasCompletedOnboarding/);
 
   assert.match(rulesSource, /match \/entryExperiences\/\{versionId\}/);
-  assert.match(rulesSource, /versionId\.matches\('v\[0-9\]\+'\)/);
-  assert.match(rulesSource, /allow read, create, update: if isOwner\(uid\)/);
-  assert.match(rulesSource, /allow delete: if false/);
+  const entryRules = rulesSource.slice(rulesSource.indexOf('match /entryExperiences/{versionId}'),
+    rulesSource.indexOf('match /notifications/{notificationId}'));
+  assert.match(entryRules, /allow get: if isOwner\(uid\) && versionId in \['v1', 'v2'\]/);
+  assert.match(entryRules, /allow create: if isOwner\(uid\)[\s\S]+validEntryExperienceV2\(request\.resource\.data, versionId\)/);
+  assert.match(entryRules, /allow update: if isOwner\(uid\)[\s\S]+validEntryExperienceV2Update\(resource\.data, request\.resource\.data, versionId\)/);
+  assert.match(entryRules, /allow delete: if false/);
 });
 
 test('passive fresh guest boot classifies in memory without local or cloud writes', async () => {

@@ -473,7 +473,7 @@ body.perf-stable .smart-loading-slow-warning {
   opacity: 0;
   visibility: hidden;
   pointer-events: none;
-  background: var(--legend-glass-bg, color-mix(in srgb, var(--card-bg) 40%, transparent));
+  background: color-mix(in srgb, var(--card-bg) 86%, var(--legend-glass-bg, transparent));
   border-radius: 18px;
   box-shadow: var(--legend-glass-shadow, 0 20px 50px rgba(0, 0, 0, 0.42));
   border: 1px solid var(--legend-glass-border, color-mix(in srgb, var(--border) 70%, transparent));
@@ -7536,6 +7536,45 @@ body.treasure-mode #list {
 .profile-settings-btn {
   justify-content: center;
   gap: 8px;
+}
+
+.profile-guide { min-width: 0; }
+.profile-guide summary {
+  cursor: pointer;
+  list-style: none;
+  min-height: 44px;
+}
+.profile-guide summary::-webkit-details-marker { display: none; }
+.profile-guide summary::after {
+  content: '';
+  inline-size: .45rem;
+  block-size: .45rem;
+  margin-inline-start: auto;
+  border-inline-end: 2px solid currentColor;
+  border-block-end: 2px solid currentColor;
+  transform: rotate(45deg);
+  flex: none;
+}
+.profile-guide details[open] > summary::after,
+.profile-guide[open] > summary::after { transform: rotate(225deg); }
+.profile-guide summary:focus-visible { outline: 2px solid var(--accent); outline-offset: -3px; }
+.profile-guide-topics {
+  margin-block: .5rem;
+  padding-inline: .65rem;
+  border-inline-start: 2px solid var(--accent-soft);
+}
+.profile-guide-topics summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: .75rem;
+  padding: .4rem .5rem;
+  font-weight: 650;
+}
+.profile-guide-topics p {
+  padding: 0 .5rem .65rem;
+  margin: 0;
+  line-height: 1.75;
 }
 
 .main-content {

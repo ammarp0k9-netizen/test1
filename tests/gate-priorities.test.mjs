@@ -66,6 +66,7 @@ function harness(options = {}) {
   };
   let quizWordReads = 0;
   const api = {
+    getGateLessonAccess: async () => ({ allowed: options.lessonComplete !== false }),
     getGateQuizWords: async () => {
       quizWordReads++;
       if (options.quizWordError) throw new Error('تعذر تحميل كلمات الاختبار');
@@ -171,6 +172,13 @@ test('a new gate prioritizes start, start choice, or adding words based on the e
   const joined = harness(); joined.render();
   assert.deepEqual(buttonLabels(joined), ['أضف كلمات البوابة']);
   joined.buttons[0].handlers.click(); assert.deepEqual(joined.calls, [['load', false]]);
+});
+
+test('an incomplete lesson blocks even a direct call to the gate picker', async () => {
+  const h = harness({ lessonComplete: false, gateProgress: { ...study, availableForReviewNowCount: 3 } });
+  assert.equal(await h.openPicker(), false);
+  assert.equal(h.picker, undefined);
+  assert.equal(h.quizWordReads, 0);
 });
 
 test('a due review uses the saved count and the games and cards are locked inside its picker', async () => {

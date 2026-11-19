@@ -179,6 +179,12 @@
     }
   }
 
+  function lessonReminder(context, lesson, gateLabel = '') {
+    const saved = root.LootLinguaGateLessonView?.savedActivity(context, lesson?.state);
+    if (lesson?.allowed || !saved?.activityAt || root.LootLinguaGateLesson.complete(saved.state)) return null;
+    return { ...context, gateLabel, activityAt: saved.activityAt, episodeKey: stableHash(saved.key) };
+  }
+
   async function journeyFacts(options) {
     const api = root.LootLinguaJourneyCloud;
     if (!root.auth?.currentUser || !api?.getActiveJourney) return {};
@@ -194,16 +200,22 @@
         const gate = await root.LootLinguaPublishedContent?.getPublishedGate?.(worldId, rankId, gateId);
         gateLabel = String(gate?.name || gate?.title || gate?.label || '');
       } catch (_) {}
+      const context = { worldId, rankId, gateId };
+      const hasLocalLesson = Boolean(root.LootLinguaGateLessonView?.status(context).state);
+      const lesson = progress?.loadedAt || hasLocalLesson
+        ? await api.getGateLessonAccess?.(context, { progress }).catch(() => null) : null;
+      const reminder = lesson?.confirmed && !progress?.activeClearAttemptId ? lessonReminder(context, lesson, gateLabel) : null;
+      const gateActionsAllowed = lesson?.allowed === true;
       let trusted = null;
       const reviewAction = options?.reason === 'review-action';
-      if (progress?.status === 'learning' || reviewAction) {
+      if (gateActionsAllowed && (progress?.status === 'learning' || reviewAction)) {
         try {
           trusted = await api.getGateNotificationFacts?.(worldId, rankId, gateId, { progress, fresh: reviewAction });
         } catch (_) {}
       }
       const readyAt = timestamp(progress?.readyAt);
       const reviewAt = timestamp(progress?.readinessNextAt);
-      const reviewDue = progress?.status === 'learning' && root.LootLinguaGateRunner?.reviewIsDue?.(progress) === true;
+      const reviewDue = gateActionsAllowed && progress?.status === 'learning' && root.LootLinguaGateRunner?.reviewIsDue?.(progress) === true;
       const unlockedAt = timestamp(progress?.unlockedAt);
       const structuralProgressAt = Math.max(
         timestamp(progress?.loadedAt),
@@ -218,8 +230,13 @@
           worldId, rankId, gateId, gateLabel,
           lastProgressAt: structuralProgressAt,
         },
+        gateLesson: { ...context, allowed: gateActionsAllowed },
+        lessonReminder: reminder,
+        lessonReminderConfirmed: lesson?.confirmed === true,
+        lessonAccess: lesson,
+        pendingLessonWordKeys: gateActionsAllowed ? [] : (progress?.loadedWordKeys || []),
         gatePractice: {
-          actionable: progress?.status === 'learning' && Boolean(progress?.loadedAt),
+          actionable: gateActionsAllowed && progress?.status === 'learning' && Boolean(progress?.loadedAt),
           worldId, rankId, gateId, gateLabel,
           loadedAt: timestamp(progress?.loadedAt),
           newestLinkedAt: timestamp(trusted?.newestLinkedAt || progress?.loadedAt),
@@ -227,13 +244,13 @@
           wordKeys: Array.isArray(trusted?.unpracticedWordKeys) ? trusted.unpracticedWordKeys.map(String) : [],
         },
         gateReady: {
-          ready: progress?.status === 'ready' && readyAt > 0,
+          ready: gateActionsAllowed && progress?.status === 'ready' && readyAt > 0,
           readyAt, worldId, rankId, gateId, gateLabel,
         },
         gateReview: {
           due: reviewDue,
           dueAt: reviewDue && reviewAt <= (root.LootLinguaTestClock?.effectiveNow?.() ?? Date.now()) ? reviewAt : 0,
-          nextAt: progress?.status === 'learning' && !reviewDue ? reviewAt : 0,
+          nextAt: gateActionsAllowed && progress?.status === 'learning' && !reviewDue ? reviewAt : 0,
           episodeKey: `${timestamp(progress?.loadedAt)}:${progress?.runnerReviewCompletedSessionId || 'first'}`,
           worldId, rankId, gateId, gateLabel,
         },
@@ -257,13 +274,15 @@
     const review = typeof root.withWordMasterySnapshot === 'function'
       ? root.withWordMasterySnapshot(() => reviewFacts(words, now))
       : reviewFacts(words, now);
-    const newWords = groupNewWords(review.all, now);
+    const journey = await journeyFacts(options);
+    const pending = new Set(journey.pendingLessonWordKeys || []);
+    const newWords = groupNewWords(review.all.filter(item =>
+      !pending.has(item.key) || item.word.addedFrom !== 'published-gate'), now);
     const quiz = { ...quizFacts(review.all), ...personalQuizFacts(words, ownerId) };
     if (ownerId !== 'guest' && root.LootLinguaNotificationCloud?.latestTrustedQuizAt) {
       try { quiz.lastTrustedQuizAt = Math.max(quiz.lastTrustedQuizAt, await root.LootLinguaNotificationCloud.latestTrustedQuizAt()); } catch (_) {}
     }
     const weakWords = weakFacts(review, now);
-    const journey = await journeyFacts(options);
     const quizView = document.getElementById('quizView');
     const quizOpen = Boolean(quizView && quizView.offsetParent !== null && quizView.style.display !== 'none');
     const feedbackSubmitted = localStorage.getItem(`lootlingua_feedback_submitted_v1_${ownerId}`) === '1';
@@ -280,7 +299,7 @@
       ), 0),
       timestamp(journey.journey?.lastProgressAt)
     );
-    actionCache = {
+    if (String(root.auth?.currentUser?.uid || 'guest') === ownerId) actionCache = {
       dueWordKeys: review.dueWordKeys,
       gateWordKeys: journey.gatePractice?.wordKeys || [],
       newWordKeys: newWords.wordKeys,
@@ -320,6 +339,10 @@
       },
       journey: journey.journey || {},
       journeyComplete: journey.journeyComplete !== false,
+      gateLesson: journey.gateLesson || null,
+      lessonReminder: journey.lessonReminder || null,
+      lessonReminderConfirmed: journey.lessonReminderConfirmed === true,
+      lessonAccess: journey.lessonAccess || null,
       gatePractice: journey.gatePractice || {},
       gateReady: journey.gateReady || {},
       gateReview: journey.gateReview || {},
@@ -337,7 +360,7 @@
     };
   }
 
-  const API = Object.freeze({ timestamp, collect, getActionContext, personalQuizDueAt });
+  const API = Object.freeze({ timestamp, collect, getActionContext, personalQuizDueAt, lessonReminder });
   Object.defineProperty(root, 'LootLinguaNotificationSources', {
     value: API,
     configurable: false,

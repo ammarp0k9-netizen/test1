@@ -17,6 +17,7 @@
 
   function busy() {
     if (document.hidden || root.__lootlinguaAuthResolved === false || root.__entryExperienceActive ||
+        root.LootLinguaGateLessonView?.isOpen?.() ||
         root.__lootlinguaRunnerInputActive || root.hasActiveLearningQuiz?.() || root.__lootlinguaQuizLearningCommitDepth > 0 ||
         document.body.matches('.quiz-active, .published-placement-mode, .journey-auth-active') ||
         document.documentElement.classList.contains('journey-auth-active')) return true;
@@ -44,13 +45,17 @@
   }
 
   function remember(step, choice, keyOwner = owner()) {
+    if (root.LootLinguaGuide && keyOwner === owner()) {
+      root.LootLinguaGuide.acknowledge(step, choice === 'completed' ? 'seen' : 'dismissed');
+      return;
+    }
     if (seen(step, keyOwner)) return;
     const key = prefix + step + ':' + keyOwner;
     memory.add(key);
     try { localStorage.setItem(key, choice); } catch (_) { /* Keep the choice in this page. */ }
   }
 
-  function covered(step) { return seen(step) || legacy()?.hasCoveredStep?.(step) === true; }
+  function covered(step) { return root.LootLinguaGuide?.covered(step) ?? (seen(step) || legacy()?.hasCoveredStep?.(step) === true); }
   function close() { root.LootLinguaPopover?.closeIf?.(id, { silent: true }); }
   function ownPopover() { return root.LootLinguaPopover?.getActiveId?.() === id; }
   function reset() { request = null; close(); }
@@ -139,6 +144,7 @@
   const generalModes = () => view() === 'quiz' && setupOrigin === 'general' && visible(get('#quizViewSetup'));
 
   function dictionaryEntry() {
+    if (root.LootLinguaGuide) return;
     if (onDictionary()) dictionaryLesson();
     else {
       const needsDictionary = () => {
@@ -170,6 +176,7 @@
   }
 
   root.addEventListener('lootlingua:profile-opened', () => {
+    if (root.LootLinguaGuide) return;
     if (number('#xpValue') > 0 && !covered('xp')) offer('xp', { when: profileOpen });
     else offer('profile', { selector: '#profileModalTitle', text: 'هنا تشوف رتبتك وخبرتك وتلاقي إعداداتك.', when: profileOpen });
   });
@@ -229,6 +236,9 @@
     'toast-idle', 'quiz-learning-commit-complete', 'initial-data-ready', 'auth-dialog-closed', 'feature-discovery-change']) {
     root.addEventListener('lootlingua:' + name, schedule);
   }
+  root.addEventListener('lootlingua:guide-coverage-changed', () => {
+    if (request && covered(request.step)) reset();
+  });
   root.addEventListener('lootlingua:auth-dialog-opened', () => {
     if (ownPopover() && request) request.shown = false;
     close();
@@ -244,7 +254,7 @@
   document.addEventListener('click', event => {
     const target = event.target;
     if (target.closest?.('#' + id)) return;
-    if (target.closest?.('#onboardingResume, .help-btn, [aria-label^="شرح"], [onclick*="showKeyboardShortcutsModal"]')) {
+    if (target.closest?.('#lootlinguaGuide, #onboardingResume, .help-btn, [aria-label^="شرح"], [onclick*="showKeyboardShortcutsModal"]')) {
       reset(); return;
     }
     if (target.closest?.('#addFormToggle')) { reset(); dictionaryLesson(); return; }
@@ -260,13 +270,14 @@
       ['quests', '#dailyQuestsBtn', () => visible(get('#dailyQuestsSheet')) && Boolean(get('#dailyQuestsList li')), '#dailyQuestsResetHint'],
     ].find(([, selector]) => target.closest?.(selector));
     if (context) {
+      if (root.LootLinguaGuide && !['ranks', 'quests', 'stats'].includes(context[0])) return;
       const [step, , when, selector, text] = context;
       offer(step, { when, ...(selector && { selector }), ...(text && { text }) });
     }
   });
   document.addEventListener('scroll', event => {
     schedule();
-    if (!profileOpen() || !event.target?.closest?.('#profileModal') || ownPopover()) return;
+    if (root.LootLinguaGuide || !profileOpen() || !event.target?.closest?.('#profileModal') || ownPopover()) return;
     for (const [step, selector] of [
       ['stats', '.profile-stats-mini'], ['titles', '#profileTitlePicker'],
       ['appearance', '#profileAppearanceSection'], ['settings', '.profile-settings-section'],
@@ -282,6 +293,7 @@
     }
   }, true);
   document.addEventListener('pointerover', event => {
+    if (root.LootLinguaGuide) return;
     if (event.target?.closest?.('#streakWrap') && number('#streakCount') > 0) {
       offer('activity', { selector: '#streakWrap', when: () => number('#streakCount') > 0 });
     }

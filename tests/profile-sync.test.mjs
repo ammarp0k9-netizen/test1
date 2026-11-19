@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 import vm from 'node:vm';
+import { GUIDE_TOUR, guideStorageKey } from '../js/guide-coverage.mjs';
 import { applyProfileIntent, profileOperationId, profileStorageIntents, mergeOnboardingProgress, treasureSlots } from '../js/profile-sync-policy.mjs';
 
 const source = (await readFile(new URL('../js/profile-cloud.js', import.meta.url), 'utf8')).replace(/^import .*;\r?\n/gm, '');
@@ -69,7 +70,7 @@ function client(db, options = {}) {
   };
   vm.runInNewContext(source, {
     window: root, localStorage, sessionStorage: storage(), Date, Math, JSON,
-    applyProfileIntent, profileOperationId, profileStorageIntents, mergeOnboardingProgress, queueMicrotask,
+    applyProfileIntent, profileOperationId, profileStorageIntents, mergeOnboardingProgress, GUIDE_TOUR, guideStorageKey, queueMicrotask,
     console: { error: (...args) => errors.push(args) },
     CustomEvent: class { constructor(type, init) { this.type = type; this.detail = init.detail; } },
     getApps: () => [{}], getFirestore: () => db, getAuth: () => auth, onAuthStateChanged() {},
@@ -462,4 +463,16 @@ test('a newer successful appearance cannot later be reverted by an older failed 
   await a.root.saveProfilePreferencesToCloud({theme:'ocean'});blocked=false;
   assert.equal(await a.root.saveProfilePreferencesToCloud({theme:'golden'}),true);await a.root.flushProfileIntents();
   assert.equal(db.profile().theme,'golden');assert.equal(a.pending.length,0);
+});
+
+test('guide coverage merges across devices and changes only with deliberate acknowledgement', async () => {
+  const db = database({});
+  const first = client(db), second = client(db);
+  const coverage = topics => ({ version: 1, topics });
+  await first.root.commitProfileIntent({ type: 'onboarding', tour: GUIDE_TOUR, state: coverage({ 'gate-review': 'seen', unknown: 'seen' }) });
+  await second.root.commitProfileIntent({ type: 'onboarding', tour: GUIDE_TOUR, state: coverage({ 'gate-review': 'dismissed', dictionary: 'dismissed' }) });
+  await second.root.commitProfileIntent({ type: 'onboarding', tour: GUIDE_TOUR, state: coverage({ dictionary: 'seen' }) });
+  assert.deepEqual(db.profile().onboardingProgress[GUIDE_TOUR].topics, { 'gate-review': 'seen', dictionary: 'seen' });
+  assert.equal(JSON.parse(second.localStorage.getItem(guideStorageKey('A'))).topics['gate-review'], 'seen');
+  assert.equal(second.localStorage.getItem(guideStorageKey('B')), null);
 });

@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import vm from 'node:vm';
 import { readFile } from 'node:fs/promises';
 
 const [smart, dictionary, discoveryContract, discovery, mini] = await Promise.all([
@@ -238,4 +239,38 @@ test('mini tours start on the appropriate unlocked surface, keep checkpoints and
   h.element('#customWorldNameInput'); h.emit('custom-world-form-opened'); h.flush(); assert.match(h.title, /مجموعة/);
   assert.equal(h.opens, 0);
   assert.equal(h.root.LootLinguaFeatureDiscovery.getState().features['custom-worlds'].step, 3);
+});
+
+test('the shared guide migrates completed and explicitly dismissed topics only for their owner', async () => {
+  const { GUIDE_TOUR, GUIDE_TOPICS, guideStorageKey, readGuideCoverage, mergeGuideCoverage } = await import('../js/guide-coverage.mjs');
+  const guideModule = (await readFile(new URL('../js/lootlingua-guide.js', import.meta.url), 'utf8')).replace(/^import .*;\r?\n/m, '');
+  const values = new Map([
+    ['lootlingua:contextual-onboarding:v1:gate-wait:user:A', 'completed'],
+    ['lootlingua:contextual-onboarding:v1:search:user:A', 'skipped'],
+    ['lootlingua:contextual-onboarding:v1:meaning:user:A', 'shown'],
+  ]);
+  const storage = { getItem: key => values.get(key), setItem: (key, value) => values.set(key, value), removeItem: key => values.delete(key) };
+  const listeners = new Map();
+  const events = [];
+  const root = { auth: { currentUser: { uid: 'A' } }, addEventListener: (name, cb) => listeners.set(name, cb),
+    dispatchEvent: event => events.push(event.type) };
+  vm.runInNewContext(guideModule, { window: root, document: { getElementById: () => null },
+    localStorage: storage, CustomEvent: class { constructor(type) { this.type = type; } },
+    GUIDE_TOUR, GUIDE_TOPICS, guideStorageKey, readGuideCoverage, mergeGuideCoverage });
+  assert.deepEqual(JSON.parse(storage.getItem(guideStorageKey('A'))).topics, { 'gate-wait': 'seen', search: 'dismissed' });
+  assert.equal(root.LootLinguaGuide.covered('meaning'), false);
+  root.LootLinguaGuide.acknowledge('search', 'seen');
+  assert.equal(JSON.parse(storage.getItem(guideStorageKey('A'))).topics.search, 'seen');
+  root.auth.currentUser = { uid: 'B' };
+  listeners.get('lootlingua:auth-state')();
+  assert.equal(root.LootLinguaGuide.covered('gate-wait'), false);
+  assert.equal(storage.getItem(guideStorageKey('B')), undefined);
+  root.auth.currentUser = null;
+  listeners.get('lootlingua:auth-state')();
+  root.LootLinguaGuide.acknowledge('lesson');
+  root.auth.currentUser = { uid: 'ANON', isAnonymous: true };
+  listeners.get('lootlingua:auth-state')();
+  assert.equal(JSON.parse(storage.getItem(guideStorageKey('ANON'))).topics.lesson, 'seen');
+  assert.equal(storage.getItem(guideStorageKey()), undefined);
+  assert.ok(events.includes('lootlingua:guide-coverage-changed'));
 });

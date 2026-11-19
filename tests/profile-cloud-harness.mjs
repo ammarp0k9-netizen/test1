@@ -1,5 +1,6 @@
 import { readFile } from 'node:fs/promises';
 import vm from 'node:vm';
+import { GUIDE_TOUR, guideStorageKey } from '../js/guide-coverage.mjs';
 import { applyProfileIntent, profileOperationId, profileStorageIntents, mergeOnboardingProgress } from '../js/profile-sync-policy.mjs';
 
 const source = (await readFile(new URL('../js/profile-cloud.js', import.meta.url), 'utf8'))
@@ -108,7 +109,7 @@ export function createProfileHarness(options = {}) {
     getApps: () => [{}], getFirestore: () => ({}), getAuth: () => auth,
     onAuthStateChanged: (_auth, callback) => { authObserver = callback; },
     doc: (_db, ...parts) => parts.join('/'), getDoc, setDoc, runTransaction,
-    applyProfileIntent, profileOperationId, profileStorageIntents, mergeOnboardingProgress, queueMicrotask,
+    applyProfileIntent, profileOperationId, profileStorageIntents, mergeOnboardingProgress, GUIDE_TOUR, guideStorageKey, queueMicrotask,
     onSnapshot: () => () => {},
     setTimeout: (callback) => { const id = ++timerSequence; timers.set(id, callback); return id; },
     clearTimeout: (id) => timers.delete(id),

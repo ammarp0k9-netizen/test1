@@ -1212,6 +1212,11 @@ async function ensureQuizEvidenceSession(user, input, entries) {
     window.LootLinguaWordLifecycle?.wordKeyOf?.(entry.word)
   ).filter(Boolean)));
   const review = officialReviewGate(input);
+  const lesson = window.LootLinguaGateLesson;
+  const gate = lesson?.gateContext(input.gateContext || input.officialReviewGate || input);
+  if (lesson?.hasGateIntent(input) && !gate) throw journeyCloudError('lesson/missing-gate');
+  if (review && lesson && lesson.keyFor(gate) !== lesson.keyFor(review)) throw journeyCloudError('lesson/gate-mismatch');
+  const gateFields = gate ? { lessonWorldId: gate.worldId, lessonRankId: gate.rankId, lessonGateId: gate.gateId } : {};
   const reviewFields = review ? {
     officialReviewWorldId: review.worldId,
     officialReviewRankId: review.rankId,
@@ -1228,6 +1233,9 @@ async function ensureQuizEvidenceSession(user, input, entries) {
     if (snapshot.exists()) {
       const saved = snapshot.data() || {};
       if (
+        (saved.lessonGateId && (
+          saved.lessonWorldId !== gate?.worldId || saved.lessonRankId !== gate?.rankId || saved.lessonGateId !== gate?.gateId
+        )) ||
         saved.status !== 'completed' ||
         saved.sourceType !== sourceType ||
         String(saved.privateWorldId || '') !== privateWorldId ||
@@ -1254,6 +1262,7 @@ async function ensureQuizEvidenceSession(user, input, entries) {
       totalCount: wordKeys.length,
       correctCount: correctWordKeys.length,
       evidenceVersion: evidenceCore().EVIDENCE_VERSION,
+      ...gateFields,
       ...reviewFields,
       completedAt: serverTimestamp(),
     });
@@ -1558,6 +1567,104 @@ async function gateClearBundle(worldId, rankId, gateId, attempt) {
   };
 }
 
+function gateLessonRef(uid, { worldId, rankId, gateId }) {
+  return doc(gateProgressRef(uid, worldId, rankId, gateId), 'lesson', 'progress');
+}
+
+async function getGateLessonCutoff() {
+  const release = await getDoc(doc(db, 'releaseConfig', 'gateLesson'));
+  return release.data() || {};
+}
+
+async function getGateLessonAccess(context, options = {}) {
+  const user = requireUser();
+  const { worldId, rankId, gateId } = context;
+  const lesson = window.LootLinguaGateLesson;
+  const [snapshot, progress] = await Promise.all([
+    getDoc(gateLessonRef(user.uid, context)),
+    options.progress || getGateProgress(worldId, rankId, gateId, { force: true }),
+  ]);
+  const state = snapshot.exists() ? snapshot.data() : null;
+  const result = allowed => {
+    if (auth.currentUser?.uid !== user.uid) throw journeyCloudError('journey/auth-changed');
+    return { allowed, state, confirmed: !snapshot.metadata?.fromCache && !snapshot.metadata?.hasPendingWrites };
+  };
+  if (!progress?.loadedAt) return result(false);
+  if (!snapshot.metadata?.hasPendingWrites && lesson.complete(state, progress.loadedContentWordIds)) return result(true);
+  if (!options.session?.id && !['ready', 'cleared'].includes(progress.status)) return result(false);
+  const { activatedAt: cutoff, captureStartedAt } = await getGateLessonCutoff();
+  if (!lesson.time(cutoff)) return result(false);
+  if (options.session?.id) {
+    const meta = ['users', user.uid, 'meta'];
+    const [draftSnapshot, sealSnapshot] = await Promise.all([
+      getDoc(doc(db, ...meta, 'active_quiz_session')),
+      getDoc(doc(db, ...meta, 'legacy_gate_quiz')),
+    ]);
+    const draft = draftSnapshot.data();
+    const seal = sealSnapshot.data();
+    const draftGate = lesson.gateContext(draft) || lesson.gateContext(draft?.officialReviewGate);
+    if (lesson.isLegacy(seal?.capturedAt, captureStartedAt) && lesson.time(captureStartedAt) <= lesson.time(cutoff) &&
+        seal?.sessionId === options.session.id && draft?.id === seal.sessionId &&
+        seal.source === draft.source && seal.source === options.session.source &&
+        seal.mode === draft.mode && seal.mode === options.session.mode && lesson.isLegacy(seal.capturedAt, cutoff) &&
+        draftGate && lesson.keyFor(draftGate) === lesson.keyFor(context) &&
+        lesson.keyFor(seal) === lesson.keyFor(context) &&
+        sameEvidenceWordKeys(seal.dueWordKeys, options.session.officialReviewDueWordKeys) &&
+        sameEvidenceWordKeys(seal.wordKeys, options.session.words?.map(word => word.wordKey) || options.session.selectedWordKeys)) return result(true);
+  }
+  if (progress.status === 'cleared' && progress.clearedBy === 'gate-clear' &&
+      lesson.isLegacy(progress.clearedAt, cutoff)) return result(true);
+  if (progress.status !== 'ready' || !lesson.isLegacy(progress.readyAt, cutoff)) return result(false);
+  const [proof, gate] = await Promise.all([
+    getDoc(doc(gateProgressRef(user.uid, worldId, rankId, gateId), 'readiness', 'proof')),
+    contentApi().getPublishedGate(worldId, rankId, gateId),
+  ]);
+  const ids = progress.loadedContentWordIds || [];
+  return result(ids.length > 0 && gate?.status === 'published' &&
+    lesson.sameWords(gate.publishedWordIds || ids, ids) && ids.every(id => proof.data()?.wordIds?.includes(id)));
+}
+
+async function saveGateLessonState(context, candidate) {
+  const user = requireUser();
+  const lesson = window.LootLinguaGateLesson;
+  const target = gateLessonRef(user.uid, context);
+  return runTransaction(db, async transaction => {
+    const snapshot = await transaction.get(target);
+    if (auth.currentUser?.uid !== user.uid) throw journeyCloudError('journey/auth-changed');
+    const current = snapshot.exists() ? snapshot.data() : null;
+    if (current && !lesson.sameWords(current.wordIds, candidate.wordIds)) {
+      throw journeyCloudError('lesson/content-changed', 'The published word set has changed.');
+    }
+    const prior = lesson.upgrade(current, { confirmed: true });
+    const state = lesson.merge(prior, candidate);
+    if (current?.version !== state.version || lesson.checkpointKey(prior) !== lesson.checkpointKey(state)) {
+      transaction.set(target, { ...state, updatedAt: serverTimestamp() });
+    }
+    return state;
+  });
+}
+
+async function getLegacyLessonWordIds(context, progress) {
+  const lesson = window.LootLinguaGateLesson;
+  if (!progress?.loadedAt) return [];
+  const { activatedAt: cutoff } = await getGateLessonCutoff();
+  if (!lesson.isLegacy(progress.loadedAt, cutoff)) return [];
+  const { worldId, rankId, gateId } = context;
+  const user = requireUser();
+  const snapshot = await getDoc(doc(gateProgressRef(user.uid, worldId, rankId, gateId), 'lesson', 'legacyCredit'));
+  if (auth.currentUser?.uid !== user.uid) return [];
+  const grant = snapshot.data();
+  const ids = progress.loadedContentWordIds;
+  if (!lesson.isLegacy(grant?.capturedAt, cutoff) || !lesson.sameWords(grant.wordIds, ids)) return [];
+  return ids.filter(id => grant.creditedIds?.includes(id));
+}
+
+async function requireGateLessonAccess(context, options) {
+  if (!(await getGateLessonAccess(context, options)).allowed) {
+    throw journeyCloudError('lesson/incomplete', 'Complete this lesson before opening the gate review.');
+  }
+}
+
 async function startGateClearAttempt(worldId, rankId, gateId) {
   const user = requireUser();
   const [journey, progress, gate, words] = await Promise.all([
@@ -1579,6 +1686,7 @@ async function startGateClearAttempt(worldId, rankId, gateId) {
       return gateClearBundle(worldId, rankId, gateId, active);
     }
   }
+  await requireGateLessonAccess({ worldId, rankId, gateId }, { progress });
   const attemptId = createGateClearAttemptId(worldId, rankId, gateId);
   const passRatio = gateClearCore().resolvePassThreshold(gate, schemaApi());
   const seed = gateClearCore().createSessionSeed({
@@ -2344,6 +2452,10 @@ async function getGateQuizWords(worldId, rankId, gateId, options) {
       ? await getDoc(doc(db, 'users', user.uid, 'words', legacyWordId))
       : null;
     const legacy = legacySnapshot?.exists() ? legacySnapshot.data() || {} : {};
+    const meaning = value => String(value || '').trim().normalize('NFKC');
+    const lessonHistory = options?.lessonHistory ? {
+      lessonMeaningMatches: Boolean(word.translation && meaning(word.translation) === meaning(canonical.translation || legacy.meaning)),
+    } : {};
     return {
       ...word,
       ...canonical,
@@ -2355,6 +2467,7 @@ async function getGateQuizWords(worldId, rankId, gateId, options) {
       word: word.word || canonical.word || legacy.word || legacy.text || '',
       meaning: word.translation || canonical.meaning || canonical.translation || legacy.meaning || legacy.translation || '',
       translation: word.translation || canonical.translation || legacy.translation || legacy.meaning || '',
+      ...lessonHistory,
     };
   }));
   return trustedWords.filter(Boolean);
@@ -4765,6 +4878,7 @@ function installQuizEvidenceBeforeRewardHook() {
       completed: true,
       entries,
       projectReadiness: false,
+      gateContext: context.gateContext,
       officialReviewGate: context.officialReviewGate || null,
       officialReviewDueWordKeys: context.officialReviewDueWordKeys || [],
     });
@@ -4836,6 +4950,9 @@ const API = Object.freeze({
   findNewGateWords,
   getGateMasteryView,
   getGateQuizWords,
+  getGateLessonAccess,
+  saveGateLessonState,
+  getLegacyLessonWordIds,
   getGateNotificationFacts,
   subscribeGateProgress,
   recordQuizEvidenceBatch,

@@ -275,29 +275,30 @@ function migrationHarness(options = {}) {
     legacyWordPayload: (uid, word) => ({ userId: uid, word: word.word }),
     sourceDocumentPayload: (value) => value,
     doc: (base, ...parts) => typeof base === 'string' ? [base, ...parts].join('/') : parts.join('/'),
-    async getDoc(path) {
-      calls.reads.push(path);
-      readStarted.resolve();
-      if (options.readGate) await options.readGate;
-      return { exists: () => options.existing !== false };
-    },
     async upsertUserWordWithSource(input) {
       calls.upserts.push(input);
       upsertStarted.resolve();
       if (options.upsertGate) await options.upsertGate;
       return { status: 'already-linked', wordId: `word-${calls.upserts.length}` };
     },
-    writeBatch() {
+    async runTransaction(_db, update) {
       const writes = [];
-      return {
-        create(path, value) { writes.push({ path, value }); },
-        async commit() {
-          calls.batches.push(writes);
-          commitStarted.resolve();
-          if (options.commitGate) await options.commitGate;
-          if (options.commitError) throw options.commitError;
+      const result = await update({
+        async get(path) {
+          calls.reads.push(path);
+          readStarted.resolve();
+          if (options.readGate) await options.readGate;
+          return { exists: () => options.existing !== false };
         },
-      };
+        set(path, value) { writes.push({ path, value }); },
+      });
+      if (writes.length) {
+        calls.batches.push(writes);
+        commitStarted.resolve();
+        if (options.commitGate) await options.commitGate;
+        if (options.commitError) throw options.commitError;
+      }
+      return result;
     },
   });
   vm.runInContext(schemaSource, context);
@@ -335,6 +336,13 @@ test('guest migration pins the owner on every upsert across chunks and batch-con
   }
 });
 
+function waitForMigrationPhase(phase, pending) {
+  return Promise.race([
+    phase.promise,
+    pending.then(() => { throw new Error('Migration finished before the expected phase'); }),
+  ]);
+}
+
 for (const aba of [false, true]) {
   const switchName = aba ? 'ABA switch' : 'account switch';
   for (const phase of ['read', 'upsert']) {
@@ -342,7 +350,7 @@ for (const aba of [false, true]) {
       const gate = deferred();
       const h = migrationHarness({ [phase === 'read' ? 'readGate' : 'upsertGate']: gate.promise });
       const pending = h.start();
-      await (phase === 'read' ? h.readStarted.promise : h.upsertStarted.promise);
+      await waitForMigrationPhase(phase === 'read' ? h.readStarted : h.upsertStarted, pending);
       h.switchOwner(aba);
       gate.reject(Object.assign(new Error('Denied'), { code: 'permission-denied' }));
       await assert.rejects(pending, { code: 'guest-migration/identity-changed' });
@@ -355,7 +363,7 @@ for (const aba of [false, true]) {
     const gate = deferred();
     const h = migrationHarness({ readGate: gate.promise });
     const pending = h.start();
-    await h.readStarted.promise;
+    await waitForMigrationPhase(h.readStarted, pending);
     h.switchOwner(aba);
     gate.resolve();
     await assert.rejects(pending, { code: 'guest-migration/identity-changed' });
@@ -368,7 +376,7 @@ for (const aba of [false, true]) {
     const gate = deferred();
     const h = migrationHarness({ upsertGate: gate.promise });
     const pending = h.start();
-    await h.upsertStarted.promise;
+    await waitForMigrationPhase(h.upsertStarted, pending);
     h.switchOwner(aba);
     gate.resolve();
     await assert.rejects(pending, { code: 'guest-migration/identity-changed' });
@@ -382,7 +390,7 @@ for (const aba of [false, true]) {
       const gate = deferred();
       const h = migrationHarness({ existing: false, commitGate: gate.promise });
       const pending = h.start();
-      await h.commitStarted.promise;
+      await waitForMigrationPhase(h.commitStarted, pending);
       h.switchOwner(aba);
       if (commitRejects) gate.reject(Object.assign(new Error('Conflict'), { code: 'already-exists' }));
       else gate.resolve();

@@ -138,10 +138,16 @@
       const desc = document.createElement('span'); desc.textContent = 'صوّب وقاتل وفكّ رمز محطة الطاقة بكلمات هذه البوابة. تدريب دون رفع الإتقان.';
       const button = document.createElement('button'); button.className = 'gate-runner-launch'; button.type = 'button'; button.textContent = 'ادخل الساحة';
       button.disabled = practiceLocked();
-      button.addEventListener('click', () => { void launch(button, {
-        source: `كلمات بوابة ${title || ''}`.trim(), isSourceCurrent, practiceLocked,
-        words: () => window.LootLinguaPublishedContent.listAllPublishedGateWords(worldId, rankId, gateId),
-      }); });
+      button.addEventListener('click', async () => {
+        const owner = window.auth?.currentUser?.uid;
+        const context = { worldId, rankId, gateId };
+        const access = await window.LootLinguaJourneyCloud?.getGateLessonAccess(context).catch(() => null);
+        if (owner !== window.auth?.currentUser?.uid || !access?.allowed) return;
+        void launch(button, {
+          source: 'كلمات بوابة ' + (title || ''), isSourceCurrent, practiceLocked,
+          words: () => window.LootLinguaPublishedContent.listAllPublishedGateWords(worldId, rankId, gateId),
+        });
+      });
       const summary = document.createElement('small'); summary.className = 'gate-runner-cosmetic'; summary.dataset.botsStats = '';
       const data = progress(); summary.textContent = `${data.coins} عملة · أفضل نتيجة ${data.best} · ${data.bosses} زعيم`;
       copy.append(heading, desc, summary); card.append(copy, button);

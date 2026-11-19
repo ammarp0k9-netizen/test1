@@ -80,12 +80,27 @@ test('partial gate loads remain retryable and learning is written only after ful
   assert.match(worlds, /إعادة المحاولة/);
 });
 
-test('a loaded learning gate opens its Gate-only quiz picker without showing the general quiz', () => {
+test('a loaded gate offers its lesson before the gate-only quiz picker and keeps personal navigation independent', () => {
+  const panel = worlds.slice(worlds.indexOf('function makePublishedGateJourneyPanel'), worlds.indexOf('function appendPublishedHeader'));
+  const guardStart = panel.indexOf('!lessonStatus.allowed');
+  const guardEnd = panel.indexOf('return panel;', guardStart);
+  assert.ok(guardStart > 0 && guardEnd > guardStart);
+  const guard = panel.slice(guardStart, guardEnd);
+  assert.match(guard, /أكمل تعلّم كلماتك/);
+  assert.match(guard, /openPublishedLesson\(world, rank, gate, progress, isCurrentGate\)/);
+  const shared = worlds.slice(worlds.indexOf('function openPublishedLesson('), worlds.indexOf('window.resumePublishedLearning'));
+  assert.match(shared, /LootLinguaGateLessonView\?\.open\(/);
+  assert.match(shared, /return openPublishedLesson\(world, rank, gate, gateProgress, current\)/);
+  assert.match(shared, /auth\?\.currentUser\?\.uid === expectedUid/);
+  assert.doesNotMatch(guard, /openPublishedGateQuizPicker/);
   const learningActions = worlds.slice(
     worlds.indexOf("} else if (state === 'learning')"),
     worlds.indexOf("} else if (state === 'ready')")
   );
-  assert.match(learningActions, /متابعة التعلم/);
+  assert.match(learningActions, /راجع كلمات البوابة/);
+  const picker = worlds.slice(worlds.indexOf('async function openPublishedGateQuizPicker'), worlds.indexOf('// Smart Journey notifications'));
+  assert.match(picker, /getGateLessonAccess\(lesson\)[\s\S]*?return false/);
+  assert.ok(picker.indexOf('getGateLessonAccess(lesson)') < picker.indexOf('shell.innerHTML'));
   assert.match(learningActions, /openPublishedGateQuizPicker\(world, rank, gate\)/);
   assert.doesNotMatch(learningActions, /window\.loadQuizView\(\)/);
   assert.doesNotMatch(learningActions, /window\.loadPersonalDictionary\(\)/);
@@ -157,7 +172,8 @@ test('published UI displays lock, load, learning, and new-word synchronization s
   assert.match(worlds, /published-card-journey-\$\{journeyState\}/);
   assert.match(worlds, /أكمل البوابة السابقة لفتحها/);
   assert.match(worlds, /تحميل البوابة/);
-  assert.match(worlds, /متابعة التعلم/);
+  assert.match(worlds, /أكمل تعلّم كلماتك/);
+  assert.match(worlds, /راجع كلمات البوابة/);
   assert.match(worlds, /توجد كلمات جديدة في هذه البوابة/);
   assert.match(worlds, /مزامنة الكلمات الجديدة/);
   assert.doesNotMatch(worlds, /from "https:\/\/www\.gstatic\.com\/firebasejs/);

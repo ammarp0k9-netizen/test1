@@ -23,25 +23,7 @@
     intentConsuming: false,
     authPromptFocus: null,
     legacyPreferences: null,
-    previewGeneration: 0,
-    worldsPreview: { status: 'idle', items: [], error: null },
-    structurePreview: {
-      status: 'idle',
-      worldId: '',
-      model: null,
-      error: null,
-      selectedRankId: '',
-      gatesStatus: 'idle',
-      gates: [],
-      selectedGateId: '',
-      gateStatus: 'idle',
-      gatePreview: null,
-      gateError: null,
-    },
-    returnPreview: { status: 'idle', worldId: '', model: null, error: null },
-    guestFirstRouteHandled: false,
-    readingStep: '',
-    readUntil: 0,
+    returnedOwner: '',
   };
 
   function api() {
@@ -432,20 +414,6 @@
     };
   }
 
-  async function routeGuestDirectlyToLearning(action) {
-    if (!action) return;
-    try {
-      const destination = await openEntryDestination(action.id, action);
-      if (destination?.focusWordInput) {
-        root.showToast?.('ابدأ بالبحث عن كلمة ثم أضفها إلى قاموسك.', 'info', 4200);
-        setTimeout(() => document.getElementById('wordInput')?.focus(), 0);
-      }
-    } catch (_) {
-      // A missing optional destination must not hold the initial loading UI.
-      // The normal app navigation remains available as the safe fallback.
-    }
-  }
-
   function boot() {
     const owner = `${runtime.authEpoch}:${root.__lootlinguaAuthUser?.uid || 'guest'}`;
     if (runtime.bootRequest?.owner === owner) return runtime.bootRequest.promise;
@@ -464,14 +432,6 @@
     const token = ++runtime.bootToken;
     const user = root.__lootlinguaAuthUser || null;
     runtime.user = user;
-    runtime.previewGeneration += 1;
-    runtime.worldsPreview = { status: 'idle', items: [], error: null };
-    runtime.structurePreview = {
-      status: 'idle', worldId: '', model: null, error: null,
-      selectedRankId: '', gatesStatus: 'idle', gates: [],
-      selectedGateId: '', gateStatus: 'idle', gatePreview: null, gateError: null,
-    };
-    runtime.returnPreview = { status: 'idle', worldId: '', model: null, error: null };
     if (user) {
       claimGuestPendingIntentForUser(user);
       claimGuestThemeForUser(user);
@@ -590,47 +550,34 @@
     });
     runtime.baselinePreferences = baselinePreferences(user, entryState, profileSnapshot);
 
-    if (user && !entryState && hasGuestLearningData) {
-      // Do not manufacture completion for a guest who has never taken the
-      // account Entry route. A single resumable destination preserves their
-      // learning data and avoids replaying the setup from the first step.
-      entryState = api().normalizeEntryState({
-        ...api().createEntryDraft(runtime.presentation, existingPreferences(user, null, profileSnapshot)),
-        currentStep: 'destination',
-        journeyStatus: 'structure-explored',
-        source: 'guest-migration',
-      });
-      persistLocalState(entryState, user);
-    }
-
-    // Preserve a returning guest's actual destination, but give a truly new
-    // guest the same original welcome → interests → public-World journey as a
-    // new account.  This replaces neither saved learning data nor the
-    // separate Guided First Journey that begins only after World selection.
-    if (!user && !entryState && !runtime.guestFirstRouteHandled) {
-      runtime.guestFirstRouteHandled = true;
-      if (runtime.presentation.classification !== 'brand-new') {
-        const hasWords = Number(signals.wordCount || 0) > 0 || Number(signals.srsCount || 0) > 0;
-        const guestAction = hasWords || signals.activeJourney || signals.resumableQuiz
-          ? runtime.action
-          : { id: 'new-user-start' };
-        runtime.state = null;
-        announceEntryState();
-        close({ silent: true });
-        completeStartup();
-        await routeGuestDirectlyToLearning(guestAction);
-        return;
-      }
-    }
-
-    if (entryState && !api().shouldPresent(entryState)) {
-      runtime.state = entryState;
+    const returning = presentation.classification !== 'brand-new';
+    const hasLearningProgress = signals.hasMeaningfulJourneyProgress || signals.resumableQuiz;
+    if (terminalEntry || (returning && (!entryState || hasLearningProgress || entryState.audience !== 'new'))) {
+      runtime.state = entryState || api().createEntryDraft(
+        runtime.presentation,
+        existingPreferences(user, entryState, profileSnapshot)
+      );
       announceEntryState();
       close({ silent: true });
       completeStartup();
-      queueMicrotask(() => consumePendingJourneyIntent());
+      const owner = identityFor(user).uid || 'guest';
+      if (runtime.returnedOwner !== owner) {
+        runtime.returnedOwner = owner;
+        const resumed = await consumePendingJourneyIntent();
+        const route = typeof parseAppRoute === 'function' ? parseAppRoute() : null;
+        const explicitRoute = route && (route.kind !== 'view' || route.key !== 'personal');
+        if (!resumed && !explicitRoute && token === runtime.bootToken) {
+          if (signals.resumableQuiz) root.loadQuizView?.();
+          else if (signals.activeJourney?.worldId) {
+            await root.resumePublishedLearning?.(signals.activeJourney.worldId);
+          } else if (signals.journeyDestination?.classification === 'world-completed') {
+            await root.loadWorldsView?.();
+          }
+        }
+      }
       return;
     }
+
     runtime.state = entryState || api().createEntryDraft(
       runtime.presentation,
       existingPreferences(user, entryState, profileSnapshot)
@@ -644,21 +591,6 @@
     announceEntryState();
     open();
     completeStartup();
-    if (user && runtime.state.currentStep === 'destination') {
-      const resumed = await consumePendingJourneyIntent({ allowWhileOpen: true });
-      if (resumed && token === runtime.bootToken && runtime.state?.status === 'in-progress') {
-        try {
-          const completed = api().transitionState(runtime.state, { type: 'complete' }, Date.now());
-          await commitTerminalState(completed, 'جارٍ إكمال طلبك…', { applyAppearance: true });
-          close();
-        } catch (error) {
-          const status = document.getElementById('entryExperienceStatus');
-          if (status) status.textContent = error?.code === 'entry/profile-write-failed'
-            ? 'نُفّذ طلبك، لكن تعذّر حفظ المظهر. بقيت التجربة مفتوحة لتأكيد الإكمال.'
-            : 'نُفّذ طلبك، لكن تعذّر تأكيد اكتمال التجربة. بقيت مفتوحة للمحاولة مرة أخرى.';
-        }
-      }
-    }
   }
 
   function rootElement() {
@@ -686,7 +618,7 @@
   }
 
   function stepIndicator(step) {
-    const order = ['welcome', 'interests', 'theme', 'worlds', 'journey', 'destination'];
+    const order = api().STEPS;
     const index = Math.max(0, order.indexOf(step)) + 1;
     return `الخطوة ${index} من ${order.length}`;
   }
@@ -723,7 +655,7 @@
         <p id="entryInterestHint" class="entry-helper${selected.size ? ' ready' : ''}">${selected.size ? `اخترت ${selected.size} — يمكنك اختيار أكثر من اهتمام` : 'اختر اهتمامًا واحدًا على الأقل، أو تخطَّ هذا السؤال'}</p>
         <div class="entry-actions">
           ${runtime.settingsMode ? '' : '<button type="button" class="entry-secondary" data-entry-action="skip-interests">تخطي الاهتمامات</button>'}
-          <button type="button" class="entry-primary" data-entry-action="continue-interests" ${selected.size ? '' : 'disabled'}>${runtime.settingsMode ? 'حفظ الاهتمامات' : 'عاين الثيم'} <i class="fa-solid fa-arrow-left" aria-hidden="true"></i></button>
+          <button type="button" class="entry-primary" data-entry-action="continue-interests" ${selected.size ? '' : 'disabled'}>${runtime.settingsMode ? 'حفظ الاهتمامات' : 'متابعة'} <i class="fa-solid fa-arrow-left" aria-hidden="true"></i></button>
         </div>
       </footer>
     `;
@@ -741,18 +673,10 @@
         <span class="entry-welcome-icon"><i class="fa-solid fa-hand-sparkles" aria-hidden="true"></i></span>
         <div class="entry-copy">
           <h1 id="entryExperienceTitle">تعلّم الكلمات داخل رحلة واضحة</h1>
-          <p>اختَر اهتماماتك والثيم اللي يعجبك، وبعدها عالمًا تتعلّم كلماته. بتقدر تبدأ كضيف وتحفظ رحلتك على هذا المتصفح.</p>
+          <p>اختر مجالًا تحبّه وتعلّم كلماته. تقدر تبدأ كضيف وتكمل من نفس المكان عند رجوعك.</p>
         </div>
-        <div class="entry-welcome-route" aria-label="كيف تعمل الرحلة">
-          <span><i class="fa-solid fa-earth-americas" aria-hidden="true"></i><strong>عالم</strong><small>اختر موضوعًا</small></span>
-          <i class="fa-solid fa-angle-left" aria-hidden="true"></i>
-          <span><i class="fa-solid fa-signal" aria-hidden="true"></i><strong>مستوى</strong><small>بحسب التدرّج</small></span>
-          <i class="fa-solid fa-angle-left" aria-hidden="true"></i>
-          <span><i class="fa-solid fa-dungeon" aria-hidden="true"></i><strong>بوابة</strong><small>كلمات وخطوة تالية</small></span>
-        </div>
-        <p class="entry-helper">أول ما تبدأ البوابة، أضف كلماتها إلى قاموسك وابدأ مراجعتها.</p>
       </section>
-      <footer class="entry-footer"><div class="entry-actions entry-actions-single"><button type="button" class="entry-primary" data-entry-action="continue-welcome">اختر اهتماماتك <i class="fa-solid fa-arrow-left" aria-hidden="true"></i></button></div></footer>`;
+      <footer class="entry-footer"><div class="entry-actions entry-actions-single"><button type="button" class="entry-primary" data-entry-action="continue-welcome">اختر المظهر <i class="fa-solid fa-arrow-left" aria-hidden="true"></i></button></div></footer>`;
     bindPanelActions();
   }
 
@@ -806,446 +730,35 @@
         <p class="entry-helper ready">${explicit ? 'سيُطبّق اختيارك عند إكمال الإعداد' : (runtime.state.themeId ? 'لن نغيّر مظهرك الحالي ما لم تختر مظهرًا آخر' : 'LootLingua هو الخيار الافتراضي ويمكن تغييره لاحقًا')}</p>
         <div class="entry-actions">
           <button type="button" class="entry-secondary" data-entry-action="back"><i class="fa-solid fa-arrow-right" aria-hidden="true"></i> رجوع</button>
-          <button type="button" class="entry-primary" data-entry-action="${isSettings ? 'complete' : 'continue-theme'}">${isSettings ? 'حفظ المظهر' : 'اكتشف العوالم'} <i class="fa-solid fa-compass" aria-hidden="true"></i></button>
+          <button type="button" class="entry-primary" data-entry-action="${isSettings ? 'complete' : 'continue-theme'}">${isSettings ? 'حفظ المظهر' : 'اختر اهتماماتك'} <i class="fa-solid fa-compass" aria-hidden="true"></i></button>
         </div>
       </footer>
     `;
     bindPanelActions();
   }
 
-  function previewApi() {
-    return root.LootLinguaWorldsEntryPreview;
-  }
-
-  function usesSelectedWorldStart() {
-    return runtime.presentation?.classification === 'brand-new' && runtime.presentation?.audience === 'new';
-  }
-
-  function currentNextAction() {
-    runtime.action = api().resolveNextAction(runtime.signals || {}, {
-      selectedWorldId: runtime.state?.selectedWorldId || '',
-    });
-    if (runtime.action.id === 'open-selected-world' && usesSelectedWorldStart()) {
-      runtime.action = { ...runtime.action, label: 'افتح عالمك',
-        hint: 'ابدأ من البوابة الأولى، وأضف كلماتها حتى تقدر تراجعها.' };
-    }
-    return runtime.action;
-  }
-
-  function selectedWorldPreview() {
-    const id = String(runtime.state?.selectedWorldId || '');
-    const choice = runtime.worldsPreview.items.find((item) => String(item?.worldId || '') === id);
-    return choice || runtime.structurePreview.model?.world || null;
-  }
-
-  function worldPreviewVisual(world) {
-    const cover = String(world?.cover || world?.coverUrl || world?.imageUrl || world?.image || '').trim();
-    if (cover) return `<img src="${escapeHtml(cover)}" alt="" loading="lazy" decoding="async">`;
-    const icon = String(world?.icon || '').trim();
-    if (/^(fa-|fas |far |fab )/.test(icon)) return `<i class="${escapeHtml(icon)}" aria-hidden="true"></i>`;
-    if (icon && /\p{Extended_Pictographic}/u.test(icon)) return `<span class="entry-world-emoji">${escapeHtml(icon)}</span>`;
-    return '<i class="fa-solid fa-earth-americas" aria-hidden="true"></i>';
-  }
-
-  async function ensureWorldChoices(force) {
-    if (!runtime.state || runtime.state.currentStep !== 'worlds') return;
-    if (!force && ['loading', 'ready'].includes(runtime.worldsPreview.status)) return;
-    const provider = previewApi();
-    if (!provider?.loadWorldChoices) {
-      runtime.worldsPreview = { status: 'waiting', items: [], error: null };
-      return;
-    }
-    const generation = ++runtime.previewGeneration;
-    runtime.worldsPreview = { status: 'loading', items: [], error: null };
-    renderWorldsOnboarding();
-    try {
-      const items = await provider.loadWorldChoices(runtime.state.interestIds, { force: Boolean(force) });
-      if (generation !== runtime.previewGeneration || runtime.state?.currentStep !== 'worlds') return;
-      runtime.worldsPreview = { status: 'ready', items: Array.isArray(items) ? items : [], error: null };
-    } catch (error) {
-      if (generation !== runtime.previewGeneration || runtime.state?.currentStep !== 'worlds') return;
-      runtime.worldsPreview = { status: 'error', items: [], error };
-    }
-    renderWorldsOnboarding();
-    focusEntryHeading();
-  }
-
-  async function ensureStructurePreview(force) {
-    if (!runtime.state || runtime.state.currentStep !== 'journey') return;
-    const worldId = String(runtime.state.selectedWorldId || '');
-    if (!worldId) return;
-    if (
-      !force &&
-      ['loading', 'ready'].includes(runtime.structurePreview.status) &&
-      runtime.structurePreview.worldId === worldId
-    ) return;
-    const provider = previewApi();
-    if (!provider?.loadWorldStructure) {
-      runtime.structurePreview = {
-        status: 'waiting', worldId, model: null, error: null,
-        selectedRankId: '', gatesStatus: 'idle', gates: [],
-        selectedGateId: '', gateStatus: 'idle', gatePreview: null, gateError: null,
-      };
-      return;
-    }
-    const generation = ++runtime.previewGeneration;
-    runtime.structurePreview = {
-      status: 'loading', worldId, model: null, error: null,
-      selectedRankId: '', gatesStatus: 'idle', gates: [],
-      selectedGateId: '', gateStatus: 'idle', gatePreview: null, gateError: null,
-    };
-    renderJourneyStructure();
-    try {
-      const model = await provider.loadWorldStructure(worldId, { force: Boolean(force) });
-      if (generation !== runtime.previewGeneration || runtime.state?.currentStep !== 'journey') return;
-      const selectedRankId = String(model?.rank?.rankId || model?.ranks?.[0]?.rankId || '');
-      runtime.structurePreview = {
-        status: 'ready',
-        worldId,
-        model,
-        error: null,
-        selectedRankId,
-        gatesStatus: 'ready',
-        gates: Array.isArray(model?.gates) ? model.gates : [],
-        selectedGateId: '',
-        gateStatus: 'idle',
-        gatePreview: null,
-        gateError: null,
-      };
-    } catch (error) {
-      if (generation !== runtime.previewGeneration || runtime.state?.currentStep !== 'journey') return;
-      runtime.structurePreview = {
-        status: 'error', worldId, model: null, error,
-        selectedRankId: '', gatesStatus: 'idle', gates: [],
-        selectedGateId: '', gateStatus: 'idle', gatePreview: null, gateError: null,
-      };
-    }
-    renderJourneyStructure();
-    focusEntryHeading();
-  }
-
-  async function ensureReturnPreview(force) {
-    if (!runtime.state || runtime.state.currentStep !== 'return') return;
-    const journey = runtime.signals?.activeJourney;
-    const worldId = String(journey?.worldId || '');
-    if (!worldId) return;
-    if (!force && ['loading', 'ready'].includes(runtime.returnPreview.status) && runtime.returnPreview.worldId === worldId) return;
-    const provider = previewApi();
-    if (!provider?.loadJourneyContext) {
-      runtime.returnPreview = { status: 'waiting', worldId, model: null, error: null };
-      return;
-    }
-    const generation = ++runtime.previewGeneration;
-    runtime.returnPreview = { status: 'loading', worldId, model: null, error: null };
-    renderReturnJourney();
-    try {
-      const model = await provider.loadJourneyContext(journey, { force: Boolean(force) });
-      if (generation !== runtime.previewGeneration || runtime.state?.currentStep !== 'return') return;
-      runtime.returnPreview = { status: 'ready', worldId, model, error: null };
-    } catch (error) {
-      if (generation !== runtime.previewGeneration || runtime.state?.currentStep !== 'return') return;
-      runtime.returnPreview = { status: 'error', worldId, model: null, error };
-    }
-    renderReturnJourney();
-    focusEntryHeading();
-  }
-
-  function renderWorldsOnboarding() {
+  function renderDiscover() {
     const panel = panelElement();
-    if (!panel || !runtime.state) return;
-    const selectedId = String(runtime.state.selectedWorldId || '');
-    const state = runtime.worldsPreview;
-    const loading = state.status === 'loading' || state.status === 'waiting' || state.status === 'idle';
-    const empty = state.status === 'ready' && !state.items.length;
-    const failed = state.status === 'error';
-    const hasSelection = state.status === 'ready' && state.items.some((world) => String(world.worldId) === selectedId);
-    let content = '';
-    if (loading) {
-      content = `<div class="entry-world-grid" aria-label="جاري تحميل العوالم">
-        ${[1, 2, 3].map(() => '<span class="entry-world-card entry-world-skeleton" aria-hidden="true"></span>').join('')}
-      </div><p class="entry-helper ready">جاري قراءة العوالم المنشورة…</p>`;
-      queueMicrotask(() => ensureWorldChoices(false));
-    } else if (failed || empty) {
-      content = `<div class="entry-preview-fallback" role="status">
-        <i class="fa-solid ${failed ? 'fa-cloud-arrow-down' : 'fa-compass'}" aria-hidden="true"></i>
-        <strong>${failed ? 'تعذر تحميل العوالم الآن' : 'لا توجد عوالم منشورة جاهزة للعرض الآن'}</strong>
-        <span>سنشرح شكل رحلة التعلم دون عرض محتوى غير متاح، ثم يمكنك فتح العوالم المنشورة.</span>
-        ${failed ? '<button type="button" class="entry-secondary" data-entry-action="retry-worlds"><i class="fa-solid fa-rotate-right" aria-hidden="true"></i> إعادة المحاولة</button>' : ''}
-      </div>`;
-    } else {
-      content = `<div class="entry-world-grid" role="radiogroup" aria-label="اختر عالمًا للتعرّف إلى رحلته">
-        ${state.items.map((world) => {
-          const selected = String(world.worldId || '') === selectedId;
-          const recommended = world.recommendation?.kind === 'interest-match';
-          const matchedInterest = recommended && api().INTERESTS.find((interest) => interest.id === world.recommendation.matchedInterestId);
-          return `<button type="button" role="radio" aria-checked="${selected}" class="entry-world-card${selected ? ' selected' : ''}${recommended ? ' recommended' : ''}" data-entry-world="${escapeHtml(world.worldId)}">
-            <span class="entry-world-visual">${worldPreviewVisual(world)}</span>
-            <span class="entry-world-copy">
-              ${recommended ? `<small><i class="fa-solid fa-wand-magic-sparkles" aria-hidden="true"></i> ${matchedInterest ? `من اهتماماتك: ${escapeHtml(matchedInterest.label)}` : 'مقترح حسب اهتماماتك'}</small>` : '<small>عالم منشور</small>'}
-              <strong>${escapeHtml(world.title || world.name || 'عالم تعلّم')}</strong>
-              <span>${escapeHtml(world.description || world.subtitle || 'مجموعة كلمات حول موضوع أو اهتمام.')}</span>
-              ${Number(world.gateCount) > 0 ? `<em>${Number(world.gateCount)} بوابة</em>` : ''}
-            </span>
-            <i class="fa-solid fa-circle-check entry-world-check" aria-hidden="true"></i>
-          </button>`;
-        }).join('')}
-      </div>`;
-    }
-    panel.innerHTML = `
-      <header class="entry-header"><div><span class="entry-eyebrow">اهتماماتك تفتح لك أبوابًا حقيقية</span><span class="entry-step-label">${stepIndicator('worlds')}</span></div></header>
-      <div class="entry-copy entry-copy-compact">
-        <h1 id="entryExperienceTitle">اختر عالمًا يثير فضولك</h1>
-        <p>اختَر موضوع الكلمات اللي بدّك تتعلّمها. رتّبنا العوالم المقترحة حسب اهتماماتك.</p>
-      </div>
-      ${content}
-      <footer class="entry-footer">
-        <p class="entry-helper${hasSelection || failed || empty ? ' ready' : ''}">${hasSelection ? 'اخترت عالمك. تقدر تشوف معاينة قبل البداية.' : (failed || empty ? 'يمكنك التعرّف إلى طريقة التعلم، ثم فتح العوالم المتاحة.' : 'اختر عالمًا واحدًا للمتابعة.')}</p>
-        <div class="entry-actions">
-          <button type="button" class="entry-secondary" data-entry-action="back"><i class="fa-solid fa-arrow-right" aria-hidden="true"></i> رجوع</button>
-          ${failed || empty
-            ? '<button type="button" class="entry-primary" data-entry-action="continue-worlds-fallback">تعرّف إلى شكل الرحلة <i class="fa-solid fa-route" aria-hidden="true"></i></button>'
-            : `<button type="button" class="entry-primary" data-entry-action="continue-worlds" ${hasSelection ? '' : 'disabled'}>عاين البداية <i class="fa-solid fa-arrow-left" aria-hidden="true"></i></button>`}
-        </div>
-      </footer>`;
-    bindPanelActions();
-  }
-
-  function legacyStructureNodes(state) {
-    const model = state.model;
-    const ranks = Array.isArray(model?.ranks) ? model.ranks.slice(0, 5) : [];
-    const selectedRankId = String(state.selectedRankId || ranks[0]?.rankId || 'example');
-    const usingExample = !ranks.length;
-    const rankNodes = ranks.length
-      ? ranks.map((rank, index) => {
-        const selected = String(rank.rankId || '') === selectedRankId;
-        return `<button type="button" role="tab" aria-selected="${selected}" class="entry-route-node entry-route-rank${selected ? ' selected' : ''}" data-entry-preview-rank="${escapeHtml(rank.rankId)}">
-          <i class="fa-solid fa-ranking-star" aria-hidden="true"></i>
-          <span><small>${selected ? ' الرتبة المعروضة الآن' : `الرتبة ${index + 1}`}</small><strong>${escapeHtml(rank.title || `الرتبة ${index + 1}`)}</strong></span>
-          <i class="fa-solid fa-circle-check entry-route-selected-icon" aria-hidden="true"></i>
-        </button>`;
-      }).join('')
-      : `<button type="button" role="tab" aria-selected="true" class="entry-route-node entry-route-rank selected" data-entry-preview-rank="example">
-          <i class="fa-solid fa-ranking-star" aria-hidden="true"></i><span><small>مثال توضيحي</small><strong>رتبة منظّمة</strong></span><i class="fa-solid fa-circle-check entry-route-selected-icon" aria-hidden="true"></i>
-        </button>`;
-    const gates = usingExample
-      ? [1, 2, 3].map((index) => ({ gateId: `example-${index}`, title: `بوابة ${index}`, wordCount: 0, example: true }))
-      : (Array.isArray(state.gates) ? state.gates.slice(0, 8) : []);
-    let gateNodes = '';
-    if (state.gatesStatus === 'loading') {
-      gateNodes = '<div class="entry-route-inline-state"><i class="fa-solid fa-circle-notch fa-spin" aria-hidden="true"></i><span>نفتح بوابات هذه الرتبة…</span></div>';
-    } else if (state.gatesStatus === 'error') {
-      gateNodes = '<div class="entry-route-inline-state is-error"><i class="fa-solid fa-triangle-exclamation" aria-hidden="true"></i><span>تعذر فتح بوابات هذه الرتبة. اختر الرتبة مرة أخرى للمحاولة.</span></div>';
-    } else if (!gates.length) {
-      gateNodes = '<div class="entry-route-inline-state"><i class="fa-regular fa-folder-open" aria-hidden="true"></i><span>لا توجد بوابات منشورة في هذه الرتبة الآن.</span></div>';
-    } else {
-      gateNodes = gates.map((gate, index) => {
-        const selected = String(gate.gateId || '') === String(state.selectedGateId || '');
-        return `<button type="button" role="option" aria-selected="${selected}" class="entry-route-node entry-route-gate${selected ? ' selected' : ''}" data-entry-route-node="gate:${escapeHtml(gate.gateId)}" data-entry-preview-gate="${escapeHtml(gate.gateId)}">
-          <span>${index + 1}</span><strong>${escapeHtml(gate.title || `البوابة ${index + 1}`)}</strong>
-          <small>${gate.example ? 'مثال على خطوة تعلم' : `${Number(gate.wordCount) || 0} كلمة`}</small>
-          <i class="fa-solid fa-circle-check entry-route-selected-icon" aria-hidden="true"></i>
-        </button>`;
-      }).join('');
-    }
-    return `<div class="entry-preview-stage">
-      <div class="entry-preview-stage-heading"><span>1</span><div><small>الرتبة</small><strong>اختر الرتبة التي تريد فتح بواباتها</strong></div></div>
-      <div class="entry-route-ranks" role="tablist" aria-label="رتب العالم">${rankNodes}</div>
-    </div>
-    <div class="entry-route-line" aria-hidden="true"></div>
-    <div class="entry-preview-stage">
-      <div class="entry-preview-stage-heading"><span>2</span><div><small>البوابة</small><strong>${state.selectedGateId ? ' هذه هي البوابة المحددة الآن' : ' اختر بوابة لتظهر معاينتها'}</strong></div></div>
-      <div class="entry-route-gates" role="listbox" aria-label="بوابات الرتبة">${gateNodes}</div>
-    </div>`;
-  }
-
-  function structureNodes(state) {
-    const gates = Array.isArray(state.gates) && state.gates.length
-      ? state.gates.slice(0, 12)
-      : [1, 2, 3].map((index) => ({
-        gateId: `example-${index}`,
-        title: `بوابة ${index}`,
-        wordCount: 0,
-        cefrLevel: 'A1',
-        example: true,
-      }));
-    const levels = new Map();
-    gates.forEach((gate) => {
-      const level = String(gate?.cefrLevel || 'unclassified');
-      if (!levels.has(level)) levels.set(level, []);
-      levels.get(level).push(gate);
-    });
-    const order = ['A1', 'A2', 'B1', 'B2', 'C1', 'C2', 'unclassified'];
-    const orderedLevels = [...levels.keys()].sort((left, right) => order.indexOf(left) - order.indexOf(right));
-    if (state.gatesStatus === 'loading') {
-      return '<div class="entry-route-inline-state"><i class="fa-solid fa-circle-notch fa-spin" aria-hidden="true"></i><span>نجهّز بوابات المستويات…</span></div>';
-    }
-    if (state.gatesStatus === 'error') {
-      return '<div class="entry-route-inline-state is-error"><i class="fa-solid fa-triangle-exclamation" aria-hidden="true"></i><span>تعذر فتح بوابات هذا العالم الآن.</span></div>';
-    }
-    return orderedLevels.map((level) => {
-      const gatesInLevel = levels.get(level) || [];
-      const levelLabel = level === 'unclassified' ? 'بوابات العالم' : `بوابات مستوى ${level}`;
-      const levelBadge = level === 'unclassified' ? '<i class="fa-solid fa-layer-group" aria-hidden="true"></i>' : escapeHtml(level);
-      return `<div class="entry-preview-stage">
-        <div class="entry-preview-stage-heading"><span>${levelBadge}</span><div><small>المستوى</small><strong>${escapeHtml(levelLabel)}</strong></div></div>
-        <div class="entry-route-gates" role="listbox" aria-label="${escapeHtml(levelLabel)}">
-          ${gatesInLevel.map((gate, index) => {
-            const selected = String(gate.gateId || '') === String(state.selectedGateId || '');
-            return `<button type="button" role="option" aria-selected="${selected}" class="entry-route-node entry-route-gate${selected ? ' selected' : ''}" data-entry-route-node="gate:${escapeHtml(gate.gateId)}" data-entry-preview-gate="${escapeHtml(gate.gateId)}">
-              <span>${index + 1}</span><strong>${escapeHtml(gate.title || `بوابة ${index + 1}`)}</strong>
-              <small>${gate.example ? 'مثال على خطوة تعلّم' : `${Number(gate.wordCount) || 0} كلمة`}</small>
-              <i class="fa-solid fa-circle-check entry-route-selected-icon" aria-hidden="true"></i>
-            </button>`;
-          }).join('')}
-        </div>
-      </div>`;
-    }).join('<div class="entry-route-line" aria-hidden="true"></div>');
-  }
-
-  function gatePreviewMarkup(state) {
-    const selectedGate = (state.gates || []).find(
-      (gate) => String(gate?.gateId || '') === String(state.selectedGateId || '')
-    );
-    if (!state.selectedGateId) {
-      return `<section class="entry-gate-preview entry-gate-preview-empty" aria-live="polite">
-        <i class="fa-regular fa-hand-pointer" aria-hidden="true"></i>
-        <div><small> معاينة البوابة</small><strong> لم تختر بوابة بعد</strong><span>اضغط على أي بوابة لتشوف عينة من كلماتها.</span></div>
-      </section>`;
-    }
-    const gate = state.gatePreview?.gate || selectedGate || {};
-    if (state.gateStatus === 'loading') {
-      return `<section class="entry-gate-preview is-loading" aria-live="polite" aria-busy="true">
-        <i class="fa-solid fa-circle-notch fa-spin" aria-hidden="true"></i>
-        <div><small>معاينة البوابة</small><strong>${escapeHtml(gate.title || 'جاري فتح البوابة')}</strong><span>نقرأ عينة صغيرة من محتواها المنشور…</span></div>
-      </section>`;
-    }
-    if (state.gateStatus === 'error') {
-      return `<section class="entry-gate-preview is-error" aria-live="polite">
-        <i class="fa-solid fa-triangle-exclamation" aria-hidden="true"></i>
-        <div><small>معاينة البوابة</small><strong>${escapeHtml(gate.title || 'تعذرت المعاينة')}</strong><span>لم نتمكن من قراءة محتواها الآن. اخترها مرة أخرى للمحاولة.</span></div>
-      </section>`;
-    }
-    const words = Array.isArray(state.gatePreview?.words) ? state.gatePreview.words : [];
-    const wordList = words.length
-      ? `<p class="entry-gate-preview-note">عينة من كلمات هذه البوابة — للمعاينة فقط، لم تُضف إلى قاموسك بعد.</p><div class="entry-gate-preview-words" aria-label="عينة كلمات البوابة">${words.map((word) => `<span><strong lang="en" dir="ltr">${escapeHtml(word.word || word.text || '')}</strong><small dir="rtl">${escapeHtml(word.translation || word.meaning || '')}</small></span>`).join('')}</div>`
-      : '<p class="entry-gate-preview-note">لا توجد عينة كلمات منشورة لهذه البوابة الآن، لكن مكانها في الرحلة واضح.</p>';
-    return `<section class="entry-gate-preview is-selected" aria-live="polite">
-      <div class="entry-gate-preview-title"><span><i class="fa-solid fa-dungeon" aria-hidden="true"></i></span><div><small>معاينة البوابة المحددة</small><strong>${escapeHtml(gate.title || 'البوابة')}</strong><em>${Number(gate.wordCount) || words.length || 0} كلمة في البوابة</em></div><i class="fa-solid fa-circle-check" aria-hidden="true"></i></div>
-      ${wordList}
-    </section>`;
-  }
-
-  function renderJourneyStructure() {
-    const panel = panelElement();
-    if (!panel || !runtime.state) return;
-    const selectedId = String(runtime.state.selectedWorldId || '');
-    const status = runtime.structurePreview.status;
-    const structure = runtime.structurePreview;
-    const model = structure.model;
-    const explored = runtime.state.journeyStatus === 'structure-explored';
-    if (selectedId && ['idle', 'waiting'].includes(status)) queueMicrotask(() => ensureStructurePreview(false));
-    const loading = selectedId && ['idle', 'waiting', 'loading'].includes(status);
-    const failed = selectedId && status === 'error';
-    const world = model?.world || selectedWorldPreview();
-    const canSkipPreview = usesSelectedWorldStart() && Boolean(selectedId && String(world?.worldId || '') === selectedId);
-    panel.innerHTML = `
-      <header class="entry-header"><div><span class="entry-eyebrow">معاينة تعليمية — لا تغيّر تقدمك</span><span class="entry-step-label">${stepIndicator('journey')}</span></div></header>
-      <div class="entry-copy entry-copy-compact">
-        <h1 id="entryExperienceTitle">${escapeHtml(world?.title || 'من العالم إلى بوابة تتقنها')}</h1>
-        <p>اختر بوابة إذا بدّك تعاين كلماتها، أو تابع لتبدأ من أول بوابة متاحة.</p>
-      </div>
-      <section class="entry-route-preview${explored ? ' explored' : ''}" aria-label="كيف تسير رحلة التعلم">
-        <div class="entry-route-world"><span>${worldPreviewVisual(world)}</span><div><small>العالم</small><strong>${escapeHtml(world?.title || 'عالم التعلّم')}</strong></div></div>
-        ${loading ? '<div class="entry-route-loading"><i class="fa-solid fa-circle-notch fa-spin" aria-hidden="true"></i> نجهّز المستويات والبوابات المنشورة…</div>' : structureNodes(structure)}
-        ${failed ? '<button type="button" class="entry-secondary entry-route-retry" data-entry-action="retry-structure"><i class="fa-solid fa-rotate-right" aria-hidden="true"></i> أعد تحميل المستويات والبوابات</button>' : ''}
-      </section>
-      ${loading ? '' : gatePreviewMarkup(structure)}
-      <section class="entry-learning-explainer" aria-label="كيف يعمل التعلم في LootLingua">
-        <div class="entry-learning-heading"><small>ماذا يحدث بعد بدء الرحلة؟</small><strong>تعلّم كلمات البوابة، ثم راجعها وتقدّم</strong><p>بعد إضافة الكلمات، راجعها من داخل البوابة لتتابع تقدّمك.</p></div>
-        <div class="entry-learning-loop">
-        <span><i class="fa-solid fa-book-open" aria-hidden="true"></i><strong>تتعلّم</strong><small>كلمات البوابة</small></span>
-        <i class="fa-solid fa-arrow-left" aria-hidden="true"></i>
-        <span><i class="fa-solid fa-rotate" aria-hidden="true"></i><strong>تراجع</strong><small>في الوقت المناسب</small></span>
-        <i class="fa-solid fa-arrow-left" aria-hidden="true"></i>
-        <span><i class="fa-solid fa-unlock-keyhole" aria-hidden="true"></i><strong>تتقدّم</strong><small>إلى البوابة التالية</small></span>
-        </div>
-      </section>
-      <footer class="entry-footer"><p class="entry-helper${explored || canSkipPreview ? ' ready' : ''}">${explored ? 'عالمك جاهز لتفتحه.' : (canSkipPreview ? 'معاينة الكلمات اختيارية.' : 'اختر بوابة لتعاين طريقة التعلّم.')}</p>
-        <div class="entry-actions"><button type="button" class="entry-secondary" data-entry-action="back"><i class="fa-solid fa-arrow-right" aria-hidden="true"></i> رجوع</button><button type="button" class="entry-primary" data-entry-action="continue-journey" ${explored || canSkipPreview ? '' : 'disabled'}>${!explored && canSkipPreview ? 'تخطي المعاينة' : 'تابع للبدء'} <i class="fa-solid fa-arrow-left" aria-hidden="true"></i></button></div>
-      </footer>`;
-    bindPanelActions();
-  }
-
-  function renderReturnJourney() {
-    const panel = panelElement();
-    if (!panel || !runtime.state) return;
-    const journey = runtime.signals?.activeJourney || {};
-    const model = runtime.returnPreview.model;
-    const reviewed = runtime.state.journeyStatus === 'return-reviewed';
-    if (['idle', 'waiting'].includes(runtime.returnPreview.status)) queueMicrotask(() => ensureReturnPreview(false));
-    const worldTitle = model?.world?.title || 'رحلتك الحالية';
-    const levelTitle = model?.rank?.cefrLevel || 'المستوى الحالي';
-    const gateTitle = model?.gate?.title || journey.activeGateId || 'البوابة الحالية';
-    panel.innerHTML = `
-      <header class="entry-header entry-action-header"><span class="entry-eyebrow">تقدّمك الحقيقي محفوظ</span><span class="entry-step-label">عودة سريعة</span></header>
-      <div class="entry-copy entry-copy-compact"><h1 id="entryExperienceTitle">أعدناك إلى موضعك، لا إلى بداية جديدة</h1><p>التعلّم هنا منظّم في عالم، ثم مستوى، ثم بوابة. هذه البطاقة تعرض رحلتك الفعلية ولا تغيّرها.</p></div>
-      <section class="entry-saved-route${reviewed ? ' reviewed' : ''}">
-        <span><i class="fa-solid fa-earth-americas" aria-hidden="true"></i><small>العالم</small><strong>${escapeHtml(worldTitle)}</strong></span>
-        <i class="fa-solid fa-angle-left" aria-hidden="true"></i>
-        <span><i class="fa-solid fa-signal" aria-hidden="true"></i><small>المستوى</small><strong>${escapeHtml(levelTitle)}</strong></span>
-        <i class="fa-solid fa-angle-left" aria-hidden="true"></i>
-        <span><i class="fa-solid fa-dungeon" aria-hidden="true"></i><small>البوابة</small><strong>${escapeHtml(gateTitle)}</strong></span>
-      </section>
-      ${reviewed ? '<p class="entry-context-note success"><i class="fa-solid fa-circle-check" aria-hidden="true"></i> هذا هو موضعك المحفوظ، وسنفتحه كما هو.</p>' : '<button type="button" class="entry-primary entry-inspect-return" data-entry-action="review-return"><i class="fa-solid fa-location-crosshairs" aria-hidden="true"></i> أرني موضعي في الرحلة</button>'}
-      <footer class="entry-footer"><div class="entry-actions entry-actions-single"><button type="button" class="entry-primary" data-entry-action="continue-return" ${reviewed ? '' : 'disabled'}>تابع إلى رحلتك <i class="fa-solid fa-arrow-left" aria-hidden="true"></i></button></div></footer>`;
-    bindPanelActions();
-  }
-
-  function renderDestination() {
-    const panel = panelElement();
-    if (!panel || !runtime.state) return;
-    const action = currentNextAction();
-    if (action.completedWorld === true) {
-      panel.innerHTML = `
-        <div class="entry-action-screen entry-destination-screen entry-completed-world-screen">
-          <header class="entry-header entry-action-header"><span class="entry-eyebrow">رحلتك هنا مكتملة</span><span class="entry-step-label">إنجاز محفوظ</span></header>
-          <span class="entry-action-icon"><i class="fa-solid fa-trophy" aria-hidden="true"></i></span>
-          <h1 id="entryExperienceTitle">أنهيت هذا العالم 🎉</h1>
-          <p>${escapeHtml(action.hint)}</p>
-          <div class="entry-action-destinations">
-            <button type="button" class="entry-primary entry-action-primary" data-entry-cta="${action.id}">${escapeHtml(action.label)} <i class="fa-solid fa-compass" aria-hidden="true"></i></button>
-          </div>
-        </div>`;
-      bindPanelActions();
-      return;
-    }
-    const selectedWorld = selectedWorldPreview();
-    panel.innerHTML = `
-      <div class="entry-action-screen entry-destination-screen">
-        <header class="entry-header entry-action-header"><span class="entry-eyebrow">خطوتك التالية واضحة</span><span class="entry-step-label">${runtime.presentation?.classification === 'returning-with-progress' ? 'عودة سريعة' : stepIndicator('destination')}</span></header>
-        <span class="entry-action-icon"><i class="fa-solid ${action.id.includes('journey') ? 'fa-route' : (action.id === 'review-words' ? 'fa-rotate' : 'fa-compass')}" aria-hidden="true"></i></span>
-        <h1 id="entryExperienceTitle">${escapeHtml(action.label)}</h1>
-        <p>${escapeHtml(action.hint)}</p>
-        ${selectedWorld ? `<div class="entry-selected-world-summary"><span>${worldPreviewVisual(selectedWorld)}</span><div><small>العالم الذي اخترته</small><strong>${escapeHtml(selectedWorld.title || selectedWorld.name || 'عالم التعلّم')}</strong></div></div>` : ''}
-        <div class="entry-journey-recap"><span><i class="fa-solid fa-earth-americas"></i> عالم</span><i class="fa-solid fa-angle-left"></i><span><i class="fa-solid fa-signal"></i> مستويات</span><i class="fa-solid fa-angle-left"></i><span><i class="fa-solid fa-dungeon"></i> بوابات</span><i class="fa-solid fa-angle-left"></i><span><i class="fa-solid fa-rotate"></i> تعلم ومراجعة</span></div>
-        <div class="entry-action-destinations">
-          ${runtime.presentation?.classification === 'returning-with-progress' ? '' : '<button type="button" class="entry-secondary" data-entry-action="back"><i class="fa-solid fa-arrow-right" aria-hidden="true"></i> رجوع</button>'}
-          <button type="button" class="entry-primary entry-action-primary" data-entry-cta="${action.id}">${escapeHtml(action.label)} <i class="fa-solid fa-arrow-left" aria-hidden="true"></i></button>
-          ${action.secondaryId ? `<button type="button" class="entry-secondary entry-action-secondary" data-entry-cta="${action.secondaryId}">${escapeHtml(action.secondaryLabel)}</button>` : ''}
-        </div>
-      </div>`;
+    if (!panel) return;
+    panel.innerHTML = [
+      '<header class="entry-header"><span class="entry-step-label">' + stepIndicator('discover') + '</span></header>',
+      '<section class="entry-welcome"><span class="entry-welcome-icon"><i class="fa-solid fa-earth-americas" aria-hidden="true"></i></span>',
+      '<div class="entry-copy"><h1 id="entryExperienceTitle">اكتشف العوالم</h1>',
+      '<p>العوالم قواميس جاهزة لمجالات تحبّها. تعلّم كلماتها خطوة خطوة، وراجعها لتتذكّرها.</p></div></section>',
+      '<footer class="entry-footer"><div class="entry-actions">',
+      '<button type="button" class="entry-secondary" data-entry-action="back">رجوع</button>',
+      '<button type="button" class="entry-primary" data-entry-action="discover-worlds">افتح العوالم</button>',
+      '</div></footer>'
+    ].join('');
     bindPanelActions();
   }
 
   function render() {
     if (!runtime.state) return;
-    if (runtime.state.status !== 'in-progress' || runtime.state.currentStep === 'destination') renderDestination();
-    else if (runtime.state.currentStep === 'return') renderReturnJourney();
-    else if (runtime.state.currentStep === 'journey') renderJourneyStructure();
-    else if (runtime.state.currentStep === 'worlds') renderWorldsOnboarding();
+    if (runtime.state.currentStep === 'welcome') renderWelcome();
     else if (runtime.state.currentStep === 'theme') renderTheme();
-    else if (runtime.state.currentStep === 'welcome') renderWelcome();
-    else renderInterests();
+    else if (runtime.state.currentStep === 'interests') renderInterests();
+    else renderDiscover();
   }
 
   function escapeHtml(value) {
@@ -1257,66 +770,20 @@
       .replace(/'/g, '&#039;');
   }
 
-  function updateReadingHint(panel) {
-    const remaining = runtime.readUntil - Date.now();
-    if (!panel || runtime.settingsMode || remaining <= 0) return;
-    const button = panel.querySelector('.entry-primary[data-entry-action]:not([disabled]), .entry-primary[data-entry-cta]:not([disabled])') ||
-      panel.querySelector('[data-entry-action="skip-interests"]');
-    const actions = button?.closest?.('.entry-actions, .entry-action-destinations');
-    if (!actions?.before) return;
-    let hint = panel.querySelector('#entryReadingHint');
-    if (!hint) {
-      hint = document.createElement('p');
-      hint.id = 'entryReadingHint';
-      hint.className = 'entry-helper';
-      actions.before(hint);
-    }
-    hint.textContent = `اقرأ أولًا، ثم اضغط «${button.textContent.trim()}».`;
-    panel.querySelectorAll('[aria-describedby="entryReadingHint"]').forEach((node) => node.removeAttribute('aria-describedby'));
-    button.setAttribute('aria-describedby', hint.id);
-    setTimeout(() => { hint.remove(); button.removeAttribute('aria-describedby'); }, remaining);
-  }
-
   function bindPanelActions() {
     const panel = panelElement();
     if (!panel) return;
-    if (!runtime.settingsMode) {
-      const step = runtime.state?.currentStep || '';
-      if (runtime.readingStep !== step) {
-        runtime.readingStep = step;
-        const length = panel.querySelector('.entry-copy p, .entry-destination-screen > p, .entry-journey-copy p')?.textContent?.length || 0;
-        runtime.readUntil = Date.now() + (length >= 105 ? 4000 : 3000);
-      }
-    }
-    updateReadingHint(panel);
-    panel.querySelectorAll('[data-entry-interest]').forEach((button) => {
+    panel.querySelectorAll('[data-entry-interest]').forEach(button => {
       button.addEventListener('click', () => toggleInterest(button.dataset.entryInterest, button));
     });
-    panel.querySelectorAll('[data-entry-theme]').forEach((button) => {
+    panel.querySelectorAll('[data-entry-theme]').forEach(button => {
       button.addEventListener('click', () => selectTheme(button.dataset.entryTheme));
     });
-    panel.querySelectorAll('[data-entry-world]').forEach((button) => {
-      button.addEventListener('click', () => selectWorld(button.dataset.entryWorld));
-    });
-    panel.querySelectorAll('[data-entry-oasis-mode]').forEach((button) => {
+    panel.querySelectorAll('[data-entry-oasis-mode]').forEach(button => {
       button.addEventListener('click', () => selectOasisMode(button.dataset.entryOasisMode));
     });
-    panel.querySelectorAll('[data-entry-action], [data-entry-cta], [data-entry-preview-rank], [data-entry-preview-gate]').forEach((button) => {
-      const action = button.dataset.entryAction;
-      const gated = !runtime.settingsMode && (button.dataset.entryCta || button.dataset.entryPreviewRank ||
-        button.dataset.entryPreviewGate || /^(continue-|skip-|review-return)/.test(action || ''));
-      const wait = gated ? Math.max(0, runtime.readUntil - Date.now()) : 0;
-      if (wait) {
-        button.dataset.reading = 'true';
-        setTimeout(() => { delete button.dataset.reading; }, wait);
-      }
-      button.addEventListener('click', () => {
-        if (gated && Date.now() < runtime.readUntil) return;
-        if (action) handleAction(action);
-        else if (button.dataset.entryCta) runCta(button.dataset.entryCta);
-        else if (button.dataset.entryPreviewGate) inspectPreviewGate(button.dataset.entryPreviewGate);
-        else selectPreviewRank(button.dataset.entryPreviewRank);
-      });
+    panel.querySelectorAll('[data-entry-action]').forEach(button => {
+      button.addEventListener('click', () => void handleAction(button.dataset.entryAction));
     });
   }
 
@@ -1354,7 +821,6 @@
     }
     const continueButton = panelElement()?.querySelector('[data-entry-action="continue-interests"]');
     if (continueButton) continueButton.disabled = ids.size === 0;
-    updateReadingHint(panelElement());
   }
 
   function selectTheme(themeId) {
@@ -1367,151 +833,6 @@
     transition({ type: 'select-theme', themeId: 'ocean', oasisMode: mode });
     renderTheme();
     requestAnimationFrame(() => panelElement()?.querySelector(`[data-entry-oasis-mode="${mode}"]`)?.focus());
-  }
-
-  async function selectWorld(worldId) {
-    if (!worldId || runtime.state?.currentStep !== 'worlds') return;
-    try {
-      transition({ type: 'select-world', worldId });
-      runtime.structurePreview = {
-        status: 'idle', worldId: '', model: null, error: null,
-        selectedRankId: '', gatesStatus: 'idle', gates: [],
-        selectedGateId: '', gateStatus: 'idle', gatePreview: null, gateError: null,
-      };
-      await saveCheckpoint('جاري حفظ اختيار العالم…');
-      renderWorldsOnboarding();
-      requestAnimationFrame(() => {
-        const target = [...(panelElement()?.querySelectorAll('[data-entry-world]') || [])]
-          .find((element) => element.dataset.entryWorld === worldId);
-        target?.focus();
-      });
-    } catch (error) {
-      setBusy(false);
-      renderWorldsOnboarding();
-      const status = document.getElementById('entryExperienceStatus');
-      if (status) status.textContent = 'تعذر حفظ اختيار العالم في الحساب. بقي اختيارك محفوظًا على هذا الجهاز؛ حاول مرة أخرى.';
-    }
-  }
-
-  async function selectPreviewRank(rankId) {
-    if (!rankId || runtime.state?.currentStep !== 'journey') return;
-    const structure = runtime.structurePreview;
-    if (rankId === 'example') {
-      runtime.structurePreview = {
-        ...structure,
-        selectedRankId: rankId,
-        gatesStatus: 'ready',
-        selectedGateId: '',
-        gateStatus: 'idle',
-        gatePreview: null,
-        gateError: null,
-      };
-      renderJourneyStructure();
-      return;
-    }
-    if (String(structure.selectedRankId || '') === String(rankId) && structure.gatesStatus === 'ready') return;
-    runtime.structurePreview = {
-      ...structure,
-      selectedRankId: rankId,
-      gatesStatus: 'loading',
-      gates: [],
-      selectedGateId: '',
-      gateStatus: 'idle',
-      gatePreview: null,
-      gateError: null,
-    };
-    renderJourneyStructure();
-    const provider = previewApi();
-    if (!provider?.loadRankPreview) {
-      runtime.structurePreview = { ...runtime.structurePreview, gatesStatus: 'error' };
-      renderJourneyStructure();
-      return;
-    }
-    const generation = ++runtime.previewGeneration;
-    try {
-      const preview = await provider.loadRankPreview(structure.worldId, rankId);
-      if (generation !== runtime.previewGeneration || runtime.state?.currentStep !== 'journey') return;
-      runtime.structurePreview = {
-        ...runtime.structurePreview,
-        selectedRankId: rankId,
-        gatesStatus: 'ready',
-        gates: Array.isArray(preview?.gates) ? preview.gates : [],
-      };
-    } catch (error) {
-      if (generation !== runtime.previewGeneration || runtime.state?.currentStep !== 'journey') return;
-      runtime.structurePreview = {
-        ...runtime.structurePreview,
-        gatesStatus: 'error',
-        gates: [],
-        gateError: error,
-      };
-    }
-    renderJourneyStructure();
-    requestAnimationFrame(() => {
-      const target = [...(panelElement()?.querySelectorAll('[data-entry-preview-rank]') || [])]
-        .find((element) => element.dataset.entryPreviewRank === rankId);
-      target?.focus();
-    });
-  }
-
-  async function inspectPreviewGate(gateId) {
-    if (!gateId || runtime.state?.currentStep !== 'journey') return;
-    const structure = runtime.structurePreview;
-    const selectedGate = (structure.gates || []).find(
-      (gate) => String(gate?.gateId || '') === String(gateId)
-    ) || (gateId.startsWith('example-') ? { gateId, title: `بوابة ${gateId.split('-').pop()}`, wordCount: 0 } : null);
-    runtime.structurePreview = {
-      ...structure,
-      selectedGateId: gateId,
-      gateStatus: 'loading',
-      gatePreview: { gate: selectedGate, words: [] },
-      gateError: null,
-    };
-    renderJourneyStructure();
-    const generation = ++runtime.previewGeneration;
-    try {
-      let preview;
-      if (gateId.startsWith('example-')) {
-        preview = { gate: selectedGate, words: [] };
-      } else {
-        const provider = previewApi();
-        if (!provider?.loadGatePreview) throw new Error('Gate preview is unavailable.');
-        preview = await provider.loadGatePreview(
-          structure.worldId,
-          String(selectedGate?.rankId || structure.selectedRankId || ''),
-          gateId
-        );
-      }
-      if (generation !== runtime.previewGeneration || runtime.state?.currentStep !== 'journey') return;
-      runtime.structurePreview = {
-        ...runtime.structurePreview,
-        selectedGateId: gateId,
-        gateStatus: 'ready',
-        gatePreview: preview,
-        gateError: null,
-      };
-      if (runtime.state.journeyStatus !== 'structure-explored') {
-        transition({ type: 'explore-structure' });
-        await saveCheckpoint('نحفظ تقدمك في الجولة…');
-      }
-      renderJourneyStructure();
-      requestAnimationFrame(() => {
-        const target = [...(panelElement()?.querySelectorAll('[data-entry-preview-gate]') || [])]
-          .find((element) => element.dataset.entryPreviewGate === gateId);
-        target?.focus();
-      });
-    } catch (error) {
-      if (generation !== runtime.previewGeneration || runtime.state?.currentStep !== 'journey') return;
-      setBusy(false);
-      runtime.structurePreview = {
-        ...runtime.structurePreview,
-        selectedGateId: gateId,
-        gateStatus: 'error',
-        gatePreview: { gate: selectedGate, words: [] },
-        gateError: error,
-      };
-      renderJourneyStructure();
-    }
   }
 
   async function saveCheckpoint(label) {
@@ -1605,7 +926,7 @@
   }
 
   async function handleAction(action) {
-    if (!runtime.state) return;
+    if (!runtime.state || panelElement()?.getAttribute('aria-busy') === 'true') return;
     const epoch = runtime.authEpoch;
     if (action === 'cancel-settings') {
       runtime.state = runtime.settingsBaseState;
@@ -1643,26 +964,21 @@
       }
       else if (action === 'skip-interests') transition({ type: 'skip-interests' });
       else if (action === 'continue-theme') transition({ type: 'continue-theme' });
-      else if (action === 'retry-worlds') {
-        await ensureWorldChoices(true);
-        return;
-      }
-      else if (action === 'continue-worlds') transition({ type: 'continue-worlds' });
-      else if (action === 'continue-worlds-fallback') transition({ type: 'continue-worlds-fallback' });
-      else if (action === 'retry-structure') {
-        await ensureStructurePreview(true);
-        return;
-      }
-      else if (action === 'continue-journey') {
-        const world = selectedWorldPreview();
-        if (runtime.state.journeyStatus !== 'structure-explored' && usesSelectedWorldStart() &&
-            world?.worldId && String(world.worldId) === runtime.state.selectedWorldId) {
-          transition({ type: 'explore-structure' });
+      else if (action === 'discover-worlds') {
+        setBusy(true, 'جارٍ فتح العوالم…');
+        if (await root.loadWorldsView?.() !== true) throw new Error('Worlds could not be loaded.');
+        if (epoch !== runtime.authEpoch) return;
+        const completed = api().transitionState(runtime.state, { type: 'complete' }, Date.now());
+        await commitTerminalState(completed, 'جارٍ حفظ اختياراتك…', { applyAppearance: true });
+        if (epoch !== runtime.authEpoch) return;
+        close({ silent: true });
+        const heading = document.querySelector('.published-route-view h2');
+        if (heading) {
+          heading.tabIndex = -1;
+          heading.focus();
         }
-        transition({ type: 'continue-journey' });
+        return;
       }
-      else if (action === 'review-return') transition({ type: 'review-return' });
-      else if (action === 'continue-return') transition({ type: 'continue-return' });
       else if (action === 'complete') {
         if (runtime.settingsMode === 'theme') {
           const draft = runtime.state;
@@ -2035,99 +1351,6 @@
     return run();
   }
 
-  async function openEntryDestination(id, expected) {
-    if (id === 'resume-quiz') {
-      if (typeof root.loadQuizView !== 'function') throw new Error('Quiz destination is unavailable.');
-      root.loadQuizView();
-      return { type: 'quiz' };
-    }
-    if (id === 'continue-journey' || id === 'resume-journey-session') {
-      const worldId = expected?.worldId || runtime.signals?.activeJourney?.worldId;
-      if (!worldId || typeof root.loadWorldsView !== 'function' || typeof root.openPublishedWorld !== 'function') {
-        throw new Error('Journey destination is unavailable.');
-      }
-      root.loadWorldsView();
-      root.openPublishedWorld(worldId);
-      return { type: 'world', worldId };
-    }
-    if (id === 'open-selected-world') {
-      const worldId = expected?.worldId || runtime.state?.selectedWorldId;
-      if (worldId && usesSelectedWorldStart() && typeof root.openPublishedWorld === 'function') {
-        await root.openPublishedWorld(worldId);
-        return { type: 'world', worldId, selectedStart: true };
-      }
-      if (typeof root.loadWorldsView !== 'function') throw new Error('Worlds destination is unavailable.');
-      root.loadWorldsView();
-      return { type: 'worlds', suggestedWorldId: worldId };
-    }
-    if (id === 'review-words' || id === 'new-user-start') {
-      if (typeof root.loadPersonalDictionary !== 'function') {
-        throw new Error('Dictionary destination is unavailable.');
-      }
-      root.loadPersonalDictionary();
-      return { type: 'dictionary', focusWordInput: id === 'new-user-start' };
-    }
-    if (id === 'explore-worlds' || id === 'suggest-placement') {
-      if (typeof root.loadWorldsView !== 'function') throw new Error('Worlds destination is unavailable.');
-      root.loadWorldsView();
-      return { type: 'worlds' };
-    }
-    throw new Error('Unsupported Entry destination.');
-  }
-
-  async function runCta(id) {
-    const epoch = runtime.authEpoch;
-    if (!runtime.state || runtime.state.status !== 'in-progress' || runtime.state.currentStep !== 'destination') return;
-    const expected = currentNextAction();
-    if (![expected?.id, expected?.secondaryId].filter(Boolean).includes(id)) return;
-    if (!['structure-explored', 'return-reviewed'].includes(runtime.state.journeyStatus)) return;
-    if (api().ctaContradictsSignals({ ...expected, id }, runtime.signals)) return;
-
-    setBusy(true, 'جارٍ فتح وجهتك…');
-    try {
-      const startsGuidedFirstJourney = ['open-selected-world', 'explore-worlds', 'suggest-placement'].includes(id) &&
-        root.LootLinguaGuidedFirstJourneyContract?.shouldStartForPresentation(runtime.presentation);
-      const destination = await openEntryDestination(id, expected);
-      if (epoch !== runtime.authEpoch) return;
-      if (startsGuidedFirstJourney && (destination?.type === 'worlds' || destination?.selectedStart)) {
-        // Dictionary guidance is its own tiny, resumable hand-off.  It is
-        // planned before the public gate journey but cannot surface until that
-        // journey completes, so the two overlays never compete.
-        root.LootLinguaPersonalDictionaryOnboarding?.planForFirstJourney?.({
-          requiresFirstWord: !runtime.user,
-        });
-        // Kept separate from Entry v2: this is temporary in-product guidance,
-        // not a new Product Entry state or learning/progression mutation.
-        await root.LootLinguaGuidedFirstJourney?.beginFromEntry({
-          presentation: runtime.presentation,
-          worldId: destination.worldId || destination.suggestedWorldId || runtime.state.selectedWorldId,
-          chooseWorld: !destination.selectedStart,
-        });
-      }
-      if (epoch !== runtime.authEpoch) return;
-      const completed = api().transitionState(runtime.state, { type: 'complete' }, Date.now());
-      await commitTerminalState(completed, 'جارٍ حفظ اكتمال التجربة…', { applyAppearance: true });
-      if (epoch !== runtime.authEpoch) return;
-      close();
-      if (destination.focusWordInput) {
-        setTimeout(() => document.getElementById('wordInput')?.focus(), 0);
-      }
-    } catch (error) {
-      if (epoch !== runtime.authEpoch || error?.code === 'entry/auth-changed') return;
-      setBusy(false);
-      const status = document.getElementById('entryExperienceStatus');
-      if (status) status.textContent = error?.code === 'entry/write-failed'
-        ? `وصلنا إلى وجهتك، لكن تعذّر تأكيد اكتمال التجربة في حسابك. أبقيناها مفتوحة للمحاولة مرة أخرى.${error?.diagnostic?.firebaseCode ? ` (${error.diagnostic.firebaseCode} / ${error.diagnostic.phase})` : ''}`
-        : (error?.code === 'entry/validation-failed'
-          ? `تعذّر التحقق من حالة اكتمال التجربة محليًا.${error?.diagnostic?.firebaseCode ? ` (${error.diagnostic.firebaseCode})` : ''}`
-          : (error?.code === 'entry/verification-failed'
-            ? `تمت كتابة حالة التجربة، لكن تعذّر التحقق منها بعد الحفظ.${error?.diagnostic?.firebaseCode ? ` (${error.diagnostic.firebaseCode} / ${error.diagnostic.phase})` : ''}`
-        : (error?.code === 'entry/profile-write-failed'
-          ? 'تعذّر حفظ المظهر في حسابك. لم نغلق التجربة ولم نعتبرها مكتملة.'
-          : 'تعذّر فتح الوجهة المطلوبة. بقيت التجربة مفتوحة ولم تُعتبر مكتملة.')));
-    }
-  }
-
   function setBackgroundInert(active) {
     if (active) {
       runtime.inerted = [];
@@ -2246,7 +1469,7 @@
     root.addEventListener('lootlingua:auth-state', (event) => {
       runtime.bootToken += 1;
       runtime.authEpoch += 1;
-      runtime.readingStep = '';
+      runtime.returnedOwner = '';
       runtime.savePromise = Promise.resolve();
       close({ silent: true });
       runtime.state = null;
@@ -2267,11 +1490,6 @@
     root.addEventListener('lootlingua:entry-cloud-ready', () => queueMicrotask(boot));
     root.addEventListener('lootlingua:journey-cloud-ready', () => queueMicrotask(boot));
     root.addEventListener('lootlingua:word-mastery-snapshot', () => queueMicrotask(boot));
-    root.addEventListener('lootlingua:worlds-entry-preview-ready', () => {
-      if (runtime.state?.currentStep === 'worlds') queueMicrotask(() => ensureWorldChoices(true));
-      else if (runtime.state?.currentStep === 'journey') queueMicrotask(() => ensureStructurePreview(true));
-      else if (runtime.state?.currentStep === 'return') queueMicrotask(() => ensureReturnPreview(true));
-    });
     queueMicrotask(boot);
   }
 

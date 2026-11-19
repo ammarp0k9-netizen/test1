@@ -575,6 +575,13 @@ test('a stale completed pointer yields to another genuinely actionable active Wo
 
 test('ordinary quiz evidence success is not reported as result failure when readiness projection fails', async () => {
   const harness = createHarness();
+  const journey = harness.values.get(harness.journeyPath);
+  harness.values.set(harness.journeyPath, { ...journey, activeLevelPlacementAssessmentId: '',
+    placementStatus: 'declined', levelPlacementStatus: 'completed' });
+  assert.equal((await harness.api.getActiveJourney())?.activeGateId, 'old-gate');
+  const gate = await harness.api.getGateProgress('world-a', 'rank-a2', 'old-gate');
+  assert.equal(gate?.status, 'learning');
+  assert.deepEqual(gate.loadedWordKeys, ['old-word-key']);
   const identity = harness.root.LootLinguaContentSchema.normalizeWordIdentity({ word: 'Apple' });
   harness.values.set(`users/flow-user/contentWords/${identity.wordKey}`, {
     canonicalId: identity.wordKey,
@@ -596,7 +603,7 @@ test('ordinary quiz evidence success is not reported as result failure when read
     completed: true,
     entries: [{
       word: { word: 'Apple', wordKey: identity.wordKey },
-      result: { correct: true, answeredAt: Date.now() },
+      result: { correct: true, answeredAt: Date.now(), submittedAnswer: 'legacy-apple' },
     }],
   };
   const result = await harness.api.recordQuizEvidenceBatch(input);

@@ -265,6 +265,9 @@
 
   function isDisplayable(record) {
     if (record.status !== 'active') return false;
+    if (['practice-gate', 'practice-gate-gap', 'open-ready-gate', 'resume-gate-lesson'].includes(record.cta?.id) &&
+        root.LootLinguaGateLesson && !root.LootLinguaNotificationRuntime) return false;
+    if (root.LootLinguaNotificationRuntime?.canDisplayGateAction(record) === false) return false;
     if (record.kind === 'smart' && record.notificationType === 'reminder.streak.risk' && record.cta?.id === 'review-due' &&
         records.some((other) => other.kind === 'smart' && other.notificationType === 'reminder.review.due' && other.status === 'active')) return false;
     if (record.cta?.id === 'resume-public-world-onboarding') {
@@ -363,7 +366,8 @@
     const scopedIncoming = (Array.isArray(incoming) ? incoming : [incoming])
       .filter(Boolean)
       .map((item) => ({ ...item, ownerId: owner }));
-    const next = mergeMany(records, scopedIncoming, owner);
+    const current = mergeMany(records, readOwner(owner), owner);
+    const next = mergeMany(current, scopedIncoming, owner);
     const changed = JSON.stringify(next) !== JSON.stringify(records);
     records = next;
     if (!changed) return getAll();
@@ -388,6 +392,7 @@
   }
 
   function mutate(ids, updater, reason) {
+    records = mergeMany(records, readOwner(owner), owner);
     const idSet = new Set((Array.isArray(ids) ? ids : [ids]).map(cleanText).filter(Boolean));
     const changed = [];
     const now = Date.now();
@@ -512,11 +517,22 @@
     dismissAllActive,
     resolve,
     subscribe,
+    refreshVisibility: () => emit('gate-access-changed'),
     registerCloudAdapter,
     retryDeferredCloudWrites,
     deferredCloudWriteCount: () => deferredCloudWrites.size,
     migrateGuestToOwner,
     purgeOwner,
+  });
+
+  root.addEventListener?.('storage', event => {
+    if (event.key !== storageKey(owner)) return;
+    const shared = readOwner(owner);
+    const next = mergeMany(records, shared, owner);
+    if (JSON.stringify(next) === JSON.stringify(records)) return;
+    records = next;
+    if (JSON.stringify(next) !== JSON.stringify(shared)) persist();
+    emit('other-tab');
   });
 
   Object.defineProperty(root, 'LootLinguaNotificationStore', {

@@ -1,3 +1,4 @@
+import { GUIDE_TOUR, mergeGuideCoverage, readGuideCoverage } from './guide-coverage.mjs';
 import { createGuestDictionaryMerge } from './guest-dictionary-merge.js?v=full-merge-1';
 import { savedGuestError } from './saved-guest-session.js';
 import { legacyWordMastery, mergeCanonical, mergeJourney, mergeMastery, mergeProfile, number, pickGate, time, union } from './guest-progress-policy.js';
@@ -165,6 +166,8 @@ export function createGuestProgressMerge({ firestore, getDatabase, assertCurrent
 
   async function copyJourneys(plan, wordStates, existingReceipts) {
     if (!globalThis.LootLinguaLearningEvidence) await import('./learning-evidence.js');
+    if (!globalThis.LootLinguaGateLesson) await import('./gate-lesson.js');
+    const lesson = globalThis.LootLinguaGateLesson;
     const evidence = globalThis.LootLinguaLearningEvidence;
     const counted = new Map();
     const { source, sourceUid } = plan;
@@ -188,8 +191,30 @@ export function createGuestProgressMerge({ firestore, getDatabase, assertCurrent
         const [incoming, existing] = await Promise.all([rows(source, sourceUid, ...gatePath), rows(plan.target, plan.targetUid, ...gatePath)]);
         for (const [gateId, gate] of incoming) {
           const current = existing.get(gateId);
-          if (pickGate(current, gate, attempts) !== gate) continue;
           const fullPath = [...gatePath, gateId];
+          const context = { worldId: id, rankId, gateId };
+          const localKey = 'lootlingua:gate-lesson:v1:' + sourceUid + ':' + lesson.keyFor(context);
+          let localLesson = null;
+          try { localLesson = JSON.parse(globalThis.localStorage?.getItem(localKey) || 'null')?.state; } catch (_) {}
+          const storedLesson = await read(userDoc(source, sourceUid, ...fullPath, 'lesson', 'progress'));
+          const checkpoint = lesson.merge(lesson.upgrade(storedLesson, { confirmed: true }), localLesson);
+          // Import historical credit only from the source account's saved checkpoint.
+          if (checkpoint) checkpoint.creditedIds = storedLesson?.creditedIds || [];
+          if (checkpoint?.version === lesson.version) {
+            const lessonRef = userDoc(plan.target, plan.targetUid, ...fullPath, 'lesson', 'progress');
+            await writeRows(plan, [{
+              ref: lessonRef,
+              merge: prior => {
+                if (prior && !lesson.sameWords(prior.wordIds, checkpoint.wordIds)) return prior;
+                return {
+                  ...lesson.merge(lesson.upgrade(prior, { confirmed: true }), checkpoint),
+                  updatedAt: serverTimestamp(),
+                };
+              },
+              stamp: true,
+            }]);
+          }
+          if (pickGate(current, gate, attempts) !== gate) continue;
           const proof = gate.status === 'ready' || gate.status === 'cleared'
             ? await read(userDoc(source, sourceUid, ...fullPath, 'readiness', 'proof')) : null;
           const ref = userDoc(plan.target, plan.targetUid, ...fullPath);
@@ -245,7 +270,10 @@ export function createGuestProgressMerge({ firestore, getDatabase, assertCurrent
       if (receipt.exists()) return receipt.data();
       const target = balance.data() || {};
       const xpDeduplicated = Math.min(number(plan.guest.userXP), duplicateXP(incoming, existing));
-      const merged = mergeProfile(target, plan.guest, xpDeduplicated, consumed, counted);
+      const coverage = mergeGuideCoverage(plan.guest.onboardingProgress?.[GUIDE_TOUR],
+        readGuideCoverage(globalThis.localStorage, plan.sourceUid));
+      const guest = coverage ? { ...plan.guest, onboardingProgress: { ...plan.guest.onboardingProgress, [GUIDE_TOUR]: coverage } } : plan.guest;
+      const merged = mergeProfile(target, guest, xpDeduplicated, consumed, counted);
       tx.set(profile, { ...merged, _syncRevision: number(target._syncRevision) + 1, updatedAt: serverTimestamp() });
       const amounts = { sourceUid: plan.sourceUid, sourceXP: number(plan.guest.userXP), xpDeduplicated,
         xpAdded: number(plan.guest.userXP) - xpDeduplicated, runnerCoinsAdded: number(plan.guest.runnerCoins),

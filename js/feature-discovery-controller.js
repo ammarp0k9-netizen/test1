@@ -126,13 +126,13 @@
   }
 
   function canShowInvitation(feature) {
-    return api().FEATURES.includes(feature) && eligible(feature) && !isInteractiveJourneyActive() &&
+    return !root.LootLinguaGuide && api().FEATURES.includes(feature) && eligible(feature) && !isInteractiveJourneyActive() &&
       !['completed', 'skipped'].includes(getStatus(feature, true));
   }
 
   function updateMarkers() {
     if (typeof document === 'undefined') return;
-    const defer = isInteractiveJourneyActive();
+    const defer = root.LootLinguaGuide || isInteractiveJourneyActive();
     api().FEATURES.forEach((feature) => {
       const status = getStatus(feature, eligible(feature));
       const pending = !defer && eligible(feature) && !['completed', 'skipped'].includes(status);
@@ -151,7 +151,7 @@
   function syncNotifications() {
     const store = root.LootLinguaNotificationStore;
     if (!store?.upsert || !store?.resolve) return;
-    if (isInteractiveJourneyActive()) return;
+    if (root.LootLinguaGuide || isInteractiveJourneyActive()) return;
     api().FEATURES.forEach((feature) => {
       const current = getStatus(feature, eligible(feature));
       const key = notificationKey(feature);
@@ -197,6 +197,7 @@
   }
 
   function open(feature) {
+    if (root.LootLinguaGuide) return api().FEATURES.includes(feature) && root.LootLinguaGuide.openTopic(feature);
     if (!api().FEATURES.includes(feature) || !eligible(feature) || isInteractiveJourneyActive()) return false;
     const active = root.LootLinguaFeatureMiniOnboarding?.getActiveFeature?.();
     if (active && active !== feature) root.LootLinguaFeatureMiniOnboarding?.pause?.();

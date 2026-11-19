@@ -26,6 +26,9 @@ async function commitVerifiedQuizResults(trace, onStage) {
   const advancedWords = [];
   const transitionEntries = [];
 
+  if (window.LootLinguaGateLesson?.hasGateIntent(activeQuizSession) &&
+      !await canOpenGateQuiz(activeQuizSession, true)) throw new Error('lesson/incomplete');
+
   // Commit against the immutable candidate snapshot captured when this session
   // started. Re-resolving here could apply an old answer to a newly selected
   // source (or to another account after an auth switch).
@@ -118,6 +121,7 @@ async function commitVerifiedQuizResults(trace, onStage) {
         completed: true,
         entries: transitionEntries,
         projectReadiness: false,
+        gateContext: window.getActiveVerifiedQuizCommitContext?.(activeQuizSession.id)?.gateContext,
         officialReviewGate: window.getActiveVerifiedQuizCommitContext?.(activeQuizSession.id)?.officialReviewGate || null,
         officialReviewDueWordKeys: window.getActiveVerifiedQuizCommitContext?.(activeQuizSession.id)?.officialReviewDueWordKeys || [],
       });

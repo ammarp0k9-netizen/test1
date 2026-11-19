@@ -3,6 +3,7 @@
 import { getApps }  from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
 import { getFirestore, doc, getDoc, runTransaction, onSnapshot } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
 import { getAuth, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js";
+import { GUIDE_TOUR, guideStorageKey } from './guide-coverage.mjs';
 import { applyProfileIntent, profileOperationId, profileStorageIntents, mergeOnboardingProgress } from './profile-sync-policy.mjs?v=20261114-runner-shop-1';
 
 // استخدم التطبيق الموجود فقط بدون إعادة تعريف إذا كان معرف مسبقًا
@@ -167,8 +168,8 @@ function syncOnboardingProgress(data, owner) {
   const discovery = read(discoveryKey) || { version: 1, features: {} };
   const features = { ...(discovery.features || {}) };
   let changed = false;
-  for (const tour of ['treasure', 'quiz', 'starred', 'custom-worlds', 'personal-dictionary', 'public-world-guide']) {
-    const separateKey = tour === 'personal-dictionary' ? personalKey : tour === 'public-world-guide' ? worldGuideKey : '';
+  for (const tour of ['treasure', 'quiz', 'starred', 'custom-worlds', 'personal-dictionary', 'public-world-guide', GUIDE_TOUR]) {
+    const separateKey = tour === 'personal-dictionary' ? personalKey : tour === 'public-world-guide' ? worldGuideKey : tour === GUIDE_TOUR ? guideStorageKey(owner.uid) : '';
     const local = separateKey ? read(separateKey) : features[tour];
     const remote = data.onboardingProgress?.[tour];
     const merged = mergeOnboardingProgress(tour, remote, local);
