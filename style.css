@@ -5492,6 +5492,19 @@ body.test-clock-active .toast-host {
 .header-widgets { display:flex; align-items:center; gap:12px; flex-shrink:0; }
 
 /* Quiet optional-discovery marker; it never changes a feature's lock state. */
+#legendDock [data-discovery-pending]::before {
+  content: '';
+  position: absolute;
+  inset-block-start: 4px;
+  inset-inline-end: 7px;
+  inline-size: 7px;
+  block-size: 7px;
+  border: 1px solid var(--card-bg);
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent);
+  pointer-events: none;
+}
 .feature-discovery-ready { position: relative; }
 .worlds-tab.feature-discovery-ready::after {
   content: '';
@@ -14858,3 +14871,67 @@ body.runner-input-active > :where(.main-content, .legend-top-bar, .legend-dock, 
 .runner-setup-brief[hidden] { display:none; }
 .runner-setup-brief span { display:inline-block; padding:6px 10px; margin:3px; border-radius:20px; border:1px solid var(--accent); font-weight:700; }
 .runner-setup-brief p { margin:10px 0 0; line-height:1.8; color:var(--text-gray); }
+.contextual-guide-inline {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 5px 12px;
+  margin-block: 0 12px;
+  padding: 10px 14px;
+  border: 1px solid color-mix(in srgb, var(--accent) 32%, transparent);
+  border-inline-start: 3px solid var(--accent);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--accent) 8%, var(--card-bg));
+  color: var(--text-white);
+  text-align: start;
+}
+.contextual-guide-inline > strong { grid-column: 1; font-size: .88rem; }
+.contextual-guide-inline > p { grid-column: 1; margin: 0; font-size: .83rem; line-height: 1.6; }
+.contextual-guide-inline > .feature-mini-onboarding-actions { grid-column: 2; grid-row: 1 / span 2; margin: 0; }
+.contextual-guide-inline button { min-height: 40px; }
+.published-gate-state-card > .contextual-guide-inline {
+  grid-column: 2 / -1;
+  min-inline-size: 0;
+  margin-block-end: 0;
+}
+.profile-guide-status { margin-inline-start: auto; color: var(--text-white); opacity: .74; font-size: .72rem; font-weight: 500; text-align: end; }
+.profile-guide-status:empty { display: none; }
+@media (max-width: 680px) {
+  .published-gate-state-card > .contextual-guide-inline { grid-column: 1 / -1; }
+}
+@media (max-width: 480px) {
+  .contextual-guide-inline { grid-template-columns: minmax(0, 1fr); }
+  .contextual-guide-inline > .feature-mini-onboarding-actions { grid-column: 1; grid-row: auto; }
+}
+
+.profile-guide-start,
+.profile-guide-tour-actions button {
+  padding: .55rem .75rem;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--card-bg);
+  color: var(--text-white);
+  cursor: pointer;
+  font: inherit;
+}
+.profile-guide-start {
+  margin-block: .5rem;
+  border-color: var(--accent);
+}
+.profile-guide-tour:not([hidden]) {
+  display: grid;
+  gap: .75rem;
+  margin-block: .6rem;
+  padding: .9rem;
+  border: 1px solid var(--border);
+  border-inline-start: 3px solid var(--accent);
+  border-radius: 12px;
+  background: var(--card-bg);
+}
+.profile-guide-tour h3,
+.profile-guide-tour p { margin: 0; }
+.profile-guide-tour p { line-height: 1.65; }
+.profile-guide-tour-actions { display: flex; flex-wrap: wrap; gap: .45rem; }
+.profile-guide-tour-actions button { min-height: 44px; }
+.profile-guide-tour-actions [data-guide-tour-action="next"] { border-color: var(--accent); }
+.profile-guide :is(button, h3):focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }

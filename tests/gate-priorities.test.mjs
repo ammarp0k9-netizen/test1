@@ -186,7 +186,8 @@ test('a due review uses the saved count and the games and cards are locked insid
   const h = harness({ gateProgress: progress }); h.render();
   assert.equal(h.buttons[0].textContent, 'ابدأ المراجعة الرسمية');
   assert.deepEqual(reviewFacts(h.panel), [['كلمات مستحقة الآن', '2']]);
-  assert.equal(reviewCopy(h.panel).dataset.onboardingGateReview, 'due');
+  assert.equal(h.buttons[0].dataset.onboardingGateReview, 'due');
+  assert.equal(reviewCopy(h.panel).dataset.onboardingGateReview, undefined);
   for (const name of ['runner', 'bots']) assert.equal(h.panel.querySelector('.' + name), null);
   await h.openPicker();
   for (const name of ['runner', 'bots']) assert.equal(gameLaunch(h, name).disabled, true);
@@ -204,7 +205,8 @@ test('waiting locks training in the open picker exactly when the saved deadline 
   const copy = reviewCopy(h.panel);
   assert.equal(reviewTime(h.panel).tag, 'time');
   assert.equal(reviewTime(h.panel).dateTime, new Date(nextAt).toISOString());
-  assert.equal(copy.dataset.onboardingGateReview, 'waiting');
+  assert.equal(copy.dataset.onboardingGateReview, undefined);
+  assert.equal(h.buttons[0].dataset.onboardingGateReview, undefined);
   await h.openPicker();
   const cards = pickerModes(h.picker)[0];
   assert.equal(cards.disabled, false);
@@ -212,6 +214,7 @@ test('waiting locks training in the open picker exactly when the saved deadline 
   assert.equal(gameLaunch(h, 'bots').disabled, false);
   h.tick(nextAt - 1); assert.strictEqual(reviewCopy(h.panel), copy);
   h.tick(nextAt); assert.deepEqual(buttonLabels(h), ['ابدأ المراجعة الرسمية']);
+  assert.equal(h.buttons[0].dataset.onboardingGateReview, 'due');
   assert.equal(reviewFacts(h.panel), undefined);
   assert.equal(reviewTime(h.panel), undefined);
   assert.equal(cards.disabled, true);

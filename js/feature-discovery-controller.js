@@ -125,14 +125,29 @@
     return store?.find?.(currentKey)?.resolutionReason === 'source-cleared' ? `${key}:invitation` : currentKey;
   }
 
+  function coordinator() {
+    const smart = root.LootLinguaSmartOnboarding;
+    return smart?.coordinatesLegacy?.() ? smart : null;
+  }
+
   function canShowInvitation(feature) {
-    return !root.LootLinguaGuide && api().FEATURES.includes(feature) && eligible(feature) && !isInteractiveJourneyActive() &&
+    return api().FEATURES.includes(feature) && eligible(feature) && !isInteractiveJourneyActive() &&
+      !root.LootLinguaGuide?.covered(feature) &&
       !['completed', 'skipped'].includes(getStatus(feature, true));
   }
 
   function updateMarkers() {
     if (typeof document === 'undefined') return;
-    const defer = root.LootLinguaGuide || isInteractiveJourneyActive();
+    const smart = coordinator();
+    if (smart) {
+      document.querySelectorAll('.feature-discovery-ready').forEach(element => {
+        element.classList.remove('feature-discovery-ready');
+        element.removeAttribute('data-discovery-feature');
+      });
+      smart.schedule();
+      return;
+    }
+    const defer = isInteractiveJourneyActive();
     api().FEATURES.forEach((feature) => {
       const status = getStatus(feature, eligible(feature));
       const pending = !defer && eligible(feature) && !['completed', 'skipped'].includes(status);
@@ -143,7 +158,7 @@
         else element.removeAttribute('data-discovery-feature');
       });
     });
-    const worldsPending = !defer && ['starred', 'custom-worlds'].some((feature) => eligible(feature) && !['completed', 'skipped'].includes(getStatus(feature, true)));
+    const worldsPending = !defer && ['starred', 'custom-worlds'].some(canShowInvitation);
     document.querySelector('#legendDock [data-dock-view="worlds"]')?.classList.toggle('feature-discovery-ready', worldsPending);
     document.querySelector('#customWorldsTab')?.classList.toggle('feature-discovery-ready', worldsPending);
   }
@@ -151,7 +166,13 @@
   function syncNotifications() {
     const store = root.LootLinguaNotificationStore;
     if (!store?.upsert || !store?.resolve) return;
-    if (root.LootLinguaGuide || isInteractiveJourneyActive()) return;
+    if (isInteractiveJourneyActive()) return;
+    if (coordinator()) {
+      const oldInvitations = (store.getAll?.() || []).filter(record => record.notificationType === 'feature.discovery' &&
+        ['active', 'pending'].includes(record.status));
+      if (oldInvitations.length) store.resolve(oldInvitations.map(record => record.id), 'feature-discovery-in-context');
+      return;
+    }
     api().FEATURES.forEach((feature) => {
       const current = getStatus(feature, eligible(feature));
       const key = notificationKey(feature);
@@ -197,7 +218,7 @@
   }
 
   function open(feature) {
-    if (root.LootLinguaGuide) return api().FEATURES.includes(feature) && root.LootLinguaGuide.openTopic(feature);
+    if (coordinator()) return canShowInvitation(feature) && coordinator().openFeature(feature);
     if (!api().FEATURES.includes(feature) || !eligible(feature) || isInteractiveJourneyActive()) return false;
     const active = root.LootLinguaFeatureMiniOnboarding?.getActiveFeature?.();
     if (active && active !== feature) root.LootLinguaFeatureMiniOnboarding?.pause?.();
@@ -222,7 +243,8 @@
   root.addEventListener('lootlingua:onboarding-cloud-change', () => { loadedOwner = ''; state = null; load(); requestEvaluation(); });
   ['lootlingua:initial-data-ready', 'lootlingua:learning-data-changed', 'lootlingua:entry-state-ready', 'lootlingua:entry-closed',
     'lootlingua:surface-ready', 'lootlingua:auth-dialog-opened', 'lootlingua:auth-dialog-closed',
-    'lootlingua:guided-first-journey-change', 'lootlingua:personal-dictionary-onboarding-change']
+    'lootlingua:guided-first-journey-change', 'lootlingua:personal-dictionary-onboarding-change',
+    'lootlingua:guide-coverage-changed', 'lootlingua:guide-presentation-change']
     .forEach((eventName) => root.addEventListener(eventName, requestEvaluation));
   if (typeof document !== 'undefined') {
     document.addEventListener('click', (event) => {

@@ -2,6 +2,10 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import vm from 'node:vm';
 import { readFile } from 'node:fs/promises';
+import {
+  DISCOVERY_TOPICS, GUIDE_TOUR, GUIDE_TOPICS, GUIDE_SIGNALS, guideStorageKey,
+  readGuideCoverage, mergeGuideCoverage, selectDiscoveryTopic,
+} from '../js/guide-coverage.mjs';
 
 const [smart, dictionary, discoveryContract, discovery, mini] = await Promise.all([
   'smart-onboarding', 'personal-dictionary-onboarding', 'feature-discovery-contract',
@@ -110,6 +114,64 @@ function setup(values = new Map(), uid = null) {
 }
 const old = (step, phase = 'intro') => JSON.stringify({ version: 1, phase, step });
 
+test('the dictionary invitation needs an owner-matched receipt, and a visit alone does not consume it', async () => {
+  const h = setup(new Map(), 'alex');
+  const topics = new Set();
+  h.root.LootLinguaGuide = {
+    covered: topic => topics.has(topic), acknowledge: topic => topics.add(topic), isPresenting: () => false,
+    status: topic => topics.has(topic) ? 'seen' : '',
+    discoveryTopic: eligible => selectDiscoveryTopic(topic => topics.has(topic) ? 'seen' : '', eligible),
+  };
+  const state = { wordIds: ['word'] };
+  h.root.LootLinguaGateLesson = { complete: candidate => candidate === state };
+  h.root.LootLinguaJourneyCloud = { getGateLessonAccess: async () => ({ confirmed: true, state }) };
+  const officialReviewGate = { worldId: 'world', rankId: 'rank', gateId: 'gate' };
+  h.emit('surface-ready', { kind: 'view' });
+  assert.equal(topics.has('dictionary-visited'), false);
+  for (const detail of [
+    { ownerId: 'alex' },
+    { ownerId: 'alex', officialReviewGate, officialReviewCommitted: false },
+    { ownerId: 'someone-else', officialReviewGate, officialReviewCommitted: true },
+  ]) {
+    h.emit('trusted-quiz-completed', detail);
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(h.root.LootLinguaSmartOnboarding.dictionaryInvitationPending(), false);
+  }
+  const receipt = { ownerId: 'alex', officialReviewGate, officialReviewCommitted: true };
+  h.emit('trusted-quiz-completed', receipt);
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(h.root.LootLinguaSmartOnboarding.dictionaryInvitationPending(), true);
+  topics.delete('first-official-review');
+  h.input('click', { closest: selector => selector.includes('[data-view="personal"]') });
+  assert.equal(topics.has('dictionary-visited'), true);
+  assert.equal(topics.has('dictionary'), false);
+  h.emit('trusted-quiz-completed', receipt);
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(h.root.LootLinguaSmartOnboarding.dictionaryInvitationPending(), true);
+  topics.add('dictionary');
+  assert.equal(h.root.LootLinguaSmartOnboarding.dictionaryInvitationPending(), false);
+});
+
+test('one persistent invitation follows feature priority and natural coverage without replaying later', () => {
+  const record = { 'dictionary-visited': 'seen' };
+  const pending = (...unlocked) => selectDiscoveryTopic(topic => record[topic], topic => unlocked.includes(topic));
+  assert.equal(pending('quiz', 'treasure'), '');
+  record['first-official-review'] = 'seen';
+  assert.equal(pending('quiz', 'treasure'), 'dictionary');
+  record['dictionary-invitation'] = 'seen';
+  assert.equal(pending('quiz', 'treasure'), 'dictionary');
+  record['dictionary-invitation'] = 'dismissed';
+  assert.equal(pending('quiz', 'treasure'), 'quiz');
+  record.quiz = 'seen';
+  assert.equal(pending('quiz', 'treasure', 'starred'), 'treasure');
+  record.treasure = 'dismissed';
+  assert.equal(pending('quiz', 'treasure', 'starred', 'custom-worlds'), 'starred');
+  assert.equal(mergeGuideCoverage(
+    { version: 1, topics: { 'quiz-invitation': 'seen' } },
+    { version: 1, topics: { 'quiz-invitation': 'dismissed' } }
+  ).topics['quiz-invitation'], 'dismissed');
+});
+
 test('profile help runs outside the legacy order, and the full tour resumes at its old checkpoint', () => {
   const key = legacyKey + 'user:alex';
   const h = setup(new Map([[key, old(2)]]), 'alex');
@@ -173,7 +235,7 @@ test('a due or waiting gate gives way to requested help and a busy surface', () 
   h.element('[data-onboarding-gate-review]').dataset.onboardingGateReview = 'due';
   h.setHelp(true); h.emit('gate-guide-state'); h.flush(); assert.equal(h.active, 'user-help');
   h.setBusy(true); h.setHelp(false); h.flush(); assert.equal(h.active, undefined);
-  h.setBusy(false); h.flush(); assert.match(h.title, /الرسمية/); h.choose('فهمت');
+  h.setBusy(false); h.flush(); assert.match(h.title, /حان وقت المراجعة/); h.choose('فهمت');
   h.element('[data-onboarding-gate-review]').dataset.onboardingGateReview = 'waiting';
   h.element('[data-onboarding-gate-review="waiting"]');
   h.emit('gate-guide-state'); h.flush(); assert.match(h.title, /التالية/);
@@ -242,7 +304,6 @@ test('mini tours start on the appropriate unlocked surface, keep checkpoints and
 });
 
 test('the shared guide migrates completed and explicitly dismissed topics only for their owner', async () => {
-  const { GUIDE_TOUR, GUIDE_TOPICS, guideStorageKey, readGuideCoverage, mergeGuideCoverage } = await import('../js/guide-coverage.mjs');
   const guideModule = (await readFile(new URL('../js/lootlingua-guide.js', import.meta.url), 'utf8')).replace(/^import .*;\r?\n/m, '');
   const values = new Map([
     ['lootlingua:contextual-onboarding:v1:gate-wait:user:A', 'completed'],
@@ -256,7 +317,7 @@ test('the shared guide migrates completed and explicitly dismissed topics only f
     dispatchEvent: event => events.push(event.type) };
   vm.runInNewContext(guideModule, { window: root, document: { getElementById: () => null },
     localStorage: storage, CustomEvent: class { constructor(type) { this.type = type; } },
-    GUIDE_TOUR, GUIDE_TOPICS, guideStorageKey, readGuideCoverage, mergeGuideCoverage });
+    DISCOVERY_TOPICS, GUIDE_TOUR, GUIDE_TOPICS, GUIDE_SIGNALS, guideStorageKey, readGuideCoverage, mergeGuideCoverage, selectDiscoveryTopic });
   assert.deepEqual(JSON.parse(storage.getItem(guideStorageKey('A'))).topics, { 'gate-wait': 'seen', search: 'dismissed' });
   assert.equal(root.LootLinguaGuide.covered('meaning'), false);
   root.LootLinguaGuide.acknowledge('search', 'seen');
@@ -273,4 +334,17 @@ test('the shared guide migrates completed and explicitly dismissed topics only f
   assert.equal(JSON.parse(storage.getItem(guideStorageKey('ANON'))).topics.lesson, 'seen');
   assert.equal(storage.getItem(guideStorageKey()), undefined);
   assert.ok(events.includes('lootlingua:guide-coverage-changed'));
+  root.LootLinguaGuide.acknowledge('first-official-review');
+  assert.equal(root.LootLinguaGuide.covered('first-official-review'), true);
+  values.set(guideStorageKey('ANON'), JSON.stringify({ version: 1, topics: { 'dictionary-invitation': 'dismissed' } }));
+  listeners.get('storage')({ key: guideStorageKey('ANON') });
+  assert.equal(root.LootLinguaGuide.covered('first-official-review'), true);
+  assert.equal(root.LootLinguaGuide.status('dictionary-invitation'), 'dismissed');
+  assert.equal(JSON.parse(storage.getItem(guideStorageKey('ANON'))).topics.lesson, 'seen');
+  assert.equal(root.LootLinguaGuide.covered('dictionary'), false);
+  root.auth.currentUser = { uid: 'B' };
+  listeners.get('lootlingua:auth-state')();
+  listeners.get('storage')({ key: guideStorageKey('ANON') });
+  assert.equal(root.LootLinguaGuide.covered('first-official-review'), false);
+  assert.equal(root.LootLinguaGuide.status('dictionary-invitation'), '');
 });

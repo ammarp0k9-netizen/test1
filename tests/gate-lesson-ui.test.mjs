@@ -182,3 +182,21 @@ test('closing a lesson after an account switch cannot surface the previous owner
   assert.equal(window.__toastQueue.length, 1);
   assert.equal(window.__toastQueue[0].preview, 'Owner B lesson notice');
 });
+
+test('presentation credits learning and practice without changing completed words', () => {
+  const start = viewSource.indexOf('  function progressUnits(');
+  const end = viewSource.indexOf('  const number =', start);
+  const scope = vm.createContext({});
+  vm.runInContext(viewSource.slice(start, end), scope);
+  const state = {
+    wordIds: ['old', 'new'], completedWordIds: ['old'],
+    study: { taught: ['old', 'new'], applied: ['old'] }
+  };
+  const before = structuredClone(state);
+  assert.deepEqual({ ...scope.progressUnits(state) }, { units: 5, introduced: 2 });
+  assert.deepEqual(state, before);
+  state.study.applied.push('new');
+  assert.equal(scope.progressUnits(state).units, 6);
+  state.completedWordIds.push('new');
+  assert.equal(scope.progressUnits(state).units, 8);
+});

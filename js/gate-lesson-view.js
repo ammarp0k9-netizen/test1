@@ -252,6 +252,12 @@
     return node;
   }
 
+  function arabic(node) {
+    node.lang = 'ar';
+    node.dir = 'rtl';
+    return node;
+  }
+
   function close(view, { save = true, restoreFocus = true } = {}) {
     if (view !== active) return;
     active = null;
@@ -272,30 +278,63 @@
   const titles = { listen: 'اسمع الكلمة واربطها بمعناها', context: 'افهم الكلمة في سياقها',
     use: 'جرّب الكلمة في العبارة', recall: 'استرجع الكلمة', discover: 'تعرّف على الكلمة' };
 
+  function updateExampleWord(mark, word, gap, hidden) {
+    mark.classList.toggle('gate-lesson-gap', hidden);
+    mark.textContent = hidden ? '…' : word.example.slice(gap[0].length, gap[0].length + word.word.length);
+    if (hidden) {
+      arabic(mark);
+      mark.setAttribute('aria-label', 'الكلمة الناقصة');
+    } else {
+      mark.removeAttribute('dir');
+      mark.removeAttribute('lang');
+      mark.removeAttribute('aria-label');
+    }
+  }
+
   function sentence(word, gap = null, hideWord = false) {
     const line = english(element('p', 'gate-lesson-example'));
     if (!gap) {
       line.textContent = word.example;
       return line;
     }
-    const focus = element('mark', hideWord ? 'gate-lesson-gap' : '', hideWord ? '…' :
-      word.example.slice(gap[0].length, gap[0].length + word.word.length));
-    if (hideWord) focus.setAttribute('aria-label', 'الكلمة الناقصة');
-    line.append(gap[0], focus, gap[1]);
+    const mark = element('mark', '');
+    updateExampleWord(mark, word, gap, hideWord);
+    line.append(gap[0], mark, gap[1]);
     return line;
+  }
+
+  function contextExample(word, gap, hideWord = false) {
+    const card = element('div', 'gate-lesson-context');
+    const line = sentence(word, gap, hideWord);
+    const translation = word.exampleTranslation && arabic(element('p', 'gate-lesson-translation', word.exampleTranslation));
+    card.append(line);
+    if (translation && !hideWord) card.append(translation);
+    return { card, line, translation };
+  }
+
+  function clozeExample(view, word, gap, hideWord) {
+    if (view.example?.id !== word.id) {
+      view.example = { id: word.id, ...contextExample(word, gap, hideWord) };
+    } else {
+      const { card, line, translation } = view.example;
+      updateExampleWord(line.querySelector('mark'), word, gap, hideWord);
+      if (translation && hideWord) translation.remove();
+      else if (translation && !translation.parentNode) card.append(translation);
+    }
+    return view.example.card;
   }
 
   function relation(word) {
     const pair = element('div', 'gate-lesson-relation');
     pair.append(english(element('strong', 'gate-lesson-answer-word', word.word)),
-      icon('arrows-left-right'), element('span', 'gate-lesson-answer-meaning', word.translation));
+      icon('arrows-left-right'), arabic(element('span', 'gate-lesson-answer-meaning', word.translation)));
     return pair;
   }
 
-  function supportText(word, includeExample = true) {
+  function supportText(word) {
     const group = element('div', 'gate-lesson-teaching-copy');
-    if (word.example && includeExample) group.append(sentence(word, contract.cloze(word)));
-    if (word.example && word.exampleTranslation) group.append(element('p', 'gate-lesson-translation', word.exampleTranslation));
+    if (word.example) group.append(sentence(word, contract.cloze(word)));
+    if (word.example && word.exampleTranslation) group.append(arabic(element('p', 'gate-lesson-translation', word.exampleTranslation)));
     const definition = word.definition_ar || word.definition;
     if (definition) {
       const copy = element('p', 'gate-lesson-definition', definition);
@@ -318,8 +357,8 @@
     options.append(element('legend', '', legend));
     for (const value of values) {
       const button = action(value, 'gate-lesson-choice', () => act(event, value));
-      button.dir = 'auto';
-      if (field === 'word') button.lang = 'en';
+      if (field === 'word') english(button);
+      else arabic(button);
       button.dataset.lessonAction = event;
       options.append(button);
     }
@@ -329,26 +368,28 @@
   function renderTeaching(view, step, prompt, response, footer, act) {
     const { word } = step;
     const linking = step.practice === 'link' && !step.rehearse;
-    if (!linking) prompt.append(english(element('p', 'gate-lesson-word', word.word)));
-    else {
-      const link = english(action(word.word, 'gate-lesson-word gate-lesson-word-link', () => act('guided', word.word)));
-      link.setAttribute('aria-label', word.word);
-      link.setAttribute('aria-describedby', 'gateLessonLinkPrompt');
-      link.dataset.lessonAction = 'guided';
-      prompt.append(link);
-    }
-    if (word.partOfSpeech) prompt.append(english(element('span', 'gate-lesson-part-of-speech', word.partOfSpeech)));
-    prompt.append(audioControl(view, word));
-    if (word.example) {
-      const context = element('div', 'gate-lesson-context');
-      context.append(sentence(word, contract.cloze(word)));
-      (step.practice === 'cloze' ? prompt : response).append(context);
-    }
+    const line = english(element('div', 'gate-lesson-word-line'));
+    const carrier = element('div', 'gate-lesson-word-carrier');
+    const lexeme = element('div', 'gate-lesson-lexeme');
+    lexeme.append(english(element('p', 'gate-lesson-word', word.word)));
+    if (word.partOfSpeech) lexeme.append(english(element('span', 'gate-lesson-part-of-speech', word.partOfSpeech)));
     const explanation = element('div', 'gate-lesson-explanation');
     explanation.id = 'gateLessonExplanation';
     explanation.append(element('span', 'gate-lesson-cue-label', 'المعنى'),
-      element('strong', 'gate-lesson-answer-meaning', word.translation));
-    response.append(explanation, supportText(word, false));
+      arabic(element('strong', 'gate-lesson-answer-meaning', word.translation)));
+    carrier.append(lexeme, arabic(explanation));
+    line.append(carrier, arabic(audioControl(view, word)));
+    // A sentence that becomes a cloze stays at the same reading position.
+    if (step.practice === 'cloze') prompt.append(clozeExample(view, word, contract.cloze(word), false));
+    prompt.append(line);
+    if (word.example && step.practice !== 'cloze') {
+      response.append(contextExample(word, contract.cloze(word)).card);
+    }
+    const definition = word.definition_ar || word.definition;
+    if (definition) {
+      const copy = element('p', 'gate-lesson-definition', definition);
+      response.append(word.definition_ar ? arabic(copy) : english(copy));
+    }
     if (word.definition_ar && word.definition && word.definition_ar !== word.definition) {
       const detail = element('details', 'gate-lesson-definition-more');
       detail.open = view.state.study.details.includes(word.id);
@@ -362,14 +403,17 @@
       response.append(detail);
     }
     if (linking) {
-      const guide = element('p', 'gate-lesson-discover-prompt', 'المس اللفظ الإنجليزي لتربطه بهذا المعنى.');
+      const guide = element('p', 'gate-lesson-discover-prompt', 'اقرأ المعنى واضغط الكلمة لتثبّت الربط بينهما.');
       guide.id = 'gateLessonLinkPrompt';
-      response.append(guide);
+      const link = english(action(word.word, 'gate-lesson-word-link', () => act('guided', word.word)));
+      link.setAttribute('aria-describedby', 'gateLessonLinkPrompt gateLessonExplanation');
+      link.dataset.lessonAction = 'guided';
+      footer.append(guide, link);
     } else if (step.practice === 'cloze' || step.rehearse) {
       nextButton(footer, step.practice === 'cloze' ? 'جرّب إكمال العبارة' : 'جرّب ربط اللفظ بالمعنى',
         () => act('practice'), 'practice');
     } else {
-      response.append(choiceGroup(contract.choices(step, view.words, view.state), 'طابق الكلمة مع معناها الموضّح',
+      footer.append(choiceGroup(contract.choices(step, view.words, view.state), 'ثبّت معنى الكلمة بالاستعانة بالشرح أعلاه',
         'translation', act, 'guided'));
     }
   }
@@ -409,17 +453,15 @@
 
   function exercisePrompt(view, step, prompt, result) {
     const { word } = step;
-    if (step.kind === 'use' || (step.gap && !result && step.phase === 'retrieve')) {
-      const copy = element('div', 'gate-lesson-context');
-      copy.append(sentence(word, step.gap, !result));
-      if (result && word.exampleTranslation) copy.append(element('p', 'gate-lesson-translation', word.exampleTranslation));
-      prompt.append(copy);
+    if (step.kind === 'use') {
+      prompt.append(clozeExample(view, word, step.gap, !result));
+    } else if (step.gap && !result && step.phase === 'retrieve') {
+      prompt.append(contextExample(word, step.gap, true).card);
     } else if (!result && step.answerField === 'translation') {
       prompt.append(english(element('p', 'gate-lesson-meaning', word.word)));
       if (step.phase === 'apply' && word.example) prompt.append(sentence(word, contract.cloze(word)));
     } else if (!result) {
-      prompt.append(element('p', 'gate-lesson-cue-label', 'ما الكلمة التي تحمل هذا المعنى؟'));
-      prompt.append(element('p', 'gate-lesson-meaning', word.translation));
+      prompt.append(arabic(element('p', 'gate-lesson-meaning', word.translation)));
     }
   }
 
@@ -430,13 +472,15 @@
     if (step.phase === 'apply' && step.practice === 'link') {
       const wordButton = english(action(word.word, 'gate-lesson-choice gate-lesson-word-link', () => act('guided', word.word)));
       wordButton.dataset.lessonAction = 'guided';
-      response.append(element('p', 'gate-lesson-discover-prompt', 'اقرأ المعنى، ثم اضغط اللفظ وجرّب أن تقوله من ذاكرتك.'));
+      response.append(element('p', 'gate-lesson-discover-prompt', 'اقرأ المعنى، ثم اضغط الكلمة وحاول نطقها من ذاكرتك.'));
       response.append(wordButton);
       return null;
     }
     if (options.length) {
-      const legend = step.gap ? 'أعد الكلمة التي تعلّمتها إلى العبارة' :
-        step.answerField === 'word' ? 'اختر اللفظ المطابق' : 'اختر المعنى المطابق';
+      const legend = step.gap
+        ? step.phase === 'apply' ? 'جرّب وضع الكلمة في الجملة. استخدم التلميح إذا احتجته.' : 'تذكّر الكلمة التي تكمل الجملة'
+        :
+        step.answerField === 'word' ? 'اختر الكلمة التي تحمل هذا المعنى' : 'اختر معنى الكلمة';
       response.append(choiceGroup(options, legend, step.answerField, act));
     } else {
       response.append(element('p', 'gate-lesson-discover-prompt', 'حاول التذكّر أولًا. يمكنك كتابة الإجابة أو مقارنتها بالحل.'));
@@ -482,7 +526,7 @@
     if (!sameAnswer && !contender) {
       strip.append(english(element('bdi', '', receipt.word.word)), element('span', '', receipt.word.translation));
     }
-    stage.insertBefore(strip, stage.querySelector('.gate-lesson-workspace'));
+    stage.append(strip);
     if (view.liveResult) {
       view.liveResult.textContent = strip.textContent;
     }
@@ -503,30 +547,34 @@
     title.setAttribute('aria-describedby', 'gateLessonRelation');
     const pair = relation(step.word);
     pair.id = 'gateLessonRelation';
-    feedback.append(badge, title, pair, audioControl(view, step.word));
+    const head = element('div', 'gate-lesson-feedback-head');
+    head.append(badge, title);
+    feedback.append(head, pair, audioControl(view, step.word));
     if (step.kind !== 'use') feedback.append(supportText(step.word));
     if (step.phase === 'retrieve' && result !== 'correct') {
-      feedback.append(element('p', 'gate-lesson-discover-prompt', 'ستعود الكلمة بعد قليل لتجرّب تذكّرها مرة أخرى.'));
+      feedback.append(element('p', 'gate-lesson-discover-prompt', 'نرجع لها لاحقًا حتى تأخذ فرصة ثانية للتذكّر.'));
     }
     response.append(feedback);
     nextButton(footer, result === 'wrong' || result === 'revealed' ? 'تابع بعد التصحيح' : 'تابع', () => act('next'));
     return title;
   }
 
-  function render(view) {
-    if (active !== view) return;
-    stopAudio(view);
-    const state = view.state;
-    const steps = contract.build(view.words, state);
-    const step = contract.stepAt(steps, state);
-    const answered = step && contract.resultFor(state, step);
-    const progress = element('progress', 'gate-lesson-progress');
-    progress.max = state.wordIds.length;
-    progress.value = state.completedWordIds.length;
-    const number = value => value.toLocaleString('ar');
-    const count = number(progress.value) + ' من ' + number(progress.max) + ' كلمة';
-    progress.setAttribute('aria-label', 'تقدّم تعلّم الكلمات · ' + count);
-    progress.dir = 'rtl';
+  function progressUnits(state) {
+    const completed = new Set(state.completedWordIds);
+    const taught = new Set(state.study.taught);
+    const applied = new Set(state.study.applied);
+    let units = 0;
+    let introduced = 0;
+    for (const id of state.wordIds) {
+      if (taught.has(id) || completed.has(id)) introduced++;
+      units += completed.has(id) ? 4 : Number(taught.has(id)) + Number(applied.has(id));
+    }
+    return { units, introduced };
+  }
+
+  const number = value => value.toLocaleString('ar');
+
+  function makeChrome(view) {
     const header = element('header', 'gate-lesson-header');
     const identity = element('div', 'gate-lesson-identity');
     const identityCopy = element('div', '');
@@ -539,20 +587,88 @@
     });
     exit.append(icon('arrow-right-from-bracket'), element('span', '', 'احفظ واخرج'));
     header.append(identity, exit);
+
     const meter = element('div', 'gate-lesson-meter');
-    meter.append(element('span', 'gate-lesson-count', count), progress);
+    const copy = element('div', 'gate-lesson-meter-copy');
+    const studied = element('span', 'gate-lesson-studied');
+    const count = element('span', 'gate-lesson-count');
+    copy.append(studied, count);
+    const track = element('div', 'gate-lesson-track');
+    const fill = element('span', 'gate-lesson-fill');
+    fill.setAttribute('aria-hidden', 'true');
+    const progress = element('progress', 'gate-lesson-progress');
+    track.append(fill, progress);
+    meter.append(copy, track);
+    view.dialog.replaceChildren(header, meter, view.liveResult);
+    if (view.toastHost) view.dialog.append(view.toastHost);
+    return { progress, fill, count, studied };
+  }
+
+  function showProgress(view) {
+    const { state } = view;
+    const meter = view.meter ||= makeChrome(view);
+    const { units, introduced } = progressUnits(state);
+    meter.progress.max = state.wordIds.length;
+    meter.progress.value = state.completedWordIds.length;
+    meter.studied.textContent = 'تعرّفت على ' + number(introduced) + ' كلمة';
+    meter.count.textContent = 'أكملت ' + number(meter.progress.value) + ' من ' + number(meter.progress.max) + ' كلمة';
+    meter.progress.setAttribute('aria-label', 'تقدم الدرس. ' + meter.studied.textContent + '. ' + meter.count.textContent);
+    meter.fill.style.setProperty('--lesson-progress', String(units / (4 * meter.progress.max)));
+  }
+
+  function lessonMotion(previous, current) {
+    if (!previous) return 'arrival';
+    if (current.stepId === previous.stepId) {
+      if (current.answer && !previous.answer) return 'feedback';
+      if (current.hint && !previous.hint) return 'hint';
+      return '';
+    }
+    if (current.answer) return 'feedback';
+    if (current.phase === 'apply' && current.scene === previous.scene) return 'practice';
+    if (current.scene === previous.scene) return 'prompt';
+    if (current.scene.startsWith('return:')) return 'return';
+    if (current.scene.startsWith('station:')) return 'station';
+    if (previous.scene.startsWith('station:')) return 'leave-station';
+    return current.stepId ? 'word' : 'arrival';
+  }
+
+  function mountActivity(view, stage, target) {
+    if (view.stage) view.stage.replaceWith(stage);
+    else view.dialog.insertBefore(stage, view.liveResult);
+    view.stage = stage;
+    target.focus({ preventScroll: true });
+    const goal = target.getBoundingClientRect();
+    const viewport = stage.getBoundingClientRect();
+    if (goal.top < viewport.top || goal.bottom > viewport.bottom) {
+      target.scrollIntoView({ block: 'nearest', behavior: 'instant' });
+    }
+  }
+
+  function render(view) {
+    if (active !== view) return;
+    stopAudio(view);
+    const state = view.state;
+    const steps = contract.build(view.words, state);
+    const step = contract.stepAt(steps, state);
+    const answered = step && contract.resultFor(state, step);
+    showProgress(view);
     const stage = element('section', 'gate-lesson-stage');
     stage.classList.add(step ? step.kind === 'use' ? 'is-context' : 'is-' + step.kind : 'is-finished');
     stage.classList.toggle('is-context-practice', step?.kind === 'use');
     stage.classList.toggle('is-answered', Boolean(answered));
     stage.dataset.scene = step?.scene || 'finished';
+    const activity = { scene: stage.dataset.scene, stepId: step?.id, phase: step?.phase,
+      answer: answered, hint: step?.phase === 'apply' && state.study.hinted.includes(step.word.id) };
+    stage.dataset.motion = lessonMotion(view.activity, activity);
+    view.activity = activity;
+    if (view.example && (view.example.id !== step?.word.id || !['teach', 'apply'].includes(step.phase))) view.example = null;
     if (step) {
       stage.dataset.phase = step.phase;
       stage.dataset.wordId = step.word.id;
     }
     const title = !step ? 'أكملت درس البوابة' : step.phase === 'reinforce' ? 'ثبّت اللفظ والمعنى' :
-      step.phase === 'retry' ? 'عودة قصيرة' : step.phase === 'retrieve' ? 'استرجع ما تعلّمته' :
-        step.kind === 'use' ? titles.context : step.phase === 'apply' ? 'جرّب ربط الكلمة بمعناها' : titles[step.kind];
+      step.phase === 'retry' ? 'فرصة تذكّر ثانية' : step.phase === 'retrieve' ? 'استرجع ما تعلّمته' :
+        step.kind === 'use' ? titles.use : step.phase === 'apply' ? 'جرّب ربط الكلمة بمعناها' : titles[step.kind];
     const heading = element('h2', 'gate-lesson-heading', title);
     heading.tabIndex = -1;
     heading.id = 'gateLessonTitle';
@@ -564,19 +680,19 @@
       ? 'موضعك محفوظ على هذا الجهاز. تتم المزامنة عند عودة الاتصال.'
       : 'تعذّر حفظ موضعك. أعد المحاولة قبل الخروج.';
     view.notice = notice;
-    stage.append(heading);
-    footer.append(notice);
+    const stageTitle = element('div', 'gate-lesson-stage-title');
+    stageTitle.append(heading);
+    stage.append(stageTitle);
+    const actions = element('div', 'gate-lesson-actions');
+    footer.append(actions, notice);
     if (step?.members) {
       const position = step.members.indexOf(step.word.id) + 1;
       const marker = element('p', 'gate-lesson-station-position',
         number(position) + ' من ' + number(step.members.length) + ' في هذه المحطة');
-      stage.append(marker);
+      stageTitle.append(marker);
       stage.dataset.stationSize = String(step.members.length);
     }
     view.liveResult.textContent = '';
-    view.dialog.replaceChildren(header, meter, stage, footer, view.liveResult);
-    if (view.toastHost) view.dialog.append(view.toastHost);
-
     if (!step) {
       const seal = element('div', 'gate-lesson-complete-seal');
       seal.append(icon('check'));
@@ -595,9 +711,10 @@
       });
       finish.dataset.lessonAction = 'finish';
       finish.append(element('span', '', 'ارجع إلى البوابة'), icon('arrow-left'));
-      footer.append(finish);
+      actions.append(finish);
+      stage.append(footer);
       addReceipt(view, stage, null);
-      heading.focus({ preventScroll: true });
+      mountActivity(view, stage, heading);
       return;
     }
 
@@ -605,7 +722,7 @@
     const prompt = element('div', 'gate-lesson-prompt');
     const response = element('div', 'gate-lesson-response');
     workspace.append(prompt, response);
-    stage.append(workspace);
+    stage.append(workspace, footer);
     const act = (event, value, { repaint = true } = {}) => {
       if (active !== view || !stage.isConnected) return;
       const plan = contract.build(view.words, view.state);
@@ -624,15 +741,15 @@
       if (repaint) render(view);
     };
     let focus;
-    if (step.phase === 'teach') renderTeaching(view, step, prompt, response, footer, act);
-    else if (step.phase === 'reinforce') renderReinforcement(view, step.word, prompt, response, footer, act);
+    if (step.phase === 'teach') renderTeaching(view, step, prompt, response, actions, act);
+    else if (step.phase === 'reinforce') renderReinforcement(view, step.word, prompt, response, actions, act);
     else {
       exercisePrompt(view, step, prompt, answered);
-      focus = answered ? exerciseFeedback(view, step, response, footer, answered, act) :
-        exerciseQuestion(view, step, response, act);
+      focus = answered ? exerciseFeedback(view, step, response, actions, answered, act) :
+        exerciseQuestion(view, step, actions, act);
     }
     if (!answered) addReceipt(view, stage, step);
-    (focus || heading).focus({ preventScroll: true });
+    mountActivity(view, stage, focus || heading);
   }
 
   async function open({ context, title, world, progress, prepare, onClose }) {
@@ -661,9 +778,16 @@
     }, true);
     shell.addEventListener('keydown', event => event.stopPropagation());
     shell.addEventListener('click', event => {
-      if (event.detail < 2 || !event.target.closest?.('[data-lesson-action]')) return;
-      event.preventDefault();
-      event.stopPropagation();
+      if (!event.detail || !event.target.closest?.('[data-lesson-action], .gate-lesson-answer-submit')) return;
+      const tap = { x: event.clientX, y: event.clientY, at: event.timeStamp };
+      const prior = view.lastTap;
+      const repeated = prior && tap.at - prior.at < 240 && Math.hypot(tap.x - prior.x, tap.y - prior.y) < 14;
+      if (event.detail > 1 || repeated) {
+        event.preventDefault();
+        event.stopPropagation();
+      } else {
+        view.lastTap = tap;
+      }
     }, true);
     const loading = element('h2', '', 'جارٍ فتح الدرس…');
     loading.id = 'gateLessonTitle';

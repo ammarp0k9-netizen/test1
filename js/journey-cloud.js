@@ -1181,8 +1181,8 @@ async function recordOfficialRunnerReview(user, review, sessionId, existingSessi
   const ref = gateProgressRef(user.uid, review.worldId, review.rankId, review.gateId);
   const saved = await runTransaction(db, async (transaction) => {
     const snapshot = await transaction.get(ref), progress = snapshot.data() || {};
-    if (!snapshot.exists() || !['learning', 'ready'].includes(progress.status) ||
-        progress.runnerReviewCompletedSessionId === sessionId) return false;
+    if (progress.runnerReviewCompletedSessionId === sessionId) return true;
+    if (!snapshot.exists() || !['learning', 'ready'].includes(progress.status)) return false;
     const loaded = new Set((progress.loadedWordKeys || []).map(String));
     if (!review.dueWordKeys.every((key) => loaded.has(key))) return false;
     if (existingSession && progress.runnerReviewCompletedSessionId) {
@@ -1394,10 +1394,13 @@ async function recordQuizEvidenceBatch(input = {}) {
       return 'recorded';
     });
   }));
-  await recordOfficialRunnerReview(user, review, session.sessionId, session.existingSession);
+  const officialReviewCommitted = await recordOfficialRunnerReview(user, review, session.sessionId, session.existingSession);
   const summary = {
     recorded: results.filter((result) => result === 'recorded').length,
     duplicate: results.filter((result) => result === 'duplicate').length,
+    officialReviewCommitted: officialReviewCommitted && results.some((result, index) =>
+      (result === 'recorded' || result === 'duplicate') &&
+      review.dueWordKeys.includes(lifecycle?.wordKeyOf?.(correctEntries[index].word))),
     ineligible: results.filter((result) => result === 'ineligible').length +
       Math.max(0, entries.length - correctEntries.length),
   };

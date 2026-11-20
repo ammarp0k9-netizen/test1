@@ -146,7 +146,7 @@
     return true;
   }
   function visibleCheckpoint() {
-    if (root.LootLinguaGuide) return null;
+    if (root.LootLinguaSmartOnboarding?.coordinatesLegacy?.()) return null;
     const discovery = controller();
     const smart = root.LootLinguaSmartOnboarding;
     if (activeFeature || !smart || root.LootLinguaPopover?.getActiveId?.() || discovery?.isInteractiveJourneyActive?.()) return null;
@@ -201,7 +201,7 @@
   }
   function offerResume() {
     const [feature] = interruptedFeatures();
-    root.LootLinguaPopover?.offerResume?.(COACH_ID, feature && !root.LootLinguaGuide ? {
+    root.LootLinguaPopover?.offerResume?.(COACH_ID, feature && !root.LootLinguaSmartOnboarding?.coordinatesLegacy?.() ? {
       label: `تابع استكشاف ${FEATURE_NAMES[feature]}`,
       open: () => {
         root.LootLinguaSmartOnboarding?.close();

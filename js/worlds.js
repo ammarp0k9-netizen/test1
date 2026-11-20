@@ -4570,8 +4570,8 @@ function makePublishedJourneyPanel(world, ranks, journey, activeJourney) {
           ? 'تابع من البوابة النشطة دون فقدان تقدمك.'
           : 'يمكنك جعل هذا العالم رحلتك النشطة مع بقاء تقدم العالم الآخر محفوظًا.')
         : (!window.auth?.currentUser
-          ? 'ابدأ كضيف، وأضف كلمات البوابة حتى تراجعها.'
-          : 'أضف كلمات البوابة إلى قاموسك، وبعدها ابدأ مراجعتها.')))
+          ? 'ابدأ كضيف وتعلّم كلمات أول بوابة.'
+          : 'ابدأ بأول بوابة وتعلّم كلماتها.')))
     )
   );
   panel.append(copy);
@@ -4614,6 +4614,7 @@ function makePublishedJourneyPanel(world, ranks, journey, activeJourney) {
       'fa-solid fa-forward-step'
     );
     beginning.disabled = !firstRank;
+    if (!beginning.disabled) beginning.dataset.guideStartWorld = '';
     choices.append(beginning);
     panel.append(choices);
   } else {
@@ -4626,6 +4627,7 @@ function makePublishedJourneyPanel(world, ranks, journey, activeJourney) {
     pending ? 'fa-solid fa-circle-notch fa-spin' : 'fa-solid fa-route'
   );
   button.disabled = pending || (!existing && !firstRank);
+  if (startsAtFirstGate && !button.disabled) button.dataset.guideStartWorld = '';
   panel.append(button);
   }
   const placementLevel = firstRank?.cefrLevel;
@@ -4633,6 +4635,7 @@ function makePublishedJourneyPanel(world, ranks, journey, activeJourney) {
     const placement = publishedButton('اختبار المستوى', 'published-action-btn',
       () => beginPublishedLevelPlacement(world, placementLevel), 'fa-solid fa-list-check');
     placement.disabled = pending;
+    placement.dataset.initialPlacementLevel = placementLevel;
     panel.append(placement);
   }
   if (!existing && !firstRank) {
@@ -5114,6 +5117,7 @@ function makePublishedGateJourneyPanel(world, rank, gate) {
         if (!window.auth?.currentUser || !activeForWorld) return startOrResumePublishedJourney(world);
         return openPublishedLesson(world, rank, gate, progress, isCurrentGate);
       }, 'fa-solid fa-book-open-reader');
+    if (activeForWorld && !existingLesson && !hasAttempt) button.dataset.guideLearnGate = '';
     actions.append(button);
     panel.append(actions);
     return panel;
@@ -5185,12 +5189,6 @@ function makePublishedGateJourneyPanel(world, rank, gate) {
       readinessCopy.append(dateRow);
     }
 
-    if (review && isCurrentGate()) {
-      if (review.kind !== 'practice') readinessCopy.dataset.onboardingGateReview = review.kind;
-      if (readinessCopy.dataset.onboardingGateReview) queueMicrotask(() => {
-        if (readinessCopy.isConnected) window.dispatchEvent(new CustomEvent('lootlingua:gate-guide-state'));
-      });
-    }
     readiness.append(heading);
     if (review) {
       const facts = publishedElement('dl', 'published-gate-review-facts');
@@ -5314,7 +5312,7 @@ function makePublishedGateJourneyPanel(world, rank, gate) {
     actions.append(load);
   } else if (state === 'learning') {
     hasReviewPicker = true;
-    actions.append(publishedButton(
+    const reviewButton = publishedButton(
       review.kind === 'due' ? 'ابدأ المراجعة الرسمية'
         : (review.kind === 'waiting' ? 'تدرّب على كلمات البوابة' : 'راجع كلمات البوابة'),
       (review.kind === 'due' ? primaryClass : 'published-action-btn published-journey-btn') +
@@ -5327,7 +5325,14 @@ function makePublishedGateJourneyPanel(world, rank, gate) {
         void openPublishedGateQuizPicker(world, rank, gate);
       },
       'fa-solid fa-crosshairs'
-    ));
+    );
+    if (review.kind === 'due' && !retryable && !pending && isCurrentGate()) {
+      reviewButton.dataset.onboardingGateReview = 'due';
+      queueMicrotask(() => {
+        if (reviewButton.isConnected) window.dispatchEvent(new CustomEvent('lootlingua:gate-guide-state'));
+      });
+    }
+    actions.append(reviewButton);
     if (publishedContentState.newGateWords.length) {
       const sync = publishedButton(
         pending ? 'جارٍ مزامنة الكلمات' : 'مزامنة الكلمات الجديدة',
@@ -5499,7 +5504,7 @@ function renderPublishedWorlds(items, activeJourney, accountDestination) {
   window.LootLinguaGuidedFirstJourney?.applyRoute?.({ type: 'worlds', root });
 }
 
-function makePublishedLevelSection(world, cefrLevel, ranks, journey, activeJourney) {
+function makePublishedLevelSection(world, cefrLevel, ranks, journey, activeJourney, initialPlacementLevel) {
   const schema = window.LootLinguaContentSchema;
   const meta = schema.CEFR_LEVEL_META[cefrLevel];
   const state = publishedLevelState(cefrLevel, journey);
@@ -5550,7 +5555,7 @@ function makePublishedLevelSection(world, cefrLevel, ranks, journey, activeJourn
     button.disabled = state === 'locked' || state === 'passed' ||
       publishedContentState.levelPlacementPending;
     if (['available', 'in-progress', 'new-content'].includes(state)) button.dataset.guidePlacementLevel = cefrLevel;
-    summary.append(button);
+    if (state !== 'available' || cefrLevel !== initialPlacementLevel) summary.append(button);
     const history = overview?.history;
     const pendingWordDecision = history?.resultApplied === true &&
       history?.status === 'completed' &&
@@ -5624,6 +5629,7 @@ function renderPublishedRanks(world, ranks, journey, activeJourney) {
   });
   const journeyPanel = makePublishedJourneyPanel(world, ranks, journey, activeJourney);
   section.append(journeyPanel);
+  const initialPlacementLevel = journeyPanel.querySelector('[data-initial-placement-level]')?.dataset.initialPlacementLevel;
   const rewardGoal = window.LootLinguaMotivation?.makeGoal?.(world.worldId, null, { gateCount: world.gateCount, complete: journey?.contentJourneyStatus === 'completed-current-content' });
   if (rewardGoal) section.append(rewardGoal);
   if (!ranks.length) {
@@ -5633,24 +5639,9 @@ function renderPublishedRanks(world, ranks, journey, activeJourney) {
     window.LootLinguaContentSchema.CEFR_LEVELS.forEach((level) => {
       const levelRanks = groups.get(level) || [];
       if (levelRanks.length) {
-        section.append(makePublishedLevelSection(world, level, levelRanks, journey, activeJourney));
+        section.append(makePublishedLevelSection(world, level, levelRanks, journey, activeJourney, initialPlacementLevel));
       }
     });
-  }
-  const startButton = journeyPanel.querySelector('.published-first-journey-start:not([disabled])');
-  const levelTest = section.querySelector('.published-level-test-btn[data-guide-placement-level]:not([disabled])');
-  if (startButton && levelTest) {
-    const actions = publishedElement('div', 'published-journey-actions');
-    startButton.replaceWith(actions);
-    actions.append(startButton, publishedButton(
-      'اختبر مستواك (اختياري)',
-      'published-action-btn',
-      () => {
-        levelTest.scrollIntoView({ block: 'center' });
-        levelTest.focus({ preventScroll: true });
-      },
-      'fa-solid fa-location-crosshairs'
-    ));
   }
   content.append(section);
   root.replaceChildren(content);

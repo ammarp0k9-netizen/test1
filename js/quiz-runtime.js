@@ -413,6 +413,7 @@ function finishQuizRun() {
       source: sessionSource,
       journeyContext: Boolean(activeQuizSession?.journeyWorldId && activeQuizSession?.journeyGateId),
       officialReviewGate: resolvedGate,
+      officialReviewCommitted: commit.evidence?.officialReviewCommitted === true,
       worldId: detailWorldId,
       rankId: detailRankId,
       gateId: detailGateId,

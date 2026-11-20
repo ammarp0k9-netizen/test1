@@ -60,6 +60,12 @@ const sparse = process.env.LESSON_PACE_SPARSE === '1';
 const stress = process.env.LESSON_PACE_FORGET === '1';
 const baseline = process.env.LESSON_PACE_BASELINE_DIR;
 const integration = process.env.LESSON_GUIDE_INTEGRATION === '1';
+const layoutAudit = process.env.LESSON_LAYOUT_AUDIT === '1';
+const flowAudit = process.env.LESSON_FLOW_AUDIT === '1';
+const guidanceAudit = process.env.LESSON_GUIDANCE_AUDIT === '1';
+const referenceViewport = process.env.LESSON_SMOKE_DESKTOP === '1'
+  ? { width: 1300, height: 860, mobile: false }
+  : { width: 390, height: 844, mobile: true };
 const baselineFiles = ['js/gate-lesson.js', 'js/gate-lesson-view.js', 'gate-lesson.css'];
 await env.withSecurityRulesDisabled(async context => {
   const db = context.firestore();
@@ -89,7 +95,8 @@ await env.withSecurityRulesDisabled(async context => {
 const profile = mkdtempSync(path.join(tmpdir(), 'lootlingua-lesson-'));
 const debugPort = staticPort + 1000;
 const base = 'http://127.0.0.1:' + staticPort;
-const staticServer = spawn(process.execPath, [path.join(root, 'tools/static-server.mjs'), String(staticPort)],
+const staticRoot = process.env.LESSON_SMOKE_STATIC_ROOT || root;
+const staticServer = spawn(process.execPath, [path.join(staticRoot, 'tools/static-server.mjs'), String(staticPort)],
   { cwd: root, stdio: 'ignore', windowsHide: true });
 const browser = spawn(browserPath, ['--headless=new', '--no-first-run', '--disable-gpu',
   '--disable-extensions', '--no-default-browser-check', '--remote-allow-origins=*',
@@ -190,10 +197,10 @@ try {
   const click = selector => until(() => run(
     '(() => { const node = ' + select(selector) +
     '; if (!node?.getClientRects().length || node.disabled) return false; node.click(); return true; })()'), selector);
-  async function screenshot(name) {
+  async function screenshot(name, settled = true) {
     if (!directory) return;
     mkdirSync(directory, { recursive: true });
-    await run('Promise.all(document.querySelector(".gate-lesson-stage")?.getAnimations({subtree: true}).filter(animation => animation.effect.getComputedTiming().iterations !== Infinity).map(animation => animation.finished.catch(() => {})) || [])');
+    if (settled) await run('Promise.all(document.querySelector(".gate-lesson-stage")?.getAnimations({subtree: true}).filter(animation => animation.effect.getComputedTiming().iterations !== Infinity).map(animation => animation.finished.catch(() => {})) || [])');
     const { data } = await cdp('Page.captureScreenshot', { format: 'png' });
     writeFileSync(path.join(directory, name + '.png'), Buffer.from(data, 'base64'));
   }
@@ -201,6 +208,7 @@ try {
   failureScreenshot = screenshot;
   await cdp('Page.enable');
   await cdp('Runtime.enable');
+  if (flowAudit) await cdp('Animation.enable');
   const intercepted = [];
   if (testAudio) intercepted.push({ urlPattern: '*__lesson-qa.wav' });
   if (baseline) for (const file of baselineFiles) intercepted.push({ urlPattern: base + '/' + file + '*' });
@@ -254,7 +262,7 @@ try {
   if (sparse) await cdp('Page.addScriptToEvaluateOnNewDocument', { source:
     'Object.defineProperty(window, "speechSynthesis", {value: { getVoices: () => [] }, configurable:true});' });
   await cdp('Network.enable');
-  await cdp('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 1, mobile: true });
+  await cdp('Emulation.setDeviceMetricsOverride', { ...referenceViewport, deviceScaleFactor: 1 });
   await cdp('Page.navigate', { url: base + '/app?firebaseEmulator=1' });
   await click('[data-entry-action="continue-welcome"]');
   await click('[data-entry-theme="ocean"]');
@@ -265,28 +273,63 @@ try {
   if (integration) {
     assert.equal(await run('Boolean(document.querySelector("#onboardingResume:not([hidden]), .guided-first-journey-coach"))'), false);
     checks.entryWithoutTour = true;
+    if (layoutAudit) {
+      await waitFor('.contextual-guide-inline');
+      assert.equal(await run('window.LootLinguaGuide.covered("worlds")'), false);
+      await click('.contextual-guide-inline .feature-mini-onboarding-next');
+      assert.equal(await run('window.LootLinguaGuide.covered("worlds")'), true);
+      checks.worldsContext = true;
+    }
   }
   await click('[data-guided-world="' + worldId + '"]');
+  if (guidanceAudit) {
+    await waitFor('button[data-guide-start-world].coach-highlight-target');
+    assert.equal(await run('document.querySelectorAll("button[data-initial-placement-level], button[data-guide-placement-level=A1]").length'), 1);
+    if (directory) await screenshot('onboarding-world-start');
+    await click('#contextualOnboardingCoach .feature-mini-onboarding-next');
+  }
   await click('.published-first-journey-start');
   await click('[data-journey-auth="guest"]');
   await until(() => run('window.auth?.currentUser?.isAnonymous && window.auth.app.options.projectId === "demo-lootlingua"'), 'local guest');
+  const discoveryBadge = '#legendDock [data-discovery-pending]';
+  const badgeTopic = () => run(select(discoveryBadge) + '?.dataset.discoveryPending || ""');
+  const introCoach = '#contextualOnboardingCoach';
+  const coachIncludes = text => run(select(introCoach) + '?.textContent.includes(' + JSON.stringify(text) + ')');
+  const previsited = process.env.LESSON_DISCOVERY_PREVISIT === '1';
+  if (guidanceAudit && previsited) {
+    await click('#legendDock [data-dock-view="personal"]');
+    await until(() => coachIncludes('قاموسك الشخصي'), 'natural dictionary before review');
+    assert.equal(await badgeTopic(), '');
+    assert.equal(await run('window.LootLinguaGuide.covered("dictionary")'), false);
+    await run('window.openPublishedGate(' + [worldId, rankId, gateId].map(JSON.stringify).join(',') + ')');
+  }
   const primary = '.published-gate-journey .published-journey-cta';
+  if (guidanceAudit) {
+    await waitFor('button[data-guide-learn-gate].coach-highlight-target');
+    if (directory) await screenshot('onboarding-learn-gate');
+    await click('#contextualOnboardingCoach .feature-mini-onboarding-next');
+  }
   await click(primary);
   await waitFor('.gate-lesson-progress');
+  assert.equal(await badgeTopic(), '');
   const initialXP = await run('typeof userXP === "number" ? userXP : null');
   assert.notEqual(initialXP, null);
   await until(() => run('window.LootLinguaJourneyCloud.getGateQuizWords(' +
     [worldId, rankId, gateId].map(JSON.stringify).join(',') + ', {force: true}).then(words => words.length === ' + count + ')'), 'complete gate source linking');
   const uid = await run('window.auth.currentUser.uid');
-  const readLearningEvidence = () => env.withSecurityRulesDisabled(async context => {
-    const database = context.firestore();
-    const [mastery, evidence, sessions] = await Promise.all([
-      getDoc(doc(database, 'users', uid, 'meta', 'word_mastery')),
-      getDocs(collection(database, 'users', uid, 'contentWords', 'squad', 'evidence')),
-      getDocs(collection(database, 'users', uid, 'quizEvidenceSessions')),
-    ]);
-    return { mastery: mastery.data() || null, evidenceCount: evidence.size, quizSessions: sessions.size };
-  });
+  async function readLearningEvidence() {
+    let state;
+    await env.withSecurityRulesDisabled(async context => {
+      const database = context.firestore();
+      const [mastery, evidence, sessions] = await Promise.all([
+        getDoc(doc(database, 'users', uid, 'meta', 'word_mastery')),
+        getDocs(collection(database, 'users', uid, 'contentWords', 'squad', 'evidence')),
+        getDocs(collection(database, 'users', uid, 'quizEvidenceSessions')),
+      ]);
+      state = { mastery: mastery.data() || null, evidenceCount: evidence.size, quizSessions: sessions.size };
+    });
+    return state;
+  }
   const initialEvidence = await readLearningEvidence();
   checks.voices = await run('window.speechSynthesis?.getVoices().length ?? null');
   if (testAudio) {
@@ -309,7 +352,73 @@ try {
   assert.ok(await run('document.querySelector(".gate-lesson").getBoundingClientRect().width <= innerWidth'));
   const pageCount = () => run('document.querySelector(".gate-lesson-progress").value');
   const captured = new Set();
+  const flowFrames = [];
+  const activityGeometry = `(() => {
+    const stage = document.querySelector('.gate-lesson-stage');
+    return {
+      header: document.querySelector('.gate-lesson-header').getBoundingClientRect().toJSON(),
+      meter: document.querySelector('.gate-lesson-meter').getBoundingClientRect().toJSON(),
+      exampleTop: stage.querySelector('.gate-lesson-context')?.getBoundingClientRect().top,
+      motion: stage.dataset.motion,
+    };
+  })()`;
+  const flowAnimations = 'document.querySelector(".gate-lesson-stage").getAnimations({subtree:true}).filter(a => a.animationName?.startsWith("lesson-flow-"))';
+  function transitionSample(scene, action) {
+    if (scene.word === 'shield' && scene.phase === 'teach') return 'practice';
+    if (scene.word === 'shield' && scene.phase === 'apply' && action === 'answer') return 'word';
+    if (scene.word === 'scout' && scene.phase === 'apply' && action === 'answer') return 'station';
+    if (scene.word === 'retreat' && scene.phase === 'retrieve' && action === 'answer') return 'leave-station';
+    if (action === 'wrong') return 'feedback-wrong';
+    if (action === 'reveal') return 'feedback-revealed';
+    if (scene.word === 'shelter' && scene.phase === 'retrieve' && action === 'next') return 'return';
+    if (!stress && scene.word === 'shelter' && scene.phase === 'retrieve' && action === 'answer') return 'complete';
+  }
+
+  async function beforeMotion(label) {
+    if (!label) return null;
+    if (directory) await screenshot('flow-' + label + '-before');
+    const before = await run(activityGeometry);
+    await run('window.__qaExample = document.querySelector(".gate-lesson-context"); true');
+    await cdp('Animation.setPlaybackRate', { playbackRate: .16 });
+    return before;
+  }
+
+  async function afterMotion(label, before) {
+    if (!before) return;
+    try {
+      const motion = await run(activityGeometry);
+      assert.deepEqual(motion.header, before.header);
+      assert.deepEqual(motion.meter, before.meter);
+      const expectedMotion = label.startsWith('feedback-') ? 'feedback' : label === 'complete' ? 'leave-station' : label;
+      assert.equal(motion.motion, expectedMotion);
+      if (label === 'practice') {
+        assert.equal(await run('document.querySelector(".gate-lesson-context") === window.__qaExample'), true);
+        assert.equal(motion.exampleTop, before.exampleTop);
+        assert.equal(await run('document.querySelector(".gate-lesson-context mark").textContent'), '…');
+        assert.equal(await run('document.querySelector(".gate-lesson-context .gate-lesson-translation")'), null);
+      }
+      if (label.startsWith('feedback-')) {
+        assert.equal(await run('document.activeElement.matches(".gate-lesson-feedback-title")'), true);
+        const tree = await cdp('Accessibility.getFullAXTree');
+        const title = await run('document.activeElement.textContent');
+        assert.ok(tree.nodes.some(node => !node.ignored && node.role?.value === 'heading' && node.name?.value === title));
+      }
+      const intermediate = await run('(() => { const animations = ' + flowAnimations + '; ' +
+        'for (const a of animations) { a.pause(); a.currentTime = a.effect.getTiming().duration * .36; } ' +
+        'return animations.map(a => ({ name:a.animationName, opacity:Number(getComputedStyle(a.effect.target).opacity) })); })()');
+      assert.ok(intermediate.length && intermediate.every(frame => frame.opacity < 1 && frame.opacity > .7));
+      if (directory) await screenshot('flow-' + label + '-during', false);
+      await run('(' + flowAnimations + ').forEach(a => a.finish())');
+      if (directory) await screenshot('flow-' + label + '-after');
+      flowFrames.push({ label, intermediate, stableHeaderAndMeter: true, exampleHeld: label === 'practice' });
+    } finally {
+      await cdp('Animation.setPlaybackRate', { playbackRate: 1 });
+    }
+  }
   const sceneEvidence = [];
+  const headingPositions = new Map();
+  const progressValues = [];
+  const visualProgress = () => run('Number(document.querySelector(".gate-lesson-fill").style.getPropertyValue("--lesson-progress"))');
   async function pairedScreenshots(name, context = {worldId, rankId, gateId}, appearance = '') {
     const scene = await run('({ activity: document.querySelector(".gate-lesson-stage").className, count: document.querySelector(".gate-lesson-progress").value, text: document.querySelector(".gate-lesson-stage").textContent })');
     const saved = await run('(() => { const cache = JSON.parse(localStorage.getItem("lootlingua:gate-lesson:v1:" + window.auth.currentUser.uid + ' +
@@ -325,6 +434,29 @@ try {
       if (appearance) await run('void (document.documentElement.dataset.theme = ' + JSON.stringify(appearance) + ')');
       await run('new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))');
       await screenshot(name + '-' + viewport.name);
+      if (layoutAudit) {
+        const positions = await run(`(() => {
+          const pane = document.querySelector('.gate-lesson').getBoundingClientRect();
+          const heading = document.querySelector('.gate-lesson-heading').getBoundingClientRect();
+          const stage = document.querySelector('.gate-lesson-stage');
+          const workspace = stage.querySelector('.gate-lesson-workspace');
+          const actions = stage.querySelector('.gate-lesson-actions');
+          const ltr = [...stage.querySelectorAll('[lang="en"]')];
+          const arabic = [...stage.querySelectorAll('[lang="ar"]')];
+          return { x: pane.right - heading.right, y: heading.top,
+            english: ltr.every(node => getComputedStyle(node).direction === 'ltr'),
+            arabic: arabic.every(node => getComputedStyle(node).direction === 'rtl'),
+            actionGap: workspace && actions?.children.length
+              ? actions.getBoundingClientRect().top - workspace.getBoundingClientRect().bottom : 0 };
+        })()`);
+        assert.ok(positions.english && positions.arabic, 'Language direction is isolated');
+        assert.ok(positions.actionGap >= -1 && positions.actionGap <= 25, 'Actions stay close to content');
+        const previous = headingPositions.get(viewport.name);
+        if (previous) {
+          assert.ok(Math.abs(previous.x - positions.x) <= 1, 'Same heading inline anchor');
+          assert.ok(Math.abs(previous.y - positions.y) <= 14, 'Same heading vertical anchor');
+        } else headingPositions.set(viewport.name, positions);
+      }
       assert.equal(await pageCount(), scene.count);
       assert.equal(await run('document.querySelector(".gate-lesson-stage").textContent'), scene.text);
       {
@@ -338,8 +470,8 @@ try {
       }
     }
     sceneEvidence.push({ name, ...scene, ...saved });
-    await cdp('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 1, mobile: true });
-    await until(() => run('innerWidth === 390 && innerHeight === 844'), 'restored the phone viewport');
+    await cdp('Emulation.setDeviceMetricsOverride', { ...referenceViewport, deviceScaleFactor: 1 });
+    await until(() => run('innerWidth === ' + referenceViewport.width + ' && innerHeight === ' + referenceViewport.height), 'restored the reference viewport');
   }
   async function captureActivity() {
     const kind = await run('document.querySelector(".gate-lesson-stage").classList[1]');
@@ -400,6 +532,14 @@ try {
 
   async function advance(scene) {
     const action = actionFor(scene);
+    if (layoutAudit) {
+      progressValues.push(await visualProgress());
+      assert.equal(await run('Boolean(document.querySelector(".contextual-guide-inline, #contextualOnboardingCoach :not([hidden])"))'), false);
+    }
+    if (directory && scene.phase === 'teach' && scene.word === 'supply' && !captured.has('supply')) {
+      captured.add('supply');
+      await pairedScreenshots('supply', undefined, 'lootlingua');
+    }
     if (scene.phase === 'teach') {
       assert.equal(await run('Boolean(document.querySelector(".gate-lesson-answer-form"))'), false);
       if (baseline) {
@@ -421,7 +561,18 @@ try {
         assert.equal(await run('Boolean(document.querySelector(".gate-lesson").querySelector(".gate-lesson-feedback, .gate-lesson-next, [aria-selected=true]"))'), false);
       }
       if (action === 'reveal') await click('.gate-lesson-reveal');
-      else if (action === 'wrong') await submit(scene.options.find(value => value !== scene.expected));
+      else if (action === 'wrong' && flowAudit && !checks.repeatedTapBlocked) {
+        const wrong = scene.options.find(value => value !== scene.expected);
+        assert.ok(await run(`(() => {
+          const choice = [...document.querySelectorAll('.gate-lesson-choice')].find(node => node.textContent === ${JSON.stringify(wrong)});
+          const tap = () => new MouseEvent('click', {bubbles:true, cancelable:true, detail:1, clientX:100, clientY:340});
+          choice.dispatchEvent(tap());
+          const followUp = tap();
+          document.querySelector('.gate-lesson-next').dispatchEvent(followUp);
+          return followUp.defaultPrevented && document.querySelector('.gate-lesson-feedback')?.dataset.response === 'wrong';
+        })()`));
+        checks.repeatedTapBlocked = true;
+      } else if (action === 'wrong') await submit(scene.options.find(value => value !== scene.expected));
       else await submit(scene.expected);
       if (action === 'wrong' || action === 'reveal') {
         assert.equal(await run('document.querySelector(".gate-lesson-feedback").dataset.response'), action === 'wrong' ? 'wrong' : 'revealed');
@@ -485,6 +636,7 @@ try {
     }
     await run('document.querySelector("#gateLessonTitle").focus()');
     checks.keyboard = true;
+    if (layoutAudit) await until(() => run('!window.__toastActive'), 'diagnostic toast clears before captures');
     await cdp('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: 'reduce' }] });
     assert.equal(await run('document.querySelector(".gate-lesson-stage").getAnimations({subtree:true}).filter(animation => animation.playState === "running").length'), 0);
     await cdp('Emulation.setEmulatedMedia', { features: [] });
@@ -494,7 +646,7 @@ try {
       assert.ok(await run('document.querySelector(".gate-lesson").scrollWidth <= innerWidth'));
       await screenshot('small-' + dimensions.width + '-' + dimensions.height);
     }
-    await cdp('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 1, mobile: true });
+    await cdp('Emulation.setDeviceMetricsOverride', { ...referenceViewport, deviceScaleFactor: 1 });
   }
 
   const lessonRecord = 'window.LootLinguaNotificationStore.getDisplayRecords().find(record => record.cta?.id === "resume-gate-lesson")';
@@ -528,13 +680,16 @@ try {
         deviceScaleFactor: 1, mobile: viewport.mobile });
       await until(() => run('innerWidth === ' + viewport.width), 'guide viewport ' + viewport.name);
       await run('document.documentElement.dataset.theme = ' + JSON.stringify(theme));
-      await run(select(selector) + '.scrollIntoView({block:' + JSON.stringify(align) + '})');
+      await until(() => run('(() => { const node = ' + select(selector) +
+        '; if (!node?.getClientRects().length) return false; node.scrollIntoView({block:' + JSON.stringify(align) + '}); return true; })()'),
+      'visible guide for capture: ' + selector);
       await run('new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))');
-      assert.ok(await run('(() => { const box = ' + select(selector) + '.getBoundingClientRect(); return box.width > 0 && box.left >= -1 && box.right <= innerWidth + 1; })()'));
+      await until(() => run('(() => { const box = ' + select(selector) + '?.getBoundingClientRect(); return box?.width > 0 && box.left >= -1 && box.right <= innerWidth + 1; })()'),
+        'guide stays within viewport: ' + selector);
       await screenshot(name + '-' + viewport.name);
     }
-    await cdp('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 1, mobile: true });
-    await until(() => run('innerWidth === 390'), 'phone restored');
+    await cdp('Emulation.setDeviceMetricsOverride', { ...referenceViewport, deviceScaleFactor: 1 });
+    await until(() => run('innerWidth === ' + referenceViewport.width), 'reference viewport restored');
   }
   let verifiedHint = false;
   let verifiedCorrection = false;
@@ -548,7 +703,7 @@ try {
       assert.match(await run('document.querySelector(".gate-lesson-audio-status").textContent'), /الصوت غير متاح/);
       checks.writtenFallback = true;
     }
-    if (!baseline && !sparse && scene.phase === 'teach' && scene.word === 'shield' && !checks.speechEvents) {
+    if (!guidanceAudit && !baseline && !sparse && scene.phase === 'teach' && scene.word === 'shield' && !checks.speechEvents) {
       await clickAudio();
       await until(() => run('window.__qaSpeechEvents.some(event => event.type === "end" || event.type === "error")'), 'native pronunciation');
       checks.speechEvents = await run('window.__qaSpeechEvents');
@@ -559,7 +714,7 @@ try {
           (scene.result ? 'retrieval-correction' : 'retrieval-station') : scene.phase === 'retry' ? 'retry-station' : null;
       if (visual && !captured.has(visual)) {
         captured.add(visual);
-        await pairedScreenshots(visual);
+        await pairedScreenshots(visual, undefined, layoutAudit ? 'lootlingua' : '');
       }
     }
     // A stress fixture checks the optional help and reload without counting
@@ -581,7 +736,18 @@ try {
     const resume = !baseline && !stress && count > 1 && scene.phase === 'retrieve' && !checks.midStationResume &&
       scene.members?.indexOf(scene.wordId) === 1;
     if (resume) await cdp('Network.emulateNetworkConditions', { ...networks, offline: true });
+    const sample = flowAudit ? transitionSample(scene, action) : null;
+    const label = sample && !flowFrames.some(frame => frame.label === sample) ? sample : null;
+    const priorGeometry = await beforeMotion(label);
+    const reduce = flowAudit && !checks.reducedMotionAtTransition && scene.word === 'ammo' && scene.phase === 'teach';
+    if (reduce) await cdp('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: 'reduce' }] });
     await advance(scene);
+    await afterMotion(label, priorGeometry);
+    if (reduce) {
+      assert.equal(await run('(' + flowAnimations + ').length'), 0);
+      checks.reducedMotionAtTransition = true;
+      await cdp('Emulation.setEmulatedMedia', { features: [] });
+    }
     const after = await savedScene();
     records.push({ ...scene, action, after: after.phase });
     if (resume) {
@@ -648,6 +814,14 @@ try {
     }
   }
   assert.equal(await pageCount(), count);
+  if (layoutAudit) {
+    progressValues.push(await visualProgress());
+    assert.equal(progressValues[0], 0);
+    assert.equal(progressValues.at(-1), 1);
+    assert.ok(progressValues.every((value, i) => !i || value >= progressValues[i - 1]));
+    assert.ok(new Set(progressValues).size > count + 1, 'The bar progresses during learning too');
+    checks.visualProgress = { distinctPositions: new Set(progressValues).size, words: count };
+  }
   if (!baseline && !stress && count > 1) assert.ok(checks.midStationResume);
   if (stress) {
     assert.ok(verifiedHint && verifiedCorrection);
@@ -666,6 +840,117 @@ try {
   });
   assert.equal(await run('document.body.classList.contains("gate-lesson-active")'), false);
   await waitFor('.published-gate-practice-cta');
+  if (guidanceAudit) {
+    const review = 'button[data-onboarding-gate-review="due"]';
+    await waitFor(review + '.coach-highlight-target');
+    assert.match(await run(select(review) + '.textContent'), /ابدأ المراجعة الرسمية/);
+    const reviewLayout = await run(`(() => {
+      const hint = document.getElementById('contextualOnboardingCoach');
+      const bounds = hint.getBoundingClientRect();
+      const card = hint.parentElement.getBoundingClientRect();
+      const button = document.querySelector('button[data-onboarding-gate-review="due"]').getBoundingClientRect();
+      return { wide: bounds.width > card.width * .75, belowButton: bounds.top >= button.bottom,
+        noHorizontalOverflow: hint.scrollWidth <= bounds.width + 1 };
+    })()`);
+    assert.deepEqual(reviewLayout, { wide: true, belowButton: true, noHorizontalOverflow: true });
+    if (directory) await screenshot('onboarding-review-anchor');
+    await click('#contextualOnboardingCoach .feature-mini-onboarding-next');
+    assert.equal(await run('window.LootLinguaGuide.covered("first-official-review")'), false);
+    await run('window.addEventListener("lootlingua:trusted-quiz-completed", e => window.__qaReviewEvent = e.detail); true');
+    await click(review);
+    await click('#publishedGateQuizPicker .is-matching');
+    await waitFor('#matchingWords .matching-option');
+    const reviewContext = await run('({ official: Boolean(activeQuizSession.officialReviewGate), due: activeQuizSession.officialReviewDueWordKeys?.length })');
+    assert.equal(await badgeTopic(), '');
+    await run('window.__qaOriginalAwards = window.awardWordTransitionXPBatch; window.awardWordTransitionXPBatch = async () => { throw new Error("QA isolated save failure"); }; true');
+    await run(`(() => {
+      for (let i = 0; i < 8 && quizFinishState === 'answering' && matchingQuizState; i++) {
+        const board = quizCore.currentMatchingBoard(matchingQuizState);
+        if (!board || board.phase !== 'pairing') throw new Error('Unexpected matching board ' + board?.phase);
+        for (const id of board.wordIds) {
+          selectMatchingWord(matchingEncodedId(id));
+          selectMatchingMeaning(matchingEncodedId(id));
+        }
+        document.getElementById('matchingCheckButton').click();
+        document.getElementById('matchingCheckButton').click();
+      }
+      return true;
+    })()`);
+    await until(() => run('quizFinishState === "save-failed"'), 'review save failure');
+    assert.equal(await run('window.LootLinguaGuide.covered("first-official-review")'), false);
+    assert.equal(await run('Boolean(document.querySelector("#contextualOnboardingCoach"))'), false);
+    if (directory) await screenshot('onboarding-review-save-failure');
+    await run('window.awardWordTransitionXPBatch = window.__qaOriginalAwards; delete window.__qaOriginalAwards; void finishQuizRun(); true');
+    await until(() => run('Boolean(window.__qaReviewEvent)'), 'trusted completion event');
+    const reviewReceipt = await run(`(async () => {
+      const event = window.__qaReviewEvent;
+      const gate = { worldId: "${worldId}", rankId: "${rankId}", gateId: "${gateId}" };
+      const access = await window.LootLinguaJourneyCloud.getGateLessonAccess(gate);
+      const progress = await window.LootLinguaJourneyCloud.getGateProgress(gate.worldId, gate.rankId, gate.gateId, { force: true });
+      return { committed: event.officialReviewCommitted, official: Boolean(event.officialReviewGate),
+        receipt: progress.runnerReviewCompletedSessionId === event.sessionId, confirmed: access.confirmed,
+        completedLesson: window.LootLinguaGateLesson.complete(access.state), dictionaryVisited: window.LootLinguaGuide.covered('dictionary-visited') };
+    })()`);
+    assert.deepEqual(reviewContext, { official: true, due: count });
+    assert.deepEqual(reviewReceipt, {
+      committed: true, official: true, receipt: true, confirmed: true, completedLesson: true, dictionaryVisited: previsited,
+    });
+    await until(() => run('window.LootLinguaGuide.covered("first-official-review")'), 'persisted official review signal');
+    await until(() => run('!window.hasActiveLearningQuiz() && currentView === "quiz" && !document.getElementById("quizReturnToGate").hidden'), 'return after review result');
+    await until(() => run('document.querySelector("#contextualOnboardingCoach")?.textContent.includes("اكتشف قاموسك الشخصي")'), 'quiet dictionary discovery');
+    await until(async () => await badgeTopic() === 'dictionary', 'same dictionary topic in the dock');
+    assert.equal(await run('document.querySelectorAll(' + JSON.stringify(discoveryBadge) + ').length'), 1);
+    const badgeGeometry = await run(`(() => {
+      const button = document.querySelector('#legendDock [data-discovery-pending]');
+      const badge = getComputedStyle(button, '::before');
+      const {left, right} = button.getBoundingClientRect();
+      return { inViewport: left >= 0 && right <= innerWidth, markerWidth: badge.width, pointerEvents: badge.pointerEvents };
+    })()`);
+    assert.deepEqual(badgeGeometry, { inViewport: true, markerWidth: '7px', pointerEvents: 'none' });
+    assert.ok((await readLearningEvidence()).evidenceCount > initialEvidence.evidenceCount);
+    if (directory) await captureIntegration('dictionary-invitation', '#contextualOnboardingCoach');
+    const later = process.env.LESSON_GUIDANCE_LATER === '1';
+    const natural = process.env.LESSON_DISCOVERY_DOCK === '1';
+    if (natural) {
+      await click('#legendDock [data-dock-view="personal"]');
+      await until(() => coachIncludes('قاموسك الشخصي'), 'natural dictionary after invitation');
+      assert.equal(await badgeTopic(), 'dictionary');
+      assert.equal(await run('window.LootLinguaGuide.covered("dictionary")'), false);
+      await click('#contextualOnboardingCoach .feature-mini-onboarding-next');
+      assert.equal(await badgeTopic(), '');
+      assert.equal(await run('window.LootLinguaGuide.covered("dictionary")'), true);
+    } else if (later) {
+      await click('#contextualOnboardingCoach .feature-mini-onboarding-skip');
+      assert.equal(await run('window.LootLinguaGuide.status("dictionary-invitation")'), 'dismissed');
+      assert.equal(await run('currentView'), 'quiz');
+      assert.equal(await run('window.LootLinguaSmartOnboarding.dictionaryInvitationPending()'), false);
+      await click('#quizReturnToGate');
+      await until(() => run('currentView === "worlds"'), 'return to gate still available');
+      await until(async () => await badgeTopic() === 'quiz', 'general quiz is next after later');
+      await click('#legendDock [data-dock-view="quiz"]');
+      await until(() => coachIncludes('المراجعة الرسمية لكل بوابة'), 'natural general quiz explains independent source');
+      await click('#contextualOnboardingCoach .feature-mini-onboarding-next');
+      await click('#legendDock [data-dock-view="worlds"]');
+      await until(async () => await badgeTopic() === 'treasure', 'treasure follows general quiz');
+      await click('#legendDock [data-dock-view="treasure"]');
+      await until(() => coachIncludes('مكافآت تعلّمك'), 'natural treasure');
+      await click('#contextualOnboardingCoach .feature-mini-onboarding-skip');
+      assert.equal(await badgeTopic(), '');
+      assert.equal(await run('window.LootLinguaGuide.status("treasure")'), 'dismissed');
+    } else {
+      await click('#contextualOnboardingCoach .feature-mini-onboarding-next');
+      assert.equal(await run('window.LootLinguaGuide.status("dictionary-invitation")'), 'seen');
+      await until(() => run('currentView === "personal"'), 'user chose dictionary');
+      assert.equal(await run('window.LootLinguaGuide.covered("dictionary")'), false);
+      await run('void window.openPublishedGate(' + [worldId, rankId, gateId].map(JSON.stringify).join(',') + '); true');
+      await click('#onboardingResume[data-coach="dictionaryDiscovery"]:not([hidden])');
+      await until(() => run('currentView === "personal"'), 'dictionary exploration resumed explicitly');
+      await until(() => run('document.querySelector("#contextualOnboardingCoach")?.textContent.includes("قاموسك الشخصي")'), 'dictionary context');
+      await click('#contextualOnboardingCoach .feature-mini-onboarding-next');
+    }
+    checks.firstOfficialReview = { savedEvidence: true, failedSaveExcluded: true, previsited, singleBadge: true,
+      action: natural ? 'dock' : later ? 'later-quiz-treasure' : 'explore-and-resume' };
+  }
   if (integration) {
     await evaluateNotices();
     assert.equal(await run('Boolean(' + lessonRecord + ')'), false);
@@ -682,8 +967,27 @@ try {
     await cdp('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13 });
     await waitFor('#lootlinguaGuide[open]');
     assert.equal(await run('window.LootLinguaGuide.covered("manual-meaning")'), false);
+    if (layoutAudit) {
+      assert.equal(await run('document.querySelector(\"[data-guide-topics=worlds] .profile-guide-status\").textContent'), 'تم الاطّلاع');
+      if (!guidanceAudit) assert.equal(await run('document.querySelector(\"[data-guide-topics=gate-start] .profile-guide-status\").textContent'), 'تابع هنا');
+    }
     await click(topic);
-    await until(() => run('window.LootLinguaGuide.covered("manual-meaning")'), 'shared guide topic acknowledged');
+    await until(() => run('window.LootLinguaGuide.covered("search")'), 'shared guide topic acknowledged');
+    assert.equal(await run('window.LootLinguaGuide.covered("manual-meaning")'), false);
+    if (guidanceAudit) {
+      await click('[data-guide-start]');
+      await waitFor('[data-guide-tour]:not([hidden])');
+      const first = await run('document.activeElement.textContent');
+      if (directory) await captureIntegration('optional-tour', '[data-guide-tour]');
+      await click('[data-guide-tour-action="pause"]');
+      assert.match(await run('document.activeElement.textContent'), /استأنف/);
+      await click('[data-guide-start]');
+      assert.equal(await run('document.activeElement.textContent'), first);
+      await click('[data-guide-tour-action="skip"]');
+      assert.notEqual(await run('document.activeElement.textContent'), first);
+      await click('[data-guide-tour-action="pause"]');
+      checks.optionalTourPausedAndResumed = true;
+    }
     if (directory) {
       await captureIntegration('guide-ocean', '#lootlinguaGuide', 'ocean', 'start');
       await captureIntegration('guide-glass', '#lootlinguaGuide', 'glass', 'start');
@@ -696,12 +1000,54 @@ try {
     await run('document.querySelector("#wordInput").focus()');
     assert.equal(await run('window.LootLinguaGuide.covered("search")'), true);
     assert.notEqual(await run('window.LootLinguaPopover.getActiveId()'), 'contextualOnboardingCoach');
+    if (layoutAudit && !await run('window.LootLinguaGuide.covered("dictionary")')) {
+      await until(() => run('document.querySelector("#contextualOnboardingCoach")?.textContent.includes("قاموسك الشخصي")'), 'dictionary context');
+      assert.equal(await run('window.LootLinguaGuide.covered("dictionary")'), false);
+      if (directory) await captureIntegration('contextual-dictionary', '.contextual-guide-inline');
+      await click('.contextual-guide-inline .feature-mini-onboarding-next');
+      assert.equal(await run('window.LootLinguaGuide.covered("dictionary")'), true);
+      assert.equal(await run('Boolean(document.querySelector(".contextual-guide-inline"))'), false);
+      checks.guideSharesContext = true;
+    }
+    if (guidanceAudit && process.env.LESSON_SMOKE_DESKTOP === '1') {
+      await run('void openStatsPanel()');
+      await waitFor('#statsPanel.show');
+      await until(() => run('window.LootLinguaPopover.getActiveId() === "contextualStatsCoach"'), 'contextual stats on the actual panel');
+      if (directory) await screenshot('contextual-stats');
+      await click('#contextualStatsCoach .feature-mini-onboarding-next');
+      assert.equal(await run('window.LootLinguaGuide.covered("full-stats")'), true);
+      await run('closeStatsPanel(true)');
+      const peer = await cdp('Runtime.evaluate', {
+        expression: 'Boolean(window.__qaGuidePeer = window.open("about:blank", "_blank"))',
+        returnByValue: true, userGesture: true,
+      });
+      assert.equal(peer.result.value, true);
+      await run(`(() => {
+        const uid = window.auth.currentUser.uid;
+        localStorage.setItem('lootlingua:contextual-onboarding:v1:titles:user:' + uid, 'completed');
+        window.LootLinguaGuide.refresh();
+        const key = 'lootlingua:guide-coverage:v1:user:' + uid;
+        const peer = window.__qaGuidePeer;
+        peer.localStorage.setItem('lootlingua:guide-coverage:v1:user:another-browser-account',
+          JSON.stringify({ version: 1, topics: { account: 'seen' } }));
+        const current = JSON.parse(peer.localStorage.getItem(key));
+        peer.localStorage.setItem(key, JSON.stringify({ ...current, topics: { ...current.topics, notices: 'seen' } }));
+        peer.close();
+        return true;
+      })()`);
+      await until(() => run('window.LootLinguaGuide.covered("notices")'), 'same-owner guide update from a second tab');
+      assert.equal(await run('window.LootLinguaGuide.covered("account")'), false);
+      assert.equal(await run('window.LootLinguaGuide.covered("titles")'), true);
+      checks.guideCrossTab = { sameGuest: true, otherOwnerIgnored: true, partialLegacyImported: true };
+    }
     checks.guide = { keyboard: true, screenReaderTree: true, dictionaryCovered: true, completesWithoutReminder: true };
     await run('window.openPublishedGate(' + [worldId, rankId, gateId].map(JSON.stringify).join(',') + ')');
     await waitFor('.published-gate-practice-cta');
   }
-  await click('.published-gate-practice-cta');
-  await waitFor('#publishedGateQuizPicker');
+  if (!guidanceAudit) {
+    await click('.published-gate-practice-cta');
+    await waitFor('#publishedGateQuizPicker');
+  }
   const events = await run('JSON.parse(sessionStorage.getItem("__qaLessonActions"))');
   const tally = (...types) => events.filter(row => types.includes(row.action)).length;
   const scenes = new Set(records.map(row => row.scene));
@@ -736,6 +1082,17 @@ try {
     assert.equal(checks.metrics.typed, 0);
   }
   checks.officialLearningStateUnchanged = true;
+  if (flowAudit) {
+    const labels = flowFrames.map(frame => frame.label);
+    for (const key of ['practice', 'word', 'station', 'leave-station']) assert.ok(labels.includes(key), key);
+    if (stress) {
+      for (const key of ['feedback-wrong', 'feedback-revealed', 'return']) assert.ok(labels.includes(key), key);
+      assert.ok(checks.repeatedTapBlocked);
+    }
+    if (!stress) assert.ok(labels.includes('complete'));
+    assert.ok(checks.reducedMotionAtTransition);
+    checks.flow = flowFrames;
+  }
   if (directory) {
     writeFileSync(path.join(directory, 'scene-evidence.json'), JSON.stringify(sceneEvidence, null, 2));
     writeFileSync(path.join(directory, 'browser-checks.json'), JSON.stringify(checks, null, 2));

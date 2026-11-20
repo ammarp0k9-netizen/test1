@@ -75,7 +75,7 @@
       closeStatsGuide(); return;
     }
     const popover = root.LootLinguaPopover;
-    const busy = root.LootLinguaGateLessonView?.isOpen?.() || root.LootLinguaGuide?.quizInFront() || document.hidden || root.__entryExperienceActive || root.__lootlinguaAuthResolved === false ||
+    const busy = root.LootLinguaGuide?.isPresenting?.() || root.LootLinguaSmartOnboarding?.presenting?.() || root.LootLinguaGateLessonView?.isOpen?.() || root.LootLinguaGuide?.quizInFront() || document.hidden || root.__entryExperienceActive || root.__lootlinguaAuthResolved === false ||
       root.hasActiveLearningQuiz?.() || root.__lootlinguaRunnerInputActive || root.__lootlinguaQuizLearningCommitDepth > 0 ||
       document.documentElement.classList.contains('journey-auth-active') ||
       document.body.matches('.quiz-active, .published-placement-mode') || panel.closest('[inert]') ||
@@ -146,7 +146,7 @@
     root.LootLinguaPopover?.closeIf?.(COACH_ID, { silent: true });
   }
   function offerResume(state) {
-    const resume = !root.LootLinguaGuide && state && !['completed', 'awaiting-journey'].includes(state.phase) && !root.__entryExperienceActive;
+    const resume = !root.LootLinguaSmartOnboarding?.coordinatesLegacy?.() && state && !['completed', 'awaiting-journey'].includes(state.phase) && !root.__entryExperienceActive;
     root.LootLinguaPopover?.offerResume?.(COACH_ID, resume ? {
       label: 'تابع إرشاد قاموسك',
       priority: 3,
@@ -164,7 +164,7 @@
   }
   function renderStep({ allowSurfaceOpen = false } = {}) {
     const state = read();
-    if (root.LootLinguaGuide || !state || ['completed', 'awaiting-journey'].includes(state.phase) || root.__entryExperienceActive ||
+    if (root.LootLinguaSmartOnboarding?.coordinatesLegacy?.() || !state || ['completed', 'awaiting-journey'].includes(state.phase) || root.__entryExperienceActive ||
         document.getElementById('appAuthDialogShell')?.hidden === false) {
       closeCoach(); offerResume(null); return;
     }
