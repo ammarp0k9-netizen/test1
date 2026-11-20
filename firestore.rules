@@ -1275,16 +1275,19 @@ service cloud.firestore {
             return result.status == 'completed' && result.resultApplied == true &&
               gateId in result.resultClearedGateIds && rankId in result.passedRankIds;
           }
-          function validLegacyPlacementGate(id) {
+          function validLegacyPlacementGate(gate, id) {
             let result = getAfter(/databases/$(database)/documents/users/$(uid)/contentProgress/$(worldId)/placementSessions/$(id)).data;
+            let total = result.orderedContentWordIds.size();
             return result.rankId == rankId && result.currentGateId == gateId && result.status in ['submitting', 'completed'] &&
-              placementAnswersComplete(result, result.orderedContentWordIds.size()) && result.correctCount >= result.requiredCorrect;
+              placementAnswersComplete(result, total) && result.correctCount >= result.requiredCorrect &&
+              gate.placementTotal == total && gate.placementCorrect == result.correctCount &&
+              gate.placementScore == result.correctCount / total;
           }
           function placementGate(gate) {
             let source = gate.get('clearedBy', '');
             return gate.status == 'cleared' && publishedGate(worldId, rankId, gateId) &&
               (source == 'level-placement' ? nonEmptyString(gate.get('levelPlacementAssessmentId', ''), 500) && validLevelPlacementGate(gate.levelPlacementAssessmentId) :
-               source == 'placement' && nonEmptyString(gate.get('placementAssessmentId', ''), 500) && validLegacyPlacementGate(gate.placementAssessmentId));
+               source == 'placement' && nonEmptyString(gate.get('placementAssessmentId', ''), 500) && validLegacyPlacementGate(gate, gate.placementAssessmentId));
           }
           function validReviewChange(before, after) {
             return !after.diff(before).affectedKeys().hasAny([
@@ -1321,14 +1324,19 @@ service cloud.firestore {
                 passedActiveAttempt(before, after, uid, worldId, rankId, gateId) : placementGate(after));
           }
           function validGateUpdate(before, after) {
-            return stableLoadedAt(before, after) && (after.status == 'learning' ? validLearningGate(before, after) :
+            return after.get('masteryComplete', false) == before.get('masteryComplete', false) &&
+              stableLoadedAt(before, after) && (after.status == 'learning' ? validLearningGate(before, after) :
               after.status == 'ready' ? validReadyGate(before, after) :
               after.status == 'cleared' && validClearedGate(before, after));
           }
           function importedGateKeepsDates(before, after) {
             let sourceUid = get(savedGuestPermit(uid)).data.sourceUid;
             let source = get(ownerGatePath(sourceUid, worldId, rankId, gateId)).data;
-            return sameImportedDate(before, after, source, 'loadedAt') &&
+            let previousMastery = before.get('masteryComplete', false);
+            let nextMastery = after.get('masteryComplete', false);
+            return (nextMastery == previousMastery ||
+                (nextMastery == true && source.get('masteryComplete', false) == true)) &&
+              sameImportedDate(before, after, source, 'loadedAt') &&
               sameImportedDate(before, after, source, 'readyAt') && sameImportedDate(before, after, source, 'clearedAt');
           }
 
@@ -1350,6 +1358,7 @@ service cloud.firestore {
           allow create: if importingSavedGuest(uid) && validGateProgress(request.resource.data) && importedGateKeepsDates({}, request.resource.data);
           allow update: if importingSavedGuest(uid) && validGateProgress(request.resource.data) && importedGateKeepsDates(resource.data, request.resource.data);
           allow create: if isOwner(uid) && validGateProgress(request.resource.data) &&
+            request.resource.data.get('masteryComplete', false) == false &&
             stableLoadedAt({}, request.resource.data) &&
             ((request.resource.data.status in ['available', 'learning'] && request.resource.data.readyEvidenceCount == 0 &&
               request.resource.data.get('activeClearAttemptId', '') == '' && unlockedGate()) || placementGate(request.resource.data));

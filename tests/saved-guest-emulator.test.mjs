@@ -89,9 +89,10 @@ test('guest dictionary merge requires both Auth identities, preserves distinct s
     setDoc(doc(words(main.db, guest), 'private'), word(guest.uid, 'hidden', 'مخفي', { personalDictionaryState: 'moved-to-private-world' })),
     setDoc(doc(words(old.db, target), 'already-present'), word(target.uid, 'house', 'بيت')),
     setDoc(doc(words(old.db, target), 'other-sense'), word(target.uid, 'bank', 'مصرف')),
-    setDoc(profile(main.db, guest), { userXP: 357, wallet: 88 }),
-    setDoc(profile(old.db, target), { userXP: 924, wallet: 17 }),
+    adminStore(server).doc(profile(main.db, guest).path).set({ userXP: 357, wallet: 88 }),
+    adminStore(server).doc(profile(old.db, target).path).set({ userXP: 924, wallet: 17 }),
   ]);
+  await denied(setDoc(profile(other.db, alternative), { userXP: 0, wallet: 1 }));
   await assert.rejects(auth.selectEmail(target.email, 'WrongPassword!'));
   assert.equal(main.auth.currentUser.uid, guest.uid);
   const first = await auth.selectEmail(alternative.email, password);

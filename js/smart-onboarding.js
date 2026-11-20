@@ -12,12 +12,16 @@
   let result = null;
   let setupOrigin = '';
   const owner = () => root.auth?.currentUser?.uid ? 'user:' + root.auth.currentUser.uid : 'guest';
-  const view = () => root.getOnboardingView?.();
   const legacy = () => root.LootLinguaPersonalDictionaryOnboarding;
   const get = selector => document.querySelector(selector);
   const number = selector => Number.parseInt(get(selector)?.textContent, 10) || 0;
   const visible = element => Boolean(element?.isConnected && !element.closest('[hidden], [aria-hidden="true"], [inert]') &&
     element.getClientRects().length && getComputedStyle(element).visibility !== 'hidden');
+  function view() {
+    const current = root.getOnboardingView?.();
+    // A restored published route can mount its content while the view value is still at its startup default.
+    return current === 'personal' && visible(get('#worldsView')) ? 'worlds' : current;
+  }
 
   function busy() {
     if (document.hidden || root.__lootlinguaAuthResolved === false || root.__entryExperienceActive ||
