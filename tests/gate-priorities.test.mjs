@@ -104,7 +104,7 @@ function harness(options = {}) {
   };
   const sandbox = vm.createContext({
     window, document, Date, console, AbortController, localStorage: { getItem: () => null }, getJourneyCloudApi: () => api,
-    currentView: 'worlds', publishedContentState: state, isPublishedGateRoute: () => true, isCurrentPublishedGate: () => true,
+    currentView: options.currentView || 'worlds', publishedContentState: state, isPublishedGateRoute: () => true, isCurrentPublishedGate: () => true,
     publishedGateJourneyState: () => options.presentation || state.gateProgress?.status || 'available',
     publishedJourneyPresentation: () => ({ icon: '' }), animatePublishedGateProgress() {},
     appendMetaChip: (parent, label) => parent.append(label),
@@ -188,6 +188,9 @@ test('a due review uses the saved count and the games and cards are locked insid
   assert.deepEqual(reviewFacts(h.panel), [['كلمات مستحقة الآن', '2']]);
   assert.equal(h.buttons[0].dataset.onboardingGateReview, 'due');
   assert.equal(reviewCopy(h.panel).dataset.onboardingGateReview, undefined);
+  const restored = harness({ gateProgress: progress, currentView: 'personal' });
+  restored.render();
+  assert.equal(restored.buttons[0].dataset.onboardingGateReview, 'due');
   for (const name of ['runner', 'bots']) assert.equal(h.panel.querySelector('.' + name), null);
   await h.openPicker();
   for (const name of ['runner', 'bots']) assert.equal(gameLaunch(h, name).disabled, true);

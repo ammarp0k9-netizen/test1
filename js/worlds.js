@@ -5079,8 +5079,9 @@ function makePublishedGateJourneyPanel(world, rank, gate) {
     'section',
     `published-gate-journey published-gate-journey-${state} published-gate-state-card`
   );
-  const isCurrentGate = () => currentView === 'worlds' && publishedContentState.tab === 'published' &&
+  const isRenderedGate = () => publishedContentState.tab === 'published' &&
     isPublishedGateRoute(world.worldId, rank.rankId, gate.gateId);
+  const isCurrentGate = () => currentView === 'worlds' && isRenderedGate();
   const clearedWithoutLoad = Boolean(
     progress?.status === 'cleared' &&
     progress?.clearedBy === 'level-placement' &&
@@ -5326,7 +5327,7 @@ function makePublishedGateJourneyPanel(world, rank, gate) {
       },
       'fa-solid fa-crosshairs'
     );
-    if (review.kind === 'due' && !retryable && !pending && isCurrentGate()) {
+    if (review.kind === 'due' && !retryable && !pending && isRenderedGate()) {
       reviewButton.dataset.onboardingGateReview = 'due';
       queueMicrotask(() => {
         if (reviewButton.isConnected) window.dispatchEvent(new CustomEvent('lootlingua:gate-guide-state'));
