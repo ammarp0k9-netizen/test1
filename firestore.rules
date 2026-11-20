@@ -570,8 +570,32 @@ service cloud.firestore {
           (!('version' in data) || (data.version is int && data.version >= 0));
       }
 
+      function worldPath() {
+        return /databases/$(database)/documents/content_worlds/$(worldId);
+      }
+
+      function rankPath(id) {
+        return /databases/$(database)/documents/content_worlds/$(worldId)/ranks/$(id);
+      }
+
+      function rankCountChanged(before, after) {
+        let id = after.get('rankCountChangeRankId', '');
+        return id is string && id.matches('[^/]{1,128}') &&
+          after.rankCount is int && after.rankCount >= 0 && after.updatedAt == request.time &&
+          after.updatedBy == request.auth.uid &&
+          (after.rankCount == before.rankCount + 1
+            ? existsAfter(rankPath(id)) && !('_adminCopyOperation' in getAfter(rankPath(id)).data) &&
+              (!exists(rankPath(id)) || '_adminCopyOperation' in get(rankPath(id)).data)
+            : after.rankCount == before.rankCount - 1 && exists(rankPath(id)) &&
+              get(rankPath(id)).data.status == 'archived' && !existsAfter(rankPath(id)));
+      }
+
       allow read: if isAdmin() || resource.data.status == 'published';
-      allow create, update: if isAdmin() && validWorldShape(request.resource.data);
+      allow create: if isAdmin() && validWorldShape(request.resource.data) &&
+        request.resource.data.get('rankCount', 0) == 0;
+      allow update: if isAdmin() && validWorldShape(request.resource.data) &&
+        (request.resource.data.get('rankCount', null) == resource.data.get('rankCount', null) ||
+          rankCountChanged(resource.data, request.resource.data));
       allow delete: if isAdmin() && resource.data.status == 'archived' &&
         resource.data.get('_deleteLock', {}).get('adminUid', '') == request.auth.uid;
 
@@ -579,15 +603,60 @@ service cloud.firestore {
         function validRankShape(data) {
           return data.worldId == worldId && data.rankId == rankId &&
             validContentStatus(data.status) &&
+            data.get('gateCount', 0) is int && data.get('gateCount', 0) >= 0 &&
+            data.get('wordCount', 0) is int && data.get('wordCount', 0) >= 0 &&
             (!('title' in data) || nonEmptyString(data.title, 160)) &&
             (!('schemaVersion' in data) || data.schemaVersion == 1) &&
             (!('version' in data) || (data.version is int && data.version >= 1));
         }
 
+        function rankCountDelta(delta) {
+          let before = get(worldPath()).data;
+          let after = getAfter(worldPath()).data;
+          return after.get('rankCountChangeRankId', '') == rankId &&
+            after.rankCount == before.rankCount + delta;
+        }
+
+        function validRankLevel(level) {
+          return level in ['unclassified', 'A1', 'A2', 'B1', 'B2', 'C1', 'C2'];
+        }
+
+        function validRankUpdate(before, after) {
+          let changed = after.diff(before).affectedKeys();
+          let oldLevel = before.get('cefrLevel', 'unclassified');
+          let level = after.get('cefrLevel', 'unclassified');
+          return !('_adminRankOperation' in before) && !changed.hasAny(['_adminRankOperation']) &&
+            (('_adminCopyOperation' in before)
+              ? before.status == 'draft' && after.status == 'draft' &&
+                !('_adminCopyOperation' in after) && rankCountDelta(1) &&
+                changed.hasOnly(['_adminCopyOperation', 'gateCount', 'wordCount', 'updatedAt', 'updatedBy'])
+              : !('_adminCopyOperation' in after) &&
+                (changed.hasOnly(['gateCount', 'wordCount', 'updatedAt', 'updatedBy'])
+                  || (after.version == before.version + 1 &&
+                    !changed.hasAny(['gateCount', 'wordCount', 'createdAt', 'createdBy']) &&
+                    (level == oldLevel || (oldLevel == 'unclassified' && validRankLevel(level))))));
+        }
+
+        function deletingArchivedWorld() {
+          let parent = getAfter(worldPath()).data;
+          let lock = parent.get('_deleteLock', {});
+          return parent.status == 'archived' && lock.get('adminUid', '') == request.auth.uid &&
+            lock.get('requestedAt', null) == request.time;
+        }
+
         allow read: if isAdmin() ||
           (resource.data.status == 'published' && publishedWorld(worldId));
-        allow create, update: if isAdmin() && validRankShape(request.resource.data);
-        allow delete: if isAdmin();
+        allow create: if isAdmin() && validRankShape(request.resource.data) &&
+          validRankLevel(request.resource.data.get('cefrLevel', 'unclassified')) &&
+          request.resource.data.version == 1 && request.resource.data.gateCount == 0 &&
+          request.resource.data.wordCount == 0 && !('_adminRankOperation' in request.resource.data) &&
+          (('_adminCopyOperation' in request.resource.data)
+            ? request.resource.data.status == 'draft' && nonEmptyString(request.resource.data._adminCopyOperation, 180)
+            : rankCountDelta(1));
+        allow update: if isAdmin() && validRankShape(request.resource.data) &&
+          validRankUpdate(resource.data, request.resource.data);
+        allow delete: if isAdmin() && (deletingArchivedWorld() ||
+          (resource.data.status == 'archived' && !('_adminRankOperation' in resource.data) && rankCountDelta(-1)));
 
         match /gates/{gateId} {
           function validGateShape(data) {
@@ -1024,6 +1093,12 @@ service cloud.firestore {
         function placementAnswersComplete(data, size) {
           return size > 0 && data.currentQuestionIndex == size && data.answers.size() == size;
         }
+        function activeLegacyPlacement(sessionId, rank, gate) {
+          let journey = getAfter(/databases/$(database)/documents/users/$(uid)/contentProgress/$(worldId)).data;
+          return journey.status == 'active' && journey.placementStatus == 'active' &&
+            journey.get('activePlacementAssessmentId', '') == sessionId &&
+            journey.activeRankId == rank && journey.activeGateId == gate;
+        }
         function unchangedJourneyTarget(before, after) {
           return !after.diff(before).affectedKeys().hasAny(['activeRankId', 'activeGateId',
             'unlockedRankIds', 'unlockedGateIds', 'contentJourneyStatus', 'levelPlacementClearedGateIds',
@@ -1052,6 +1127,14 @@ service cloud.firestore {
               finishedJourney(resource.data, request.resource.data)) || placementAllowsAdvance(resource.data, request.resource.data));
         allow delete: if false;
         match /placementSessions/{assessmentId} {
+          function placementFields() {
+            return ['assessmentId', 'worldId', 'rankId', 'currentGateId', 'currentQuestionIndex',
+              'orderedContentWordIds', 'orderedWordKeys', 'answers', 'correctCount', 'totalQuestions',
+              'passThreshold', 'requiredCorrect', 'status', 'source', 'suppressRewards', 'answersComplete',
+              'wordsLinked', 'gateProgressSaved', 'placementCompleted', 'nextGateUnlocked',
+              'completionStep', 'placementVersion', 'startedAt', 'updatedAt', 'outcome', 'score',
+              'rankCompletedByPlacement', 'completedAt', 'abandonedAt'];
+          }
           function validPlacementSession(data) {
             return data.assessmentId == assessmentId && data.worldId == worldId &&
               data.status in ['active', 'submitting', 'completed', 'abandoned'] &&
@@ -1066,21 +1149,31 @@ service cloud.firestore {
             let order = data.orderedContentWordIds;
             let configuredRatio = gate.get('entryAssessmentPassRatio', null);
             let ratio = configuredRatio == null || configuredRatio == '' ? 0.75 : configuredRatio;
-            return cleanPlacementStart(data) && gate.status == 'published' && order.size() > 0 && order.size() <= 2000 &&
+            return data.keys().hasOnly(placementFields()) && activeLegacyPlacement(assessmentId, data.rankId, data.currentGateId) &&
+              cleanPlacementStart(data) && gate.status == 'published' && order.size() > 0 && order.size() <= 2000 &&
               order.toSet().size() == order.size() && order.toSet() == gate.get('publishedWordIds', order).toSet() &&
               data.orderedWordKeys.size() == order.size() && data.totalQuestions == order.size() && data.passThreshold == ratio &&
               data.requiredCorrect is int && data.requiredCorrect >= data.totalQuestions * ratio && data.requiredCorrect - 1 < data.totalQuestions * ratio;
           }
           function validPlacementUpdate(before, after) {
             let order = before.orderedContentWordIds;
-            return !after.diff(before).affectedKeys().hasAny(['rankId', 'currentGateId', 'orderedContentWordIds',
+            let changed = after.diff(before).affectedKeys();
+            let resultChanged = changed.hasAny(['outcome', 'score', 'completedAt', 'rankCompletedByPlacement',
+              'gateProgressSaved', 'placementCompleted', 'nextGateUnlocked']);
+            return changed.hasOnly(placementFields()) &&
+              !changed.hasAny(['rankId', 'currentGateId', 'orderedContentWordIds',
               'orderedWordKeys', 'totalQuestions', 'passThreshold', 'requiredCorrect', 'startedAt']) &&
               (after.currentQuestionIndex == before.currentQuestionIndex ? placementAnswersUnchanged(before, after) &&
-                (after.status == before.status || after.status == 'abandoned' ||
+                ((!resultChanged && (after.status == before.status ||
+                  (before.status in ['active', 'submitting'] && after.status == 'abandoned'))) ||
                   (before.status == 'submitting' && after.status == 'completed' && placementAnswersComplete(before, order.size()) &&
-                  after.outcome == (before.correctCount >= before.requiredCorrect ? 'passed' : 'failed'))) :
-                placementAnswerStep(before, after, order[before.currentQuestionIndex], 'contentWordId', 'selectedContentWordId') &&
+                    after.score == before.correctCount * 1.0 / order.size() &&
+                    after.outcome == (before.correctCount >= before.requiredCorrect ? 'passed' : 'failed') &&
+                    (after.outcome != 'failed' ||
+                      (after.get('nextGateUnlocked', false) == false && after.get('rankCompletedByPlacement', false) == false)))) :
+                !resultChanged && placementAnswerStep(before, after, order[before.currentQuestionIndex], 'contentWordId', 'selectedContentWordId') &&
                 after.status == (after.currentQuestionIndex == order.size() ? 'submitting' : 'active') &&
+                after.answers[before.currentQuestionIndex].wordKey == before.orderedWordKeys[before.currentQuestionIndex] &&
                 publishedPlacementWord(before.rankId, before.currentGateId, order[before.currentQuestionIndex], before.orderedWordKeys[before.currentQuestionIndex]));
           }
           allow create: if importingSavedGuest(uid) && validPlacementSession(request.resource.data);
@@ -1275,19 +1368,20 @@ service cloud.firestore {
             return result.status == 'completed' && result.resultApplied == true &&
               gateId in result.resultClearedGateIds && rankId in result.passedRankIds;
           }
-          function validLegacyPlacementGate(gate, id) {
+          function validLegacyPlacementGate(gate, id, passed) {
             let result = getAfter(/databases/$(database)/documents/users/$(uid)/contentProgress/$(worldId)/placementSessions/$(id)).data;
             let total = result.orderedContentWordIds.size();
-            return result.rankId == rankId && result.currentGateId == gateId && result.status in ['submitting', 'completed'] &&
-              placementAnswersComplete(result, total) && result.correctCount >= result.requiredCorrect &&
+            return activeLegacyPlacement(id, rankId, gateId) &&
+              result.rankId == rankId && result.currentGateId == gateId && result.status in ['submitting', 'completed'] &&
+              placementAnswersComplete(result, total) && (result.correctCount >= result.requiredCorrect) == passed &&
               gate.placementTotal == total && gate.placementCorrect == result.correctCount &&
-              gate.placementScore == result.correctCount / total;
+              gate.placementScore == result.correctCount * 1.0 / total;
           }
           function placementGate(gate) {
             let source = gate.get('clearedBy', '');
             return gate.status == 'cleared' && publishedGate(worldId, rankId, gateId) &&
               (source == 'level-placement' ? nonEmptyString(gate.get('levelPlacementAssessmentId', ''), 500) && validLevelPlacementGate(gate.levelPlacementAssessmentId) :
-               source == 'placement' && nonEmptyString(gate.get('placementAssessmentId', ''), 500) && validLegacyPlacementGate(gate, gate.placementAssessmentId));
+               source == 'placement' && nonEmptyString(gate.get('placementAssessmentId', ''), 500) && validLegacyPlacementGate(gate, gate.placementAssessmentId, true));
           }
           function validReviewChange(before, after) {
             return !after.diff(before).affectedKeys().hasAny([
@@ -1295,13 +1389,18 @@ service cloud.firestore {
             ]) || validReviewMarker(before, after);
           }
           function validLearningGate(before, after) {
-            return (before.status in ['available', 'learning'] &&
+            return (!after.diff(before).affectedKeys().hasAny(['placementAssessmentId', 'placementScore',
+                'placementCorrect', 'placementTotal']) ||
+              (nonEmptyString(after.get('placementAssessmentId', ''), 500) &&
+                after.get('clearedBy', '') == '' &&
+                validLegacyPlacementGate(after, after.placementAssessmentId, false))) &&
+              ((before.status in ['available', 'learning'] &&
                 after.readyEvidenceCount < after.get('requiredWordCount', 1) &&
                 after.loadedContentWordIds.hasAll(before.get('loadedContentWordIds', [])) &&
                 after.loadedWordKeys.hasAll(before.get('loadedWordKeys', [])) &&
                 after.get('activeClearAttemptId', '') == before.get('activeClearAttemptId', '') &&
                 after.clearAttempts == before.clearAttempts && validReviewChange(before, after)) ||
-              (before.status == 'cleared' && before.get('clearedBy', '') == 'placement');
+              (before.status == 'cleared' && before.get('clearedBy', '') == 'placement'));
           }
           function validReadyGate(before, after) {
             let oldAttempt = before.get('activeClearAttemptId', '');

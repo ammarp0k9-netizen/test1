@@ -1441,7 +1441,7 @@ function loadFeatureScript(src, options = {}) {
 function loadLootLinguaAdminAccess() {
   if (window.LootLinguaAdminCloud) return Promise.resolve();
   if (adminAccessLoadPromise) return adminAccessLoadPromise;
-  adminAccessLoadPromise = loadFeatureScript('js/admin-cloud.js?v=admin-content-3', { module: true }).catch((error) => {
+  adminAccessLoadPromise = loadFeatureScript('js/admin-cloud.js?v=admin-rank-count-1', { module: true }).catch((error) => {
     adminAccessLoadPromise = null;
     throw error;
   });

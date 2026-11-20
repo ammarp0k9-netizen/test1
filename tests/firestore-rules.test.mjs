@@ -15,6 +15,7 @@ import {
   documentId,
   getDoc,
   getDocs,
+  increment,
   limit,
   orderBy,
   query,
@@ -518,6 +519,8 @@ async function seed() {
       }],
       [paths.journeyWord,
         word('journey-world', 'journey-rank', 'journey-gate', 'journey-word', 'published')],
+      [paths.journeyNextGate + '/words/journey-next-word',
+        word('journey-world', 'journey-rank', 'journey-gate-next', 'journey-next-word', 'published')],
       [paths.journeyHashedWord, {
         ...word(
           'journey-world',
@@ -1194,7 +1197,9 @@ try {
   await test('Spark world deletion requires an archived world and the administering owner’s lease', async () => {
     await assertFails(deleteDoc(doc(admin, paths.publishedWorld)));
     const reference = doc(admin, 'content_worlds/archived-for-deletion');
-    await assertSucceeds(setDoc(reference, world('archived-for-deletion', 'archived')));
+    await assertSucceeds(setDoc(reference, {
+      ...world('archived-for-deletion', 'archived'), rankCount: 0, gateCount: 0, wordCount: 0
+    }));
     await assertFails(deleteDoc(reference));
     await assertSucceeds(updateDoc(reference, {
       _deleteLock: { requestId: 'test-world-delete', adminUid: 'admin-a', requestedAt: serverTimestamp() }
@@ -1904,7 +1909,8 @@ try {
     });
     createSessionBatch.set(doc(userA, sessionPath), placementSession(assessmentId, {
       currentGateId: 'journey-gate-next',
-      orderedContentWordIds: ['journey-next-word']
+      orderedContentWordIds: ['journey-next-word'],
+      orderedWordKeys: ['journey-next-word']
     }));
     await assertSucceeds(createSessionBatch.commit());
 
@@ -1912,7 +1918,7 @@ try {
       currentQuestionIndex: 1,
       answers: [{
         contentWordId: 'journey-next-word',
-        wordKey: 'journey-word',
+        wordKey: 'journey-next-word',
         selectedContentWordId: 'journey-word',
         correct: false,
         seenAt: Date.now()
@@ -1931,8 +1937,19 @@ try {
       placementAssessmentId: assessmentId,
       lastActivityAt: serverTimestamp()
     }));
+    const resumedOwner = environment.authenticatedContext('user-a').firestore();
+    const pending = (await getDoc(doc(resumedOwner, sessionPath))).data();
+    assert.equal(pending.status, 'submitting');
+    assert.equal(pending.correctCount, 0);
+    assert.equal(pending.answers.length, 1);
 
-    await assertSucceeds(updateDoc(doc(userA, sessionPath), {
+    await assertFails(updateDoc(doc(userB, sessionPath), {
+      status: 'completed', outcome: 'failed', score: 0, updatedAt: serverTimestamp()
+    }));
+    await assertFails(updateDoc(doc(userA, sessionPath), {
+      status: 'completed', outcome: 'passed', score: 1, updatedAt: serverTimestamp()
+    }));
+    await assertSucceeds(updateDoc(doc(resumedOwner, sessionPath), {
       status: 'completed',
       outcome: 'failed',
       score: 0,
@@ -1957,6 +1974,7 @@ try {
     assert.equal(savedJourney.data().placementStatus, 'completed');
     assert.equal(savedJourney.data().activeGateId, 'journey-gate-next');
     assert.equal(savedGate.data().status, 'learning');
+    await assertFails(updateDoc(doc(userA, sessionPath), { score: 1, outcome: 'passed', updatedAt: serverTimestamp() }));
   });
 
   await test('a 4/10 Placement failure saves the exact browser payload', async () => {
@@ -3023,10 +3041,17 @@ try {
       updatedBy: 'admin-a'
     };
     await assertFails(setDoc(doc(admin, rankPath), valid));
+    const unlabeledBatch = writeBatch(admin);
+    unlabeledBatch.set(doc(admin, rankPath), valid);
+    unlabeledBatch.update(doc(admin, paths.publishedWorld), {
+      rankCount: increment(1), updatedAt: serverTimestamp(), updatedBy: 'admin-a'
+    });
+    await assertFails(unlabeledBatch.commit());
     const createBatch = writeBatch(admin);
     createBatch.set(doc(admin, rankPath), valid);
     createBatch.update(doc(admin, paths.publishedWorld), {
       rankCount: 4,
+      rankCountChangeRankId: 'admin-rank',
       updatedAt: serverTimestamp(),
       updatedBy: 'admin-a'
     });
@@ -3081,10 +3106,61 @@ try {
     });
     invalidCounterBatch.update(doc(admin, paths.publishedWorld), {
       rankCount: 5,
+      rankCountChangeRankId: 'nonzero-rank',
       updatedAt: serverTimestamp(),
       updatedBy: 'admin-a'
     });
     await assertFails(invalidCounterBatch.commit());
+    const parent = doc(admin, paths.publishedWorld);
+    const rankRef = doc(admin, rankPath);
+    await assertFails(updateDoc(parent, {
+      rankCount: 5, rankCountChangeRankId: 'missing-rank',
+      updatedAt: serverTimestamp(), updatedBy: 'admin-a'
+    }));
+    const twoRanks = writeBatch(admin);
+    for (const id of ['rank-batch-one', 'rank-batch-two']) {
+      twoRanks.set(doc(admin, paths.publishedWorld + '/ranks/' + id), { ...valid, rankId: id });
+    }
+    twoRanks.update(parent, {
+      rankCount: 5, rankCountChangeRankId: 'rank-batch-one',
+      updatedAt: serverTimestamp(), updatedBy: 'admin-a'
+    });
+    await assertFails(twoRanks.commit());
+    await assertFails(updateDoc(doc(userA, paths.publishedWorld), { rankCount: 5 }));
+    await assertSucceeds(updateDoc(rankRef, { status: 'archived', version: 5, updatedAt: serverTimestamp(), updatedBy: 'admin-a' }));
+    assert.equal((await getDoc(parent)).data().rankCount, 4);
+    await assertFails(deleteDoc(rankRef));
+    const remove = writeBatch(admin);
+    remove.delete(rankRef);
+    remove.update(parent, {
+      rankCount: 3, rankCountChangeRankId: 'admin-rank',
+      updatedAt: serverTimestamp(), updatedBy: 'admin-a'
+    });
+    await assertSucceeds(remove.commit());
+    await Promise.all(['rank-concurrent-one', 'rank-concurrent-two'].map(id =>
+      runTransaction(admin, async transaction => {
+        await transaction.get(parent);
+        transaction.set(doc(admin, paths.publishedWorld + '/ranks/' + id), { ...valid, rankId: id });
+        transaction.update(parent, {
+          rankCount: increment(1),
+          rankCountChangeRankId: id, updatedAt: serverTimestamp(), updatedBy: 'admin-a'
+        });
+      })
+    ));
+    assert.equal((await getDoc(parent)).data().rankCount, 5);
+
+    const copy = doc(admin, paths.publishedWorld + '/ranks/rank-copy');
+    await assertSucceeds(setDoc(copy, { ...valid, rankId: 'rank-copy', _adminCopyOperation: 'rank-copy-lease' }));
+    assert.equal((await getDoc(parent)).data().rankCount, 5);
+    await assertFails(updateDoc(copy, { status: 'published', version: 2 }));
+    const finishCopy = writeBatch(admin);
+    finishCopy.update(copy, { _adminCopyOperation: deleteField(), updatedAt: serverTimestamp(), updatedBy: 'admin-a' });
+    finishCopy.update(parent, {
+      rankCount: 6, rankCountChangeRankId: 'rank-copy',
+      updatedAt: serverTimestamp(), updatedBy: 'admin-a'
+    });
+    await assertSucceeds(finishCopy.commit());
+    assert.equal((await getDoc(parent)).data().rankCount, 6);
   });
 
   await test('an admin client cannot remove a backend rank-operation lock', async () => {
