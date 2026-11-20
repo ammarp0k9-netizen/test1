@@ -1363,10 +1363,12 @@ service cloud.firestore {
               after.loadedWordKeys.hasAll(after.runnerReviewCompletedDueWordKeys) && session.completedAt >= before.loadedAt &&
               (previous == '' || session.completedAt > get(/databases/$(database)/documents/users/$(uid)/quizEvidenceSessions/$(previous)).data.completedAt);
           }
-          function validLevelPlacementGate(id) {
+          function validLevelPlacementGate(gate, id) {
             let result = getAfter(/databases/$(database)/documents/users/$(uid)/contentProgress/$(worldId)/levelPlacementSessions/$(id)).data;
+            let score = result.get('perRankStats', {}).get(rankId, {}).get('ratio', null);
             return result.status == 'completed' && result.resultApplied == true &&
-              gateId in result.resultClearedGateIds && rankId in result.passedRankIds;
+              gateId in result.resultClearedGateIds && rankId in result.passedRankIds &&
+              score is number && score >= 0 && score <= 1 && gate.levelPlacementScore == score;
           }
           function validLegacyPlacementGate(gate, id, passed) {
             let result = getAfter(/databases/$(database)/documents/users/$(uid)/contentProgress/$(worldId)/placementSessions/$(id)).data;
@@ -1380,7 +1382,7 @@ service cloud.firestore {
           function placementGate(gate) {
             let source = gate.get('clearedBy', '');
             return gate.status == 'cleared' && publishedGate(worldId, rankId, gateId) &&
-              (source == 'level-placement' ? nonEmptyString(gate.get('levelPlacementAssessmentId', ''), 500) && validLevelPlacementGate(gate.levelPlacementAssessmentId) :
+              (source == 'level-placement' ? nonEmptyString(gate.get('levelPlacementAssessmentId', ''), 500) && validLevelPlacementGate(gate, gate.levelPlacementAssessmentId) :
                source == 'placement' && nonEmptyString(gate.get('placementAssessmentId', ''), 500) && validLegacyPlacementGate(gate, gate.placementAssessmentId, true));
           }
           function validReviewChange(before, after) {
@@ -1417,6 +1419,9 @@ service cloud.firestore {
           function validClearedGate(before, after) {
             let source = after.get('clearedBy', '');
             return (before.status == 'cleared' && source == before.get('clearedBy', '') &&
+                (source != 'level-placement' ||
+                  (after.get('levelPlacementAssessmentId', null) == before.get('levelPlacementAssessmentId', null) &&
+                    after.get('levelPlacementScore', null) == before.get('levelPlacementScore', null))) &&
                 (source != 'gate-clear' || (sameLoadedGate(before, after) && after.clearedAt == before.clearedAt))) ||
               (source == 'gate-clear' ? before.status == 'ready' && sameLoadedWords(before, after) &&
                 completeGateProof(uid, before, worldId, rankId, gateId, null) &&
