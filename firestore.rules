@@ -572,7 +572,8 @@ service cloud.firestore {
 
       allow read: if isAdmin() || resource.data.status == 'published';
       allow create, update: if isAdmin() && validWorldShape(request.resource.data);
-      allow delete: if isAdmin();
+      allow delete: if isAdmin() && resource.data.status == 'archived' &&
+        resource.data.get('_deleteLock', {}).get('adminUid', '') == request.auth.uid;
 
       match /ranks/{rankId} {
         function validRankShape(data) {
@@ -625,7 +626,50 @@ service cloud.firestore {
     }
 
     match /content_word_import_staging/{stagingWordId} {
-      allow read, create, update, delete: if isAdmin();
+      function validStagingTarget(target) {
+        return target is map && target.keys().hasOnly(['worldId', 'rankId', 'gateId']) &&
+          nonEmptyString(target.worldId, 128) && nonEmptyString(target.rankId, 128) &&
+          nonEmptyString(target.gateId, 128);
+      }
+      function validStagingWord(data) {
+        return data.keys().hasOnly([
+            'stagingWordId', 'importBatchId', 'sourceFileName', 'sourceOrder',
+            'schemaVersion', 'normalizationVersion', 'word', 'normalizedWord',
+            'wordKey', 'translation', 'definition', 'definition_ar', 'example',
+            'exampleTranslation', 'category', 'partOfSpeech', 'level', 'tags',
+            'synonyms', 'pronunciation', 'audioUrl', 'imageUrl', 'notes', 'order',
+            'stagingStatus', 'distributionTarget', 'distributionOperationId',
+            'distributedContentWordId', 'distributedAt', 'importedAt',
+            'createdAt', 'updatedAt', 'createdBy', 'updatedBy'
+          ]) && data.stagingWordId == stagingWordId && stagingWordId.matches('staging_[a-f0-9]{64}') &&
+          nonEmptyString(data.importBatchId, 128) && nonEmptyString(data.sourceFileName, 240) &&
+          data.sourceOrder is int && data.sourceOrder >= 0 && data.sourceOrder <= 1000000 &&
+          data.schemaVersion == 1 && data.normalizationVersion == 1 &&
+          nonEmptyString(data.word, 240) && nonEmptyString(data.normalizedWord, 240) &&
+          nonEmptyString(data.wordKey, 240) && nonEmptyString(data.translation, 1000) &&
+          data.order is int && data.order >= 0 && data.stagingStatus in ['pending', 'distributing', 'distributed'] &&
+          (!('distributionTarget' in data) || validStagingTarget(data.distributionTarget)) &&
+          (!('distributionOperationId' in data) || nonEmptyString(data.distributionOperationId, 128)) &&
+          (!('distributedContentWordId' in data) || nonEmptyString(data.distributedContentWordId, 128)) &&
+          (!('distributedAt' in data) || data.distributedAt is timestamp) &&
+          data.createdAt is timestamp && data.importedAt is timestamp &&
+          nonEmptyString(data.createdBy, 128) && data.updatedBy == request.auth.uid && data.updatedAt == request.time;
+      }
+      function validStagingCreate(data) {
+        return validStagingWord(data) && data.stagingStatus == 'pending' &&
+          !data.keys().hasAny(['distributionTarget', 'distributionOperationId', 'distributedContentWordId', 'distributedAt']) &&
+          data.createdBy == request.auth.uid && data.createdAt == request.time && data.importedAt == request.time;
+      }
+      function validStagingUpdate(before, after) {
+        return validStagingWord(after) && after.diff(before).affectedKeys().hasOnly([
+          'stagingStatus', 'distributionTarget', 'distributionOperationId',
+          'distributedContentWordId', 'distributedAt', 'updatedAt', 'updatedBy'
+        ]);
+      }
+      allow read: if isAdmin();
+      allow create: if isAdmin() && validStagingCreate(request.resource.data);
+      allow update: if isAdmin() && validStagingUpdate(resource.data, request.resource.data);
+      allow delete: if isAdmin();
     }
 
     // These are server/Admin-SDK workflows. Client access remains denied.
@@ -758,6 +802,24 @@ service cloud.firestore {
 
       // User settings, onboarding, XP metadata, and local quiz state.
       match /meta/profile {
+        function profileFieldNames() {
+          return [
+            'userXP', 'xpEconomyVersion', 'dailyStreak', 'maxStreak', 'lastActivityDate', 'activityMap',
+            'quizExposureHistory', 'lastPersonalTrustedQuizAt', 'theme', 'oasisMode', 'themeIntroSeen',
+            'displayName', 'interestIds', 'onboardingProgress', 'addedGameWords', 'dailyLootState',
+            'titlesState', 'activeTitleId', 'dailyQuestDate', 'dailyQuestState', 'dailyQuestsByDay',
+            'streakFreezes', 'freezeSaves', 'gameDictAdds', 'perfectQuizzes', 'extraChests',
+            'extraChestState', 'runnerCoins', 'runnerUnlocks', 'runnerBestDistance', 'lootBots',
+            'motivationRewards', 'updatedAt', '_syncRevision'
+          ];
+        }
+        function validAppearance(data, fields) {
+          let themes = ['lootlingua', 'golden', 'scroll', 'ocean', 'glass'];
+          return (!fields.hasAny(['theme']) || !('theme' in data) || data.theme in themes) &&
+            (!fields.hasAny(['oasisMode']) || !('oasisMode' in data) || data.oasisMode in ['light', 'dark']) &&
+            (!fields.hasAny(['themeIntroSeen']) || !('themeIntroSeen' in data) ||
+              (data.themeIntroSeen is list && data.themeIntroSeen.size() <= 12 && data.themeIntroSeen.hasOnly(themes)));
+        }
         function validProfile(data) {
           return (!('userXP' in data) || (data.userXP is number && data.userXP >= 0)) &&
             (!('xpEconomyVersion' in data) ||
@@ -766,12 +828,17 @@ service cloud.firestore {
             (!('maxStreak' in data) || (data.maxStreak is int && data.maxStreak >= 0)) &&
             (!('displayName' in data) || (data.displayName is string && data.displayName.size() <= 120));
         }
+        function validProfileUpdate(before, after) {
+          let changed = after.diff(before).affectedKeys();
+          return changed.hasOnly(profileFieldNames()) && validProfile(after) && validAppearance(after, changed) &&
+            (!changed.hasAny(['_syncRevision']) ||
+              (after._syncRevision is int && after._syncRevision == before.get('_syncRevision', 0) + 1));
+        }
         allow read: if isOwner(uid);
-        allow create: if isOwner(uid) && validProfile(request.resource.data) &&
+        allow create: if isOwner(uid) && request.resource.data.keys().hasOnly(profileFieldNames()) &&
+          validProfile(request.resource.data) && validAppearance(request.resource.data, request.resource.data.keys()) &&
           request.resource.data.get('_syncRevision', 1) == 1;
-        allow update: if isOwner(uid) && validProfile(request.resource.data) &&
-          (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['_syncRevision']) ||
-            (request.resource.data._syncRevision is int && request.resource.data._syncRevision == resource.data.get('_syncRevision', 0) + 1));
+        allow update: if isOwner(uid) && validProfileUpdate(resource.data, request.resource.data);
         allow delete: if false;
       }
       match /meta/word_mastery {
@@ -889,7 +956,8 @@ service cloud.firestore {
       // production ruleset adds the remaining cross-document/batch invariants.
       match /contentProgress/{worldId} {
         function validJourney(data) {
-          return data.worldId == worldId && data.journeyVersion == 1 &&
+          return !data.keys().hasAny(['userXP', 'xp', 'xpEconomyVersion']) &&
+            data.worldId == worldId && data.journeyVersion == 1 &&
             data.status in ['active', 'paused'] &&
             nonEmptyString(data.activeRankId, 128) && nonEmptyString(data.activeGateId, 128) &&
             data.startedAt is timestamp && data.updatedAt is timestamp &&
@@ -1178,6 +1246,7 @@ service cloud.firestore {
             return data.worldId == worldId && data.rankId == rankId && data.gateId == gateId &&
               data.journeyVersion == 1 &&
               data.status in ['available', 'learning', 'ready', 'cleared'] &&
+              (!('snapshotVersion' in data) || (data.snapshotVersion is int && data.snapshotVersion >= 1)) &&
               data.lastActivityAt is timestamp && data.readyEvidenceCount is int &&
               data.readyEvidenceCount >= 0 && data.clearAttempts is int && data.clearAttempts >= 0 &&
               (!('clearCorrect' in data) || (data.clearCorrect is int && data.clearCorrect >= 0)) &&

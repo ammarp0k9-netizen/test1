@@ -60,7 +60,7 @@ test('staging rules are admin-only and reject prepared-content fields', () => {
   const stagingRules = section(
     rules,
     'match /content_word_import_staging/{stagingWordId}',
-    '// Existing user paths'
+    'match /feedback/{feedbackId}'
   );
   assert.match(stagingRules, /allow read: if isAdmin\(\)/);
   assert.match(stagingRules, /allow create: if isAdmin\(\)/);

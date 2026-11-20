@@ -1191,8 +1191,16 @@ try {
     await assertFails(updateDoc(doc(userA, paths.publishedWorld), { title: 'forged' }));
   });
 
-  await test('prepared parent deletion is backend-only even for an admin client', async () => {
+  await test('Spark world deletion requires an archived world and the administering owner’s lease', async () => {
     await assertFails(deleteDoc(doc(admin, paths.publishedWorld)));
+    const reference = doc(admin, 'content_worlds/archived-for-deletion');
+    await assertSucceeds(setDoc(reference, world('archived-for-deletion', 'archived')));
+    await assertFails(deleteDoc(reference));
+    await assertSucceeds(updateDoc(reference, {
+      _deleteLock: { requestId: 'test-world-delete', adminUid: 'admin-a', requestedAt: serverTimestamp() }
+    }));
+    await assertFails(deleteDoc(doc(userA, reference.path)));
+    await assertSucceeds(deleteDoc(reference));
   });
 
   await test('a normal user cannot self-assign an admin document', async () => {
