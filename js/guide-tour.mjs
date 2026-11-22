@@ -127,7 +127,13 @@ export function mountGuideTour(panel, { activeUid, blocked, covered, acknowledge
     } else reveal();
   }
 
-  function begin(topic) {
+  async function begin(topic) {
+    const owner = activeUid();
+    const pendingBoot = app.LootLinguaEntryExperienceController?.getPendingBoot?.();
+    if (pendingBoot) {
+      try { await pendingBoot; } catch (_) { return; }
+      if (owner !== activeUid() || running) return;
+    }
     const modal = app.LootLinguaModalFocus?.currentSurface?.();
     if (blocked() || startupPending() || app.__lootlinguaAuthResolved === false || (modal && modal !== profile)) return;
     const saved = topic ? null : read();

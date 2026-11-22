@@ -1518,6 +1518,7 @@
     consumePendingJourneyIntent,
     getState: () => runtime.state ? { ...runtime.state, interestIds: [...runtime.state.interestIds] } : null,
     getPresentation: () => runtime.presentation ? { ...runtime.presentation } : null,
+    getPendingBoot: () => runtime.bootRequest?.promise || null,
     isActive: () => runtime.opened,
   });
 
