@@ -939,7 +939,34 @@ browserScenario: try {
     if (directory) await captureIntegration('dictionary-invitation', '#contextualOnboardingCoach');
     const later = process.env.LESSON_GUIDANCE_LATER === '1';
     const natural = process.env.LESSON_DISCOVERY_DOCK === '1';
-    if (curious) {
+    const discoveryTabs = process.env.LESSON_DISCOVERY_TABS === '1';
+    if (discoveryTabs) {
+      assert.equal(expectedTopic, 'dictionary');
+      const opened = await cdp('Runtime.evaluate', {
+        expression: 'Boolean(window.__qaDiscoveryTab = window.open(location.origin + "/app/worlds?firebaseEmulator=1", "_blank"))',
+        returnByValue: true, userGesture: true,
+      });
+      assert.equal(opened.result.value, true);
+      await until(() => run('window.__qaDiscoveryTab.auth?.currentUser?.uid === window.auth.currentUser.uid && ' +
+        'window.__qaDiscoveryTab.__lootlinguaInitialDataReady === true && ' +
+        'window.__qaDiscoveryTab.LootLinguaEntryExperienceController?.getState() && ' +
+        '!window.__qaDiscoveryTab.LootLinguaEntryExperienceController.getPendingBoot()'), 'second tab ready after official review');
+      const pressInTab = selector => until(() => run(`(() => {
+        const control = window.__qaDiscoveryTab.document.querySelector(${JSON.stringify(selector)});
+        if (!control?.getClientRects().length || control.disabled) return false;
+        control.click();
+        return true;
+      })()`), 'discovery in same-account tab ' + selector);
+      await pressInTab('#legendDock [data-dock-view="personal"]');
+      await pressInTab('#contextualOnboardingCoach .feature-mini-onboarding-next');
+      await until(() => run('window.__qaDiscoveryTab.LootLinguaGuide.covered("dictionary") && ' +
+        'window.LootLinguaGuide.covered("dictionary")'), 'dictionary coverage received by both tabs');
+      await run('window.__qaDiscoveryTab.close(); true');
+      await cdp('Page.bringToFront');
+      await until(async () => await badgeTopic() !== 'dictionary' &&
+        !await coachIncludes('اكتشف قاموسك الشخصي'), 'dictionary invitation and badge cleared on the first tab');
+      checks.discoveryCrossTab = true;
+    } else if (curious) {
       await click('#legendDock [data-dock-view="quiz"]');
       await until(() => coachIncludes('المراجعة الرسمية لكل بوابة'), 'general quiz discovered naturally');
       await click('#contextualOnboardingCoach .feature-mini-onboarding-next');
@@ -993,7 +1020,7 @@ browserScenario: try {
       await click('#contextualOnboardingCoach .feature-mini-onboarding-next');
     }
     checks.firstOfficialReview = { savedEvidence: true, failedSaveExcluded: true, previsited, singleBadge: true,
-      action: curious ? 'early-dictionary-then-quiz' : natural ? 'dock' : later ? 'later-quiz-treasure' : 'explore-and-resume' };
+      action: discoveryTabs ? 'dock-in-second-tab' : curious ? 'early-dictionary-then-quiz' : natural ? 'dock' : later ? 'later-quiz-treasure' : 'explore-and-resume' };
   }
   if (integration) {
     await evaluateNotices();
