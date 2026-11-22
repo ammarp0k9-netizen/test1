@@ -845,10 +845,13 @@ service cloud.firestore {
             (('text' in data && nonEmptyString(data.text, 500)) ||
               ('word' in data && nonEmptyString(data.word, 500))) &&
             (!('forgetCount' in data) || (data.forgetCount is int && data.forgetCount >= 0)) &&
+            (!('personalDictionaryState' in data) || data.personalDictionaryState in ['active', 'moved-to-private-world']) &&
             (!('starred' in data) || data.starred is bool);
         }
         allow read, delete: if isOwner(uid);
-        allow create, update: if isOwner(uid) && validPersonalWord(request.resource.data);
+        allow create: if isOwner(uid) && validPersonalWord(request.resource.data);
+        allow update: if isOwner(uid) && validPersonalWord(request.resource.data) &&
+          request.resource.data.get('xpValue', 0) == resource.data.get('xpValue', 0);
       }
       match /customWorlds/{worldId} {
         function validCustomWorld(data) {
@@ -1611,17 +1614,55 @@ service cloud.firestore {
           return ['eligibleEvidenceCount', 'lastEligibleEvidenceAt', 'lastEvidenceEventId', 'evidenceVersion',
             'evidenceTimezoneOffsetMinutes', 'lastEvidenceLocalDayKey'];
         }
+        function validForgetCountStep() {
+          let before = resource.data.get('forgetCount', 0);
+          let after = request.resource.data.forgetCount;
+          return before is int && after is int && after >= 0 && after <= 100000 &&
+            (after == before + 1 || after == before - 1);
+        }
         allow create, update: if importingSavedGuest(uid) && validContentWord(request.resource.data);
         allow create: if isOwner(uid) && validContentWord(request.resource.data) &&
           request.resource.data.get('eligibleEvidenceCount', 0) == 0 &&
           request.resource.data.get('lastEligibleEvidenceAt', null) == null &&
           request.resource.data.get('lastEvidenceEventId', '') == '';
         allow update: if isOwner(uid) && validContentWord(request.resource.data) &&
+          request.resource.data.normalizedWord == resource.data.normalizedWord &&
+          request.resource.data.masteryKey == resource.data.masteryKey &&
+          resource.data.get('wordKey', contentWordId) == contentWordId &&
+          (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['forgetCount']) || validForgetCountStep()) &&
           (!request.resource.data.diff(resource.data).affectedKeys().hasAny(evidenceFields()) ||
             (request.resource.data.diff(resource.data).affectedKeys().hasOnly(evidenceFields().concat(['updatedAt'])) &&
               validEvidenceProjection(resource.data, request.resource.data, uid, contentWordId)));
+        allow update: if isOwner(uid) && !('wordKey' in resource.data) &&
+          resource.data.canonicalId == contentWordId && resource.data.masteryKey == contentWordId &&
+          request.resource.data.diff(resource.data).affectedKeys().hasOnly(['forgetCount', 'updatedAt']) &&
+          validForgetCountStep();
         allow delete: if false;
         match /sources/{sourceId} {
+          function validPublishedGateSource(data) {
+            let journey = getAfter(/databases/$(database)/documents/users/$(uid)/contentProgress/$(data.worldId)).data;
+            let pointer = getAfter(/databases/$(database)/documents/users/$(uid)/meta/active_content_journey).data;
+            let gate = get(gateContentPath(data.worldId, data.rankId, data.gateId)).data;
+            let word = get(/databases/$(database)/documents/content_worlds/$(data.worldId)/ranks/$(data.rankId)/gates/$(data.gateId)/words/$(data.contentWordId)).data;
+            let canonical = getAfter(/databases/$(database)/documents/users/$(uid)/contentWords/$(contentWordId)).data;
+            return pointer.worldId == data.worldId && journey.status == 'active' &&
+              data.rankId in journey.unlockedRankIds && data.gateId in journey.unlockedGateIds &&
+              publishedWorld(data.worldId) && publishedRank(data.worldId, data.rankId) &&
+              gate.status == 'published' && word.status == 'published' &&
+              gate.worldId == data.worldId && gate.rankId == data.rankId && gate.gateId == data.gateId &&
+              word.worldId == data.worldId && word.rankId == data.rankId &&
+              word.gateId == data.gateId && word.contentWordId == data.contentWordId &&
+              data.contentWordId in gate.get('publishedWordIds', [data.contentWordId]) &&
+              word.wordKey == contentWordId && canonical.canonicalId == contentWordId &&
+              canonical.wordKey == contentWordId && canonical.normalizedWord == word.normalizedWord &&
+              canonical.masteryKey == contentWordId &&
+              sourceId == 'published_' + data.worldId + '~' + data.rankId + '~' + data.gateId + '~' + data.contentWordId;
+          }
+          function validImportedSource(data) {
+            let sourceUid = get(savedGuestPermit(uid)).data.sourceUid;
+            let original = get(/databases/$(database)/documents/users/$(sourceUid)/contentWords/$(contentWordId)/sources/$(sourceId)).data;
+            return data.diff(original).affectedKeys().hasOnly(['_savedGuestImportedAt']);
+          }
           function validSource(data) {
             return data.addedFrom in [
                 'manual', 'dictionary-search', 'private-world', 'import',
@@ -1632,7 +1673,9 @@ service cloud.firestore {
               (!('importId' in data) || nonEmptyString(data.importId, 500));
           }
           allow read, delete: if isOwner(uid);
-          allow create: if isOwner(uid) && validSource(request.resource.data);
+          allow create: if isOwner(uid) && validSource(request.resource.data) &&
+            (request.resource.data.addedFrom != 'published-gate' || validPublishedGateSource(request.resource.data));
+          allow create: if importingSavedGuest(uid) && validImportedSource(request.resource.data);
           allow update: if false;
         }
         match /evidence/{eventId} {

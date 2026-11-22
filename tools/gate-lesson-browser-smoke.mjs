@@ -3,6 +3,7 @@ import { spawn } from 'node:child_process';
 import { mkdirSync, existsSync, mkdtempSync, writeFileSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
+import { checkOnboardingIdentity, checkOnboardingSections } from './onboarding-tour-smoke.mjs';
 
 const firestoreAddress = /^127\.0\.0\.1:(\d+)$/.exec(process.env.FIRESTORE_EMULATOR_HOST || '');
 assert.ok(firestoreAddress && /^127\.0\.0\.1:\d+$/.test(process.env.FIREBASE_AUTH_EMULATOR_HOST || ''),
@@ -63,6 +64,7 @@ const integration = process.env.LESSON_GUIDE_INTEGRATION === '1';
 const layoutAudit = process.env.LESSON_LAYOUT_AUDIT === '1';
 const flowAudit = process.env.LESSON_FLOW_AUDIT === '1';
 const guidanceAudit = process.env.LESSON_GUIDANCE_AUDIT === '1';
+const sectionAudit = process.env.LESSON_GUIDE_SECTIONS === '1';
 const referenceViewport = process.env.LESSON_SMOKE_DESKTOP === '1'
   ? { width: 1300, height: 860, mobile: false }
   : { width: 390, height: 844, mobile: true };
@@ -89,6 +91,9 @@ await env.withSecurityRulesDisabled(async context => {
       ...(testAudio && i === 0 ? { audioUrl: 'http://127.0.0.1:' + staticPort + '/__lesson-qa.wav' } : {}),
     });
   }
+  if (sectionAudit) batch.set(doc(db, 'ai_global_cache/orbital'), {
+    word: 'orbital', type: 'normal', meanings: [{ meaning: 'مداري', example: 'An orbital path.' }],
+  });
   await batch.commit();
 });
 
@@ -117,7 +122,7 @@ let socket;
 let inspectPage;
 let failureScreenshot;
 const commandTimers = new Map();
-try {
+browserScenario: try {
   const target = await until(async () => {
     const targets = await (await fetch('http://127.0.0.1:' + debugPort + '/json/list')).json();
     return targets.find(item => item.type === 'page' && item.url === 'about:blank');
@@ -291,6 +296,11 @@ try {
   await click('.published-first-journey-start');
   await click('[data-journey-auth="guest"]');
   await until(() => run('window.auth?.currentUser?.isAnonymous && window.auth.app.options.projectId === "demo-lootlingua"'), 'local guest');
+  console.log('Browser milestone: guest and first gate');
+  if (process.env.LESSON_GUIDE_IDENTITY === '1') {
+    console.log('Tour identity verified', JSON.stringify(await checkOnboardingIdentity({ run, click, waitFor, until, cdp })));
+    break browserScenario;
+  }
   const discoveryBadge = '#legendDock [data-discovery-pending]';
   const badgeTopic = () => run(select(discoveryBadge) + '?.dataset.discoveryPending || ""');
   const introCoach = '#contextualOnboardingCoach';
@@ -323,6 +333,14 @@ try {
   assert.notEqual(initialXP, null);
   await until(() => run('window.LootLinguaJourneyCloud.getGateQuizWords(' +
     [worldId, rankId, gateId].map(JSON.stringify).join(',') + ', {force: true}).then(words => words.length === ' + count + ')'), 'complete gate source linking');
+  if (sectionAudit) {
+    await click('.gate-lesson-exit');
+    await until(() => run('!window.LootLinguaGateLessonView.isOpen()'), 'lesson closed before optional tour');
+    const trace = await checkOnboardingSections({ run, click, waitFor, until, cdp, screenshot });
+    if (directory) writeFileSync(path.join(directory, 'all-sections-trace.json'), JSON.stringify(trace, null, 2));
+    console.log('Tour sections verified', JSON.stringify(trace));
+    break browserScenario;
+  }
   const uid = await run('window.auth.currentUser.uid');
   async function readLearningEvidence() {
     let state;
@@ -847,6 +865,7 @@ try {
   });
   assert.equal(await run('document.body.classList.contains("gate-lesson-active")'), false);
   await waitFor('.published-gate-practice-cta');
+  console.log('Browser milestone: lesson finished and persisted');
   if (guidanceAudit) {
     const review = 'button[data-onboarding-gate-review="due"]';
     const reviewLayout = await until(() => run(`(() => {
@@ -903,6 +922,7 @@ try {
       committed: true, official: true, receipt: true, confirmed: true, completedLesson: true, dictionaryVisited: previsited,
     });
     await until(() => run('window.LootLinguaGuide.covered("first-official-review")'), 'persisted official review signal');
+    console.log('Browser milestone: official review receipt persisted');
     await until(() => run('!window.hasActiveLearningQuiz() && currentView === "quiz" && !document.getElementById("quizReturnToGate").hidden'), 'return after review result');
     const expectedTopic = curious ? 'quiz' : 'dictionary';
     await until(() => coachIncludes(curious ? 'اكتشف الاختبار العام' : 'اكتشف قاموسك الشخصي'), 'quiet discovery after a saved review');
@@ -941,6 +961,17 @@ try {
       await until(() => run('currentView === "worlds"'), 'return to gate still available');
       await until(async () => await badgeTopic() === 'quiz', 'general quiz is next after later');
       await click('#legendDock [data-dock-view="quiz"]');
+      const hasSavedQuiz = await until(() => run(`(() => {
+        if (document.querySelector('#quizResumeModal')?.getClientRects().length &&
+            document.querySelector('#quizResumeModal').classList.contains('show')) return 'saved';
+        if (document.querySelector('#contextualOnboardingCoach')?.textContent.includes('المراجعة الرسمية لكل بوابة')) return 'guide';
+        return null;
+      })()`), 'general quiz guide or protected saved attempt');
+      if (hasSavedQuiz === 'saved') {
+        assert.equal(await run('Boolean(document.querySelector("#contextualOnboardingCoach"))'), false);
+        await click('#quizResumeModal .btn-cancel');
+        await until(() => run('!document.querySelector("#quizResumeModal").classList.contains("show")'), 'fixture quiz discarded by the user');
+      }
       await until(() => coachIncludes('المراجعة الرسمية لكل بوابة'), 'natural general quiz explains independent source');
       await click('#contextualOnboardingCoach .feature-mini-onboarding-next');
       await click('#legendDock [data-dock-view="worlds"]');
@@ -1124,7 +1155,7 @@ try {
     assert.equal(checks.metrics.teachingScenes, 15);
     assert.ok(checks.metrics.stations.length >= 3 && checks.metrics.stations.length <= 5);
     assert.ok(checks.metrics.actionsInLesson <= 45);
-    if (integration) {
+    if (integration || process.env.LESSON_REFERENCE_METRICS === '1') {
       assert.equal(checks.metrics.mainScenes, 19);
       assert.equal(checks.metrics.stations.length, 4);
       assert.equal(checks.metrics.actionsInLesson, 40);

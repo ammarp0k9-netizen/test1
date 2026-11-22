@@ -202,6 +202,20 @@ test('later preserves coverage and lets another eligible topic take its turn', (
   });
 });
 
+test('visiting or covering any discovery surfaces cannot open invitations before a saved review', () => {
+  for (const visited of ['dictionary', 'quiz', 'treasure']) {
+    for (const state of ['visited', 'in-progress', 'seen', 'dismissed']) {
+      const topics = { [visited]: state };
+      const candidate = () => selectDiscoveryTopic(topic => topics[topic], () => true);
+      assert.equal(candidate(), '', visited + ' ' + state);
+      topics['lesson-started'] = 'seen';
+      assert.equal(candidate(), '', 'starting or finishing the lesson is insufficient');
+      topics['first-official-review'] = 'seen';
+      assert.equal(candidate(), visited === 'dictionary' && isGuideCovered(state) ? 'quiz' : 'dictionary');
+    }
+  }
+});
+
 test('profile help runs outside the legacy order, and the full tour resumes at its old checkpoint', () => {
   const key = legacyKey + 'user:alex';
   const h = setup(new Map([[key, old(2)]]), 'alex');

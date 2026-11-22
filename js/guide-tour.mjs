@@ -3,7 +3,7 @@ import { GUIDE_SECTIONS } from './guide-sections.mjs';
 const id = 'lootlinguaSectionTour';
 const checkpointKey = uid => 'lootlingua:guide-checkpoint:v1:' + (uid || 'guest');
 const findSection = topic => GUIDE_SECTIONS.find(section => section.steps.some(step => step.topic === topic));
-const gatedSections = new Set(['quiz', 'starred', 'treasure', 'custom-worlds']);
+const gatedSections = new Set(['quiz', 'starred', 'treasure']);
 const visible = node => Boolean(node?.isConnected && !node.closest('[hidden], [aria-hidden="true"], [inert]') &&
   node.getClientRects().length && getComputedStyle(node).visibility !== 'hidden');
 const find = selector => selector && [...document.querySelectorAll(selector)].find(visible);
@@ -24,7 +24,8 @@ export function mountGuideTour(panel, { activeUid, blocked, covered, acknowledge
   let pausedByTab = false;
   let lastPublishedRoute = null;
   const profile = panel.closest('#profileModal');
-  const suspended = () => blocked() || app.LootLinguaSmartOnboarding?.busy?.();
+  const startupPending = () => app.__lootlinguaInitialDataReady === false;
+  const suspended = () => startupPending() || blocked() || app.LootLinguaSmartOnboarding?.busy?.();
   const read = (uid = activeUid()) => {
     try {
       const saved = JSON.parse(localStorage.getItem(checkpointKey(uid)));
@@ -128,7 +129,7 @@ export function mountGuideTour(panel, { activeUid, blocked, covered, acknowledge
 
   function begin(topic) {
     const modal = app.LootLinguaModalFocus?.currentSurface?.();
-    if (blocked() || app.__lootlinguaAuthResolved === false || (modal && modal !== profile)) return;
+    if (blocked() || startupPending() || app.__lootlinguaAuthResolved === false || (modal && modal !== profile)) return;
     const saved = topic ? null : read();
     const selected = topic || saved?.topic;
     const manual = Boolean(topic || saved?.manual);
@@ -156,7 +157,7 @@ export function mountGuideTour(panel, { activeUid, blocked, covered, acknowledge
   }
 
   function next({ result, section: skipSection = false, unavailable = false } = {}) {
-    if (!running || suspended()) return;
+    if (!running || running.owner !== activeUid() || blocked()) return;
     const { section, step, manual } = running;
     if (skipSection) {
       for (const item of section.steps) {
@@ -268,7 +269,8 @@ export function mountGuideTour(panel, { activeUid, blocked, covered, acknowledge
 
     if (running.pendingAct) {
       const subsequent = nextStep(section, currentIndex() + 1, running.manual);
-      if (subsequent && find(subsequent.target)) { next({ result: 'seen' }); return; }
+      const openedWorld = step.topic === 'worlds' && getWorldRoute(app.history.state);
+      if (subsequent && (openedWorld || find(subsequent.target))) { next({ result: 'seen' }); return; }
     }
     if (!surface) {
       if (running.latestSurface) stop();
@@ -318,7 +320,7 @@ export function mountGuideTour(panel, { activeUid, blocked, covered, acknowledge
     if (running || records.some(record => !record.target.closest?.('#onboardingResume'))) schedule();
   }).observe(document.body, { subtree: true, childList: true, attributes: true,
     attributeFilter: ['aria-hidden', 'aria-busy', 'class', 'disabled', 'hidden', 'style'] });
-  for (const event of ['surface-ready', 'guide-coverage-changed', 'gate-lesson-changed', 'quiz-mode-changed',
+  for (const event of ['surface-ready', 'initial-data-ready', 'guide-coverage-changed', 'gate-lesson-changed', 'quiz-mode-changed',
     'dictionary-search-result', 'dictionary-meaning-selected', 'dictionary-word-saved', 'gate-lesson-closed',
     'quiz-learning-commit-complete', 'toast-idle', 'auth-dialog-opened', 'auth-dialog-closed', 'popover-closed']) {
     app.addEventListener('lootlingua:' + event, schedule);
@@ -338,6 +340,14 @@ export function mountGuideTour(panel, { activeUid, blocked, covered, acknowledge
       }
     }
     pausedByTab = false;
+    schedule();
+  });
+  app.addEventListener('lootlingua:saved-guest-merged', event => {
+    const { sourceUid, targetUid } = event.detail || {};
+    if (!sourceUid || !targetUid || targetUid !== activeUid() || read()) return;
+    const guest = read(sourceUid);
+    if (!guest) return;
+    persist({ ...guest, owner: targetUid, active: false });
     schedule();
   });
   app.addEventListener('lootlingua:surface-ready', event => {

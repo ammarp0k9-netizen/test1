@@ -71,7 +71,7 @@ export const GUIDE_SECTIONS = [
     ],
   },
   {
-    id: 'custom-worlds', title: 'عوالمي الخاصة', surface: '#customWorldsPanel',
+    id: 'custom-worlds', title: 'عوالمي الخاصة', surface: '#customWorldsPanel, #customWorldModal',
     enter: async app => { const ready = app.loadWorldsView?.(); app.showCustomWorldsTab?.(); await ready; },
     steps: [
       { topic: 'custom-worlds', target: '#customWorldsPanel .world-card-add', title: 'رتّب كلماتك بطريقتك',

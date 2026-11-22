@@ -27,7 +27,8 @@ import {
   where
 } from 'firebase/firestore';
 
-const projectId = 'demo-lootlingua';
+const projectId = process.env.FIRESTORE_RULES_TEST_PROJECT || 'demo-lootlingua';
+assert.match(projectId, /^demo-[a-z0-9-]+$/, 'Use an isolated demo project for rules tests.');
 const rulesFile = process.env.FIRESTORE_RULES_FILE || new URL('../firestore.rules', import.meta.url);
 const rules = readFileSync(rulesFile, 'utf8');
 const rulesProfile = process.env.FIRESTORE_RULES_PROFILE || 'local';
@@ -2199,6 +2200,7 @@ try {
     const pausedBatch = writeBatch(userA);
     pausedBatch.set(doc(userA, canonicalPath), {
       canonicalId: 'journey-word',
+      wordKey: 'journey-word',
       normalizationVersion: 1,
       normalizedWord: 'journey-word',
       masteryKey: 'journey-word',
@@ -2246,6 +2248,7 @@ try {
     });
     batch.set(doc(userA, canonicalPath), {
       canonicalId: 'journey-word',
+      wordKey: 'journey-word',
       normalizationVersion: 1,
       normalizedWord: 'journey-word',
       masteryKey: 'journey-word',
@@ -2293,6 +2296,13 @@ try {
     });
     await assertSucceeds(batch.commit());
     await assertSucceeds(getDoc(doc(userA, sourcePath)));
+    const source = (await getDoc(doc(userA, sourcePath))).data();
+    await assertFails(getDoc(doc(userB, sourcePath)));
+    await assertFails(setDoc(doc(userB, sourcePath), source));
+    await assertFails(setDoc(
+      doc(userA, `${canonicalPath}/sources/published_journey-world~journey-rank~journey-gate-next~journey-word`),
+      { ...source, gateId: 'journey-gate-next' }
+    ));
     await assertFails(setDoc(doc(userA, sourcePath), {
       worldId: 'journey-world',
       rankId: 'journey-rank',
@@ -2323,6 +2333,7 @@ try {
     const batch = writeBatch(userA);
     batch.set(doc(userA, canonicalPath), {
       canonicalId: 'i',
+      wordKey: 'i',
       normalizationVersion: 1,
       normalizedWord: 'i',
       masteryKey: 'i',
@@ -2385,6 +2396,44 @@ try {
       createdAt: serverTimestamp()
     });
     await assertSucceeds(batch.commit());
+  });
+
+  await test('an owner can repair the missing key of an old canonical word while keeping its learning identity', async () => {
+    const key = 'i';
+    const uid = 'historical-word-owner';
+    const owner = environment.authenticatedContext(uid).firestore();
+    const canonicalPath = `users/${uid}/contentWords/i`;
+    const sourceId = 'published_journey-world~journey-rank~journey-gate~word_first_gate_hash';
+    const sourcePath = `${canonicalPath}/sources/${sourceId}`;
+    await environment.withSecurityRulesDisabled(async context => {
+      const db = context.firestore();
+      await Promise.all([
+        setDoc(doc(db, canonicalPath), {
+          canonicalId: key, normalizedWord: key, masteryKey: key, word: 'I',
+          normalizationVersion: 1, schemaVersion: 1, forgetCount: 0,
+          sourceCount: 0, eligibleEvidenceCount: 1,
+        }),
+        setDoc(doc(db, `users/${uid}/contentProgress/journey-world`), journey('journey-world', 'journey-rank', 'journey-gate')),
+        setDoc(doc(db, `users/${uid}/meta/active_content_journey`), { worldId: 'journey-world' }),
+      ]);
+    });
+    const prior = (await getDoc(doc(owner, canonicalPath))).data();
+    assert.equal(prior.wordKey, undefined);
+    await assertFails(updateDoc(doc(owner, canonicalPath), {
+      wordKey: key, normalizedWord: 'different',
+    }));
+    const batch = writeBatch(owner);
+    batch.update(doc(owner, canonicalPath), { wordKey: key, sourceCount: 1, updatedAt: serverTimestamp() });
+    batch.set(doc(owner, sourcePath), {
+      worldId: 'journey-world', rankId: 'journey-rank', gateId: 'journey-gate', contentWordId: 'word_first_gate_hash',
+      addedFrom: 'published-gate', operationId: 'repair-old-canonical', linkedAt: serverTimestamp(),
+    });
+    await assertSucceeds(batch.commit());
+    const saved = (await getDoc(doc(owner, canonicalPath))).data();
+    assert.equal(saved.wordKey, key);
+    assert.equal(saved.normalizedWord, prior.normalizedWord);
+    assert.equal(saved.masteryKey, prior.masteryKey);
+    assert.equal(saved.eligibleEvidenceCount, prior.eligibleEvidenceCount);
   });
 
   await test('word membership move and copy preserve Journey identity, SRS, Crown inputs, and retry safety', async () => {
@@ -2873,9 +2922,14 @@ try {
       return { batch, db, legacyPayload };
     };
 
+    // The old client sends all three documents together. The current client
+    // separates the dictionary projection to keep the write budget bounded.
+    const oldClientUid = 'reported-gate-word-old-client';
+    await seedUserState(oldClientUid, { targetUnlocked: true });
+    await assertSucceeds(reportedBatch(oldClientUid).batch.commit());
+
     const allowedUid = 'reported-gate-word-allowed';
     await seedUserState(allowedUid, { targetUnlocked: true });
-    await assertFails(reportedBatch(allowedUid).batch.commit());
     const allowedRequest = reportedBatch(allowedUid, {
       includeLegacy: false,
       compactCanonical: true
@@ -2899,6 +2953,7 @@ try {
 
     const lockedUid = 'reported-gate-word-locked';
     await seedUserState(lockedUid, { targetUnlocked: false });
+    await assertFails(reportedBatch(lockedUid).batch.commit());
     await assertFails(reportedBatch(lockedUid, {
       includeLegacy: false,
       compactCanonical: true
@@ -2909,6 +2964,7 @@ try {
       targetUnlocked: true,
       pointerWorldId: 'another-world'
     });
+    await assertFails(reportedBatch(stalePointerUid).batch.commit());
     await assertFails(
       reportedBatch(stalePointerUid, {
         includeLegacy: false,
@@ -2923,6 +2979,7 @@ try {
     const batch = writeBatch(userA);
     batch.set(doc(userA, canonicalPath), {
       canonicalId: 'hidden',
+      wordKey: 'hidden',
       normalizationVersion: 1,
       normalizedWord: 'hidden',
       masteryKey: 'hidden',
@@ -2979,6 +3036,7 @@ try {
   await test('an admin can create a valid draft and malformed identity is rejected', async () => {
     const valid = {
       ...world('admin-draft', 'draft'),
+      rankCount: 0,
       primaryInterest: 'games',
       interestTags: ['movies', 'technology'],
       createdAt: serverTimestamp(),
@@ -2995,6 +3053,7 @@ try {
     const legacyInterestPath = 'content_worlds/legacy-interest-world';
     await assertSucceeds(setDoc(doc(admin, legacyInterestPath), {
       ...world('legacy-interest-world', 'draft'),
+      rankCount: 0,
       createdAt: serverTimestamp(),
       updatedAt: serverTimestamp(),
       createdBy: 'admin-a',
@@ -3016,6 +3075,7 @@ try {
     ]) {
       await assertFails(setDoc(doc(admin, `content_worlds/${worldId}`), {
         ...world(worldId, 'draft'),
+        rankCount: 0,
         ...interestPatch,
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp(),

@@ -129,7 +129,7 @@ export function createGuestProgressMerge({ firestore, getDatabase, assertCurrent
             if (merged) importedWords.set(key, merged);
             return merged;
           } },
-          ...[...sources].map(([id, data]) => insert(plan, [...path, 'sources', id], data)),
+          ...[...sources].map(([id, data]) => insert(plan, [...path, 'sources', id], data, true)),
           ...[...evidence].map(([id, data]) => insert(plan, [...path, 'evidence', id], data, true)),
         ];
       }));

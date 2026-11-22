@@ -909,17 +909,22 @@
             source
           ));
           trace?.count('firestoreWrites');
-        } else if (sourceLinked !== sourceRemoved) {
-          transaction.update(canonicalRef, {
-            sourceCount: Math.max(
+        } else {
+          const needsWordKey = splitLegacyProjection && !Object.hasOwn(canonical, 'wordKey') &&
+            canonical.canonicalId === identity.wordKey && canonical.masteryKey === identity.wordKey &&
+            canonical.normalizedWord === identity.normalizedWord;
+          const countChanged = sourceLinked !== sourceRemoved;
+          if (needsWordKey || countChanged) {
+            const patch = needsWordKey ? { wordKey: identity.wordKey } : {};
+            if (countChanged) patch.sourceCount = Math.max(
               0,
               (Number(canonical?.sourceCount) || 0) +
                 (sourceLinked ? 1 : 0) -
                 (sourceRemoved ? 1 : 0)
-            ),
-            updatedAt: serverTimestamp(),
-          });
-          trace?.count('firestoreWrites');
+            );
+            transaction.update(canonicalRef, { ...patch, updatedAt: serverTimestamp() });
+            trace?.count('firestoreWrites');
+          }
         }
 
         const legacyProjectionPending = splitLegacyProjection && !legacySnapshot.exists();
