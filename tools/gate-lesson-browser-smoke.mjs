@@ -295,13 +295,20 @@ try {
   const badgeTopic = () => run(select(discoveryBadge) + '?.dataset.discoveryPending || ""');
   const introCoach = '#contextualOnboardingCoach';
   const coachIncludes = text => run(select(introCoach) + '?.textContent.includes(' + JSON.stringify(text) + ')');
-  const previsited = process.env.LESSON_DISCOVERY_PREVISIT === '1';
+  const curious = process.env.LESSON_DISCOVERY_CURIOUS === '1';
+  const previsited = curious || process.env.LESSON_DISCOVERY_PREVISIT === '1';
   if (guidanceAudit && previsited) {
+    await waitFor('.published-gate-journey button[data-guide-learn-gate]');
     await click('#legendDock [data-dock-view="personal"]');
     await until(() => coachIncludes('قاموسك الشخصي'), 'natural dictionary before review');
     assert.equal(await badgeTopic(), '');
     assert.equal(await run('window.LootLinguaGuide.covered("dictionary")'), false);
+    if (curious) await click('#contextualOnboardingCoach .feature-mini-onboarding-next');
     await run('window.openPublishedGate(' + [worldId, rankId, gateId].map(JSON.stringify).join(',') + ')');
+    await waitFor('.published-gate-journey');
+    assert.equal(await badgeTopic(), '');
+    assert.equal(await run('Boolean(document.querySelector("#contextualOnboardingCoach")?.textContent.includes("استكشفني"))'), false);
+    assert.equal(await run('window.LootLinguaGuide.covered("dictionary")'), curious);
   }
   const primary = '.published-gate-journey .published-journey-cta';
   if (guidanceAudit) {
@@ -897,8 +904,9 @@ try {
     });
     await until(() => run('window.LootLinguaGuide.covered("first-official-review")'), 'persisted official review signal');
     await until(() => run('!window.hasActiveLearningQuiz() && currentView === "quiz" && !document.getElementById("quizReturnToGate").hidden'), 'return after review result');
-    await until(() => run('document.querySelector("#contextualOnboardingCoach")?.textContent.includes("اكتشف قاموسك الشخصي")'), 'quiet dictionary discovery');
-    await until(async () => await badgeTopic() === 'dictionary', 'same dictionary topic in the dock');
+    const expectedTopic = curious ? 'quiz' : 'dictionary';
+    await until(() => coachIncludes(curious ? 'اكتشف الاختبار العام' : 'اكتشف قاموسك الشخصي'), 'quiet discovery after a saved review');
+    await until(async () => await badgeTopic() === expectedTopic, 'same discovery topic in the dock');
     assert.equal(await run('document.querySelectorAll(' + JSON.stringify(discoveryBadge) + ').length'), 1);
     const badgeGeometry = await run(`(() => {
       const button = document.querySelector('#legendDock [data-discovery-pending]');
@@ -911,7 +919,12 @@ try {
     if (directory) await captureIntegration('dictionary-invitation', '#contextualOnboardingCoach');
     const later = process.env.LESSON_GUIDANCE_LATER === '1';
     const natural = process.env.LESSON_DISCOVERY_DOCK === '1';
-    if (natural) {
+    if (curious) {
+      await click('#legendDock [data-dock-view="quiz"]');
+      await until(() => coachIncludes('المراجعة الرسمية لكل بوابة'), 'general quiz discovered naturally');
+      await click('#contextualOnboardingCoach .feature-mini-onboarding-next');
+      assert.equal(await badgeTopic(), '');
+    } else if (natural) {
       await click('#legendDock [data-dock-view="personal"]');
       await until(() => coachIncludes('قاموسك الشخصي'), 'natural dictionary after invitation');
       assert.equal(await badgeTopic(), 'dictionary');
@@ -921,7 +934,7 @@ try {
       assert.equal(await run('window.LootLinguaGuide.covered("dictionary")'), true);
     } else if (later) {
       await click('#contextualOnboardingCoach .feature-mini-onboarding-skip');
-      assert.equal(await run('window.LootLinguaGuide.status("dictionary-invitation")'), 'dismissed');
+      assert.equal(await run('window.LootLinguaGuide.covered("dictionary")'), false);
       assert.equal(await run('currentView'), 'quiz');
       assert.equal(await run('window.LootLinguaSmartOnboarding.dictionaryInvitationPending()'), false);
       await click('#quizReturnToGate');
@@ -949,7 +962,7 @@ try {
       await click('#contextualOnboardingCoach .feature-mini-onboarding-next');
     }
     checks.firstOfficialReview = { savedEvidence: true, failedSaveExcluded: true, previsited, singleBadge: true,
-      action: natural ? 'dock' : later ? 'later-quiz-treasure' : 'explore-and-resume' };
+      action: curious ? 'early-dictionary-then-quiz' : natural ? 'dock' : later ? 'later-quiz-treasure' : 'explore-and-resume' };
   }
   if (integration) {
     await evaluateNotices();
@@ -969,25 +982,63 @@ try {
     assert.equal(await run('window.LootLinguaGuide.covered("manual-meaning")'), false);
     if (layoutAudit) {
       assert.equal(await run('document.querySelector(\"[data-guide-topics=worlds] .profile-guide-status\").textContent'), 'تم الاطّلاع');
-      if (!guidanceAudit) assert.equal(await run('document.querySelector(\"[data-guide-topics=gate-start] .profile-guide-status\").textContent'), 'تابع هنا');
     }
     await click(topic);
-    await until(() => run('window.LootLinguaGuide.covered("search")'), 'shared guide topic acknowledged');
-    assert.equal(await run('window.LootLinguaGuide.covered("manual-meaning")'), false);
-    if (guidanceAudit) {
-      await click('[data-guide-start]');
-      await waitFor('[data-guide-tour]:not([hidden])');
-      const first = await run('document.activeElement.textContent');
-      if (directory) await captureIntegration('optional-tour', '[data-guide-tour]');
-      await click('[data-guide-tour-action="pause"]');
-      assert.match(await run('document.activeElement.textContent'), /استأنف/);
-      await click('[data-guide-start]');
-      assert.equal(await run('document.activeElement.textContent'), first);
-      await click('[data-guide-tour-action="skip"]');
-      assert.notEqual(await run('document.activeElement.textContent'), first);
-      await click('[data-guide-tour-action="pause"]');
-      checks.optionalTourPausedAndResumed = true;
-    }
+    assert.equal(await run('window.LootLinguaGuide.covered("search")'), false);
+    const liveTour = '#lootlinguaSectionTour';
+    const steps = [];
+    const tourCommand = async command => {
+      if (command !== 'next' && !await run('document.querySelector(".section-tour-options").open')) {
+        await click(liveTour + ' .section-tour-options > summary');
+      }
+      await tourCommand('' + command + '');
+    };
+    const snapshotTour = async (name) => {
+      await waitFor(liveTour);
+      const state = await run('({ path: location.pathname, view: currentView, topic: document.querySelector("#lootlinguaSectionTour").dataset.guideTopic, section: document.querySelector("#lootlinguaSectionTour").dataset.guideSection, settings: document.querySelector("#profileModal").classList.contains("open"), highlighted: Boolean(document.querySelector(".coach-highlight-target")), targetAvailable: document.querySelector("#lootlinguaSectionTour").dataset.guideReady === "true" })');
+      steps.push(state);
+      assert.equal(await run('document.querySelectorAll("#lootlinguaSectionTour .section-tour-actions > button, #lootlinguaSectionTour .section-tour-actions > details:not([open]) > summary").length'), 2);
+      assert.equal(await run('document.querySelector("#lootlinguaSectionTour .section-tour-options").open'), false);
+      assert.equal(state.settings, false);
+      assert.equal(state.highlighted, state.targetAvailable);
+      if (directory) await screenshot(name);
+      return state;
+    };
+    await click('[data-guide-start]');
+    let state = await snapshotTour('tour-worlds');
+    assert.equal(state.section, 'worlds');
+    await tourCommand('skip-section');
+    await waitFor(liveTour + '[data-guide-section="dictionary"]');
+    state = await snapshotTour('tour-dictionary');
+    assert.equal(state.view, 'personal');
+    await tourCommand('pause');
+    await waitFor('#onboardingResume[data-coach="sectionTour"]:not([hidden])');
+    await click('#onboardingResume[data-coach="sectionTour"]');
+    assert.equal((await snapshotTour('tour-resumed')).topic, state.topic);
+    await tourCommand('skip-section');
+    await waitFor(liveTour + '[data-guide-section="quiz"]');
+    state = await snapshotTour('tour-quiz');
+    assert.equal(state.view, 'quiz');
+    if (state.topic === 'quiz') await click('#quizViewSetup .quiz-mode-time');
+    await waitFor(liveTour + '[data-guide-topic="quiz-source"][data-guide-ready="true"]');
+    await snapshotTour('tour-quiz-source');
+    await tourCommand('next');
+    await waitFor(liveTour + '[data-guide-topic="quiz-count"][data-guide-ready="true"]');
+    await snapshotTour('tour-quiz-count');
+    await tourCommand('index');
+    await waitFor('#lootlinguaGuide[open]');
+    if (directory) writeFileSync(path.join(directory, 'optional-tour-trace.json'), JSON.stringify(steps, null, 2));
+    checks.optionalTourPausedAndResumed = steps;
+    const replay = '#lootlinguaGuide [data-guide-topics="search"]';
+    if (!await run('document.querySelector(' + JSON.stringify(replay) + ').open')) await click(replay + ' > summary');
+    const beforeReplay = await run('window.LootLinguaGuide.covered("search")');
+    await click(replay + ' [data-guide-visit="search"]');
+    await waitFor(liveTour + '[data-guide-topic="search"][data-guide-ready="true"]');
+    assert.equal(await run('window.LootLinguaGuide.covered("search")'), beforeReplay);
+    await tourCommand('next');
+    assert.equal(await run('window.LootLinguaGuide.status("search")'), 'seen');
+    await waitFor(liveTour);
+    await tourCommand('index');
     if (directory) {
       await captureIntegration('guide-ocean', '#lootlinguaGuide', 'ocean', 'start');
       await captureIntegration('guide-glass', '#lootlinguaGuide', 'glass', 'start');

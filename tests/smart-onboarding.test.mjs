@@ -4,7 +4,7 @@ import vm from 'node:vm';
 import { readFile } from 'node:fs/promises';
 import {
   DISCOVERY_TOPICS, GUIDE_TOUR, GUIDE_TOPICS, GUIDE_SIGNALS, guideStorageKey,
-  readGuideCoverage, mergeGuideCoverage, selectDiscoveryTopic,
+  readGuideCoverage, mergeGuideCoverage, selectDiscoveryTopic, isGuideCovered,
 } from '../js/guide-coverage.mjs';
 
 const [smart, dictionary, discoveryContract, discovery, mini] = await Promise.all([
@@ -118,7 +118,9 @@ test('the dictionary invitation needs an owner-matched receipt, and a visit alon
   const h = setup(new Map(), 'alex');
   const topics = new Set();
   h.root.LootLinguaGuide = {
-    covered: topic => topics.has(topic), acknowledge: topic => topics.add(topic), isPresenting: () => false,
+    covered: topic => topics.has(topic),
+    acknowledge: (topic, state = 'seen') => { if (isGuideCovered(state)) topics.add(topic); },
+    isPresenting: () => false,
     status: topic => topics.has(topic) ? 'seen' : '',
     discoveryTopic: eligible => selectDiscoveryTopic(topic => topics.has(topic) ? 'seen' : '', eligible),
   };
@@ -170,6 +172,34 @@ test('one persistent invitation follows feature priority and natural coverage wi
     { version: 1, topics: { 'quiz-invitation': 'seen' } },
     { version: 1, topics: { 'quiz-invitation': 'dismissed' } }
   ).topics['quiz-invitation'], 'dismissed');
+});
+
+test('early natural discovery does not unlock any invitation until the official review is saved', () => {
+  const topics = { dictionary: 'seen', 'dictionary-visited': 'seen', 'lesson-started': 'seen' };
+  const candidate = () => selectDiscoveryTopic(topic => topics[topic], () => true);
+  assert.equal(candidate(), '');
+  topics['first-official-review'] = 'dismissed';
+  assert.equal(candidate(), '');
+  topics['first-official-review'] = 'seen';
+  assert.equal(candidate(), 'quiz');
+  topics.quiz = 'visited';
+  assert.equal(candidate(), 'quiz');
+  topics.quiz = 'in-progress';
+  assert.equal(candidate(), 'quiz');
+  topics.quiz = 'dismissed';
+  assert.equal(candidate(), 'treasure');
+});
+
+test('later preserves coverage and lets another eligible topic take its turn', () => {
+  const before = { version: 1, topics: { 'first-official-review': 'seen' } };
+  const deferred = mergeGuideCoverage(before, { version: 1, deferredUntil: { dictionary: 200 } });
+  const candidate = now => selectDiscoveryTopic(topic => deferred.topics[topic], () => true,
+    topic => now < deferred.deferredUntil[topic]);
+  assert.equal(candidate(199), 'quiz');
+  assert.equal(candidate(201), 'dictionary');
+  assert.deepEqual(mergeGuideCoverage(deferred, { version: 1, topics: { dictionary: 'seen' } }), {
+    version: 1, topics: { 'first-official-review': 'seen', dictionary: 'seen' },
+  });
 });
 
 test('profile help runs outside the legacy order, and the full tour resumes at its old checkpoint', () => {
@@ -304,7 +334,7 @@ test('mini tours start on the appropriate unlocked surface, keep checkpoints and
 });
 
 test('the shared guide migrates completed and explicitly dismissed topics only for their owner', async () => {
-  const guideModule = (await readFile(new URL('../js/lootlingua-guide.js', import.meta.url), 'utf8')).replace(/^import .*;\r?\n/m, '');
+  const guideModule = (await readFile(new URL('../js/lootlingua-guide.js', import.meta.url), 'utf8')).replace(/^import .*;\r?\n/gm, '');
   const values = new Map([
     ['lootlingua:contextual-onboarding:v1:gate-wait:user:A', 'completed'],
     ['lootlingua:contextual-onboarding:v1:search:user:A', 'skipped'],
@@ -317,7 +347,8 @@ test('the shared guide migrates completed and explicitly dismissed topics only f
     dispatchEvent: event => events.push(event.type) };
   vm.runInNewContext(guideModule, { window: root, document: { getElementById: () => null },
     localStorage: storage, CustomEvent: class { constructor(type) { this.type = type; } },
-    DISCOVERY_TOPICS, GUIDE_TOUR, GUIDE_TOPICS, GUIDE_SIGNALS, guideStorageKey, readGuideCoverage, mergeGuideCoverage, selectDiscoveryTopic });
+    DISCOVERY_TOPICS, GUIDE_TOUR, GUIDE_TOPICS, GUIDE_SIGNALS, guideStorageKey, readGuideCoverage, mergeGuideCoverage,
+    selectDiscoveryTopic, isGuideCovered });
   assert.deepEqual(JSON.parse(storage.getItem(guideStorageKey('A'))).topics, { 'gate-wait': 'seen', search: 'dismissed' });
   assert.equal(root.LootLinguaGuide.covered('meaning'), false);
   root.LootLinguaGuide.acknowledge('search', 'seen');

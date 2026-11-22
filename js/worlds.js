@@ -5186,6 +5186,7 @@ function makePublishedGateJourneyPanel(world, rank, gate) {
       const time = publishedElement('time', '', localTime);
       time.dateTime = next.toISOString();
       const dateRow = publishedElement('span', 'published-gate-review-time');
+      if (state === 'learning' && review.kind === 'waiting') dateRow.dataset.onboardingGateReview = 'waiting';
       dateRow.append(review.kind === 'due' ? 'أقرب موعد للكلمات المنتظرة' : 'موعد المراجعة التالية', time);
       readinessCopy.append(dateRow);
     }

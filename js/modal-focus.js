@@ -88,6 +88,8 @@
     if (!current?.frame) return;
     const frame = current.frame;
     if (event.key === 'Escape' && typeof frame.onEscape === 'function') {
+      const coach = companion(frame.root);
+      if (coach?.hasAttribute('data-escape-closes') && coach.contains(event.target)) return;
       event.preventDefault(); event.stopImmediatePropagation(); frame.onEscape(); return;
     }
     if (event.key !== 'Tab') return;

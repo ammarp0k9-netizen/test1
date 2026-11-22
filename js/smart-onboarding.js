@@ -123,7 +123,11 @@
         if (lesson.discovery || root.LootLinguaGuide?.discoveryTopics?.includes(lesson.step)) {
           handledDiscoverySurface = discoverySurfaceKey();
         }
-        if (status !== 'completed' || lesson.acknowledgeOnAccept !== false) remember(lesson.step, status);
+        if (lesson.discovery && status === 'skipped' && root.LootLinguaGuide?.defer) {
+          root.LootLinguaGuide.defer(lesson.discovery);
+        } else if (status !== 'completed' || lesson.acknowledgeOnAccept !== false) {
+          remember(lesson.step, status);
+        }
         reset();
         if (status === 'skipped') lesson.onDismiss?.();
         if (status === 'completed' && lesson.onAccept) {
@@ -148,12 +152,14 @@
         highlighted.classList.add('coach-highlight-target');
       }
       lesson.shown = true;
+      if (!lesson.discovery) root.LootLinguaGuide?.acknowledge(lesson.step, 'in-progress');
       return true;
     }
     lesson.shown = Boolean(popover?.open({
       id, anchor, content, labelledBy: title.id, persistent: true, yieldToHelp: true,
       className: 'lootlingua-popover feature-mini-onboarding-coach',
     }));
+    if (lesson.shown && !lesson.discovery) root.LootLinguaGuide?.acknowledge(lesson.step, 'in-progress');
     return lesson.shown;
   }
 
@@ -206,17 +212,17 @@
     if (!root.LootLinguaGuide || !onWorlds() || covered('lesson-started')) return;
     offer('worlds', {
       selector, when: onWorlds, inline: 'after', focusReturn: '[data-guided-world]',
-      title: 'ابدأ من مجال تحبّه',
-      text: 'العوالم قواميس جاهزة لمجالات مختلفة. اختار عالم مهتم فيه وابدأ تعلّم كلماته.',
+      title: 'اختار العالم اللي بتحب تتعلّم منه',
+      text: 'كل عالم قاموس جاهز لمجال معيّن، مثل الألعاب أو الأفلام أو الإنجليزية اليومية. اختار أي عالم يعجبك وابدأ بكلماته خطوة خطوة.',
     });
   }
 
   function dictionaryEntry() {
     if (root.LootLinguaGuide) {
-      if (onDictionary() && !draft()?.word?.trim()) offer('dictionary', {
+      if (onDictionary() && !covered('dictionary')) offer('dictionary', {
         selector: '#normalSearchZone', when: onDictionary, inline: 'before', focusReturn: '#wordInput',
-        title: 'قاموسك الشخصي',
-        text: 'تجد هنا كلمات العوالم وكلماتك الخاصة. لإضافة كلمة، اكتبها واضغط «ابحث عن معنى».',
+        title: 'قاموسك الشخصي مكان كلماتك',
+        text: 'هون بتلاقي الكلمات اللي جمعتها من العوالم، وبتقدر تضيف كلماتك الخاصة. جرّب تكتب كلمة بالإنجليزي وتضغط «ابحث عن معنى» حتى تختار المعنى المناسب.',
       });
       return;
     }
@@ -233,7 +239,7 @@
   function journeyButton(topic, selector, title, text) {
     offer(topic, {
       selector, title, text, inline: 'after', highlight: true, focusReturn: selector,
-      when: () => view() === 'worlds' && Boolean(get(selector)),
+      when: () => view() === 'worlds' && visible(get(selector)),
     });
   }
 
@@ -241,7 +247,14 @@
     if (view() !== 'worlds') return;
     if (coordinatesLegacy()) {
       const review = 'button[data-onboarding-gate-review="due"]:not(:disabled)';
-      if (get(review)) journeyButton('gate-review', review, 'حان وقت المراجعة', 'اضغط «ابدأ المراجعة الرسمية» لتراجع كلمات هذه البوابة.');
+      const waiting = '[data-onboarding-gate-review="waiting"]';
+      if (visible(get(review))) journeyButton('gate-review', review, 'هسا وقت تثبّت اللي تعلّمته',
+        'بالمراجعة الرسمية بتجرّب تسترجع كلمات البوابة. النتيجة المحفوظة تساعد الموقع يتابع تقدّمك ويحدد المراجعات القادمة.');
+      else if (visible(get(waiting))) offer('gate-wait', {
+        selector: waiting, inline: 'after', title: 'موعد المراجعة التالية',
+        text: 'بتلاقي موعد مراجعتك القادمة هون. تقدر ترجع للبوابة لما يحين موعدها.',
+        when: () => view() === 'worlds' && visible(get(waiting)),
+      });
       return;
     }
     const status = get('[data-onboarding-gate-review]');
@@ -263,8 +276,10 @@
   }
 
   const introButtons = [
-    ['gate-start', 'button[data-guide-start-world]:not(:disabled)', 'ابدأ من أول بوابة', '«ابدأ من البداية» يفتح لك أول بوابة في هذا العالم.'],
-    ['lesson', 'button[data-guide-learn-gate]:not(:disabled)', 'تعلّم كلمات البوابة', 'من هون بتبلّش تتعلّم كلمات هالبوابة.'],
+    ['gate-start', 'button[data-guide-start-world]:not(:disabled)', 'ابدأ رحلتك من أول بوابة',
+      'البوابات بتقسّم كلمات العالم إلى مجموعات صغيرة. «ابدأ من البداية» بيفتح أول بوابة، وإذا كنت تعرف كلمات من هالعالم تقدر تختار «اختبار المستوى» لما يكون متاح.'],
+    ['lesson', 'button[data-guide-learn-gate]:not(:disabled)', 'تعلّم الكلمات أولًا، وبعدها اختبر تذكّرك',
+      'رح تربط اللفظ بالمعنى وترجع لبعض الكلمات خلال الدرس حتى تتذكّرها. بعد التعلّم، بتدخل مراجعة البوابة الرسمية لما تصير متاحة.'],
   ];
 
   const discoverySurfaceKey = () => owner() + ':' + view() + ':' + (root.location?.pathname || '');
@@ -319,9 +334,12 @@
 
   const features = {
     dictionary: ['personal', '#normalSearchZone', 'قاموسك الشخصي', 'بتقدر تجمع فيه كلماتك وتضيف كلمات من اختيارك.', openDictionaryInvitation],
-    quiz: ['quiz', '#quizViewSetup', 'الاختبار العام', 'هون تراجع كلمات قاموسك. المراجعة الرسمية لكل بوابة تفتحها من البوابة نفسها.', () => root.loadQuizView?.()],
-    treasure: ['treasure', '#dailyLootChest', 'الكنز', 'هون بتلقى مكافآت تعلّمك.', () => root.loadTreasureView?.()],
-    starred: ['starred', '#starredSearchBar', 'الكلمات الصعبة', 'تظهر هنا الكلمات اللي وضعت عليها نجمة.', () => root.loadStarredView?.()],
+    quiz: ['quiz', '#quizViewSetup', 'الاختبار العام',
+      'اختار نمطًا لتراجع كلمات قاموسك، وبعدين حدّد مصدر الكلمات والعدد. المراجعة الرسمية لكل بوابة تفتحها من البوابة نفسها.', () => root.loadQuizView?.()],
+    treasure: ['treasure', '#dailyLootChest', 'الكنز',
+      'هون بتلقى مكافآت تعلّمك. اقرأ الحالة تحت الصندوق لتعرف إذا هو جاهز أو متى يفتح من جديد.', () => root.loadTreasureView?.()],
+    starred: ['starred', '#starredSearchBar', 'الكلمات الصعبة',
+      'أي كلمة بتحط عليها نجمة في القاموس بتظهر هون عشان ترجع لها بسهولة. إزالة النجمة بتشيلها من القائمة والكلمة بتظل محفوظة.', () => root.loadStarredView?.()],
     'custom-worlds': ['worlds', '#customWorldsPanel .world-card-add', 'عوالمي الخاصة',
       'اجمع كلمات من اختيارك في عالم خاص حتى ترجع لها بسهولة.', () => {
         root.loadWorldsView?.(); setTimeout(() => root.showCustomWorldsTab?.(), 0);
@@ -436,10 +454,16 @@
     remember('save', 'completed'); remember('manual-meaning', 'completed'); reset();
     offer('ready', { when: onDictionary });
   });
-  root.addEventListener('lootlingua:dictionary-navigation', () => { reset(); setupOrigin = ''; });
+  root.addEventListener('lootlingua:dictionary-navigation', () => { reset(); setupOrigin = ''; schedule(); });
   root.addEventListener('lootlingua:surface-ready', event => {
     if (handledDiscoverySurface && handledDiscoverySurface !== discoverySurfaceKey()) handledDiscoverySurface = '';
     if (coordinatesLegacy()) {
+      if (event.detail?.kind === 'view' && event.detail.key === 'personal' && onDictionary()) {
+        root.LootLinguaGuide?.acknowledge('dictionary-visited');
+      }
+      for (const topic of Object.keys(features)) {
+        if (onFeature(topic) && !root.LootLinguaGuide?.status?.(topic) && !busy()) root.LootLinguaGuide.acknowledge(topic, 'visited');
+      }
       contextualSurface();
       updateDictionaryResume();
     } else {
@@ -480,6 +504,18 @@
       offer('activity', { selector: '#streakWrap', when: () => number('#streakCount') > 0 });
     }
   });
+  document.addEventListener('click', event => {
+    const target = event.target;
+    if (request?.highlight && target.closest?.(request.selector) && canShow(get(request.selector), false)) {
+      const { step } = request;
+      reset();
+      remember(step, 'completed');
+    }
+    if (request?.step === 'worlds' && target.closest?.('[data-guided-world]')) {
+      reset();
+      remember('worlds', 'completed');
+    }
+  }, true);
   document.addEventListener('click', event => {
     const target = event.target;
     if (target.closest?.('#' + id)) return;

@@ -1,4 +1,5 @@
-import { GUIDE_TOUR, GUIDE_TOPICS, GUIDE_SIGNALS, DISCOVERY_TOPICS, guideStorageKey, readGuideCoverage, mergeGuideCoverage, selectDiscoveryTopic } from './guide-coverage.mjs';
+import { GUIDE_TOUR, GUIDE_TOPICS, GUIDE_SIGNALS, DISCOVERY_TOPICS, guideStorageKey, readGuideCoverage, mergeGuideCoverage, selectDiscoveryTopic, isGuideCovered } from './guide-coverage.mjs';
+import { mountGuideTour } from './guide-tour.mjs';
 
 const root = window;
 const panel = document.getElementById('lootlinguaGuide');
@@ -6,19 +7,17 @@ const legacyPrefix = 'lootlingua:contextual-onboarding:v1:';
 const activeUid = () => root.auth?.currentUser?.uid || '';
 const ownerKey = uid => uid ? 'user:' + uid : 'guest';
 const memory = new Map();
-const tour = panel?.querySelector('[data-guide-tour]');
-const startButton = panel?.querySelector('[data-guide-start]');
 const topics = () => [...(panel?.querySelectorAll('[data-guide-topics]') || [])];
-let touring = null;
+let sectionTour;
 
 function read(uid) {
   return mergeGuideCoverage(readGuideCoverage(localStorage, uid), memory.get(uid));
 }
 
-function save(uid, topics) {
+function save(uid, topics, deferredUntil) {
   if (uid !== activeUid() || root.__lootlinguaAuthResolved === false) return;
   const before = read(uid);
-  const next = mergeGuideCoverage(before, { version: 1, topics });
+  const next = mergeGuideCoverage(before, { version: 1, topics, deferredUntil });
   if (!next || JSON.stringify(next) === JSON.stringify(before)) return;
   memory.set(uid, next);
   try { localStorage.setItem(guideStorageKey(uid), JSON.stringify(next)); } catch (_) {}
@@ -59,7 +58,8 @@ function refresh() {
   if (root.auth?.currentUser?.isAnonymous) {
     const guest = read('');
     if (guest) {
-      save(uid, mergeGuideCoverage(guest, { version: 1, topics }).topics);
+      const merged = mergeGuideCoverage(guest, { version: 1, topics });
+      save(uid, merged.topics, merged.deferredUntil);
       memory.delete('');
       try { localStorage.removeItem(guideStorageKey('')); } catch (_) {}
       return;
@@ -69,7 +69,7 @@ function refresh() {
 }
 
 function covered(topic) {
-  return Boolean(status(topic));
+  return isGuideCovered(status(topic));
 }
 
 function status(topic) {
@@ -80,25 +80,23 @@ function acknowledge(topic, value = 'seen') {
   if (GUIDE_TOPICS.includes(topic) || GUIDE_SIGNALS.includes(topic)) save(activeUid(), { [topic]: value });
 }
 
-function updateGuideTopics() {
-  if (!panel) return;
-  const next = nextTopic();
-  for (const section of topics()) {
-    const name = section.dataset.guideTopics;
-    section.querySelector('.profile-guide-status').textContent = status(name) === 'seen' ? 'تم الاطّلاع' :
-      section === next && !section.open ? 'تابع هنا' : '';
-  }
-  startButton.hidden = Boolean(touring) || !next;
-  startButton.textContent = covered('guide-tour-started') ? 'استأنف جولة التعريف' : 'ابدأ جولة التعريف';
+function defer(topic) {
+  if (!DISCOVERY_TOPICS.includes(topic)) return;
+  save(activeUid(), {}, { [topic]: Date.now() + 15 * 60 * 1000 });
 }
 
-function nextTopic() {
-  return topics().find(section => !covered(section.dataset.guideTopics));
+function updateGuideTopics() {
+  for (const section of topics()) {
+    const label = section.querySelector('.profile-guide-status');
+    const state = status(section.dataset.guideTopics);
+    label.textContent = state === 'seen' ? 'تم الاطّلاع' : state === 'dismissed' ? 'تم التجاوز' :
+      state === 'in-progress' ? 'يمكنك المتابعة' : '';
+  }
+  sectionTour?.sync();
 }
 
 function isPresenting() {
-  return Boolean(panel?.open && panel.closest('#profileModal.open') &&
-    (touring || panel.querySelector('[data-guide-topics][open]')));
+  return Boolean(sectionTour?.active() || (panel?.open && panel.closest('#profileModal.open')));
 }
 
 function presentationChanged() {
@@ -110,65 +108,6 @@ function blocked() {
     root.__lootlinguaQuizLearningCommitDepth > 0;
 }
 
-const visitTopic = {
-  worlds: () => root.loadWorldsView?.(),
-  dictionary: () => root.loadPersonalDictionary?.(),
-  quiz: () => root.loadQuizView?.(),
-  starred: () => root.loadStarredView?.(),
-  treasure: () => root.loadTreasureView?.(),
-  'custom-worlds': () => { root.loadWorldsView?.(); setTimeout(() => root.showCustomWorldsTab?.(), 0); },
-  'full-stats': () => root.openStatsPanel?.(),
-};
-
-function pauseTour({ focus = false } = {}) {
-  if (!touring) return;
-  touring = null;
-  tour.hidden = true;
-  updateGuideTopics();
-  presentationChanged();
-  if (focus) (startButton.hidden ? panel.querySelector('summary') : startButton)?.focus();
-}
-
-function showTourTopic() {
-  const topic = nextTopic();
-  if (!topic || blocked()) { pauseTour({ focus: true }); return; }
-  touring = { uid: activeUid(), topic: topic.dataset.guideTopics };
-  for (const section of topics()) section.open = false;
-  tour.hidden = false;
-  const heading = tour.querySelector('h3');
-  heading.textContent = topic.querySelector('summary span').textContent;
-  tour.querySelector('[data-guide-tour-copy]').textContent = topic.querySelector('p').textContent;
-  tour.querySelector('[data-guide-tour-action="visit"]').hidden = !visitTopic[touring.topic];
-  updateGuideTopics();
-  presentationChanged();
-  heading.focus();
-}
-
-startButton?.addEventListener('click', () => {
-  if (blocked() || !panel.closest('#profileModal.open') || !nextTopic()) return;
-  root.LootLinguaSmartOnboarding?.close();
-  acknowledge('guide-tour-started');
-  showTourTopic();
-});
-
-tour?.addEventListener('click', event => {
-  const action = event.target.closest('[data-guide-tour-action]')?.dataset.guideTourAction;
-  if (!touring || touring.uid !== activeUid() || !action) return;
-  if (action === 'pause' || blocked()) { pauseTour({ focus: true }); return; }
-  const topic = touring.topic;
-  if (action === 'visit') {
-    const visit = visitTopic[topic];
-    if (!visit) return;
-    acknowledge(topic);
-    pauseTour();
-    root.closeProfileModal?.(true);
-    visit();
-  } else {
-    acknowledge(topic, action === 'skip' ? 'dismissed' : 'seen');
-    showTourTopic();
-  }
-});
-
 function quizInFront() {
   return Boolean(root.hasActiveLearningQuiz?.() ||
     document.body?.matches('.quiz-active, .published-placement-mode') ||
@@ -177,7 +116,6 @@ function quizInFront() {
 
 function openTopic(topic) {
   if (blocked()) return false;
-  pauseTour();
   const target = [...(panel?.querySelectorAll('[data-guide-topics]') || [])]
     .find(node => node.dataset.guideTopics.split(' ').includes(topic));
   if (!target) return false;
@@ -192,34 +130,32 @@ function openTopic(topic) {
 
 panel?.addEventListener('toggle', event => {
   const topic = event.target;
-  if (topic === panel && !panel.open) pauseTour();
   if (!topic.matches?.('[data-guide-topics]') || !topic.open || !panel.open ||
       !panel.closest('#profileModal.open') || !panel.getClientRects().length || blocked()) {
     presentationChanged();
     return;
   }
-  pauseTour();
   root.LootLinguaSmartOnboarding?.close();
   for (const other of panel.querySelectorAll('[data-guide-topics][open]')) {
     if (other !== topic) other.open = false;
   }
-  acknowledge(topic.dataset.guideTopics);
   updateGuideTopics();
   presentationChanged();
 }, true);
 
 root.addEventListener('lootlingua:guide-coverage-changed', updateGuideTopics);
 root.LootLinguaGuide = Object.freeze({
-  covered, status, acknowledge, openTopic, quizInFront, refresh, isPresenting, discoveryTopics: DISCOVERY_TOPICS,
-  discoveryTopic: eligible => selectDiscoveryTopic(status, eligible),
+  covered, status, acknowledge, defer, openTopic, quizInFront, refresh, isPresenting, discoveryTopics: DISCOVERY_TOPICS,
+  discoveryTopic: eligible => {
+    const deferred = read(activeUid())?.deferredUntil;
+    return selectDiscoveryTopic(status, eligible, topic => Date.now() < deferred?.[topic]);
+  },
 });
 root.addEventListener('lootlingua:profile-guide-closed', () => {
-  pauseTour();
   if (panel) panel.open = false;
   presentationChanged();
 });
 root.addEventListener('lootlingua:auth-state', () => {
-  pauseTour();
   if (panel) {
     panel.open = false;
     panel.querySelectorAll('[data-guide-topics][open]').forEach(item => { item.open = false; });
@@ -242,5 +178,6 @@ root.addEventListener('storage', event => {
   }
   root.dispatchEvent(new CustomEvent('lootlingua:guide-coverage-changed'));
 });
+if (panel) sectionTour = mountGuideTour(panel, { activeUid, blocked, covered, acknowledge, presentationChanged });
 refresh();
 updateGuideTopics();
