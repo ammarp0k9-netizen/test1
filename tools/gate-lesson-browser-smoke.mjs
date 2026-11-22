@@ -849,17 +849,17 @@ try {
   await waitFor('.published-gate-practice-cta');
   if (guidanceAudit) {
     const review = 'button[data-onboarding-gate-review="due"]';
-    await waitFor(review + '.coach-highlight-target');
-    assert.match(await run(select(review) + '.textContent'), /ابدأ المراجعة الرسمية/);
-    const reviewLayout = await run(`(() => {
+    const reviewLayout = await until(() => run(`(() => {
       const hint = document.getElementById('contextualOnboardingCoach');
+      const action = document.querySelector('button[data-onboarding-gate-review="due"].coach-highlight-target');
+      if (!hint || !action) return null;
       const bounds = hint.getBoundingClientRect();
       const card = hint.parentElement.getBoundingClientRect();
-      const button = document.querySelector('button[data-onboarding-gate-review="due"]').getBoundingClientRect();
+      const button = action.getBoundingClientRect();
       return { wide: bounds.width > card.width * .75, belowButton: bounds.top >= button.bottom,
-        noHorizontalOverflow: hint.scrollWidth <= bounds.width + 1 };
-    })()`);
-    assert.deepEqual(reviewLayout, { wide: true, belowButton: true, noHorizontalOverflow: true });
+        noHorizontalOverflow: hint.scrollWidth <= bounds.width + 1, title: action.textContent.trim() };
+    })()`), 'official review guidance on the rendered action');
+    assert.deepEqual(reviewLayout, { wide: true, belowButton: true, noHorizontalOverflow: true, title: 'ابدأ المراجعة الرسمية' });
     if (directory) await screenshot('onboarding-review-anchor');
     await click('#contextualOnboardingCoach .feature-mini-onboarding-next');
     assert.equal(await run('window.LootLinguaGuide.covered("first-official-review")'), false);

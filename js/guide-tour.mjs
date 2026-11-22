@@ -22,6 +22,7 @@ export function mountGuideTour(panel, { activeUid, blocked, covered, acknowledge
   let frame = 0;
   let loadTimer = 0;
   let pausedByTab = false;
+  let lastPublishedRoute = null;
   const profile = panel.closest('#profileModal');
   const suspended = () => blocked() || app.LootLinguaSmartOnboarding?.busy?.();
   const read = (uid = activeUid()) => {
@@ -39,15 +40,14 @@ export function mountGuideTour(panel, { activeUid, blocked, covered, acknowledge
   const resetSaved = uid => {
     try { localStorage.removeItem(checkpointKey(uid)); } catch (_) {}
   };
-  const currentWorldRoute = () => {
-    const route = app.history.state;
+  const getWorldRoute = route => {
     if (route?.kind !== 'published' || !route.params?.worldId) return null;
     const { worldId, rankId, gateId } = route.params;
     return { worldId, ...(route.key === 'gate' && rankId && gateId && { rankId, gateId }) };
   };
   const checkpoint = active => ({
     owner: running.owner, section: running.section.id, topic: running.step.topic, manual: running.manual, active,
-    ...(running.section.id === 'worlds' && { worldRoute: currentWorldRoute() || running.worldRoute }),
+    ...(running.section.id === 'worlds' && { worldRoute: getWorldRoute(app.history.state) || running.worldRoute }),
   });
   const nextStep = (section, from = 0, manual = false) =>
     section.steps.slice(from).find(step => manual || !covered(step.topic));
@@ -112,10 +112,12 @@ export function mountGuideTour(panel, { activeUid, blocked, covered, acknowledge
       if (modal === profile && section.id !== 'profile') app.closeProfileModal?.(true);
       let result;
       try {
-        const route = section.id === 'worlds' && current.worldRoute;
-        if (route?.rankId && route.gateId) result = app.openPublishedGate?.(route.worldId, route.rankId, route.gateId);
+        const route = section.id === 'worlds' && step.topic !== 'worlds' && current.worldRoute;
+        const needsGate = ['lesson', 'gate-review', 'gate-wait'].includes(step.topic);
+        if (needsGate && route?.rankId && route.gateId) result = app.openPublishedGate?.(route.worldId, route.rankId, route.gateId);
         else if (route?.worldId) result = app.openPublishedWorld?.(route.worldId);
-        else if (find(section.surface)) result = true;
+        else if (find(section.surface) && app.history.state?.kind !== 'overlay' &&
+                 (step.topic !== 'worlds' || find('[data-guided-world]'))) result = true;
         else if (gatedSections.has(section.id) && app.isFeatureUnlocked?.(section.id) === false) result = false;
         else result = section.enter(app);
       }
@@ -144,7 +146,9 @@ export function mountGuideTour(panel, { activeUid, blocked, covered, acknowledge
     const fromSettings = profile?.classList.contains('open');
     panel.open = false;
     if (fromSettings) app.closeProfileModal?.(true);
-    running = { owner: activeUid(), section, step, manual, worldRoute: saved?.worldRoute };
+    const onWorlds = app.getOnboardingView?.() === 'worlds';
+    running = { owner: activeUid(), section, step, manual,
+      worldRoute: saved?.worldRoute || (onWorlds ? lastPublishedRoute : null) };
     acknowledge('guide-tour-started');
     go(section, step, { enter: true });
     sync();
@@ -325,6 +329,7 @@ export function mountGuideTour(panel, { activeUid, blocked, covered, acknowledge
   });
   app.addEventListener('lootlingua:auth-state', () => {
     stop({ save: false });
+    lastPublishedRoute = null;
     if (app.auth?.currentUser?.isAnonymous && !read()) {
       const guest = read('');
       if (guest) {
@@ -334,6 +339,10 @@ export function mountGuideTour(panel, { activeUid, blocked, covered, acknowledge
     }
     pausedByTab = false;
     schedule();
+  });
+  app.addEventListener('lootlingua:surface-ready', event => {
+    if (event.detail?.kind === 'published') lastPublishedRoute = getWorldRoute(event.detail);
+    else if (event.detail?.key === 'worlds') lastPublishedRoute = null;
   });
   app.addEventListener('storage', event => {
     if (event.key !== checkpointKey(activeUid())) return;
