@@ -3961,6 +3961,34 @@ async function reconcilePreviouslyAppliedPlacementOutcome(user, world, assessmen
   });
 }
 
+async function commitVerifiedLevelPlacement(user, world, assessment, receipt) {
+  const sessionRef = levelPlacementSessionRef(user.uid, world, assessment);
+  const targetJourneyRef = journeyRef(user.uid, world);
+  const pointerRef = activeJourneyRef(user.uid);
+  const session = await runTransaction(db, async transaction => {
+    const [savedJourney, savedSession] = await Promise.all([
+      transaction.get(targetJourneyRef), transaction.get(sessionRef)
+    ]);
+    const current = savedSession.data();
+    if (auth.currentUser?.uid !== user.uid || !current) {
+      throw journeyCloudError('level-placement/session-mismatch', 'Placement session changed.');
+    }
+    if (current.resultApplied && current.status === 'completed') return current;
+    if (savedJourney.data()?.activeLevelPlacementAssessmentId !== assessment) {
+      throw journeyCloudError('level-placement/session-mismatch', 'Placement session changed.');
+    }
+    const completion = receipt.worldCompletion
+      ? { worldCompletion: { ...receipt.worldCompletion, completedAt: serverTimestamp() } } : {};
+    transaction.update(sessionRef, { ...receipt.sessionResult,
+      assessedAt: serverTimestamp(), completedAt: serverTimestamp(), updatedAt: serverTimestamp() });
+    transaction.update(targetJourneyRef, { ...receipt.journeyResult, ...completion, updatedAt: serverTimestamp() });
+    transaction.set(pointerRef, { worldId: world, journeyVersion: core().JOURNEY_VERSION, updatedAt: serverTimestamp() });
+    return { ...current, ...receipt.sessionResult };
+  });
+  cache.levelPlacementSessions.set(`${world}/${assessment}`, session);
+  return reconcilePreviouslyAppliedPlacementOutcome(user, world, assessment, session);
+}
+
 async function applyPlacementOutcome(worldId, assessmentId) {
   const user = requireUser();
   const world = core().cleanId(worldId, 'World');
@@ -3983,6 +4011,11 @@ async function applyPlacementOutcome(worldId, assessmentId) {
       'level-placement/result-not-ready',
       'Level Placement result is not ready.'
     );
+  }
+
+  if (session.placementVersion === 2) {
+    const proof = await getDoc(doc(journeyRef(user.uid, world), 'levelPlacementOutcomeReceipts', assessment));
+    if (proof.exists()) return commitVerifiedLevelPlacement(user, world, assessment, proof.data());
   }
 
   const [journeyBeforeResult, publishedRanks] = await Promise.all([

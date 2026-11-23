@@ -413,6 +413,30 @@ test('actual cloud flow keeps an atomic outcome authoritative when projection an
   assert.equal(afterSignIn.gate.gateId, 'gate-b1');
 });
 
+test('the browser applies a protected failure receipt instead of a saved claim of passing', async () => {
+  const harness = createHarness();
+  const session = harness.values.get(harness.sessionPath);
+  harness.values.set(harness.sessionPath, { ...session, placementVersion: 2, passedLevel: true });
+  harness.values.set(`${harness.journeyPath}/levelPlacementOutcomeReceipts/assessment-a2`, {
+    sessionResult: {
+      status: 'completed', resultApplied: true, passedLevel: false, passedRankIds: [],
+      resultStartRankId: 'rank-a2', resultStartGateId: 'old-gate', resultClearedGateIds: []
+    },
+    journeyResult: {
+      activeLevelPlacementAssessmentId: '', activeLevelPlacementCefrLevel: '',
+      levelPlacementStatus: 'completed', levelPlacementAssessmentIds: { A2: 'assessment-a2' },
+      activeRankId: 'rank-a2', activeGateId: 'old-gate', passedCefrLevels: ['A1']
+    }
+  });
+  const result = await harness.api.applyPlacementOutcome('world-a', 'assessment-a2');
+  assert.equal(result.session.passedLevel, false);
+  assert.equal(result.session.status, 'completed');
+  assert.equal(harness.values.get(harness.journeyPath).activeGateId, 'old-gate');
+  assert.deepEqual(harness.values.get(harness.journeyPath).passedCefrLevels, ['A1']);
+  await harness.api.applyPlacementOutcome('world-a', 'assessment-a2');
+  assert.equal(harness.controls.outcomeCommitCount, 1);
+});
+
 test('actual perfect new-ranks flow clears both new ranks and advances to order-zero A2', async () => {
   const harness = createHarness({ newRanks: true });
   const result = await harness.api.applyPlacementOutcome('world-a', 'assessment-a2');

@@ -1212,15 +1212,29 @@ service cloud.firestore {
                 after.unlockedRankIds == [after.activeRankId] && after.unlockedGateIds == [after.activeGateId]));
         }
         function levelPlacementAdvance(before, after, id) {
-          let result = getAfter(/databases/$(database)/documents/users/$(uid)/contentProgress/$(worldId)/levelPlacementSessions/$(id)).data;
-          return result.status == 'completed' && result.resultApplied == true && result.completedAt == request.time &&
-            after.get('activeLevelPlacementAssessmentId', '') == '' &&
-            after.activeRankId == (result.resultStartRankId == '' ? before.activeRankId : result.resultStartRankId) &&
-            after.activeGateId == (result.resultStartGateId == '' ? before.activeGateId : result.resultStartGateId) &&
-            after.unlockedRankIds.toSet() == before.unlockedRankIds.toSet().union(result.resultUnlockedRankIds.toSet()) &&
-            after.unlockedGateIds.toSet() == before.unlockedGateIds.toSet().union(result.resultUnlockedGateIds.toSet()) &&
-            after.get('levelPlacementClearedGateIds', []).toSet() == before.get('levelPlacementClearedGateIds', []).toSet().union(result.resultClearedGateIds.toSet()) &&
-            after.contentJourneyStatus == (result.completedCurrentContent == true ? 'completed-current-content' : 'in-progress');
+          let attempt = /databases/$(database)/documents/users/$(uid)/contentProgress/$(worldId)/levelPlacementSessions/$(id);
+          return verifiedLevelPlacementOutcome(id, get(attempt).data, getAfter(attempt).data, before, after);
+        }
+        function matchesPlacementReceipt(before, after, result, clockFields) {
+          return after.diff(before).affectedKeys().hasOnly(result.keys().concat(clockFields)) &&
+            after.diff(result).unchangedKeys().hasAll(result.keys());
+        }
+        function verifiedLevelPlacementOutcome(id, before, after, journeyBefore, journeyAfter) {
+          let receipt = get(/databases/$(database)/documents/users/$(uid)/contentProgress/$(worldId)/levelPlacementOutcomeReceipts/$(id)).data;
+          let achievement = receipt.get('worldCompletion', null);
+          return before.get('placementVersion', 1) == 2 && before.status in ['awaiting-decision', 'paused'] &&
+            before.get('resultApplied', false) == false && receipt.approvedAt is timestamp &&
+            receipt.approvedAt <= request.time && receipt.sessionBefore == before && receipt.journeyBefore == journeyBefore &&
+            journeyBefore.get('activeLevelPlacementAssessmentId', '') == id &&
+            after.status == 'completed' && after.resultApplied == true &&
+            after.assessedAt == request.time && after.completedAt == request.time && after.updatedAt == request.time &&
+            journeyAfter.levelPlacementStatus == 'completed' && journeyAfter.updatedAt == request.time &&
+            journeyAfter.get('activeLevelPlacementAssessmentId', '') == '' &&
+            matchesPlacementReceipt(before, after, receipt.sessionResult, ['assessedAt', 'completedAt', 'updatedAt']) &&
+            matchesPlacementReceipt(journeyBefore, journeyAfter, receipt.journeyResult, ['updatedAt', 'worldCompletion']) &&
+            (achievement == null ? journeyAfter.get('worldCompletion', null) == journeyBefore.get('worldCompletion', null) :
+              journeyAfter.worldCompletion.completedAt == request.time &&
+                journeyAfter.worldCompletion.diff(achievement).affectedKeys().hasOnly(['completedAt']));
         }
         function legacyLevelReceipt(id) {
           return get(/databases/$(database)/documents/users/$(uid)/contentProgress/$(worldId)/levelPlacementResumeReceipts/$(id)).data;
@@ -1333,6 +1347,10 @@ service cloud.firestore {
         match /levelPlacementResumeReceipts/{assessmentId} {
           allow read, write: if false;
         }
+        match /levelPlacementOutcomeReceipts/{assessmentId} {
+          allow get: if isOwner(uid);
+          allow list, write: if false;
+        }
         match /placementSessions/{assessmentId} {
           function placementFields() {
             return ['assessmentId', 'worldId', 'rankId', 'currentGateId', 'currentQuestionIndex',
@@ -1427,14 +1445,11 @@ service cloud.firestore {
             let changed = after.diff(before).affectedKeys();
             return !changed.hasAny(['cefrLevel', 'placementVersion', 'selectedWords', 'selectedContentWordIds', 'startedAt']) &&
               before.get('resultApplied', false) == false &&
-              (!after.get('resultApplied', false) ||
-                (before.get('placementVersion', 1) == 2 && after.status == 'completed')) &&
+              !after.get('resultApplied', false) && after.status != 'completed' &&
               (after.currentQuestionIndex == before.currentQuestionIndex ? placementAnswersUnchanged(before, after) &&
                 after.orderedQuestionIds == order &&
-                (after.status != 'awaiting-decision' || (before.status == 'awaiting-decision' &&
-                  !after.get('resultApplied', false))) &&
-                (after.status != 'completed' || before.status == 'completed' ||
-                  (before.status in ['awaiting-decision', 'paused'] && placementAnswersComplete(before, order.size()))) :
+                (after.status != 'awaiting-decision' || before.status == 'awaiting-decision') &&
+                changed.hasOnly(['status', 'pausedAt', 'resumedAt', 'abandonedAt', 'updatedAt']) :
                 placementAnswerStep(before, after, order[before.currentQuestionIndex], 'questionId', 'selectedQuestionId') &&
                 after.orderedQuestionIds.hasAll(order) && validLevelPlacementWord(after.answers[before.currentQuestionIndex]) &&
                 (after.status == 'active' || (after.status == 'awaiting-decision' &&
@@ -1466,7 +1481,17 @@ service cloud.firestore {
                 (choice == 'undecided' || choice == after.saveWordChoice)) ||
                 finishAppliedLevelPlacement(before, after));
           }
-          allow create: if importingSavedGuest(uid) && validLevelPlacementSession(request.resource.data);
+          function matchesImportedPlacementSession(data) {
+            let source = get(savedGuestPermit(uid)).data.sourceUid;
+            let original = get(/databases/$(database)/documents/users/$(source)/contentProgress/$(worldId)/levelPlacementSessions/$(assessmentId)).data;
+            return data.diff(original).affectedKeys().hasOnly(['_savedGuestImportedAt']);
+          }
+          function commitVerifiedOutcome(before, after) {
+            let journey = /databases/$(database)/documents/users/$(uid)/contentProgress/$(worldId);
+            return verifiedLevelPlacementOutcome(assessmentId, before, after, get(journey).data, getAfter(journey).data);
+          }
+          allow create: if importingSavedGuest(uid) && validLevelPlacementSession(request.resource.data) &&
+            matchesImportedPlacementSession(request.resource.data);
           allow create: if isOwner(uid) && validLevelPlacementSession(request.resource.data) &&
             cleanPlacementStart(request.resource.data) && !request.resource.data.get('resultApplied', false) &&
             startLevelPlacementAtEligibleLevel(request.resource.data);
@@ -1476,6 +1501,8 @@ service cloud.firestore {
               (resource.data.status in ['paused', 'awaiting-decision'] && request.resource.data.status == 'awaiting-decision' &&
                 request.resource.data.get('resultApplied', false) == true &&
                 approvedLegacyLevelResume(assessmentId)) ||
+              (request.resource.data.status == 'completed' && !resource.data.get('resultApplied', false) &&
+                commitVerifiedOutcome(resource.data, request.resource.data)) ||
               validLevelPlacementUpdate(resource.data, request.resource.data));
           allow delete: if false;
         }

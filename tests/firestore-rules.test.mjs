@@ -607,6 +607,37 @@ async function test(name, callback) {
   }
 }
 
+// These synthetic rule fixtures exercise the commit contract. The authoritative
+// calculation from real questions and answers is exercised separately.
+function verifiedPlacementBatch(db, sessionPath, journeyPath) {
+  const writes = [];
+  return {
+    update(ref, patch) { writes.push({ ref, patch }); },
+    async approve() {
+      const session = writes.find(({ ref }) => ref.path === sessionPath).patch;
+      const journey = writes.find(({ ref }) => ref.path === journeyPath).patch;
+      const { assessedAt, completedAt, updatedAt, ...sessionResult } = session;
+      const { updatedAt: journeyClock, worldCompletion, ...journeyResult } = journey;
+      await environment.withSecurityRulesDisabled(async context => {
+        const trusted = context.firestore();
+        const [sessionBefore, journeyBefore] = await Promise.all([
+          getDoc(doc(trusted, sessionPath)), getDoc(doc(trusted, journeyPath))
+        ]);
+        const id = sessionBefore.data().assessmentId;
+        await setDoc(doc(trusted, `${journeyPath}/levelPlacementOutcomeReceipts/${id}`), {
+          sessionBefore: sessionBefore.data(), journeyBefore: journeyBefore.data(), sessionResult, journeyResult,
+          worldCompletion: worldCompletion || null, approvedAt: serverTimestamp()
+        });
+      });
+    },
+    commit() {
+      const batch = writeBatch(db);
+      for (const { ref, patch } of writes) batch.update(ref, patch);
+      return batch.commit();
+    }
+  };
+}
+
 try {
   await environment.clearFirestore();
   await seed();
@@ -3936,9 +3967,7 @@ try {
       levelPlacementPassedRankIds: ['level-rank-a1'],
       updatedAt: serverTimestamp()
     });
-    await assertFails(crossPhase.commit());
-
-    const result = writeBatch(db);
+    const result = verifiedPlacementBatch(db, sessionPath, journeyPath);
     result.update(doc(db, sessionPath), {
       status: 'completed',
       resultApplied: true,
@@ -3969,6 +3998,9 @@ try {
       levelPlacementClearedGateIds: ['level-gate-a1'],
       updatedAt: serverTimestamp()
     });
+    await assertFails(result.commit());
+    await result.approve();
+    await assertFails(crossPhase.commit());
     await assertSucceeds(result.commit());
 
     const savedOutcomeJourney = await getDoc(doc(db, journeyPath));
@@ -5812,12 +5844,12 @@ try {
     addOutcomeWrites(incomplete, false, false, clearedGateIds);
     await assertFails(incomplete.commit());
 
+    const result = verifiedPlacementBatch(db, sessionPath, journeyPath);
+    addOutcomeWrites(result, true, false, clearedGateIds);
+    await result.approve();
     const missingClearLedger = writeBatch(db);
     addOutcomeWrites(missingClearLedger, true, false, []);
     await assertFails(missingClearLedger.commit());
-
-    const result = writeBatch(db);
-    addOutcomeWrites(result, true, false, clearedGateIds);
     await assertSucceeds(result.commit());
 
     const savedJourney = await getDoc(doc(db, journeyPath));
@@ -5924,7 +5956,7 @@ try {
       }
     });
 
-    const result = writeBatch(db);
+    const result = verifiedPlacementBatch(db, sessionPath, journeyPath);
     result.update(doc(db, journeyPath), {
       activeRankId: targetRankId,
       activeGateId: targetGateId,
@@ -5955,6 +5987,7 @@ try {
       completedCurrentContent: false,
       updatedAt: serverTimestamp()
     });
+    await result.approve();
     await assertSucceeds(result.commit());
     const savedJourney = await getDoc(doc(db, journeyPath));
     const projectedGate = await getDoc(doc(
@@ -6234,7 +6267,7 @@ try {
     assert.deepEqual(awaitingSession.data().passedRankIds, a2RankIds);
     assert.equal(awaitingSession.data().passedLevel, true);
 
-    const result = writeBatch(db);
+    const result = verifiedPlacementBatch(db, sessionPath, journeyPath);
     result.update(doc(db, journeyPath), {
       activeRankId: nextRankId,
       activeGateId: nextGateId,
@@ -6268,6 +6301,7 @@ try {
       completedCurrentContent: false,
       updatedAt: serverTimestamp()
     });
+    await result.approve();
     await assertSucceeds(result.commit());
 
     const [completedJourney, completedSession] = await Promise.all([
