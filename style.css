@@ -473,7 +473,7 @@ body.perf-stable .smart-loading-slow-warning {
   opacity: 0;
   visibility: hidden;
   pointer-events: none;
-  background: var(--legend-glass-bg, color-mix(in srgb, var(--card-bg) 40%, transparent));
+  background: color-mix(in srgb, var(--card-bg) 86%, var(--legend-glass-bg, transparent));
   border-radius: 18px;
   box-shadow: var(--legend-glass-shadow, 0 20px 50px rgba(0, 0, 0, 0.42));
   border: 1px solid var(--legend-glass-border, color-mix(in srgb, var(--border) 70%, transparent));
@@ -5492,6 +5492,19 @@ body.test-clock-active .toast-host {
 .header-widgets { display:flex; align-items:center; gap:12px; flex-shrink:0; }
 
 /* Quiet optional-discovery marker; it never changes a feature's lock state. */
+#legendDock [data-discovery-pending]::before {
+  content: '';
+  position: absolute;
+  inset-block-start: 4px;
+  inset-inline-end: 7px;
+  inline-size: 7px;
+  block-size: 7px;
+  border: 1px solid var(--card-bg);
+  border-radius: 50%;
+  background: var(--danger, #ed526b);
+  box-shadow: 0 0 0 1px var(--card-bg);
+  pointer-events: none;
+}
 .feature-discovery-ready { position: relative; }
 .worlds-tab.feature-discovery-ready::after {
   content: '';
@@ -7536,6 +7549,45 @@ body.treasure-mode #list {
 .profile-settings-btn {
   justify-content: center;
   gap: 8px;
+}
+
+.profile-guide { min-width: 0; }
+.profile-guide summary {
+  cursor: pointer;
+  list-style: none;
+  min-height: 44px;
+}
+.profile-guide summary::-webkit-details-marker { display: none; }
+.profile-guide summary::after {
+  content: '';
+  inline-size: .45rem;
+  block-size: .45rem;
+  margin-inline-start: auto;
+  border-inline-end: 2px solid currentColor;
+  border-block-end: 2px solid currentColor;
+  transform: rotate(45deg);
+  flex: none;
+}
+.profile-guide details[open] > summary::after,
+.profile-guide[open] > summary::after { transform: rotate(225deg); }
+.profile-guide summary:focus-visible { outline: 2px solid var(--accent); outline-offset: -3px; }
+.profile-guide-topics {
+  margin-block: .5rem;
+  padding-inline: .65rem;
+  border-inline-start: 2px solid var(--accent-soft);
+}
+.profile-guide-topics summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: .75rem;
+  padding: .4rem .5rem;
+  font-weight: 650;
+}
+.profile-guide-topics p {
+  padding: 0 .5rem .65rem;
+  margin: 0;
+  line-height: 1.75;
 }
 
 .main-content {
@@ -14819,3 +14871,99 @@ body.runner-input-active > :where(.main-content, .legend-top-bar, .legend-dock, 
 .runner-setup-brief[hidden] { display:none; }
 .runner-setup-brief span { display:inline-block; padding:6px 10px; margin:3px; border-radius:20px; border:1px solid var(--accent); font-weight:700; }
 .runner-setup-brief p { margin:10px 0 0; line-height:1.8; color:var(--text-gray); }
+.contextual-guide-inline {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 5px 12px;
+  margin-block: 0 12px;
+  padding: 10px 14px;
+  border: 1px solid color-mix(in srgb, var(--accent) 32%, transparent);
+  border-inline-start: 3px solid var(--accent);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--accent) 8%, var(--card-bg));
+  color: var(--text-white);
+  text-align: start;
+}
+.contextual-guide-inline > strong { grid-column: 1; font-size: .88rem; }
+.contextual-guide-inline > p { grid-column: 1; margin: 0; font-size: .83rem; line-height: 1.6; }
+.contextual-guide-inline > .feature-mini-onboarding-actions { grid-column: 2; grid-row: 1 / span 2; margin: 0; }
+.contextual-guide-inline button { min-height: 40px; }
+.published-gate-state-card > .contextual-guide-inline {
+  grid-column: 2 / -1;
+  min-inline-size: 0;
+  margin-block-end: 0;
+}
+.profile-guide-status { margin-inline-start: auto; color: var(--text-white); opacity: .74; font-size: .72rem; font-weight: 500; text-align: end; }
+.profile-guide-status:empty { display: none; }
+@media (max-width: 680px) {
+  .published-gate-state-card > .contextual-guide-inline { grid-column: 1 / -1; }
+}
+@media (max-width: 480px) {
+  .contextual-guide-inline { grid-template-columns: minmax(0, 1fr); }
+  .contextual-guide-inline > .feature-mini-onboarding-actions { grid-column: 1; grid-row: auto; }
+}
+
+.profile-guide-start,
+.profile-guide-visit,
+.section-tour-actions :is(button, summary) {
+  padding: .55rem .75rem;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--card-bg);
+  color: var(--text-white);
+  cursor: pointer;
+  font: inherit;
+}
+.profile-guide-start {
+  margin-block: .5rem;
+  border-color: var(--accent);
+}
+.profile-guide-visit { grid-column: 2 / -1; justify-self: start; min-height: 44px; }
+.lootlingua-popover.section-tour-popover {
+  z-index: 40010;
+  width: min(25rem, calc(100vw - 24px));
+  padding: .9rem 1rem;
+  color: var(--text-white);
+  border: 1px solid color-mix(in srgb, var(--accent) 48%, var(--border));
+  border-radius: 16px;
+  background: linear-gradient(155deg, color-mix(in srgb, var(--accent) 14%, var(--card-bg)), var(--card-bg) 70%);
+  box-shadow: 0 12px 34px #0005;
+}
+.section-tour-content { display: grid; gap: .55rem; text-align: start; }
+.section-tour-content h3, .section-tour-content p { margin: 0; }
+.section-tour-content h3 { font-size: 1.05rem; line-height: 1.45; }
+.section-tour-content h3:focus { outline: none; }
+.section-tour-content p { line-height: 1.65; font-size: .92rem; }
+.section-tour-content .section-tour-count { font-size: .75rem; color: var(--accent); }
+.section-tour-actions { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: start; gap: .4rem; }
+.section-tour-actions :is(button, summary) { min-height: 44px; padding: .35rem .65rem; font-size: .85rem; }
+.section-tour-options { display: grid; }
+.section-tour-options summary {
+  display: grid;
+  place-items: center;
+  justify-self: end;
+  inline-size: 44px;
+  padding: 0;
+  border-color: transparent;
+  background: transparent;
+  list-style: none;
+  font-size: 1.45rem;
+  line-height: 1;
+}
+.section-tour-options summary:hover,
+.section-tour-options[open] summary { background: color-mix(in srgb, var(--accent) 12%, var(--card-bg)); }
+.section-tour-options summary::-webkit-details-marker { display: none; }
+.section-tour-options-list { display: grid; gap: .25rem; margin-block-start: .35rem; }
+.section-tour-options-list button { text-align: start; }
+.section-tour-actions [data-guide-command="next"] {
+  justify-self: start;
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 19%, var(--card-bg));
+  font-weight: 700;
+}
+.section-tour-actions :is(button, summary):focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+@media (max-width: 420px) {
+  .lootlingua-popover.section-tour-popover { padding: .7rem .8rem; }
+}
+.profile-guide :is(button, h3):focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }

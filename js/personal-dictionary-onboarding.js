@@ -71,11 +71,11 @@
     }
     const state = read();
     const stepIndex = STEPS.findIndex(([id]) => id === 'full-stats');
-    if (statsSeen(key) || state?.phase === 'completed' || state?.step > stepIndex) {
+    if (root.LootLinguaGuide?.covered('full-stats') || statsSeen(key) || state?.phase === 'completed' || state?.step > stepIndex) {
       closeStatsGuide(); return;
     }
     const popover = root.LootLinguaPopover;
-    const busy = document.hidden || root.__entryExperienceActive || root.__lootlinguaAuthResolved === false ||
+    const busy = root.LootLinguaGuide?.isPresenting?.() || root.LootLinguaSmartOnboarding?.presenting?.() || root.LootLinguaGateLessonView?.isOpen?.() || root.LootLinguaGuide?.quizInFront() || document.hidden || root.__entryExperienceActive || root.__lootlinguaAuthResolved === false ||
       root.hasActiveLearningQuiz?.() || root.__lootlinguaRunnerInputActive || root.__lootlinguaQuizLearningCommitDepth > 0 ||
       document.documentElement.classList.contains('journey-auth-active') ||
       document.body.matches('.quiz-active, .published-placement-mode') || panel.closest('[inert]') ||
@@ -101,6 +101,7 @@
       button.type = 'button'; button.className = buttonClass; button.textContent = label;
       button.addEventListener('click', () => {
         if (statsVisit !== visit || owner() !== key) return;
+        root.LootLinguaGuide?.acknowledge('full-stats', status === 'completed' ? 'seen' : 'dismissed');
         statsChoices.add(key);
         try { localStorage.setItem(STATS_KEY_PREFIX + key, status); } catch (_) { /* Keep this choice for the current page. */ }
         closeStatsGuide();
@@ -145,7 +146,7 @@
     root.LootLinguaPopover?.closeIf?.(COACH_ID, { silent: true });
   }
   function offerResume(state) {
-    const resume = state && !['completed', 'awaiting-journey'].includes(state.phase) && !root.__entryExperienceActive;
+    const resume = !root.LootLinguaSmartOnboarding?.coordinatesLegacy?.() && state && !['completed', 'awaiting-journey'].includes(state.phase) && !root.__entryExperienceActive;
     root.LootLinguaPopover?.offerResume?.(COACH_ID, resume ? {
       label: 'تابع إرشاد قاموسك',
       priority: 3,
@@ -163,7 +164,7 @@
   }
   function renderStep({ allowSurfaceOpen = false } = {}) {
     const state = read();
-    if (!state || ['completed', 'awaiting-journey'].includes(state.phase) || root.__entryExperienceActive ||
+    if (root.LootLinguaSmartOnboarding?.coordinatesLegacy?.() || !state || ['completed', 'awaiting-journey'].includes(state.phase) || root.__entryExperienceActive ||
         document.getElementById('appAuthDialogShell')?.hidden === false) {
       closeCoach(); offerResume(null); return;
     }
@@ -317,11 +318,9 @@
     const state = read();
     if (!state || state.phase === 'completed') return;
     if (root.__entryExperienceActive) return;
-    if (state.phase !== 'awaiting-journey') { renderStep(); return; }
-    const guided = root.LootLinguaGuidedFirstJourney?.getState?.();
-    if (owner() === 'guest' && guided?.guestDictionaryAvailable) { api.beginGuestDictionary(); return; }
-    if (state.phase === 'awaiting-journey' && !currentJourneyCompleted()) return;
-    routeToDictionary(state);
+    if (state.phase === 'awaiting-journey') return;
+    if (fullTourRequested) renderStep();
+    else offerResume(state);
   }
 
   const api = {

@@ -1675,12 +1675,19 @@ function displayNextToast() {
   const t = document.getElementById('toastMessage');
   const queue = window.__toastQueue || (window.__toastQueue = []);
   if (!t || window.__toastActive || queue.length === 0) return;
+  while (queue.length && queue[0].notificationId && window.LootLinguaNotificationStore &&
+      window.LootLinguaNotificationRuntime?.canDisplayGateAction(window.LootLinguaNotificationStore.find(queue[0].notificationId) || {}) === false) {
+    queue.shift();
+  }
+  if (!queue.length) return;
   const entry = queue.shift();
   window.__toastActive = entry;
   const content = document.createElement('span');
   content.className = 'toast-text';
   content.textContent = entry.preview;
   t.classList.toggle('toast-wrap', entry.wrap === true);
+  t.classList.toggle('toast-critical', entry.critical === true);
+  t.classList.toggle('toast-notification', entry.fromNotificationCenter === true);
   t.replaceChildren(content);
   if (entry.notificationId) {
     const details = document.createElement('button');
@@ -1752,8 +1759,13 @@ function showToast(msg, type = 'info', duration = 2500, options = {}) {
     duration: Math.min(12000, Math.max(1200, displayDuration || 2500)),
     notificationId,
     toastDedupeKey,
+    critical: settings.critical === true,
+    fromNotificationCenter: Boolean(settings.notificationId),
+    presentationOwner: window.LootLinguaGateLessonView?.isOpen?.()
+      ? (window.auth?.currentUser?.uid || 'guest') : '',
   };
-  if (window.__entryExperienceActive && type !== 'danger' && settings.critical !== true) {
+  if ((window.__entryExperienceActive || (window.LootLinguaGateLessonView?.isOpen?.() && (type !== 'warning' || queuedEntry.fromNotificationCenter))) &&
+      type !== 'danger' && settings.critical !== true) {
     const deferred = window.__entryDeferredToastQueue || (window.__entryDeferredToastQueue = []);
     deferred.push(queuedEntry);
     if (deferred.length > 12) deferred.splice(0, deferred.length - 12);
@@ -1774,7 +1786,10 @@ window.flushDeferredEntryToasts = function() {
   // low-priority preview after Entry so completion never releases a toast storm.
   const pending = deferred.splice(0, deferred.length);
   const first = pending.find(
-    (candidate) => !findInFlightToast(candidate?.toastDedupeKey, { includeDeferred: false })
+    (candidate) => (!candidate.notificationId ||
+      window.LootLinguaNotificationRuntime?.canDisplayGateAction(window.LootLinguaNotificationStore?.find(candidate.notificationId) || {}) !== false) &&
+      (!candidate.presentationOwner || candidate.presentationOwner === (window.auth?.currentUser?.uid || 'guest')) &&
+      !findInFlightToast(candidate?.toastDedupeKey, { includeDeferred: false })
   );
   if (first) queue.push(first);
   if (queue.length > 20) queue.splice(0, queue.length - 20);

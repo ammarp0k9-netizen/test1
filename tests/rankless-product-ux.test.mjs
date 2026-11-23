@@ -15,44 +15,32 @@ function section(source, start, end) {
   return source.slice(from, to);
 }
 
-test('Product Entry shows a Level-to-Gates preview with no Rank selector', () => {
-  const structure = section(
-    entrySource,
-    '  function structureNodes(state) {',
-    '  function gatePreviewMarkup(state) {'
-  );
-  assert.match(structure, /cefrLevel/);
-  assert.match(structure, /بوابات مستوى/);
-  assert.match(structure, /data-entry-preview-gate/);
-  assert.doesNotMatch(structure, /data-entry-preview-rank/);
-  assert.doesNotMatch(structure, /entry-route-rank/);
+test('Product Entry Discover links to the actual World list without preview selectors', () => {
+  const discover = section(entrySource, '  function renderDiscover()', '  function render()');
+  assert.match(discover, /data-entry-action="discover-worlds"/);
+  assert.match(discover, /العوالم/);
+  assert.doesNotMatch(discover, /data-entry-preview|entry-route-rank|data-entry-world/);
+  const action = section(entrySource, '  async function handleAction(action)', '  function applyExplicitAppearance(state)');
+  assert.match(action, /action === 'discover-worlds'[\s\S]*?await root\.loadWorldsView[\s\S]*?await commitTerminalState/);
 });
 
-test('the Entry Gate preview forwards the Gate owner rankId only to the internal content API', () => {
-  const preview = section(
-    entrySource,
-    '  async function inspectPreviewGate(gateId) {',
-    '  async function saveCheckpoint(label) {'
-  );
-  assert.match(preview, /selectedGate\?\.rankId/);
-  assert.match(preview, /provider\.loadGatePreview/);
+test('rankId identifies the internal owner of an actual published gate', () => {
+  const gate = section(worldsSource, 'window.openPublishedGate = function', 'window.resumePublishedLearning');
+  assert.match(gate, /function\(worldId, rankId, gateId\)/);
+  assert.match(gate, /worldId, rankId, gateId/);
+  assert.doesNotMatch(gate, /entry-route-rank|data-entry-preview/);
 });
 
-test('return and destination language presents World, Level, and Gate', () => {
-  const returning = section(
-    entrySource,
-    '  function renderReturnJourney() {',
-    '  function renderDestination() {'
-  );
-  assert.match(returning, /المستوى الحالي/);
-  assert.doesNotMatch(returning, /الرتبة الحالية/);
-  assert.match(entrySource, /عالم<\/span>[\s\S]*مستويات[\s\S]*بوابات/);
+test('a returning learner with progress resumes the actual published World', () => {
+  const boot = section(entrySource, '  async function performBoot()', '  function rootElement()');
+  assert.match(boot, /signals\.activeJourney\?\.worldId[\s\S]*?await root\.resumePublishedLearning\?\.\(signals\.activeJourney\.worldId\)/);
+  assert.doesNotMatch(entrySource, /renderReturnJourney|renderDestination/);
 });
 
 test('legacy Rank deep links collapse to the World surface', () => {
   const route = section(
     worldsSource,
-    'window.loadPublishedContentRoute = function(route)',
+    'window.loadPublishedContentRoute = function(route, options)',
     'window.openPublishedWorldsRoot'
   );
   assert.match(route, /legacy-rank-route/);

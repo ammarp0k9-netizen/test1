@@ -2,7 +2,7 @@
   'use strict';
   const frames = new Map();
   const isolated = new Map();
-  const focusSelector = 'button:not(:disabled), [href], input:not(:disabled), select:not(:disabled), textarea:not(:disabled), [tabindex]';
+  const focusSelector = 'button:not(:disabled), [href], input:not(:disabled), select:not(:disabled), textarea:not(:disabled), details > summary:first-child, [tabindex]';
   let observer = null, scheduled = null, activeSurface = null;
 
   function visible(node) {
@@ -88,6 +88,8 @@
     if (!current?.frame) return;
     const frame = current.frame;
     if (event.key === 'Escape' && typeof frame.onEscape === 'function') {
+      const coach = companion(frame.root);
+      if (coach?.hasAttribute('data-escape-closes') && coach.contains(event.target)) return;
       event.preventDefault(); event.stopImmediatePropagation(); frame.onEscape(); return;
     }
     if (event.key !== 'Tab') return;

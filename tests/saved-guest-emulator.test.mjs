@@ -89,9 +89,10 @@ test('guest dictionary merge requires both Auth identities, preserves distinct s
     setDoc(doc(words(main.db, guest), 'private'), word(guest.uid, 'hidden', 'مخفي', { personalDictionaryState: 'moved-to-private-world' })),
     setDoc(doc(words(old.db, target), 'already-present'), word(target.uid, 'house', 'بيت')),
     setDoc(doc(words(old.db, target), 'other-sense'), word(target.uid, 'bank', 'مصرف')),
-    setDoc(profile(main.db, guest), { userXP: 357, wallet: 88 }),
-    setDoc(profile(old.db, target), { userXP: 924, wallet: 17 }),
+    adminStore(server).doc(profile(main.db, guest).path).set({ userXP: 357, wallet: 88 }),
+    adminStore(server).doc(profile(old.db, target).path).set({ userXP: 924, wallet: 17 }),
   ]);
+  await denied(setDoc(profile(other.db, alternative), { userXP: 0, wallet: 1 }));
   await assert.rejects(auth.selectEmail(target.email, 'WrongPassword!'));
   assert.equal(main.auth.currentUser.uid, guest.uid);
   const first = await auth.selectEmail(alternative.email, password);
@@ -229,6 +230,22 @@ test('full merge adds stored balances once, preserves evidence and clears the ne
     status: 'passed', startedAt: previous, updatedAt: past, completedAt: past, correctCount: 1, totalCount: 1, currentQuestionIndex: 1 });
   add(gateProgress(source, 'second'), { ...gate, gateId: 'second', status: 'learning', loadedAt: previous,
     loadedWordKeys: ['bank'], loadedContentWordIds: ['term'], evidenceStepCount: 2, totalEvidenceSteps: 3 });
+  add(gateProgress(source, 'second') + '/lesson/progress', {
+    version: 1, wordIds: ['term'], creditedIds: [], completedWordIds: ['term'],
+    answers: { 'learn:term': 'revealed', 'recall:term': 'correct' },
+    passed: ['learn:term', 'recall:term'], updatedAt: past,
+  });
+  await import('../js/gate-lesson.js');
+  const lesson = globalThis.LootLinguaGateLesson;
+  const repairWords = [{ id: 'term', word: 'bank', translation: 'ضفة' }];
+  const compact = lesson.start(repairWords);
+  // A saved guest from the previous lesson engine, paused before its retry.
+  const repairDraft = { ...compact, study: { ...compact.study, explained: ['term'], taught: ['term'],
+    hinted: ['term'], applied: ['term'], applications: { term: 'assisted' },
+    misses: { term: 'revealed' }, recalled: ['term'] } };
+  const repairPlan = lesson.build(repairWords, repairDraft);
+  assert.equal(lesson.stepAt(repairPlan, repairDraft).phase, 'reinforce');
+  add(gateProgress(source, 'first') + '/lesson/progress', { ...repairDraft, updatedAt: past });
 
   const mastery = { mastery_status: 'Reviewing', mastery_streak: 2, first_recalled_at: previous.getTime(),
     last_recalled_at: past.getTime(), last_recall_session_id: 'prior-2', earnedTransitions: ['new_learning', 'learning_reviewing'] };
@@ -253,9 +270,9 @@ test('full merge adds stored balances once, preserves evidence and clears the ne
       wordKeys: ['bank'], correctWordKeys: ['bank'], totalCount: 1, correctCount: 1, evidenceVersion: 2, completedAt: date });
     add(canonicalPath + '/evidence/' + eventId, { eventId, wordKey: 'bank', sessionId, sequence, occurredAt: date, correct: true });
   }
-  add(source + '/meta/profile', { userXP: 5000, runnerCoins: 7, lootBots: { coins: 20, best: 56 },
+  add(source + '/meta/profile', { onboardingProgress: { 'lootlingua-guide': { version: 1, topics: { lesson: 'seen' } } }, userXP: 5000, runnerCoins: 7, lootBots: { coins: 20, best: 56 },
     titlesState: { unlocked: ['guest-title'] }, theme: 'ocean', runnerUnlocks: ['character-2'] });
-  add(dest + '/meta/profile', { userXP: 8000, runnerCoins: 9, lootBots: { coins: 1, best: 65 }, titlesState: { unlocked: ['account-title'] }, theme: 'lootlingua' });
+  add(dest + '/meta/profile', { onboardingProgress: { 'lootlingua-guide': { version: 1, topics: { lesson: 'dismissed', dictionary: 'seen' } } }, userXP: 8000, runnerCoins: 9, lootBots: { coins: 1, best: 65 }, titlesState: { unlocked: ['account-title'] }, theme: 'lootlingua' });
   await batch.commit();
 
   const grant = (db, uid) => doc(db, 'users', uid, 'savedGuestMerges', 'progress');
@@ -290,6 +307,8 @@ test('full merge adds stored balances once, preserves evidence and clears the ne
   assert.equal(merged.runnerCoins, 16);
   assert.equal(merged.lootBots.coins, 21);
   assert.equal(merged.theme, 'lootlingua');
+  assert.deepEqual(merged.onboardingProgress['lootlingua-guide'].topics, { lesson: 'seen', dictionary: 'seen' });
+  await denied(getDoc(profile(outsider.db, target)));
   assert.deepEqual(merged.titlesState.unlocked.sort(), ['account-title', 'guest-title']);
   assert.deepEqual((await getDocs(words(userDb, target))).docs.map(row => row.data().meaning).sort(), ['ضفة', 'مصرف']);
   assert.equal((await getDoc(doc(userDb, dest + '/customWorlds/private-study/words/private-word'))).data().userId, target.uid);
@@ -298,6 +317,16 @@ test('full merge adds stored balances once, preserves evidence and clears the ne
   assert.equal(savedMastery.bank.mastery_status, 'Reviewing');
   assert.equal(savedMastery.river.mastery_status, 'Learning');
   assert.equal((await getDoc(doc(userDb, gateProgress(dest, 'first')))).data().status, 'cleared');
+  const migratedLesson = (await getDoc(doc(userDb, gateProgress(dest, 'second') + '/lesson/progress'))).data();
+  assert.equal(migratedLesson.version, 2);
+  assert.deepEqual(migratedLesson.completedWordIds, ['term']);
+  assert.deepEqual(migratedLesson.legacyCompletedIds, ['term']);
+  const importedRepair = lesson.upgrade((await getDoc(doc(userDb, gateProgress(dest, 'first') + '/lesson/progress'))).data());
+  assert.deepEqual(importedRepair.study.hinted, ['term']);
+  assert.equal(importedRepair.study.applications.term, 'assisted');
+  assert.equal(importedRepair.study.misses.term, 'revealed');
+  assert.equal(lesson.stepAt(repairPlan, importedRepair).phase, 'reinforce');
+  await denied(getDoc(doc(outsider.db, gateProgress(dest, 'first') + '/lesson/progress')));
   assert.equal((await getDoc(doc(userDb, dest + '/contentProgress/' + worldId))).data().activeGateId, 'second');
   assert.equal((await getDoc(doc(userDb, dest + '/contentWords/bank/evidence/' + previousEvent))).data().occurredAt.toMillis(), past.getTime());
   assert.equal((await getDoc(doc(userDb, dest + '/contentWords/bank'))).data().eligibleEvidenceCount, 2);
@@ -320,7 +349,7 @@ test('full merge adds stored balances once, preserves evidence and clears the ne
   };
   const window = { LootLinguaPublishedContent: fixture, addEventListener() {}, dispatchEvent() {} };
   const env = { window, document: { readyState: 'loading' }, getApps: () => [app], ...sdk, ...firestore };
-  for (const name of ['content-schema', 'journey', 'learning-evidence', 'word-lifecycle', 'gate-clear', 'placement', 'level-placement', 'journey-cloud']) {
+  for (const name of ['content-schema', 'journey', 'learning-evidence', 'word-lifecycle', 'gate-clear', 'gate-lesson', 'placement', 'level-placement', 'journey-cloud']) {
     const code = readFileSync(new URL('../js/' + name + '.js', import.meta.url), 'utf8').replace(/^import\s+[^;]+;\s*/gm, '');
     new Function(...Object.keys(env), code)(...Object.values(env));
   }

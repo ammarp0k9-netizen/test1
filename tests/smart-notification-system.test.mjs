@@ -32,8 +32,7 @@ function memoryStorage() {
   };
 }
 
-function loadSystem() {
-  const localStorage = memoryStorage();
+function loadSystem(localStorage = memoryStorage()) {
   const root = {
     dispatchEvent() {},
     addEventListener() {},
@@ -639,4 +638,87 @@ test('static integration wires v3 store/cloud/runtime, contextual CTA, trusted g
   assert.match(xpSource, /previousLocalDateKey/);
   assert.match(worldsSource, /previousLocalDateKey/);
   assert.match(quizRuntimeSource, /lootlingua:trusted-quiz-completed/);
+});
+
+test('an incomplete lesson has one bell-only occurrence per saved inactivity period', () => {
+  const { engine, store } = loadSystem();
+  const context = { worldId: 'world', rankId: 'rank', gateId: 'gate' };
+  const activityAt = Date.now() - engine.DAY * 2;
+  const reminder = { ...context, episodeKey: 'after-four', activityAt };
+  const facts = baseFacts({ gateLesson: { ...context, allowed: false },
+    lessonReminder: reminder, lessonReminderConfirmed: true });
+  const options = offset => ({ now: activityAt + engine.DAY + offset, ownerId: 'guest' });
+  assert.equal(engine.evaluate(facts, [], options(-1)).upserts.length, 0);
+  assert.equal(engine.evaluate({ ...facts, lessonReminderDeferred: true }, [], options(1)).upserts.length, 0);
+  assert.equal(engine.evaluate({ ...facts, lessonReminderConfirmed: false }, [], options(1)).upserts.length, 0);
+  const eligible = engine.evaluate(facts, [], options(0));
+  assert.equal(eligible.selected, null);
+  const [record] = eligible.upserts;
+  assert.equal(record.cta.id, 'resume-gate-lesson');
+  assert.equal(record.cta.args.gateId, 'gate');
+  store.upsert(record);
+  store.dismiss([record.id], options(1).now);
+  store.upsertMany(engine.evaluate(facts, store.getAll(), options(2)).upserts);
+  assert.equal(store.find(record.id).status, 'dismissed');
+  const newFacts = { ...facts, lessonReminder: { ...reminder, episodeKey: 'after-five', activityAt: activityAt + 100 } };
+  const next = engine.evaluate(newFacts, store.getAll(), options(100));
+  assert.notEqual(next.upserts[0].id, record.id);
+  const completion = engine.evaluate({ ...facts, lessonReminder: null, gateLesson: { ...context, allowed: true } },
+    next.upserts, options(200));
+  assert.equal(completion.resolutions[0].id, next.upserts[0].id);
+});
+
+test('two tabs and delayed synchronization retain one lesson reminder and its dismissal for the original owner', () => {
+  const disk = memoryStorage();
+  const first = loadSystem(disk), second = loadSystem(disk);
+  const kind = 'reminder.gate.lesson';
+  const occurrenceKey = kind + ':world:rank:gate:episode';
+  const shared = { kind: 'smart', notificationType: kind, occurrenceKey, status: 'active' };
+  for (const tab of [first, second]) tab.store.switchOwner('A');
+  first.store.upsert(shared);
+  const id = first.store.find(occurrenceKey).id;
+  second.store.upsert(shared);
+  second.store.dismiss([id]);
+  first.store.mergeCloud([{ ...shared, id, ownerId: 'A', updatedAt: Date.now() + 10_000 }]);
+  assert.equal(first.store.getAll().length, 1);
+  assert.equal(first.store.find(id).status, 'dismissed');
+  first.store.switchOwner('B');
+  assert.equal(first.store.getAll().length, 0);
+  first.store.switchOwner('guest');
+  assert.equal(first.store.getAll().length, 0);
+  first.store.switchOwner('A');
+  assert.equal(first.store.find(occurrenceKey).status, 'dismissed');
+});
+
+test('saved explicitly scoped gate notices are checked again on click while overlapping personal notices stay independent', async () => {
+  const gate = { worldId: 'w', rankId: 'r', gateId: 'g' };
+  const h = loadRuntimeHarness(baseFacts({ now: Date.now(), gateLesson: { ...gate, allowed: false } }), {
+    dueWordKeys: ['shared-word'],
+  });
+  h.root.LootLinguaGateLesson = {
+    gateContext: args => args?.source === 'gate-gap:w~r~g' ? gate : args?.gateId ? args : null,
+    hasGateIntent: args => args.source === 'gate-gap:w~r~g',
+  };
+  let opened = 0, personal = null, current = false;
+  h.root.LootLinguaJourneyCloud = { async getGateLessonAccess() { return { allowed: current }; } };
+  h.root.openPublishedGate = () => { opened++; };
+  h.root.startNotificationWordReview = keys => { personal = keys; return true; };
+  h.store.upsert({ id: 'old', occurrenceKey: 'old', status: 'active',
+    cta: { id: 'start-quiz', label: 'ابدأ', args: { source: 'gate-gap:w~r~g' } } });
+  h.store.upsert({ id: 'personal', occurrenceKey: 'personal', status: 'active',
+    cta: { id: 'review-due', label: 'راجع', args: { source: 'personal', wordKey: 'shared-word' } } });
+  const runtime = h.root.LootLinguaNotificationRuntime;
+  await runtime.evaluate();
+  assert.equal(runtime.canDisplayGateAction(h.store.find('old')), false);
+  assert.equal(runtime.canDisplayGateAction(h.store.find('personal')), true);
+  assert.equal(await h.root.handleNotificationAction('old'), false);
+  assert.equal(h.store.find('old').readAt, 0);
+  assert.equal(await h.root.handleNotificationAction('personal'), true);
+  assert.deepEqual(personal, ['shared-word']);
+  current = true;
+  await h.root.handleNotificationAction('old');
+  assert.equal(opened, 1);
+  h.root.hasActiveLearningQuiz = () => true;
+  assert.equal(await h.root.handleNotificationAction('old'), false);
+  assert.equal(opened, 1);
 });

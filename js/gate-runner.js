@@ -257,6 +257,11 @@
       return false;
     }
     const owner = captureRunnerOwner();
+    if (context?.source !== 'dictionary') {
+      if (!context?.worldId || !context.rankId || !context.gateId ||
+          !(await window.LootLinguaJourneyCloud?.getGateLessonAccess(context).catch(() => null))?.allowed ||
+          !runnerOwnerCurrent(owner)) return false;
+    }
     if (launchPending && runnerOwnerCurrent(launchPending.owner)) return false;
     if (practiceLocked(context) || (context?.isCurrent && !context.isCurrent())) return false;
     const operation = { owner }; launchPending = operation;

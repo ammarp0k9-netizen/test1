@@ -85,6 +85,7 @@ async function writeOne(record, expectedUid) {
   const target = doc(db, 'users', user.uid, 'notifications', String(record.id));
   await runTransaction(db, async (transaction) => {
     const snapshot = await transaction.get(target);
+    if (auth.currentUser?.uid !== expectedUid) return;
     const merged = snapshot.exists()
       ? window.LootLinguaNotificationStore.mergePair(snapshot.data(), record, user.uid)
       : window.LootLinguaNotificationStore.normalizeRecord(record, user.uid);
@@ -99,7 +100,7 @@ async function writeRecords(values) {
   if (!user) return false;
   const uid = user.uid;
   const unique = [...new Map((Array.isArray(values) ? values : [])
-    .filter((record) => record?.id)
+    .filter((record) => record?.id && record.ownerId === uid)
     .map((record) => [String(record.id), record])).values()];
   for (const record of unique) await writeOne(record, uid);
   return true;

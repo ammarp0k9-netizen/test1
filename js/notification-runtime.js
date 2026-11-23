@@ -22,6 +22,12 @@
     return String(root.auth?.currentUser?.uid || 'guest');
   }
 
+  function learningInFront() {
+    return Boolean(root.__entryExperienceActive || root.LootLinguaGateLessonView?.isOpen?.() ||
+      root.hasActiveLearningQuiz?.() || document.body?.matches?.('.published-placement-mode, .quiz-active') ||
+      root.LootLinguaSmartOnboarding?.quizInFront?.());
+  }
+
   function clearWakeTimer() {
     clearTimeout(wakeTimer);
     wakeTimer = null;
@@ -52,7 +58,11 @@
       return null;
     }
     if (generation !== evaluationGeneration || currentOwner() !== ownerId) return null;
-    lastFacts = facts;
+    const previous = lastFacts;
+    facts.lessonReminderDeferred = learningInFront();
+    lastFacts = { ...facts, ownerId };
+    const gateAccessChanged = JSON.stringify([previous?.gateLesson, previous?.lessonReminder, previous?.lessonReminderDeferred]) !==
+      JSON.stringify([facts.gateLesson, facts.lessonReminder, facts.lessonReminderDeferred]);
     root.refreshQuizPracticeAvailability?.();
     const isSessionLikeReturn = reason === 'foreground' || reason === 'visible-wake';
     const canTryUrgentReentry = sessionProminentClaimed &&
@@ -63,14 +73,15 @@
     const result = engine.evaluate(facts, store.getAll(), {
       ownerId,
       now: facts.now,
-      allowProminent: !sessionProminentClaimed || canTryUrgentReentry,
+      allowProminent: !facts.lessonReminderDeferred && (!sessionProminentClaimed || canTryUrgentReentry),
       minProminentPriority: canTryUrgentReentry ? URGENT_REENTRY_PRIORITY : 0,
       excludeProminentOccurrenceKeys: canTryUrgentReentry ? [...eligibleAtInitialProminent] : [],
     });
     result.resolutions.forEach((resolution) => {
       store.resolve(resolution.id, resolution.reason, facts.now);
     });
-    store.upsertMany(result.upserts, { reason: `engine:${reason}` });
+    store.upsertMany(result.upserts, { reason: 'engine:' + reason });
+    if (gateAccessChanged) store.refreshVisibility?.();
     if (result.selected) {
       const record = result.selected.record;
       if (!sessionProminentClaimed) {
@@ -117,17 +128,34 @@
   async function handleAction(notificationId, event) {
     event?.preventDefault?.();
     event?.stopPropagation?.();
+    const ownerId = currentOwner();
     const record = store.find(notificationId);
-    if (!record || record.status !== 'active') return false;
-    store.markVisibleRead([record.id]);
+    if (!record || record.ownerId !== ownerId || record.status !== 'active' || learningInFront()) return false;
     const action = String(record.cta?.id || '');
-    if (['review-due', 'practice-new-words', 'practice-weak-words', 'practice-gate-gap'].includes(action)) {
-      const ownerId = currentOwner();
+    const gate = gateAction(record);
+    if (root.LootLinguaGateLesson && (gate || action === 'resume-gate-lesson')) {
+      const context = gate?.context || contextFor(record);
+      if (!context) return false;
+      const access = await root.LootLinguaJourneyCloud?.getGateLessonAccess?.(context).catch(() => null);
+      if (currentOwner() !== ownerId || learningInFront() || store.find(record.id)?.status !== 'active') return false;
+      if (action === 'resume-gate-lesson') {
+        const reminder = access?.confirmed ? sources.lessonReminder(context, access) : null;
+        if (!matchesReminder(record, reminder, Date.now())) { requestEvaluation('stale-lesson'); return false; }
+        root.closeNotificationsPanel?.();
+        const opened = await root.resumePublishedGateLesson?.(context, ownerId);
+        if (opened && currentOwner() === ownerId) store.markVisibleRead([record.id]);
+        else requestEvaluation('stale-lesson');
+        return opened === true;
+      }
+      if (!access?.allowed) { requestEvaluation('stale-gate'); return false; }
+    }
+    store.markVisibleRead([record.id]);
+    if ((!gate && ['review-due', 'practice-new-words', 'practice-weak-words'].includes(action)) || action === 'practice-gate-gap') {
       if (await root.LootLinguaDictionaryPages?.requireComplete() === false) return false;
       await sources.collect({ ownerId, now: Date.now(), reason: 'review-action' });
-      if (currentOwner() !== ownerId) return false;
+      if (currentOwner() !== ownerId || learningInFront()) return false;
     }
-    const args = record.cta?.args || record.context || {};
+    const args = gate?.context || { ...record.context, ...record.cta?.args };
     let handled = true;
     if (action === 'open-treasure') root.loadTreasureView?.();
     else if (action === 'open-motivation-rewards') root.LootLinguaMotivation?.openHistory?.();
@@ -137,6 +165,9 @@
       handled = await root.LootLinguaEntryExperienceController?.consumePendingJourneyIntent?.({ explicitDiscovery: true }) === true;
       if (handled) store.resolve(record.id, 'public-world-resumed');
       else { root.loadWorldsView?.(); handled = true; }
+    }
+    else if (gate?.context && ['start-quiz', 'resume-learning', 'review-due', 'practice-new-words', 'practice-weak-words'].includes(action)) {
+      await root.openPublishedGate?.(args.worldId, args.rankId, args.gateId);
     }
     else if (action === 'review-due') handled = startWordReview('due');
     else if (action === 'practice-new-words') handled = startWordReview('new');
@@ -151,7 +182,7 @@
       const context = sources.getActionContext();
       handled = await root.startGateGapReview?.(context.gateWordKeys, args) !== false;
     } else if (action === 'start-quiz' || action === 'resume-learning') {
-      root.loadQuizView?.({ skipResume: false });
+      root.loadQuizView?.({ skipResume: true });
     } else if (['open-ready-gate', 'open-unlocked-content'].includes(action)) {
       if (root.openPublishedGate && args.worldId && args.rankId && args.gateId) {
         await root.openPublishedGate(args.worldId, args.rankId, args.gateId);
@@ -182,26 +213,86 @@
     'lootlingua:word-mastery-changed',
     'lootlingua:word-mastery-snapshot',
     'lootlingua:journey-changed',
+    'lootlingua:gate-lesson-changed',
+    'lootlingua:gate-lesson-closed',
+    'lootlingua:quiz-mode-changed',
+    'lootlingua:surface-ready',
     'lootlingua:journey-cloud-ready',
     'lootlingua:trusted-quiz-completed',
     'lootlingua:learning-data-changed',
     'lootlingua:dictionary-page-state',
     'lootlingua:test-clock-changed',
   ];
-  events.forEach((name) => root.addEventListener(name, () => requestEvaluation(name)));
+  events.forEach((name) => root.addEventListener(name, () => {
+    if (name === 'lootlingua:gate-lesson-closed' || name === 'lootlingua:quiz-mode-changed') store.refreshVisibility?.();
+    requestEvaluation(name);
+  }));
   root.addEventListener('lootlingua:auth-state', () => {
     evaluationGeneration += 1;
+    if (store.currentOwner() !== currentOwner()) {
+      lastFacts = null;
+      sessionProminentClaimed = false;
+      urgentProminentOverrideClaimed = false;
+      eligibleAtInitialProminent.clear();
+    }
     clearWakeTimer();
     store.switchOwner(currentOwner());
     requestEvaluation('auth-switch', 250);
+  });
+  root.addEventListener('storage', event => {
+    if (event.key?.startsWith('lootlingua:gate-lesson:v1:' + currentOwner() + ':')) {
+      store.refreshVisibility?.();
+      requestEvaluation('lesson-other-tab');
+    }
   });
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState === 'visible') requestEvaluation('foreground', 50);
     else clearWakeTimer();
   });
 
+  function contextFor(record) {
+    const contract = root.LootLinguaGateLesson;
+    const args = { ...record.context, ...record.cta?.args };
+    return contract?.gateContext(args) || contract?.gateContext(args.officialReviewGate) || null;
+  }
+
+  function gateAction(record) {
+    const contract = root.LootLinguaGateLesson;
+    const args = { ...record.context, ...record.cta?.args };
+    const knownAction = ['practice-gate', 'practice-gate-gap', 'open-ready-gate'].includes(record.cta?.id);
+    const knownType = [engine.TYPE.GATE_REVIEW, engine.TYPE.GATE_PRACTICE, engine.TYPE.GATE_READY].includes(record.notificationType);
+    const explicitSource = ['start-quiz', 'resume-learning', 'review-due', 'practice-new-words', 'practice-weak-words'].includes(record.cta?.id) &&
+      contract?.hasGateIntent(args);
+    return knownAction || knownType || explicitSource ? { context: contextFor(record) } : null;
+  }
+
+  function sameGate(left, right) {
+    return Boolean(left && right && left.worldId === right.worldId && left.rankId === right.rankId && left.gateId === right.gateId);
+  }
+
+  function matchesReminder(record, reminder, now) {
+    return sameGate(contextFor(record), reminder) && record.context?.episodeKey === reminder.episodeKey &&
+      now >= reminder.activityAt + engine.DAY;
+  }
+
+  function canDisplayGateAction(record) {
+    const gate = gateAction(record);
+    const reminder = record.cta?.id === 'resume-gate-lesson';
+    if (!gate && !reminder) return true;
+    if (!root.LootLinguaGateLesson) return true;
+    if (record.ownerId !== currentOwner() || lastFacts?.ownerId !== currentOwner()) return false;
+    if (reminder) {
+      return lastFacts.lessonReminderConfirmed && Boolean(lastFacts.lessonReminder) && !learningInFront() &&
+        sameGate(contextFor(record), lastFacts.gateLesson) && matchesReminder(record,
+          sources.lessonReminder(lastFacts.gateLesson, lastFacts.lessonAccess), Date.now());
+    }
+    return Boolean(lastFacts.gateLesson?.allowed && sameGate(gate.context, lastFacts.gateLesson));
+  }
+
   const API = Object.freeze({
     evaluate,
+    canDisplayGateAction,
+    learningInFront,
     requestEvaluation,
     getLastFacts: () => lastFacts ? { ...lastFacts } : null,
     hasClaimedProminent: () => sessionProminentClaimed,

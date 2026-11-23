@@ -22,6 +22,7 @@ function createHarness(options = {}) {
   const controls = {
     failNextOutcomeCommit: false,
     failProgressProjection: false,
+    requireClosedPlacementForProjection: false,
     failWorldRefresh: false,
     failReadinessProjection: false,
     readinessProjectionFailures: 0,
@@ -72,6 +73,9 @@ function createHarness(options = {}) {
       const error = new Error('Injected projection failure');
       error.code = 'unavailable';
       throw error;
+    }
+    if (projectsGate && controls.requireClosedPlacementForProjection) {
+      assert.equal(values.get(sessionPath)?.status, 'completed');
     }
     if (appliesOutcome) controls.outcomeCommitCount += 1;
     writes.forEach((write) => {
@@ -409,6 +413,30 @@ test('actual cloud flow keeps an atomic outcome authoritative when projection an
   assert.equal(afterSignIn.gate.gateId, 'gate-b1');
 });
 
+test('the browser applies a protected failure receipt instead of a saved claim of passing', async () => {
+  const harness = createHarness();
+  const session = harness.values.get(harness.sessionPath);
+  harness.values.set(harness.sessionPath, { ...session, placementVersion: 2, passedLevel: true });
+  harness.values.set(`${harness.journeyPath}/levelPlacementOutcomeReceipts/assessment-a2`, {
+    sessionResult: {
+      status: 'completed', resultApplied: true, passedLevel: false, passedRankIds: [],
+      resultStartRankId: 'rank-a2', resultStartGateId: 'old-gate', resultClearedGateIds: []
+    },
+    journeyResult: {
+      activeLevelPlacementAssessmentId: '', activeLevelPlacementCefrLevel: '',
+      levelPlacementStatus: 'completed', levelPlacementAssessmentIds: { A2: 'assessment-a2' },
+      activeRankId: 'rank-a2', activeGateId: 'old-gate', passedCefrLevels: ['A1']
+    }
+  });
+  const result = await harness.api.applyPlacementOutcome('world-a', 'assessment-a2');
+  assert.equal(result.session.passedLevel, false);
+  assert.equal(result.session.status, 'completed');
+  assert.equal(harness.values.get(harness.journeyPath).activeGateId, 'old-gate');
+  assert.deepEqual(harness.values.get(harness.journeyPath).passedCefrLevels, ['A1']);
+  await harness.api.applyPlacementOutcome('world-a', 'assessment-a2');
+  assert.equal(harness.controls.outcomeCommitCount, 1);
+});
+
 test('actual perfect new-ranks flow clears both new ranks and advances to order-zero A2', async () => {
   const harness = createHarness({ newRanks: true });
   const result = await harness.api.applyPlacementOutcome('world-a', 'assessment-a2');
@@ -469,6 +497,34 @@ test('actual final-answer retry resumes the saved outcome and applies it exactly
   const repeated = await harness.api.applyPlacementOutcome('world-a', 'assessment-a2');
   assert.equal(repeated.session.resultApplied, true);
   assert.equal(harness.controls.outcomeCommitCount, 1);
+});
+
+test('a previously applied paused result closes before projecting its gates without awarding the result again', async () => {
+  const harness = createHarness();
+  harness.controls.failProgressProjection = true;
+  await harness.api.applyPlacementOutcome('world-a', 'assessment-a2');
+  const session = harness.values.get(harness.sessionPath);
+  const before = { ...session, status: 'paused', completedAt: null, pausedAt: new Date() };
+  harness.values.set(harness.sessionPath, before);
+  harness.values.set(harness.journeyPath, {
+    ...harness.values.get(harness.journeyPath),
+    levelPlacementStatus: 'paused',
+    activeLevelPlacementAssessmentId: 'assessment-a2',
+    activeLevelPlacementCefrLevel: 'A2'
+  });
+  harness.controls.failProgressProjection = false;
+  harness.controls.requireClosedPlacementForProjection = true;
+  harness.api.invalidate('all');
+
+  const result = await harness.api.continueLevelPlacement('world-a');
+  assert.equal(result.session.status, 'completed');
+  assert.equal(result.sessionReconciliationError, null);
+  assert.equal(result.progressReconciliationError, null);
+  assert.equal(harness.controls.outcomeCommitCount, 1);
+  const saved = harness.values.get(harness.sessionPath);
+  assert.deepEqual(saved.answers, before.answers);
+  assert.deepEqual(saved.resultClearedGateIds, before.resultClearedGateIds);
+  assert.equal(harness.values.get(`${harness.journeyPath}/ranks/rank-a2/gates/old-gate`).status, 'cleared');
 });
 
 test('actual word flow upgrades legacy snapshots, retries pending only, and keeps defer/skip independent', async () => {
@@ -575,6 +631,13 @@ test('a stale completed pointer yields to another genuinely actionable active Wo
 
 test('ordinary quiz evidence success is not reported as result failure when readiness projection fails', async () => {
   const harness = createHarness();
+  const journey = harness.values.get(harness.journeyPath);
+  harness.values.set(harness.journeyPath, { ...journey, activeLevelPlacementAssessmentId: '',
+    placementStatus: 'declined', levelPlacementStatus: 'completed' });
+  assert.equal((await harness.api.getActiveJourney())?.activeGateId, 'old-gate');
+  const gate = await harness.api.getGateProgress('world-a', 'rank-a2', 'old-gate');
+  assert.equal(gate?.status, 'learning');
+  assert.deepEqual(gate.loadedWordKeys, ['old-word-key']);
   const identity = harness.root.LootLinguaContentSchema.normalizeWordIdentity({ word: 'Apple' });
   harness.values.set(`users/flow-user/contentWords/${identity.wordKey}`, {
     canonicalId: identity.wordKey,
@@ -596,7 +659,7 @@ test('ordinary quiz evidence success is not reported as result failure when read
     completed: true,
     entries: [{
       word: { word: 'Apple', wordKey: identity.wordKey },
-      result: { correct: true, answeredAt: Date.now() },
+      result: { correct: true, answeredAt: Date.now(), submittedAnswer: 'legacy-apple' },
     }],
   };
   const result = await harness.api.recordQuizEvidenceBatch(input);

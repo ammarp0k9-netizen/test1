@@ -8,6 +8,7 @@
     STREAK_RISK: 'reminder.streak.risk',
     REVIEW_DUE: 'reminder.review.due',
     GATE_REVIEW: 'reminder.gate.review',
+    RESUME_LESSON: 'reminder.gate.lesson',
     GATE_PRACTICE: 'reminder.gate.practice',
     WORDS_NEW: 'reminder.words.new',
     QUIZ_INACTIVE: 'reminder.quiz.inactive',
@@ -25,6 +26,7 @@
     [TYPE.STREAK_RISK]: { priority: 95, actionGroup: 'practice', delay: 0, maxShows: 2 },
     [TYPE.REVIEW_DUE]: { priority: 78, actionGroup: 'review', delay: 4 * HOUR, maxShows: 3 },
     [TYPE.GATE_REVIEW]: { priority: 90, actionGroup: 'gate-review', delay: 0, maxShows: 1 },
+    [TYPE.RESUME_LESSON]: { priority: 64, actionGroup: 'gate-lesson', delay: DAY, maxShows: 0 },
     [TYPE.GATE_PRACTICE]: { priority: 66, actionGroup: 'gate-practice', delay: 21 * HOUR, maxShows: 2 },
     [TYPE.WORDS_NEW]: { priority: 48, actionGroup: 'new-words', delay: 30 * HOUR, maxShows: 1 },
     [TYPE.QUIZ_INACTIVE]: { priority: 58, actionGroup: 'practice', delay: 4 * DAY, maxShows: 2 },
@@ -92,6 +94,10 @@
       }
       case TYPE.REVIEW_DUE:
         return { title: 'مراجعاتك بانتظارك', message: `لديك ${context.dueCount} كلمات مستحقة للمراجعة. جلسة قصيرة الآن تمنع تراكمها.`, cta: ['review-due', 'راجع الآن'], visualType: context.severe ? 'danger' : 'warning' };
+      case TYPE.RESUME_LESSON:
+        return { title: 'باقي عندك كلمات تتعلّمها', message: context.gateLabel
+          ? 'تقدر تكمل درس «' + context.gateLabel + '» من مكان ما وقفت.' : 'تقدر تكمل الدرس من مكان ما وقفت.',
+          cta: ['resume-gate-lesson', 'أكمل تعلّم كلماتك'], visualType: 'info' };
       case TYPE.GATE_REVIEW:
         return { title: 'حان وقت مراجعة البوابة', message: `المراجعة الرسمية متاحة في بوابة ${context.gateLabel || 'رحلتك الحالية'}. أكمل اختبارًا موثوقًا لتتقدم نحو فتح البوابة التالية.`, cta: ['open-ready-gate', 'افتح البوابة'], visualType: 'warning' };
       case TYPE.GATE_PRACTICE:
@@ -101,7 +107,7 @@
       case TYPE.QUIZ_INACTIVE:
         return { title: 'حان وقت اختبار قاموسك', message: 'اختر اختبارًا موثوقًا من صفحة الاختبار لقياس مستواك ورفع إتقان كلمات قاموسك الشخصي.', cta: ['start-quiz', 'افتح الاختبار'], visualType: 'info' };
       case TYPE.JOURNEY_NEXT_STEP:
-        return { title: 'مهمتك التالية جاهزة', message: `بوابة ${context.gateLabel || 'رحلتك الحالية'} متاحة. افتحها وحمّل كلماتها لتبدأ المهمة.`, cta: ['open-journey-target', 'افتح المهمة'], visualType: 'info' };
+        return { title: 'مهمتك التالية جاهزة', message: `بوابة ${context.gateLabel || 'رحلتك الحالية'} متاحة. افتحها لتبدأ تعلّم كلماتها.`, cta: ['open-journey-target', 'افتح المهمة'], visualType: 'info' };
       case TYPE.JOURNEY_INACTIVE:
         return { title: 'رحلتك تنتظرك', message: `بوابة ${context.gateLabel || 'رحلتك الحالية'} ما زالت قابلة للتقدم. عُد بخطوة صغيرة.`, cta: ['open-journey-target', 'تابع الرحلة'], visualType: 'info' };
       case TYPE.GATE_READY:
@@ -211,6 +217,14 @@
       });
     }
 
+    const lesson = facts.lessonReminder;
+    if (lesson?.episodeKey && lesson.gateId && numeric(lesson.activityAt) &&
+        now >= numeric(lesson.activityAt) + TABLE[TYPE.RESUME_LESSON].delay) {
+      rules.push({ type: TYPE.RESUME_LESSON,
+        key: occurrence(TYPE.RESUME_LESSON, lesson.worldId, lesson.rankId, lesson.gateId, lesson.episodeKey),
+        since: numeric(lesson.activityAt), context: lesson });
+    }
+
     const gateReview = facts.gateReview;
     if (gateReview?.due && gateReview.gateId) {
       const { worldId, rankId, gateId, gateLabel, episodeKey } = gateReview;
@@ -234,7 +248,7 @@
       });
     }
 
-    if (facts.journey.actionable && journeyAnchor && now - journeyAnchor >= 3 * DAY) {
+    if (!lesson && facts.journey.actionable && journeyAnchor && now - journeyAnchor >= 3 * DAY) {
       rules.push({
         type: TYPE.JOURNEY_INACTIVE,
         key: openKey(TYPE.JOURNEY_INACTIVE, occurrence(TYPE.JOURNEY_INACTIVE, facts.journey.worldId, facts.journey.rankId, facts.journey.gateId, journeyAnchor)),
@@ -434,6 +448,10 @@
       [TYPE.GATE_PRACTICE, TYPE.GATE_REVIEW, TYPE.GATE_READY, TYPE.JOURNEY_NEXT_STEP, TYPE.JOURNEY_INACTIVE, TYPE.CONTENT_UNLOCKED]
         .forEach((type) => deferredTypes.add(type));
     }
+    if (facts.gateLesson && !facts.gateLesson.allowed) {
+      [TYPE.GATE_PRACTICE, TYPE.GATE_REVIEW, TYPE.GATE_READY].forEach(type => deferredTypes.add(type));
+    }
+    if (!facts.lessonReminderConfirmed || facts.lessonReminderDeferred) deferredTypes.add(TYPE.RESUME_LESSON);
     if (facts.vault?.complete === false) deferredTypes.add(TYPE.CHEST_READY);
     const raw = rawRules(facts).filter(rule => !deferredTypes.has(rule.type)).map((rule) => {
       const open = currentRecord(existing, rule.key);
@@ -461,6 +479,7 @@
     const visibleAlive = new Set(rules.map((rule) => rule.key));
     const resolutions = existing.filter((record) => (
       record?.kind === 'smart' && Object.hasOwn(TABLE, record.notificationType) && !deferredTypes.has(record.notificationType) &&
+      (record.notificationType !== TYPE.RESUME_LESSON || sameGate(record, { context: facts.gateLesson })) &&
       ['pending', 'active'].includes(record.status) && !visibleAlive.has(clean(record.occurrenceKey))
     )).map((record) => ({
       id: record.id,
@@ -494,7 +513,9 @@
       selected.record.updatedAt = now;
     }
     const upserts = evaluated.map((item) => item.record);
-    const nextAt = Math.min(...[numeric(facts.vault?.nextAt), numeric(facts.gateReview?.nextAt), personalQuizDueAt(facts.quiz, facts.wordCount), ...evaluated.map((item) => {
+    const lessonAt = numeric(facts.lessonReminder?.activityAt);
+    const lessonDueAt = lessonAt ? lessonAt + TABLE[TYPE.RESUME_LESSON].delay : 0;
+    const nextAt = Math.min(...[lessonDueAt, numeric(facts.vault?.nextAt), numeric(facts.gateReview?.nextAt), personalQuizDueAt(facts.quiz, facts.wordCount), ...evaluated.map((item) => {
       if (item.record.status === 'pending') return item.record.eligibleAt;
       if (item.record.notificationType === TYPE.STREAK_RISK) return now + 15 * 60 * 1000;
       return Infinity;

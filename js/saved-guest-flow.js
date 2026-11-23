@@ -85,6 +85,11 @@ export function createSavedGuestFlow({ app, appSdk, auth, sdk, guestAuth, emulat
       const user = await sessions.continueAsTarget(current.selection);
       active = null;
       dialog.close();
+      if (action === 'merge') {
+        window.dispatchEvent(new CustomEvent('lootlingua:saved-guest-merged', {
+          detail: { sourceUid: current.selection.source.uid, targetUid: user.uid },
+        }));
+      }
       await onAuthenticated(user, action);
     } catch (error) {
       const message = error?.code === 'guest-saved/session-changed'

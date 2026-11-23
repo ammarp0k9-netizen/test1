@@ -87,8 +87,9 @@
     content="#090c0f"
   >
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
-  <link rel="stylesheet" href="style.css?v=quiz-classification-1">
+  <link rel="stylesheet" href="style.css?v=guide-sections-2">
   <link rel="stylesheet" href="entry-experience.css?v=20261104-world-guide-4">
+  <link rel="stylesheet" href="gate-lesson.css?v=flow-1">
   <link rel="stylesheet" href="motivation.css?v=20261106-motivation-1">
   <link rel="stylesheet" href="glass-theme.css?v=20261106-materials-1">
   <link rel="stylesheet" href="saved-guest.css?v=full-merge-1">
@@ -860,6 +861,44 @@
           <span>اختصارات لوحة المفاتيح</span>
           <small>دليل سريع</small>
         </button>
+        <details class="profile-guide" id="lootlinguaGuide">
+          <summary class="auth-btn profile-auth-btn profile-settings-btn">
+            <i class="fa-solid fa-book-open" aria-hidden="true"></i>
+            <span>دليل LootLingua</span>
+          </summary>
+          <button type="button" class="profile-guide-start" data-guide-start>ابدأ جولة التعريف</button>
+          <div class="profile-guide-topics">
+            <details data-guide-topics="worlds"><summary><span>اختيار عالم</span><small class="profile-guide-status"></small></summary><p>العوالم قواميس جاهزة لمجالات مختلفة. اختر المجال الذي تحبّه وتعلّم كلماته.</p></details>
+            <details data-guide-topics="gate-start"><summary><span>بدء أول بوابة</span><small class="profile-guide-status"></small></summary><p>اضغط «ابدأ من البداية» لتفتح أول بوابة في العالم الذي اخترته.</p></details>
+            <details data-guide-topics="lesson"><summary><span>تعلّم كلمات البوابة</span><small class="profile-guide-status"></small></summary><p>اسمع اللفظ وافهم المعنى، ثم جرّب وتذكّر. اضغط «احفظ واخرج» لتعود إلى موضعك.</p></details>
+            <details data-guide-topics="gate-review"><summary><span>مراجعة البوابة</span><small class="profile-guide-status"></small></summary><p>بعد الدرس، اضغط «ابدأ المراجعة الرسمية» عندما تصبح متاحة على صفحة البوابة.</p></details>
+            <details data-guide-topics="gate-wait"><summary><span>موعد مراجعة البوابة</span><small class="profile-guide-status"></small></summary><p>إذا بقي وقت على المراجعة، يظهر موعدها في صفحة البوابة.</p></details>
+            <details data-guide-topics="dictionary"><summary><span>قاموسي الشخصي</span><small class="profile-guide-status"></small></summary><p>يجمع قاموسك كلمات العوالم والكلمات التي تختار إضافتها بنفسك.</p></details>
+            <details data-guide-topics="search"><summary><span>البحث عن معنى</span><small class="profile-guide-status"></small></summary><p>اكتب كلمة واضغط «ابحث عن معنى» لترى الخيارات المتاحة.</p></details>
+            <details data-guide-topics="meaning"><summary><span>اختيار المعنى</span><small class="profile-guide-status"></small></summary><p>قد يكون للكلمة أكثر من معنى. اختر المعنى الذي يناسب استخدامها.</p></details>
+            <details data-guide-topics="manual-meaning"><summary><span>كتابة المعنى يدويًا</span><small class="profile-guide-status"></small></summary><p>إذا لم تجد المعنى المقصود، افتح الحقول الإضافية واكتبه بنفسك.</p></details>
+            <details data-guide-topics="save"><summary><span>حفظ كلمة</span><small class="profile-guide-status"></small></summary><p>بعد اختيار المعنى أو كتابته، اضغط «إضافة للقاموس».</p></details>
+            <details data-guide-topics="starred"><summary><span>الكلمات ذات النجمة</span><small class="profile-guide-status"></small></summary><p>ضع نجمة على كلمة لتجدها بسرعة في «الكلمات الصعبة».</p></details>
+            <details data-guide-topics="custom-worlds"><summary><span>عوالمي الخاصة</span><small class="profile-guide-status"></small></summary><p>أنشئ عالمًا خاصًا لجمع الكلمات التي تحب أن تراجعها معًا.</p></details>
+            <details data-guide-topics="quiz"><summary><span>اختبار القاموس</span><small class="profile-guide-status"></small></summary><p>من صفحة الاختبار يمكنك اختيار نشاط لتراجع كلمات قاموسك.</p></details>
+            <details data-guide-topics="personal-review"><summary><span>مراجعات القاموس</span><small class="profile-guide-status"></small></summary><p>تظهر الكلمات المستحقة للمراجعة ضمن خيارات اختبار القاموس.</p></details>
+            <details data-guide-topics="placement"><summary><span>اختبار المستوى</span><small class="profile-guide-status"></small></summary><p>إذا كنت تعرف بعض كلمات العالم فعلاً، اختر «اختبار المستوى» لتعرف من أين تبدأ.</p></details>
+            <details data-guide-topics="games"><summary><span>الألعاب</span><small class="profile-guide-status"></small></summary><p>تجد Runner وLoot Bots في خيارات اللعب عندما تكون متاحة.</p></details>
+            <details data-guide-topics="notices"><summary><span>الإشعارات والاستكمال</span><small class="profile-guide-status"></small></summary><p>يعرض الجرس المراجعات المتاحة وتذكير الاستكمال. يمكنك فتح الإشعار أو إخفاؤه.</p></details>
+            <details data-guide-topics="quests"><summary><span>مهام اليوم</span><small class="profile-guide-status"></small></summary><p>من زر المهام تابع المطلوب وما أنجزته اليوم.</p></details>
+            <details data-guide-topics="activity"><summary><span>الهدف والسلسلة</span><small class="profile-guide-status"></small></summary><p>يعرض الشريط تقدّمك نحو الهدف وعدد أيام استمرارك.</p></details>
+            <details data-guide-topics="treasure"><summary><span>الكنز</span><small class="profile-guide-status"></small></summary><p>افتح الكنز لتجد المكافآت المتاحة لك.</p></details>
+            <details data-guide-topics="profile"><summary><span>ملفي الشخصي</span><small class="profile-guide-status"></small></summary><p>اضغط صورتك لتجد تقدّمك وإعداداتك.</p></details>
+            <details data-guide-topics="xp"><summary><span>الخبرة</span><small class="profile-guide-status"></small></summary><p>تزيد خبرتك مع تقدّمك في التعلّم والمراجعة.</p></details>
+            <details data-guide-topics="ranks"><summary><span>الرتب</span><small class="profile-guide-status"></small></summary><p>افتح دليل الرتب من ملفك لتعرف ما الذي تفتحه كل رتبة.</p></details>
+            <details data-guide-topics="stats"><summary><span>الإحصائيات</span><small class="profile-guide-status"></small></summary><p>من الملف الشخصي راجع الأرقام المختصرة لتقدّمك.</p></details>
+            <details data-guide-topics="full-stats"><summary><span>الإحصائيات الكاملة</span><small class="profile-guide-status"></small></summary><p>افتح الإحصائيات الكاملة لتجد نشاطك وتقدّم كلماتك عبر الأيام.</p></details>
+            <details data-guide-topics="titles"><summary><span>الألقاب</span><small class="profile-guide-status"></small></summary><p>اختر من ملفك لقبًا سبق أن فتحته بإنجازاتك.</p></details>
+            <details data-guide-topics="appearance"><summary><span>المظهر</span><small class="profile-guide-status"></small></summary><p>غيّر الثيم من قسم المظهر في ملفك.</p></details>
+            <details data-guide-topics="settings"><summary><span>الإعدادات</span><small class="profile-guide-status"></small></summary><p>هنا تجد خيارات الأداء والاهتمامات واختصارات لوحة المفاتيح.</p></details>
+            <details data-guide-topics="account"><summary><span>الحساب</span><small class="profile-guide-status"></small></summary><p>من قسم الحساب يمكنك إدارة جلستك وحفظ تقدّمك.</p></details>
+          </div>
+        </details>
         <button type="button" id="editInterestsBtn" class="auth-btn profile-auth-btn profile-settings-btn" onclick="LootLinguaEntryExperienceController.openSettings('interests')">
           <i class="fa-solid fa-wand-magic-sparkles" aria-hidden="true"></i>
           <span>تعديل اهتماماتي</span>
@@ -1187,11 +1226,11 @@
   <script src="js/guided-first-journey-contract.js?v=20261113-resumable-guide"></script>
   <script src="js/feature-discovery-contract.js?v=20261104-discovery-1"></script>
 <script data-startup-critical src="js/entry-experience-controller.js?v=first-learning-1"></script>
-<script src="js/guided-first-journey-controller.js?v=first-learning-1"></script>
-<script src="js/personal-dictionary-onboarding.js?v=20261114-smart-onboarding"></script>
-  <script src="js/feature-discovery-controller.js?v=20261114-smart-onboarding"></script>
-<script src="js/feature-mini-onboarding.js?v=20261114-smart-onboarding"></script>
-  <script src="js/smart-onboarding.js?v=quiz-classification-1"></script>
+<script src="js/personal-dictionary-onboarding.js?v=guide-final-1"></script>
+  <script src="js/feature-discovery-controller.js?v=guide-discovery-1"></script>
+<script src="js/feature-mini-onboarding.js?v=guide-final-1"></script>
+  <script src="js/smart-onboarding.js?v=guide-sections-2"></script>
+  <script type="module" src="js/lootlingua-guide.js?v=guide-sections-2"></script>
 <script data-startup-critical type="module" src="js/cloud.js?v=full-merge-1"></script>
 <script data-startup-critical type="module" src="js/entry-experience-cloud.js?v=20260808-1"></script>
 <script type="module" src="js/guided-first-journey-cloud.js?v=20260827-1"></script>
@@ -1230,16 +1269,16 @@
 <!-- ══ FIREBASE PROFILE SYNC ══ -->
   <script data-startup-critical type="module" src="js/profile-cloud.js?v=20261114-runner-shop-1"></script>
 <script type="module" src="js/published-content.js?v=20260722-1"></script>
-<script data-startup-critical type="module" src="js/journey-cloud.js?v=gate-review-recovery-2"></script>
+<script data-startup-critical type="module" src="js/journey-cloud.js?v=placement-rules-1"></script>
 <script type="module" src="js/notification-cloud.js?v=20261107-reads-1"></script>
 <script type="module" src="js/feedback.js?v=20261105-feedback-1"></script>
   <script src="js/notification-policy.js?v=20260811-1"></script>
-  <script src="js/notification-store.js?v=20261113-review-guide"></script>
-<script src="js/notification-engine.js?v=20261113-treasure-v1"></script>
-<script src="js/popover.js?v=first-learning-1"></script>
+  <script src="js/notification-store.js?v=guide-integration-1"></script>
+<script src="js/notification-engine.js?v=guide-integration-1"></script>
+<script src="js/popover.js?v=guide-sections-2"></script>
   <script src="js/test-clock-contract.js?v=20260729-2"></script>
   <script src="js/dictionary-pages.js?v=20261107-reads-1"></script>
-  <script src="js/modal-focus.js?v=20261114-smart-onboarding"></script>
+  <script src="js/modal-focus.js?v=guide-sections-2"></script>
   <script data-startup-critical src="js/core.js?v=20261114-smart-onboarding"></script>
 <script src="js/operation-runtime.js?v=20260811-3"></script>
     <script data-startup-critical src="js/storage.js?v=guest-journey-1"></script>
@@ -1249,6 +1288,8 @@
 <script src="js/journey.js?v=20260729-5"></script>
 <script src="js/learning-evidence.js?v=20260729-1"></script>
 <script src="js/gate-clear.js?v=20260723-1"></script>
+<script src="js/gate-lesson.js"></script>
+<script src="js/gate-lesson-view.js?v=flow-1"></script>
 <script src="js/placement.js?v=20260720-1"></script>
 <script src="js/level-placement.js?v=20260728-1"></script>
 <script src="js/word-list-data.js?v=20261106-admin-fixes-1"></script>
@@ -1259,7 +1300,7 @@
 <script src="js/gate-game-migration.js?v=20261007-1"></script>
 <script src="js/gate-runner.js?v=quiz-classification-1"></script>
 <script src="js/loot-bots.js?v=20261113-automatic-performance"></script>
-<script src="js/worlds.js?v=first-learning-2"></script>
+<script src="js/worlds.js?v=guide-sections-2"></script>
 <script src="js/dictionary-window.js?v=20261105-render-1"></script>
 <script src="js/dictionary-render.js?v=20261107-word-visibility-1"></script>
 <script src="js/srs.js?v=20261113-review-guide"></script>
@@ -1267,9 +1308,9 @@
 <script src="js/quiz.js?v=gate-review-recovery-1"></script>
 <script src="js/srs-transitions.js"></script>
 <script src="js/srs-transition-batch.js?v=20260722-1"></script>
-<script src="js/quiz-runtime.js?v=spark-evidence-1"></script>
-<script src="js/notification-sources.js?v=launch-review-1"></script>
-<script src="js/notification-runtime.js?v=20261113-review-guide"></script>
+<script src="js/quiz-runtime.js?v=guide-final-1"></script>
+<script src="js/notification-sources.js?v=guide-integration-1"></script>
+<script src="js/notification-runtime.js?v=guide-integration-1"></script>
 <script src="js/motivation-policy.js?v=20261106-motivation-1"></script>
 <script src="js/motivation.js?v=20261113-treasure-v1"></script>
 <script type="module" src="js/motivation-cloud.js?v=20261106-motivation-1"></script>

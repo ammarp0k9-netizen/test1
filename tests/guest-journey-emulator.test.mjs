@@ -26,7 +26,7 @@ function runtime(app, content, clock) {
     ...firestore, ...authSdk, getApps: () => [app], setTimeout,
     CustomEvent: class { constructor(type, { detail } = {}) { this.type = type; this.detail = detail; } },
   };
-  for (const name of ['content-schema', 'journey', 'learning-evidence', 'word-lifecycle', 'gate-clear', 'placement', 'level-placement', 'journey-cloud']) {
+  for (const name of ['content-schema', 'journey', 'learning-evidence', 'word-lifecycle', 'gate-clear', 'gate-lesson', 'placement', 'level-placement', 'journey-cloud']) {
     const source = readFileSync(new URL('../js/' + name + '.js', import.meta.url), 'utf8');
     // Keep Firestore payloads in the SDK's realm so it recognizes plain objects.
     const load = new Function(...Object.keys(globals), source.replace(/^import\s+[^;]+;\s*/gm, ''));
@@ -48,17 +48,16 @@ test('an anonymous UID loads, reviews, clears and resumes a gate, then links wit
   const apps = [];
   const admin = initializeAdmin({ projectId }, 'fresh-guest-journey-fixture');
   const fixtureDb = adminStore(admin);
-  function connect(name, token) {
+  function connect(name) {
     const app = initializeApp({ projectId, apiKey: projectId }, name);
     apps.push(app);
     const auth = authSdk.getAuth(app);
     authSdk.connectAuthEmulator(auth, 'http://' + authHost, { disableWarnings: true });
     const db = firestore.getFirestore(app);
     const port = Number(dbHost.split(':')[1]);
-    firestore.connectFirestoreEmulator(db, '127.0.0.1', port, token ? { mockUserToken: token } : {});
+    firestore.connectFirestoreEmulator(db, '127.0.0.1', port);
     return { app, auth, db };
   }
-  const seed = connect('guest-journey-fixture', { sub: 'fixture-admin', user_id: 'fixture-admin', admin: true });
   const guest = connect('guest-journey-owner');
   const registered = connect('guest-journey-existing');
   const clock = { time: Date.now() };
@@ -106,12 +105,12 @@ test('an anonymous UID loads, reviews, clears and resumes a gate, then links wit
       words.push({ ...schema.normalizeWordIdentity(title), word: title, worldId, rankId, gateId,
         contentWordId: 'word-' + index, translation: 'معنى ' + index, status: 'published', version: 1 });
     }
-    const batch = firestore.writeBatch(seed.db);
-    batch.set(firestore.doc(seed.db, `content_worlds/${worldId}`), world);
-    batch.set(firestore.doc(seed.db, path), rank);
-    batch.set(firestore.doc(seed.db, `${path}/gates/${gateId}`), gate);
-    batch.set(firestore.doc(seed.db, `${path}/gates/${nextGateId}`), next);
-    for (const word of words) batch.set(firestore.doc(seed.db, `${path}/gates/${gateId}/words/${word.contentWordId}`), word);
+    const batch = fixtureDb.batch();
+    batch.set(fixtureDb.doc(`content_worlds/${worldId}`), { ...world, rankCount: 1 });
+    batch.set(fixtureDb.doc(path), { ...rank, gateCount: 2, wordCount: words.length });
+    batch.set(fixtureDb.doc(`${path}/gates/${gateId}`), { ...gate, publishedWordIds: words.map(word => word.contentWordId) });
+    batch.set(fixtureDb.doc(`${path}/gates/${nextGateId}`), next);
+    for (const word of words) batch.set(fixtureDb.doc(`${path}/gates/${gateId}/words/${word.contentWordId}`), word);
     await batch.commit();
 
     const journey = context.LootLinguaJourneyCloud;
@@ -122,6 +121,19 @@ test('an anonymous UID loads, reviews, clears and resumes a gate, then links wit
     assert.equal((await journey.getGateProgress(worldId, rankId, gateId, { force: true })).status, 'learning');
     const quiz = await journey.getGateQuizWords(worldId, rankId, gateId);
     assert.equal(quiz.length, words.length);
+    const lesson = context.LootLinguaGateLesson;
+    const gateContext = { worldId, rankId, gateId };
+    const lessonWords = words.map(lesson.wordRecord);
+    let lessonState = lesson.start(lessonWords);
+    const steps = lesson.build(lessonWords, lessonState);
+    for (let action = 0; lesson.stepAt(steps, lessonState) && action < words.length * 5; action += 1) {
+      const step = lesson.stepAt(steps, lessonState);
+      const event = step.phase === 'teach' ? (step.practice === 'cloze' || step.rehearse ? 'practice' : 'guided') :
+        step.phase === 'reinforce' ? 'connect' : 'answer';
+      lessonState = lesson.interact(lessonState, steps, step.id, event, lesson.expectedFor(step));
+    }
+    assert.equal(lesson.complete(lessonState), true);
+    await journey.saveGateLessonState(gateContext, lessonState);
 
     const submit = name => journey.recordQuizEvidenceBatch({
       sessionId: name, mode: 'matching', source: `journey:${worldId}~${rankId}~${gateId}`, completed: true,

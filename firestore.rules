@@ -52,6 +52,11 @@ service cloud.firestore {
         get(/databases/$(database)/documents/content_worlds/$(worldId)/ranks/$(rankId)/gates/$(gateId)).data.status == 'published';
     }
 
+    match /content_worlds/{worldId}/placementCatalog/current {
+      allow get: if signedIn() && publishedWorld(worldId);
+      allow write, list: if false;
+    }
+
     function gateContentPath(worldId, rankId, gateId) {
       return /databases/$(database)/documents/content_worlds/$(worldId)/ranks/$(rankId)/gates/$(gateId);
     }
@@ -126,6 +131,344 @@ service cloud.firestore {
       return mode in ['timeAttack', 'scramble', 'matching'];
     }
 
+    function validEntryExperienceInterestIds(ids) {
+      return ids is list && ids.size() <= 6 &&
+        ids.toSet().size() == ids.size() &&
+        ids.toSet().hasOnly([
+          'games', 'movies', 'study', 'general', 'technology', 'travel'
+        ].toSet());
+    }
+
+    function legacyEntryNeedsFirstActionProof(data) {
+      return (data.status == 'completed' || data.status == 'skipped') &&
+        !('actionStatus' in data);
+    }
+
+    function verifiedEntryCompletion(data) {
+      return data.status == 'completed' &&
+        'actionStatus' in data && data.actionStatus == 'completed';
+    }
+
+    function validEntryExperience(data, versionId) {
+      return versionId == 'v1' &&
+        data.keys().hasOnly([
+          'contractVersion', 'experienceVersion', 'status', 'audience',
+          'classification', 'currentStep', 'interestsStatus', 'interestIds',
+          'themeStatus', 'themeId', 'oasisMode', 'themeExplicit', 'actionStatus', 'source',
+          'startedAt', 'updatedAt', 'completedAt', 'skippedAt'
+        ]) && data.keys().size() == 18 &&
+        data.contractVersion == 1 && data.experienceVersion == 1 &&
+        (data.status == 'in-progress' || data.status == 'completed' || data.status == 'skipped') &&
+        (data.audience == 'new' || data.audience == 'returning' || data.audience == 'returning-guest') &&
+        (
+          data.classification == 'brand-new' ||
+          data.classification == 'returning-with-progress' ||
+          data.classification == 'returning-light' ||
+          data.classification == 'returning-guest-with-local-data' ||
+          data.classification == 'existing-account-without-meaningful-progress'
+        ) &&
+        (data.currentStep == 'interests' || data.currentStep == 'theme' || data.currentStep == 'action') &&
+        (data.interestsStatus == 'pending' || data.interestsStatus == 'selected' || data.interestsStatus == 'skipped') &&
+        validEntryExperienceInterestIds(data.interestIds) &&
+        (data.interestsStatus != 'selected' || data.interestIds.size() > 0) &&
+        (data.interestsStatus == 'selected' || data.interestIds.size() == 0) &&
+        (data.themeStatus == 'pending' || data.themeStatus == 'selected' || data.themeStatus == 'preserved') &&
+        (
+          data.themeId == '' || data.themeId == 'lootlingua' || data.themeId == 'ocean' ||
+          data.themeId == 'golden' || data.themeId == 'scroll' || data.themeId == 'glass'
+        ) &&
+        (data.oasisMode == 'light' || data.oasisMode == 'dark') &&
+        data.themeExplicit is bool &&
+        (data.actionStatus == 'pending' || data.actionStatus == 'ready' || data.actionStatus == 'completed') &&
+        (data.source == 'app-entry' || data.source == 'guest-migration' || data.source == 'settings') &&
+        data.startedAt is timestamp && data.updatedAt == request.time &&
+        (data.completedAt == null || data.completedAt is timestamp) &&
+        (data.skippedAt == null || data.skippedAt is timestamp) &&
+        (data.status != 'completed' || (
+          data.currentStep == 'action' && data.actionStatus == 'completed' &&
+          data.completedAt is timestamp && data.skippedAt == null
+        )) &&
+        (data.status != 'skipped' || (data.currentStep == 'action' && data.skippedAt is timestamp && data.completedAt == null)) &&
+        (data.status == 'completed' || data.completedAt == null) &&
+        (data.status == 'skipped' || data.skippedAt == null);
+    }
+
+    function validEntryExperienceUpdate(before, after, versionId) {
+      return validEntryExperience(after, versionId) &&
+        after.contractVersion == before.contractVersion &&
+        after.experienceVersion == before.experienceVersion &&
+        (
+          legacyEntryNeedsFirstActionProof(before) ||
+          after.audience == before.audience
+        ) &&
+        (
+          legacyEntryNeedsFirstActionProof(before) ||
+          after.classification == before.classification
+        ) &&
+        after.startedAt == before.startedAt &&
+        (
+          (before.status == 'in-progress' && after.status != 'skipped') ||
+          (verifiedEntryCompletion(before) && after.status == 'completed') ||
+          (legacyEntryNeedsFirstActionProof(before) &&
+            (after.status == 'in-progress' || after.status == 'completed'))
+        ) &&
+        (
+          !('actionStatus' in before) || before.actionStatus != 'completed' ||
+          after.actionStatus == 'completed'
+        ) &&
+        (
+          legacyEntryNeedsFirstActionProof(before) ||
+          before.completedAt == null || after.completedAt == before.completedAt
+        ) &&
+        (
+          legacyEntryNeedsFirstActionProof(before) ||
+          before.skippedAt == null || after.skippedAt == before.skippedAt
+        );
+    }
+
+    function validEntryExperienceV2(data, versionId) {
+      return versionId == 'v2' &&
+        data.keys().hasOnly([
+          'contractVersion', 'experienceVersion', 'status', 'audience',
+          'classification', 'currentStep', 'interestsStatus', 'interestIds',
+          'themeStatus', 'themeId', 'oasisMode', 'themeExplicit',
+          'journeyStatus', 'selectedWorldId', 'gamerStatus', 'source',
+          'startedAt', 'updatedAt', 'completedAt', 'skippedAt'
+        ]) && data.keys().size() == 20 &&
+        data.contractVersion in [2, 3] && data.experienceVersion == 2 &&
+        (data.status == 'in-progress' || data.status == 'completed') &&
+        (data.audience == 'new' || data.audience == 'returning' || data.audience == 'returning-guest') &&
+        (
+          data.classification == 'brand-new' ||
+          data.classification == 'returning-with-progress' ||
+          data.classification == 'returning-light' ||
+          data.classification == 'returning-guest-with-local-data' ||
+          data.classification == 'existing-account-without-meaningful-progress'
+        ) &&
+        (
+          data.currentStep == 'interests' || data.currentStep == 'theme' ||
+          data.currentStep == 'worlds' || data.currentStep == 'journey' ||
+          data.currentStep == 'context' || data.currentStep == 'destination' ||
+          data.currentStep == 'return' ||
+          (data.contractVersion == 3 && data.currentStep in ['welcome', 'discover'])
+        ) &&
+        (data.interestsStatus == 'pending' || data.interestsStatus == 'selected' || data.interestsStatus == 'skipped') &&
+        validEntryExperienceInterestIds(data.interestIds) &&
+        (data.interestsStatus != 'selected' || data.interestIds.size() > 0) &&
+        (data.interestsStatus == 'selected' || data.interestIds.size() == 0) &&
+        (data.themeStatus == 'pending' || data.themeStatus == 'selected' || data.themeStatus == 'preserved') &&
+        (
+          data.themeId == '' || data.themeId == 'lootlingua' || data.themeId == 'ocean' ||
+          data.themeId == 'golden' || data.themeId == 'scroll' || data.themeId == 'glass'
+        ) &&
+        (data.oasisMode == 'light' || data.oasisMode == 'dark') &&
+        data.themeExplicit is bool &&
+        (
+          data.journeyStatus == 'pending' || data.journeyStatus == 'world-selected' ||
+          data.journeyStatus == 'structure-explored' || data.journeyStatus == 'return-reviewed'
+        ) &&
+        data.selectedWorldId is string && data.selectedWorldId.size() <= 128 &&
+        (
+          data.gamerStatus == 'not-applicable' || data.gamerStatus == 'offered' ||
+          data.gamerStatus == 'running' || data.gamerStatus == 'completed' ||
+          data.gamerStatus == 'unavailable' || data.gamerStatus == 'skipped'
+        ) &&
+        (data.source == 'app-entry' || data.source == 'guest-migration' || data.source == 'settings') &&
+        data.startedAt is timestamp && data.updatedAt == request.time &&
+        (data.completedAt == null || data.completedAt is timestamp) &&
+        data.skippedAt == null &&
+        (data.status != 'completed' || (
+          (data.currentStep == 'destination' || (data.contractVersion == 3 && data.currentStep == 'discover')) &&
+          (data.journeyStatus == 'structure-explored' || data.journeyStatus == 'return-reviewed') &&
+          data.completedAt is timestamp
+        )) &&
+        (data.status == 'completed' || data.completedAt == null);
+    }
+
+    function validEntryExperienceV2Update(before, after, versionId) {
+      return validEntryExperienceV2(after, versionId) &&
+        after.contractVersion >= before.contractVersion &&
+        after.experienceVersion == before.experienceVersion &&
+        after.audience == before.audience &&
+        after.classification == before.classification &&
+        after.startedAt == before.startedAt &&
+        (
+          (before.status == 'in-progress' &&
+            (after.status == 'in-progress' || after.status == 'completed')) ||
+          (before.status == 'completed' && after.status == 'completed')
+        ) &&
+        (before.completedAt == null || after.completedAt == before.completedAt);
+    }
+
+    function gateLessonPath(uid, world, rank, gate) {
+      return /databases/$(database)/documents/users/$(uid)/contentProgress/$(world)/ranks/$(rank)/gates/$(gate)/lesson/progress;
+    }
+
+    function lessonComplete(uid, world, rank, gate, progress) {
+      let checkpoint = get(gateLessonPath(uid, world, rank, gate)).data;
+      let ids = progress.get('loadedContentWordIds', []);
+      return ids.size() > 0 && checkpoint.wordIds.toSet() == ids.toSet() &&
+        checkpoint.completedWordIds.toSet() == ids.toSet();
+    }
+
+    function validTestClock(data, uid) {
+      return data.keys().hasOnly([
+          'version', 'offsetMs', 'updatedAt', 'updatedBy'
+        ]) && data.keys().size() == 4 &&
+        data.version == 1 &&
+        data.offsetMs is int &&
+        data.offsetMs >= -31536000000 &&
+        data.offsetMs <= 31536000000 &&
+        data.updatedAt == request.time &&
+        data.updatedBy == uid;
+    }
+
+    function gateLessonRelease() {
+      return /databases/$(database)/documents/releaseConfig/gateLesson;
+    }
+
+    function gateLessonCutoff() {
+      return get(gateLessonRelease()).data.get('activatedAt', null);
+    }
+
+    function gateLessonCompatibilityOpen() {
+      let path = gateLessonRelease();
+      return !exists(path) || (get(path).data.get('captureStartedAt', null) == null &&
+        get(path).data.get('activatedAt', null) == null);
+    }
+
+    function capturingGateDrafts() {
+      return exists(gateLessonRelease()) && get(gateLessonRelease()).data.get('captureStartedAt', null) is timestamp &&
+        !(gateLessonCutoff() is timestamp);
+    }
+
+    function lessonReady(uid, world, rank, gate, progress) {
+      return (exists(gateLessonPath(uid, world, rank, gate)) && lessonComplete(uid, world, rank, gate, progress)) ||
+        (progress.status in ['ready', 'cleared'] && exists(gateLessonRelease()) &&
+          historicallyReady(uid, world, rank, gate, progress));
+    }
+
+    function historicallyReady(uid, world, rank, gate, progress) {
+      let cutoff = gateLessonCutoff();
+      return cutoff is timestamp &&
+        ((progress.status == 'ready' && progress.get('readyAt', null) is timestamp &&
+          progress.readyAt < cutoff && completeGateProof(uid, progress, world, rank, gate, null)) ||
+         (progress.status == 'cleared' && progress.get('clearedBy', '') == 'gate-clear' &&
+          progress.get('clearedAt', null) is timestamp && progress.clearedAt < cutoff));
+    }
+
+    function gateDraft(data) {
+      return data.get('journeyGateId', '') != '' || data.get('source', '').matches('^(journey|gate-gap):.*') ||
+        data.get('officialReviewGate', null) is map;
+    }
+
+    function legacyGateDraftRef(uid) {
+      return /databases/$(database)/documents/users/$(uid)/meta/legacy_gate_quiz;
+    }
+
+    function sealedGateDraft(uid, draft) {
+      let ref = legacyGateDraftRef(uid);
+      return exists(ref) && exists(gateLessonRelease()) &&
+        sameGateDraft(get(ref).data, draft);
+    }
+
+    function sameGateDraft(seal, draft) {
+      let boundary = get(gateLessonRelease()).data.get('captureStartedAt', null);
+      return seal.capturedAt is timestamp && boundary is timestamp && gateLessonCutoff() is timestamp &&
+        seal.capturedAt < boundary && boundary <= gateLessonCutoff() &&
+        seal.sessionId == draft.get('id', '') && seal.mode == draft.get('mode', '') &&
+        seal.source == draft.get('source', '') && seal.words == draft.get('words', []) &&
+        seal.get('officialReviewGate', null) == draft.get('officialReviewGate', null) && coherentSealedScope(seal, draft) &&
+        (draft.get('journeyWorldId', '') == seal.worldId && draft.get('journeyRankId', '') == seal.rankId &&
+          draft.get('journeyGateId', '') == seal.gateId ||
+          draft.get('source', '') == 'journey:' + seal.worldId + '~' + seal.rankId + '~' + seal.gateId ||
+          draft.get('source', '') == 'gate-gap:' + seal.worldId + '~' + seal.rankId + '~' + seal.gateId ||
+          draft.get('officialReviewGate', null) is map) &&
+        draft.get('officialReviewDueWordKeys', []).toSet() == seal.dueWordKeys.toSet();
+    }
+
+    function coherentSealedScope(seal, draft) {
+      let official = draft.get('officialReviewGate', null);
+      return (draft.get('journeyGateId', '') == '' || (draft.journeyWorldId == seal.worldId &&
+          draft.journeyRankId == seal.rankId && draft.journeyGateId == seal.gateId)) &&
+        (official == null || (official.worldId == seal.worldId && official.rankId == seal.rankId && official.gateId == seal.gateId));
+    }
+
+    function legacyGateReview(data, uid, id, world, rank, gate) {
+      let seal = get(legacyGateDraftRef(uid)).data;
+      let active = /databases/$(database)/documents/users/$(uid)/meta/active_quiz_session;
+      return exists(active) && sealedGateDraft(uid, get(active).data) && seal.sessionId == id &&
+        seal.worldId == world && seal.rankId == rank && seal.gateId == gate && seal.mode == data.mode &&
+        seal.wordKeys.hasAll(data.wordKeys) &&
+        seal.dueWordKeys.toSet() == data.get('officialReviewDueWordKeys', []).toSet();
+    }
+
+    function allowedGateDraft(uid, draft) {
+      let world = draft.get('journeyWorldId', '');
+      let rank = draft.get('journeyRankId', '');
+      let gate = draft.get('journeyGateId', '');
+      return nonEmptyString(world, 128) && nonEmptyString(rank, 128) && nonEmptyString(gate, 128) &&
+        draftForLoadedGate(uid, world, rank, gate);
+    }
+
+    function draftForLoadedGate(uid, world, rank, gate) {
+      let progress = get(ownerGatePath(uid, world, rank, gate)).data;
+      return progress.get('loadedAt', null) is timestamp && lessonReady(uid, world, rank, gate, progress);
+    }
+
+    function legacyDraftScope(draft) {
+      let source = draft.get('source', '');
+      let parts = source.matches('^(journey|gate-gap):[^~/]{1,128}~[^~/]{1,128}~[^~/]{1,128}$')
+        ? source.split(':')[1].split('~') : [];
+      return parts.size() == 3 ? {'worldId': parts[0], 'rankId': parts[1], 'gateId': parts[2]} :
+        draft.get('officialReviewGate', draft.get('journeyGateId', '') == '' ? null :
+          {'worldId': draft.journeyWorldId, 'rankId': draft.journeyRankId, 'gateId': draft.journeyGateId});
+    }
+
+    function compatibleGateDraft(uid, draft, scope) {
+      let progress = get(ownerGatePath(uid, scope.worldId, scope.rankId, scope.gateId)).data;
+      let selected = draft.get('selectedWordKeys', []);
+      let due = draft.get('officialReviewDueWordKeys', []);
+      return nonEmptyString(draft.get('id', ''), 220) && validEvidenceMode(draft.get('mode', '')) &&
+        scope.worldId.matches('[^~/]{1,128}') && scope.rankId.matches('[^~/]{1,128}') && scope.gateId.matches('[^~/]{1,128}') &&
+        coherentSealedScope(scope, draft) && progress.get('loadedAt', null) is timestamp &&
+        progress.status in ['learning', 'ready', 'cleared'] && draft.words is list && draft.words.size() > 0 &&
+        draft.words.size() <= 2000 && selected is list && due is list &&
+        progress.loadedWordKeys.hasAll(selected) && progress.loadedWordKeys.hasAll(due);
+    }
+
+    function compatibleStoredReview(data, uid, id, world, rank, gate) {
+      let draft = get(/databases/$(database)/documents/users/$(uid)/meta/active_quiz_session).data;
+      let scope = legacyDraftScope(draft);
+      return draft.id == id && draft.mode == data.mode && scope.worldId == world && scope.rankId == rank &&
+        scope.gateId == gate && coherentSealedScope(scope, draft) &&
+        draft.get('officialReviewDueWordKeys', []).toSet() == data.get('officialReviewDueWordKeys', []).toSet() &&
+        (draft.get('selectedWordKeys', []).size() == 0 || draft.selectedWordKeys.hasAll(data.wordKeys));
+    }
+
+    function validGateLessonSession(data, uid, id) {
+      let official = data.get('officialReviewGateId', '') != '';
+      let world = data.get('lessonWorldId', data.get('officialReviewWorldId', ''));
+      let rank = data.get('lessonRankId', data.get('officialReviewRankId', ''));
+      let gate = data.get('lessonGateId', data.get('officialReviewGateId', ''));
+      return (world == '' && rank == '' && gate == '' && !official) ||
+        (nonEmptyString(world, 128) && nonEmptyString(rank, 128) && nonEmptyString(gate, 128) &&
+          (!official || (world == data.officialReviewWorldId && rank == data.officialReviewRankId &&
+            gate == data.officialReviewGateId)) &&
+          (gateLessonQuizReady(data, uid, id, world, rank, gate) ||
+            (official && !data.keys().hasAny(['lessonWorldId', 'lessonRankId', 'lessonGateId']) &&
+              gateLessonCompatibilityOpen())));
+    }
+
+    function gateLessonQuizReady(data, uid, id, world, rank, gate) {
+      let progress = get(ownerGatePath(uid, world, rank, gate)).data;
+      return progress.status in ['learning', 'ready', 'cleared'] &&
+        progress.loadedWordKeys.hasAll(data.wordKeys) &&
+        (lessonReady(uid, world, rank, gate, progress) ||
+          (exists(legacyGateDraftRef(uid)) && legacyGateReview(data, uid, id, world, rank, gate)) ||
+          (gateLessonCompatibilityOpen() && compatibleStoredReview(data, uid, id, world, rank, gate)));
+    }
+
     function validOfficialReview(data, uid) {
       let world = data.get('officialReviewWorldId', '');
       let rank = data.get('officialReviewRankId', '');
@@ -147,7 +490,8 @@ service cloud.firestore {
     function validEvidenceSession(data, uid, id) {
       return data.keys().hasOnly(['sessionId', 'status', 'mode', 'sourceType', 'privateWorldId',
           'wordKeys', 'correctWordKeys', 'totalCount', 'correctCount', 'evidenceVersion', 'completedAt',
-          'officialReviewWorldId', 'officialReviewRankId', 'officialReviewGateId', 'officialReviewDueWordKeys']) &&
+          'officialReviewWorldId', 'officialReviewRankId', 'officialReviewGateId', 'officialReviewDueWordKeys',
+          'lessonWorldId', 'lessonRankId', 'lessonGateId']) &&
         data.sessionId == id && nonEmptyString(id, 220) && data.status == 'completed' && validEvidenceMode(data.mode) &&
         data.sourceType in ['personal', 'private-world'] && data.privateWorldId is string && data.privateWorldId.size() <= 500 &&
         (data.sourceType == 'personal' ? data.privateWorldId == '' : data.privateWorldId != '') &&
@@ -155,7 +499,7 @@ service cloud.firestore {
         data.wordKeys.toSet().size() == data.totalCount && data.wordKeys.size() == data.totalCount &&
         data.correctWordKeys is list && data.correctWordKeys.size() == data.correctCount &&
         data.correctWordKeys.toSet().size() == data.correctCount && data.wordKeys.hasAll(data.correctWordKeys) &&
-        data.evidenceVersion == 2 && data.completedAt == request.time && validOfficialReview(data, uid);
+        data.evidenceVersion == 2 && data.completedAt == request.time && validOfficialReview(data, uid) && validGateLessonSession(data, uid, id);
     }
 
     function recallDay(time, offset) {
@@ -271,46 +615,175 @@ service cloud.firestore {
           (!('version' in data) || (data.version is int && data.version >= 0));
       }
 
+      function validWorldInterests(data, fields) {
+        let interests = ['games', 'movies', 'study', 'general', 'technology', 'travel'];
+        let tags = data.get('interestTags', []);
+        return (!fields.hasAny(['primaryInterest']) || !('primaryInterest' in data) || data.primaryInterest in interests) &&
+          (!fields.hasAny(['interestTags']) ||
+            (tags is list && tags.size() <= interests.size() && tags.hasOnly(interests) && tags.toSet().size() == tags.size()));
+      }
+
+      function worldPath() {
+        return /databases/$(database)/documents/content_worlds/$(worldId);
+      }
+
+      function rankPath(id) {
+        return /databases/$(database)/documents/content_worlds/$(worldId)/ranks/$(id);
+      }
+
+      function rankCountChanged(before, after) {
+        let id = after.get('rankCountChangeRankId', '');
+        return id is string && id.matches('[^/]{1,128}') &&
+          after.rankCount is int && after.rankCount >= 0 && after.updatedAt == request.time &&
+          after.updatedBy == request.auth.uid &&
+          (after.rankCount == before.rankCount + 1
+            ? existsAfter(rankPath(id)) && !('_adminCopyOperation' in getAfter(rankPath(id)).data) &&
+              (!exists(rankPath(id)) || '_adminCopyOperation' in get(rankPath(id)).data)
+            : after.rankCount == before.rankCount - 1 && exists(rankPath(id)) &&
+              get(rankPath(id)).data.status == 'archived' && !existsAfter(rankPath(id)));
+      }
+
       allow read: if isAdmin() || resource.data.status == 'published';
-      allow create, update: if isAdmin() && validWorldShape(request.resource.data);
-      allow delete: if isAdmin();
+      allow create: if isAdmin() && validWorldShape(request.resource.data) &&
+        validWorldInterests(request.resource.data, request.resource.data.keys()) &&
+        request.resource.data.get('rankCount', 0) == 0;
+      allow update: if isAdmin() && validWorldShape(request.resource.data) &&
+        !('_adminWorldOperation' in resource.data) &&
+        !request.resource.data.diff(resource.data).affectedKeys().hasAny(['_adminWorldOperation']) &&
+        validWorldInterests(request.resource.data, request.resource.data.diff(resource.data).affectedKeys()) &&
+        (request.resource.data.get('rankCount', null) == resource.data.get('rankCount', null) ||
+          rankCountChanged(resource.data, request.resource.data));
+      allow delete: if isAdmin() && resource.data.status == 'archived' &&
+        resource.data.get('_deleteLock', {}).get('adminUid', '') == request.auth.uid;
 
       match /ranks/{rankId} {
+        function worldAvailableForAdminEdits() {
+          return !('_adminWorldOperation' in get(worldPath()).data);
+        }
+
         function validRankShape(data) {
           return data.worldId == worldId && data.rankId == rankId &&
             validContentStatus(data.status) &&
+            data.get('gateCount', 0) is int && data.get('gateCount', 0) >= 0 &&
+            data.get('wordCount', 0) is int && data.get('wordCount', 0) >= 0 &&
             (!('title' in data) || nonEmptyString(data.title, 160)) &&
             (!('schemaVersion' in data) || data.schemaVersion == 1) &&
             (!('version' in data) || (data.version is int && data.version >= 1));
         }
 
+        function rankCountDelta(delta) {
+          let before = get(worldPath()).data;
+          let after = getAfter(worldPath()).data;
+          return after.get('rankCountChangeRankId', '') == rankId &&
+            after.rankCount == before.rankCount + delta;
+        }
+
+        function validRankLevel(level) {
+          return level in ['unclassified', 'A1', 'A2', 'B1', 'B2', 'C1', 'C2'];
+        }
+
+        function validRankUpdate(before, after) {
+          let changed = after.diff(before).affectedKeys();
+          let oldLevel = before.get('cefrLevel', 'unclassified');
+          let level = after.get('cefrLevel', 'unclassified');
+          return !('_adminRankOperation' in before) && !changed.hasAny(['_adminRankOperation']) &&
+            (('_adminCopyOperation' in before)
+              ? before.status == 'draft' && after.status == 'draft' &&
+                !('_adminCopyOperation' in after) && rankCountDelta(1) &&
+                changed.hasOnly(['_adminCopyOperation', 'gateCount', 'wordCount', 'updatedAt', 'updatedBy'])
+              : !('_adminCopyOperation' in after) &&
+                (changed.hasOnly(['gateCount', 'wordCount', 'updatedAt', 'updatedBy'])
+                  || (after.version == before.version + 1 &&
+                    !changed.hasAny(['gateCount', 'wordCount', 'createdAt', 'createdBy']) &&
+                    (level == oldLevel || (oldLevel == 'unclassified' && validRankLevel(level))))));
+        }
+
+        function deletingArchivedWorld() {
+          let parent = getAfter(worldPath()).data;
+          let lock = parent.get('_deleteLock', {});
+          return parent.status == 'archived' && lock.get('adminUid', '') == request.auth.uid &&
+            lock.get('requestedAt', null) == request.time;
+        }
+
         allow read: if isAdmin() ||
           (resource.data.status == 'published' && publishedWorld(worldId));
-        allow create, update: if isAdmin() && validRankShape(request.resource.data);
-        allow delete: if isAdmin();
+        allow create: if isAdmin() && worldAvailableForAdminEdits() && validRankShape(request.resource.data) &&
+          validRankLevel(request.resource.data.get('cefrLevel', 'unclassified')) &&
+          request.resource.data.version == 1 && request.resource.data.gateCount == 0 &&
+          request.resource.data.wordCount == 0 && !('_adminRankOperation' in request.resource.data) &&
+          (('_adminCopyOperation' in request.resource.data)
+            ? request.resource.data.status == 'draft' && nonEmptyString(request.resource.data._adminCopyOperation, 180)
+            : rankCountDelta(1));
+        allow update: if isAdmin() && worldAvailableForAdminEdits() && validRankShape(request.resource.data) &&
+          validRankUpdate(resource.data, request.resource.data);
+        allow delete: if isAdmin() && (deletingArchivedWorld() ||
+          (resource.data.status == 'archived' && !('_adminRankOperation' in resource.data) && rankCountDelta(-1)));
 
         match /gates/{gateId} {
+          function rankAvailableForAdminEdits() {
+            return worldAvailableForAdminEdits() && !('_adminRankOperation' in get(rankPath(rankId)).data);
+          }
+
+          function gateCountIncrement() {
+            return getAfter(worldPath()).data.gateCount == get(worldPath()).data.gateCount + 1 &&
+              getAfter(rankPath(rankId)).data.gateCount == get(rankPath(rankId)).data.gateCount + 1;
+          }
+
+          function optionalPassRatio(ratio) {
+            return ratio == null || (ratio is number && ratio > 0 && ratio <= 1);
+          }
+
           function validGateShape(data) {
             return data.worldId == worldId && data.rankId == rankId && data.gateId == gateId &&
               validContentStatus(data.status) &&
               (!('title' in data) || nonEmptyString(data.title, 160)) &&
+              optionalPassRatio(data.get('entryAssessmentPassRatio', null)) &&
+              optionalPassRatio(data.get('passThreshold', null)) &&
               (!('schemaVersion' in data) || data.schemaVersion == 1) &&
               (!('version' in data) || (data.version is int && data.version >= 1));
+          }
+
+          function validGateCreate(data) {
+            return !('_adminGateOperation' in data) && data.get('wordCount', 0) == 0 &&
+              (('_adminGateCopyOperation' in data)
+                ? data.status == 'draft' && nonEmptyString(data._adminGateCopyOperation, 180)
+                : (('_adminCopyOperation' in get(rankPath(rankId)).data && data.status == 'draft') || gateCountIncrement()));
+          }
+
+          function validAdminGateUpdate(before, after) {
+            let changed = after.diff(before).affectedKeys();
+            return !('_adminGateOperation' in before) && !changed.hasAny(['_adminGateOperation']) &&
+              (('_adminGateCopyOperation' in before)
+                ? after.status == 'draft' && !('_adminGateCopyOperation' in after) && gateCountIncrement() &&
+                  changed.hasOnly(['_adminGateCopyOperation', 'wordCount', 'updatedAt', 'updatedBy'])
+                : !('_adminGateCopyOperation' in after) &&
+                  (changed.hasOnly(['wordCount', 'updatedAt', 'updatedBy']) ||
+                    (after.version == before.get('version', 1) + 1 &&
+                      !changed.hasAny(['wordCount', 'createdAt', 'createdBy']))));
           }
 
           allow read: if isAdmin() ||
             (resource.data.status == 'published' && publishedWorld(worldId) &&
               publishedRank(worldId, rankId));
-          allow create, update: if isAdmin() && validGateShape(request.resource.data);
+          allow create: if isAdmin() && rankAvailableForAdminEdits() &&
+            validGateShape(request.resource.data) && validGateCreate(request.resource.data);
+          allow update: if isAdmin() && rankAvailableForAdminEdits() &&
+            validGateShape(request.resource.data) && validAdminGateUpdate(resource.data, request.resource.data);
           allow delete: if isAdmin();
 
           match /words/{contentWordId} {
+            function gateAvailableForWordEdits() {
+              let gate = get(/databases/$(database)/documents/content_worlds/$(worldId)/ranks/$(rankId)/gates/$(gateId)).data;
+              return rankAvailableForAdminEdits() && !('_adminGateOperation' in gate);
+            }
+
             function validContentWordShape(data) {
               return data.worldId == worldId && data.rankId == rankId &&
                 data.gateId == gateId && data.contentWordId == contentWordId &&
                 validContentStatus(data.status) &&
                 nonEmptyString(data.word, 240) &&
                 nonEmptyString(data.translation, 1000) &&
+                (!('definition' in data) || (data.definition is string && data.definition.size() <= 4000)) &&
                 (!('schemaVersion' in data) || data.schemaVersion == 1) &&
                 (!('version' in data) || (data.version is int && data.version >= 1));
             }
@@ -318,7 +791,9 @@ service cloud.firestore {
             allow read: if isAdmin() ||
               (resource.data.status == 'published' && publishedWorld(worldId) &&
                 publishedRank(worldId, rankId) && publishedGate(worldId, rankId, gateId));
-            allow create, update: if isAdmin() && validContentWordShape(request.resource.data);
+            allow create: if isAdmin() && gateAvailableForWordEdits() && validContentWordShape(request.resource.data);
+            allow update: if isAdmin() && gateAvailableForWordEdits() && validContentWordShape(request.resource.data) &&
+              request.resource.data.version == resource.data.get('version', 1) + 1;
             allow delete: if isAdmin();
           }
         }
@@ -326,7 +801,51 @@ service cloud.firestore {
     }
 
     match /content_word_import_staging/{stagingWordId} {
-      allow read, create, update, delete: if isAdmin();
+      function validStagingTarget(target) {
+        return target is map && target.keys().hasOnly(['worldId', 'rankId', 'gateId']) &&
+          nonEmptyString(target.worldId, 128) && nonEmptyString(target.rankId, 128) &&
+          nonEmptyString(target.gateId, 128);
+      }
+      function validStagingWord(data) {
+        return data.keys().hasOnly([
+            'stagingWordId', 'importBatchId', 'sourceFileName', 'sourceOrder',
+            'schemaVersion', 'normalizationVersion', 'word', 'normalizedWord',
+            'wordKey', 'translation', 'definition', 'definition_ar', 'example',
+            'exampleTranslation', 'category', 'partOfSpeech', 'level', 'tags',
+            'synonyms', 'pronunciation', 'audioUrl', 'imageUrl', 'notes', 'order',
+            'stagingStatus', 'distributionTarget', 'distributionOperationId',
+            'distributedContentWordId', 'distributedAt', 'importedAt',
+            'createdAt', 'updatedAt', 'createdBy', 'updatedBy'
+          ]) && data.stagingWordId == stagingWordId && stagingWordId.matches('staging_[a-f0-9]{64}') &&
+          nonEmptyString(data.importBatchId, 128) && nonEmptyString(data.sourceFileName, 240) &&
+          data.sourceOrder is int && data.sourceOrder >= 0 && data.sourceOrder <= 1000000 &&
+          data.schemaVersion == 1 && data.normalizationVersion == 1 &&
+          nonEmptyString(data.word, 240) && nonEmptyString(data.normalizedWord, 240) &&
+          nonEmptyString(data.wordKey, 240) && nonEmptyString(data.translation, 1000) &&
+          (!('tags' in data) || (data.tags is list && data.tags.size() <= 50)) &&
+          data.order is int && data.order >= 0 && data.stagingStatus in ['pending', 'distributing', 'distributed'] &&
+          (!('distributionTarget' in data) || validStagingTarget(data.distributionTarget)) &&
+          (!('distributionOperationId' in data) || nonEmptyString(data.distributionOperationId, 128)) &&
+          (!('distributedContentWordId' in data) || nonEmptyString(data.distributedContentWordId, 128)) &&
+          (!('distributedAt' in data) || data.distributedAt is timestamp) &&
+          data.createdAt is timestamp && data.importedAt is timestamp &&
+          nonEmptyString(data.createdBy, 128) && data.updatedBy == request.auth.uid && data.updatedAt == request.time;
+      }
+      function validStagingCreate(data) {
+        return validStagingWord(data) && data.stagingStatus == 'pending' &&
+          !data.keys().hasAny(['distributionTarget', 'distributionOperationId', 'distributedContentWordId', 'distributedAt']) &&
+          data.createdBy == request.auth.uid && data.createdAt == request.time && data.importedAt == request.time;
+      }
+      function validStagingUpdate(before, after) {
+        return validStagingWord(after) && after.diff(before).affectedKeys().hasOnly([
+          'stagingStatus', 'distributionTarget', 'distributionOperationId',
+          'distributedContentWordId', 'distributedAt', 'updatedAt', 'updatedBy'
+        ]);
+      }
+      allow read: if isAdmin();
+      allow create: if isAdmin() && validStagingCreate(request.resource.data);
+      allow update: if isAdmin() && validStagingUpdate(resource.data, request.resource.data);
+      allow delete: if isAdmin();
     }
 
     // These are server/Admin-SDK workflows. Client access remains denied.
@@ -370,6 +889,11 @@ service cloud.firestore {
     }
     match /admin_audit_logs/{logId} { allow read: if isAdmin(); allow write: if false; }
     match /admins/{adminId} { allow read, write: if false; }
+
+    match /releaseConfig/gateLesson {
+      allow read: if request.auth != null;
+      allow write: if false;
+    }
 
     match /users/{uid} {
       // No root-document list/write access; all application data is explicit.
@@ -422,16 +946,50 @@ service cloud.firestore {
       // Personal dictionary and custom worlds are owner-scoped. These docs do
       // not confer admin authority or access to another account.
       match /words/{wordId} {
+        function validLegacyStreak(data) {
+          return !('mastery_streak' in data) ||
+            (data.mastery_streak is int && data.mastery_streak >= 0 && data.mastery_streak <= 3);
+        }
         function validPersonalWord(data) {
           return data.userId == uid && data.meaning is string && data.meaning.size() <= 2000 &&
             data.category is string && data.category.size() <= 120 &&
             (('text' in data && nonEmptyString(data.text, 500)) ||
               ('word' in data && nonEmptyString(data.word, 500))) &&
             (!('forgetCount' in data) || (data.forgetCount is int && data.forgetCount >= 0)) &&
+            (!('notes' in data) || (data.notes is string && data.notes.size() <= 4000)) &&
+            validLegacyStreak(data) &&
+            (!('personalDictionaryState' in data) || data.personalDictionaryState in ['active', 'moved-to-private-world']) &&
             (!('starred' in data) || data.starred is bool);
         }
-        allow read, delete: if isOwner(uid);
-        allow create, update: if isOwner(uid) && validPersonalWord(request.resource.data);
+        function validPersonalWordUpdate(before, after) {
+          let changed = after.diff(before).affectedKeys();
+          let srs = ['forgetCount', 'xpValue', 'mastery_status', 'mastery_streak', 'last_recalled_at',
+            'first_recalled_at', 'last_recall_day', 'last_recall_session_id', 'last_quizzed_at',
+            'quiz_seen_count', 'mastered_once', 'firstMasteredAt', 'hasEarnedMasteryXP',
+            'earnedTransitions', 'remasteryAwardCount', 'xpEconomyVersion'];
+          let visibility = ['hiddenFromDictionary', 'hiddenFromDictionaryAt'];
+          return after.get('xpValue', 0) == before.get('xpValue', 0) &&
+            (changed.hasAny(visibility)
+              ? changed.hasOnly(visibility.concat(['personalDictionaryState'])) &&
+                (!('personalDictionaryState' in after) || after.personalDictionaryState in ['active', 'moved-to-private-world']) &&
+                ((after.hiddenFromDictionary == true && after.hiddenFromDictionaryAt == request.time) ||
+                  (after.hiddenFromDictionary == false && after.hiddenFromDictionaryAt == null))
+              : changed.hasAny(srs)
+                ? changed.hasOnly(srs) && validLegacyStreak(after) && after.get('forgetCount', 0) is int &&
+                  after.get('forgetCount', 0) >= 0 && after.get('forgetCount', 0) <= 100000
+                : validPersonalWord(after));
+        }
+        function unlinkLeavesNoSources(data) {
+          let wordKey = data.get('wordKey', '');
+          let canonical = /databases/$(database)/documents/users/$(uid)/contentWords/$(wordKey);
+          return wordKey == '' || !exists(canonical) ||
+            (getAfter(canonical).data.sourceCount == 0 &&
+              !(get(canonical).data.get('primarySource', {}).get('addedFrom', '') in ['published-gate', 'level-placement']));
+        }
+        allow read: if isOwner(uid);
+        allow delete: if isOwner(uid) && unlinkLeavesNoSources(resource.data);
+        allow create: if isOwner(uid) && validPersonalWord(request.resource.data);
+        allow update: if isOwner(uid) && validPersonalWordUpdate(resource.data, request.resource.data);
       }
       match /customWorlds/{worldId} {
         function validCustomWorld(data) {
@@ -454,6 +1012,24 @@ service cloud.firestore {
 
       // User settings, onboarding, XP metadata, and local quiz state.
       match /meta/profile {
+        function profileFieldNames() {
+          return [
+            'userXP', 'xpEconomyVersion', 'dailyStreak', 'maxStreak', 'lastActivityDate', 'activityMap',
+            'quizExposureHistory', 'lastPersonalTrustedQuizAt', 'theme', 'oasisMode', 'themeIntroSeen',
+            'displayName', 'interestIds', 'onboardingProgress', 'addedGameWords', 'dailyLootState',
+            'titlesState', 'activeTitleId', 'dailyQuestDate', 'dailyQuestState', 'dailyQuestsByDay',
+            'streakFreezes', 'freezeSaves', 'gameDictAdds', 'perfectQuizzes', 'extraChests',
+            'extraChestState', 'runnerCoins', 'runnerUnlocks', 'runnerBestDistance', 'lootBots',
+            'motivationRewards', 'updatedAt', '_syncRevision'
+          ];
+        }
+        function validAppearance(data, fields) {
+          let themes = ['lootlingua', 'golden', 'scroll', 'ocean', 'glass'];
+          return (!fields.hasAny(['theme']) || !('theme' in data) || data.theme in themes) &&
+            (!fields.hasAny(['oasisMode']) || !('oasisMode' in data) || data.oasisMode in ['light', 'dark']) &&
+            (!fields.hasAny(['themeIntroSeen']) || !('themeIntroSeen' in data) ||
+              (data.themeIntroSeen is list && data.themeIntroSeen.size() <= 12 && data.themeIntroSeen.hasOnly(themes)));
+        }
         function validProfile(data) {
           return (!('userXP' in data) || (data.userXP is number && data.userXP >= 0)) &&
             (!('xpEconomyVersion' in data) ||
@@ -462,12 +1038,17 @@ service cloud.firestore {
             (!('maxStreak' in data) || (data.maxStreak is int && data.maxStreak >= 0)) &&
             (!('displayName' in data) || (data.displayName is string && data.displayName.size() <= 120));
         }
+        function validProfileUpdate(before, after) {
+          let changed = after.diff(before).affectedKeys();
+          return changed.hasOnly(profileFieldNames()) && validProfile(after) && validAppearance(after, changed) &&
+            (!changed.hasAny(['_syncRevision']) ||
+              (after._syncRevision is int && after._syncRevision == before.get('_syncRevision', 0) + 1));
+        }
         allow read: if isOwner(uid);
-        allow create: if isOwner(uid) && validProfile(request.resource.data) &&
+        allow create: if isOwner(uid) && request.resource.data.keys().hasOnly(profileFieldNames()) &&
+          validProfile(request.resource.data) && validAppearance(request.resource.data, request.resource.data.keys()) &&
           request.resource.data.get('_syncRevision', 1) == 1;
-        allow update: if isOwner(uid) && validProfile(request.resource.data) &&
-          (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['_syncRevision']) ||
-            (request.resource.data._syncRevision is int && request.resource.data._syncRevision == resource.data.get('_syncRevision', 0) + 1));
+        allow update: if isOwner(uid) && validProfileUpdate(resource.data, request.resource.data);
         allow delete: if false;
       }
       match /meta/word_mastery {
@@ -476,7 +1057,32 @@ service cloud.firestore {
           request.resource.data.entries is map && request.resource.data.entries.size() <= 5000;
         allow delete: if false;
       }
-      match /meta/active_quiz_session { allow read, create, update, delete: if isOwner(uid); }
+      match /meta/legacy_gate_quiz {
+        allow read: if isOwner(uid);
+        allow write: if false;
+      }
+
+      match /meta/active_quiz_session {
+        function canSaveDraft() {
+          let draft = request.resource.data;
+          return !gateDraft(draft) || allowedGateDraft(uid, draft) ||
+            (gateLessonCompatibilityOpen() && compatibleGateDraft(uid, draft, legacyDraftScope(draft)));
+        }
+        function keepsGateDraftProgress(before, after) {
+          return !gateDraft(before) || before.get('id', '') != after.get('id', '') ||
+            (before.get('source', '') == after.get('source', '') &&
+              before.get('mode', '') == after.get('mode', '') &&
+              after.get('quizIndex', 0) >= before.get('quizIndex', 0));
+        }
+        allow read: if isOwner(uid);
+        allow delete: if isOwner(uid) && !(gateDraft(resource.data) && capturingGateDrafts());
+        allow create: if isOwner(uid) && canSaveDraft();
+        allow update: if isOwner(uid) && !(gateDraft(resource.data) && capturingGateDrafts()) &&
+          keepsGateDraftProgress(resource.data, request.resource.data) && (canSaveDraft() ||
+          (sealedGateDraft(uid, resource.data) && sealedGateDraft(uid, request.resource.data) &&
+            request.resource.data.get('source', '') == resource.data.get('source', '') &&
+            request.resource.data.get('officialReviewGate', null) == resource.data.get('officialReviewGate', null)));
+      }
       match /meta/active_content_journey { allow read, create, update: if isOwner(uid); allow delete: if false; }
       match /meta/{metaId} {
         function validProfileReceipt(data) {
@@ -534,25 +1140,47 @@ service cloud.firestore {
         allow delete: if false;
       }
       match /entryExperiences/{versionId} {
-        allow read, create, update: if isOwner(uid) && versionId.matches('v[0-9]+');
+        allow get: if isOwner(uid) && versionId in ['v1', 'v2'];
+        allow create: if isOwner(uid) && request.resource.data.status != 'skipped' &&
+          (validEntryExperience(request.resource.data, versionId) || validEntryExperienceV2(request.resource.data, versionId));
+        allow update: if isOwner(uid) && (validEntryExperienceUpdate(resource.data, request.resource.data, versionId) ||
+          validEntryExperienceV2Update(resource.data, request.resource.data, versionId));
         allow delete: if false;
       }
 
       match /notifications/{notificationId} {
         function validNotification(data) {
-          return data.ownerId == uid && data.id == notificationId &&
+          let cta = data.get('cta', null);
+          return data.keys().hasOnly(['id', 'schemaVersion', 'ownerId', 'kind', 'notificationType',
+              'occurrenceKey', 'actionGroup', 'priority', 'severity', 'status', 'visualType', 'title',
+              'message', 'cta', 'context', 'createdAt', 'updatedAt', 'eligibleSince', 'eligibleAt',
+              'firstShownAt', 'lastShownAt', 'showCount', 'shownSlots', 'readAt', 'resolvedAt',
+              'dismissedAt', 'resolutionReason', 'expiresAt', 'policyVersion']) &&
+            data.ownerId == uid && data.id == notificationId &&
             data.status in ['pending', 'active', 'resolved', 'dismissed'] &&
             data.message is string && data.message.size() <= 4000 &&
+            (cta == null || (cta is map && cta.keys().hasOnly(['id', 'label', 'args']))) &&
             (!('priority' in data) || (data.priority is int && data.priority >= 0 && data.priority <= 100));
         }
+        function notificationUpdateKeepsState(before, after) {
+          let readAt = before.get('readAt', null);
+          return before.get('occurrenceKey', '') == after.get('occurrenceKey', '') &&
+            before.get('createdAt', null) == after.get('createdAt', null) &&
+            (!(before.status in ['resolved', 'dismissed']) || after.status == before.status) &&
+            (readAt == null || (after.readAt is timestamp && after.readAt >= readAt));
+        }
         allow read: if isOwner(uid);
-        allow create, update: if isOwner(uid) && validNotification(request.resource.data);
+        allow create, update: if isOwner(uid) && validNotification(request.resource.data) &&
+          (resource == null || notificationUpdateKeepsState(resource.data, request.resource.data));
         allow delete: if false;
       }
 
       match /testSettings/clock {
-        allow read, create, update: if isOwner(uid) && isAdmin() &&
-          'testClock' in request.auth.token && request.auth.token.testClock == true;
+        function canUseTestClock() {
+          return isOwner(uid) && isAdmin() && 'testClock' in request.auth.token && request.auth.token.testClock == true;
+        }
+        allow read: if canUseTestClock();
+        allow create, update: if canUseTestClock() && validTestClock(request.resource.data, uid);
         allow delete: if false;
       }
 
@@ -561,7 +1189,8 @@ service cloud.firestore {
       // production ruleset adds the remaining cross-document/batch invariants.
       match /contentProgress/{worldId} {
         function validJourney(data) {
-          return data.worldId == worldId && data.journeyVersion == 1 &&
+          return !data.keys().hasAny(['userXP', 'xp', 'rewardXp', 'xpEconomyVersion']) &&
+            data.worldId == worldId && data.journeyVersion == 1 &&
             data.status in ['active', 'paused'] &&
             nonEmptyString(data.activeRankId, 128) && nonEmptyString(data.activeGateId, 128) &&
             data.startedAt is timestamp && data.updatedAt is timestamp &&
@@ -588,21 +1217,75 @@ service cloud.firestore {
                 after.unlockedRankIds == [after.activeRankId] && after.unlockedGateIds == [after.activeGateId]));
         }
         function levelPlacementAdvance(before, after, id) {
-          let result = getAfter(/databases/$(database)/documents/users/$(uid)/contentProgress/$(worldId)/levelPlacementSessions/$(id)).data;
-          return result.status == 'completed' && result.resultApplied == true && result.completedAt == request.time &&
-            after.get('activeLevelPlacementAssessmentId', '') == '' &&
-            after.activeRankId == (result.resultStartRankId == '' ? before.activeRankId : result.resultStartRankId) &&
-            after.activeGateId == (result.resultStartGateId == '' ? before.activeGateId : result.resultStartGateId) &&
-            after.unlockedRankIds.toSet() == before.unlockedRankIds.toSet().union(result.resultUnlockedRankIds.toSet()) &&
-            after.unlockedGateIds.toSet() == before.unlockedGateIds.toSet().union(result.resultUnlockedGateIds.toSet()) &&
-            after.get('levelPlacementClearedGateIds', []).toSet() == before.get('levelPlacementClearedGateIds', []).toSet().union(result.resultClearedGateIds.toSet()) &&
-            after.contentJourneyStatus == (result.completedCurrentContent == true ? 'completed-current-content' : 'in-progress');
+          let attempt = /databases/$(database)/documents/users/$(uid)/contentProgress/$(worldId)/levelPlacementSessions/$(id);
+          return verifiedLevelPlacementOutcome(id, get(attempt).data, getAfter(attempt).data, before, after);
+        }
+        function matchesPlacementReceipt(before, after, result, clockFields) {
+          return after.diff(before).affectedKeys().hasOnly(result.keys().concat(clockFields)) &&
+            after.diff(result).unchangedKeys().hasAll(result.keys());
+        }
+        function verifiedLevelPlacementOutcome(id, before, after, journeyBefore, journeyAfter) {
+          let receipt = get(/databases/$(database)/documents/users/$(uid)/contentProgress/$(worldId)/levelPlacementOutcomeReceipts/$(id)).data;
+          let achievement = receipt.get('worldCompletion', null);
+          return before.get('placementVersion', 1) == 2 && before.status in ['awaiting-decision', 'paused'] &&
+            before.get('resultApplied', false) == false && receipt.approvedAt is timestamp &&
+            receipt.approvedAt <= request.time && receipt.sessionBefore == before && receipt.journeyBefore == journeyBefore &&
+            journeyBefore.get('activeLevelPlacementAssessmentId', '') == id &&
+            after.status == 'completed' && after.resultApplied == true &&
+            after.assessedAt == request.time && after.completedAt == request.time && after.updatedAt == request.time &&
+            journeyAfter.levelPlacementStatus == 'completed' && journeyAfter.updatedAt == request.time &&
+            journeyAfter.get('activeLevelPlacementAssessmentId', '') == '' &&
+            matchesPlacementReceipt(before, after, receipt.sessionResult, ['assessedAt', 'completedAt', 'updatedAt']) &&
+            matchesPlacementReceipt(journeyBefore, journeyAfter, receipt.journeyResult, ['updatedAt', 'worldCompletion']) &&
+            (achievement == null ? journeyAfter.get('worldCompletion', null) == journeyBefore.get('worldCompletion', null) :
+              journeyAfter.worldCompletion.completedAt == request.time &&
+                journeyAfter.worldCompletion.diff(achievement).affectedKeys().hasOnly(['completedAt']));
+        }
+        function legacyLevelReceipt(id) {
+          return get(/databases/$(database)/documents/users/$(uid)/contentProgress/$(worldId)/levelPlacementResumeReceipts/$(id)).data;
+        }
+        function approvedLegacyLevelSession(before, after, receipt) {
+          return receipt.capturedAt is timestamp && receipt.capturedAt <= request.time &&
+            receipt.pausedSession == before && !before.get('resultApplied', false) &&
+            (before.status == 'paused' || (before.status == 'awaiting-decision' && before.get('placementVersion', 1) == 1)) &&
+            before.answersCompletedAt is timestamp && placementAnswersComplete(before, before.orderedQuestionIds.size()) &&
+            after.status == 'awaiting-decision' && after.resultApplied == true &&
+            after.updatedAt == request.time &&
+            (before.status == 'paused' ? after.resumedAt == request.time && after.assessedAt == request.time :
+              after.get('assessedAt', request.time) == request.time &&
+                after.get('resumedAt', null) == before.get('resumedAt', null)) &&
+            after.diff(before).affectedKeys().hasOnly(receipt.sessionResult.keys().concat(['resumedAt', 'assessedAt', 'updatedAt'])) &&
+            after.diff(receipt.sessionResult).unchangedKeys().hasAll(receipt.sessionResult.keys());
+        }
+        // Both older clients retain the decision screen. The approval freezes
+        // the previous attempt and the permitted destination before the commit.
+        function approvedLegacyLevelResume(id) {
+          let path = /databases/$(database)/documents/users/$(uid)/contentProgress/$(worldId);
+          let attempt = /databases/$(database)/documents/users/$(uid)/contentProgress/$(worldId)/levelPlacementSessions/$(id);
+          let receipt = legacyLevelReceipt(id);
+          let beforeSession = get(attempt).data;
+          let afterSession = getAfter(attempt).data;
+          let beforeJourney = get(path).data;
+          let afterJourney = getAfter(path).data;
+          return approvedLegacyLevelSession(beforeSession, afterSession, receipt) &&
+            receipt.pausedJourney == beforeJourney &&
+            beforeJourney.get('activeLevelPlacementAssessmentId', '') == id &&
+            (beforeSession.status == 'paused' ? beforeJourney.levelPlacementStatus == 'paused' :
+              beforeJourney.levelPlacementStatus in ['active', 'awaiting-decision']) &&
+            afterJourney.activeLevelPlacementAssessmentId == id &&
+            afterJourney.levelPlacementStatus == 'awaiting-decision' && afterJourney.updatedAt == request.time &&
+            afterJourney.diff(beforeJourney).affectedKeys().hasOnly(
+              receipt.journeyResult.keys().concat(['updatedAt'])) &&
+            afterJourney.diff(receipt.journeyResult).unchangedKeys().hasAll(receipt.journeyResult.keys());
         }
         function placementAllowsAdvance(before, after) {
           let id = before.get('activePlacementAssessmentId', '');
           let level = before.get('activeLevelPlacementAssessmentId', '');
           return (id != '' && legacyPlacementAdvance(before, after, id)) ||
-            (level != '' && levelPlacementAdvance(before, after, level)) ||
+            (level != '' &&
+              ((after.get('levelPlacementStatus', '') == 'awaiting-decision' && approvedLegacyLevelResume(level)) ||
+                (after.get('levelPlacementStatus', '') == 'completed' &&
+                  levelPlacementAdvance(before, after, level)))) ||
             (before.get('contentJourneyStatus', '') == 'completed-current-content' && after.contentJourneyStatus == 'in-progress' &&
               after.diff(before).affectedKeys().hasOnly(['contentJourneyStatus', 'updatedAt', 'status']));
         }
@@ -628,10 +1311,20 @@ service cloud.firestore {
         function placementAnswersComplete(data, size) {
           return size > 0 && data.currentQuestionIndex == size && data.answers.size() == size;
         }
+        function activeLegacyPlacement(sessionId, rank, gate) {
+          let journey = getAfter(/databases/$(database)/documents/users/$(uid)/contentProgress/$(worldId)).data;
+          return journey.status == 'active' && journey.placementStatus == 'active' &&
+            journey.get('activePlacementAssessmentId', '') == sessionId &&
+            journey.activeRankId == rank && journey.activeGateId == gate;
+        }
         function unchangedJourneyTarget(before, after) {
           return !after.diff(before).affectedKeys().hasAny(['activeRankId', 'activeGateId',
             'unlockedRankIds', 'unlockedGateIds', 'contentJourneyStatus', 'levelPlacementClearedGateIds',
-            'completedRankIds', 'rankCompletionVersions', 'worldCompletion']);
+            'completedRankIds', 'rankCompletionVersions', 'worldCompletion']) &&
+            after.get('passedCefrLevels', []) == before.get('passedCefrLevels', []) &&
+            after.get('partialCefrLevels', []) == before.get('partialCefrLevels', []) &&
+            after.get('levelPlacementAssessmentIds', {}) == before.get('levelPlacementAssessmentIds', {}) &&
+            after.get('levelPlacementPassedRankIds', []) == before.get('levelPlacementPassedRankIds', []);
         }
         function finishedJourney(before, after) {
           let gate = getAfter(ownerGatePath(uid, worldId, before.activeRankId, before.activeGateId)).data;
@@ -649,13 +1342,197 @@ service cloud.firestore {
           get(/databases/$(database)/documents/content_worlds/$(worldId)/ranks/$(request.resource.data.activeRankId)).data.get('unlockConfig', {}).get('initialStatus', '') == 'available' &&
           publishedGate(worldId, request.resource.data.activeRankId, request.resource.data.activeGateId);
         allow update: if isOwner(uid) && validJourney(request.resource.data) &&
-          (unchangedJourneyTarget(resource.data, request.resource.data) ||
+          (placementAllowsAdvance(resource.data, request.resource.data) ||
+            unchangedJourneyTarget(resource.data, request.resource.data) ||
             (resource.data.activeGateId != request.resource.data.activeGateId &&
               normalProgressAdvance(resource.data, request.resource.data, uid, worldId)) ||
             (request.resource.data.get('contentJourneyStatus', '') == 'completed-current-content' &&
-              finishedJourney(resource.data, request.resource.data)) || placementAllowsAdvance(resource.data, request.resource.data));
+              finishedJourney(resource.data, request.resource.data)));
         allow delete: if false;
+        match /levelPlacementResumeReceipts/{assessmentId} {
+          allow read, write: if false;
+        }
+        function placementCatalog() {
+          return get(/databases/$(database)/documents/content_worlds/$(worldId)/placementCatalog/current).data;
+        }
+        function placementSession(id) {
+          return get(/databases/$(database)/documents/users/$(uid)/contentProgress/$(worldId)/levelPlacementSessions/$(id)).data;
+        }
+        function placementJourney() {
+          return get(/databases/$(database)/documents/users/$(uid)/contentProgress/$(worldId)).data;
+        }
+        function eligibleProofRanks(session, catalog, journey) {
+          let ranks = catalog.levels[session.cefrLevel];
+          let covered = journey.get('levelPlacementPassedRankIds', []).concat(journey.get('completedRankIds', []));
+          return session.assessmentMode == 'new-ranks'
+            ? session.cefrLevel in journey.get('passedCefrLevels', []) &&
+              session.orderedRankIds.toSet() == ranks.toSet().difference(covered.toSet())
+            : session.assessmentMode == 'full-level' && session.orderedRankIds == ranks;
+        }
+        function canProvePlacement(session, journey, assessmentId) {
+          return session.assessmentId == assessmentId && session.placementVersion == 2 &&
+            session.status in ['awaiting-decision', 'paused'] && !session.get('resultApplied', false) &&
+            session.answersCompletedAt is timestamp && journey.activeLevelPlacementAssessmentId == assessmentId &&
+            journey.activeLevelPlacementCefrLevel == session.cefrLevel &&
+            placementAnswersComplete(session, session.orderedQuestionIds.size()) &&
+            session.orderedQuestionIds.toSet().size() == session.answers.size() &&
+            session.orderedRankIds.size() > 0 && session.orderedRankIds.toSet().size() == session.orderedRankIds.size();
+        }
+        function validPlacementProofStart(data, assessmentId) {
+          let session = placementSession(assessmentId);
+          let journey = placementJourney();
+          let catalog = placementCatalog();
+          return canProvePlacement(session, journey, assessmentId) && eligibleProofRanks(session, catalog, journey) &&
+            data.keys().hasOnly(['catalogId', 'answeredAt', 'rankCursor', 'answerCount', 'correctCount',
+              'passedRankIds', 'clearedGateIds', 'wordKeys', 'statistics']) &&
+            data.catalogId == catalog.id && data.answeredAt == session.answersCompletedAt &&
+            data.rankCursor == 0 && data.answerCount == 0 && data.correctCount == 0 &&
+            data.passedRankIds == [] && data.clearedGateIds == [] && data.wordKeys == [] && data.statistics == {};
+        }
+        function placementProofAnswer(session, catalog, rank, step, index) {
+          return index >= step.indices.size() ? { 'valid': true, 'correct': 0, 'threshold': 0.0 } :
+            checkedPlacementAnswer(session, catalog, rank, step.indices[index], step.wordKeys[index]);
+        }
+        function checkedPlacementAnswer(session, catalog, rank, index, key) {
+          let answer = session.answers[index];
+          let question = catalog.questions[session.orderedQuestionIds[index]];
+          return {
+            'valid': answer.questionId == session.orderedQuestionIds[index] && question.rankId == rank &&
+              answer.rankId == rank && answer.gateId == question.gateId && answer.contentWordId == question.contentWordId &&
+              answer.wordKey == question.wordKey && key == question.wordKey,
+            'correct': answer.selectedQuestionId == answer.questionId ? 1 : 0,
+            'threshold': question.threshold
+          };
+        }
+        function validPlacementStatistics(stats, asked, correct, threshold) {
+          return stats.keys().hasOnly(['asked', 'correct', 'ratio', 'passThreshold', 'requiredCorrect', 'confidence', 'status']) &&
+            stats.asked == asked && stats.correct == correct && stats.requiredCorrect is int &&
+            stats.ratio == (asked == 0 ? 0 : correct * 1.0 / asked) &&
+            stats.passThreshold == (asked == 0 ? 0.75 : threshold / asked) &&
+            (asked == 0 ? stats.requiredCorrect == 1 :
+              stats.requiredCorrect >= threshold - 0.000000001 && stats.requiredCorrect - 1 < threshold - 0.000000001) &&
+            stats.confidence == (asked >= 4 ? 'high' : asked >= 3 ? 'medium' : 'low') &&
+            stats.status == (asked < 3 ? 'insufficient-sample' : correct >= stats.requiredCorrect ? 'passed' : 'failed');
+        }
+        function validPlacementProofStep(before, after, assessmentId) {
+          let session = placementSession(assessmentId);
+          let catalog = placementCatalog();
+          let rank = session.orderedRankIds[before.rankCursor];
+          let step = after.step;
+          let answers = [placementProofAnswer(session, catalog, rank, step, 0),
+            placementProofAnswer(session, catalog, rank, step, 1), placementProofAnswer(session, catalog, rank, step, 2),
+            placementProofAnswer(session, catalog, rank, step, 3), placementProofAnswer(session, catalog, rank, step, 4),
+            placementProofAnswer(session, catalog, rank, step, 5)];
+          let correct = answers[0].correct + answers[1].correct + answers[2].correct +
+            answers[3].correct + answers[4].correct + answers[5].correct;
+          let threshold = answers[0].threshold + answers[1].threshold + answers[2].threshold +
+            answers[3].threshold + answers[4].threshold + answers[5].threshold;
+          let stats = after.statistics[rank];
+          let passes = before.passedRankIds.size() == before.rankCursor && stats.status == 'passed';
+          return before.catalogId == catalog.id && before.answeredAt == session.answersCompletedAt &&
+            session.status in ['awaiting-decision', 'paused'] && !session.get('resultApplied', false) &&
+            (before.rankCursor == 0 ||
+              catalog.rankPositions[rank] > catalog.rankPositions[session.orderedRankIds[before.rankCursor - 1]]) &&
+            after.diff(before).affectedKeys().hasOnly(['rankCursor', 'answerCount', 'correctCount', 'passedRankIds',
+              'clearedGateIds', 'wordKeys', 'statistics', 'step']) &&
+            step.keys().hasOnly(['indices', 'wordKeys']) && step.indices is list && step.indices.size() <= 6 &&
+            step.indices.toSet().size() == step.indices.size() && step.wordKeys.size() == step.indices.size() &&
+            step.wordKeys.toSet().size() == step.wordKeys.size() && !before.wordKeys.hasAny(step.wordKeys) &&
+            answers[0].valid && answers[1].valid && answers[2].valid && answers[3].valid && answers[4].valid && answers[5].valid &&
+            after.rankCursor == before.rankCursor + 1 &&
+            after.answerCount == before.answerCount + step.indices.size() && after.correctCount == before.correctCount + correct &&
+            after.wordKeys == before.wordKeys.concat(step.wordKeys) &&
+            after.statistics.diff(before.statistics).affectedKeys().hasOnly([rank]) &&
+            validPlacementStatistics(stats, step.indices.size(), correct, threshold) &&
+            after.passedRankIds == (passes ? before.passedRankIds.concat([rank]) : before.passedRankIds) &&
+            after.clearedGateIds == (passes ? before.clearedGateIds.concat(catalog.ranks[rank]) : before.clearedGateIds);
+        }
+        match /levelPlacementProofs/{assessmentId} {
+          allow get: if isOwner(uid);
+          allow create: if isOwner(uid) && validPlacementProofStart(request.resource.data, assessmentId);
+          allow update: if isOwner(uid) && validPlacementProofStep(resource.data, request.resource.data, assessmentId);
+          allow delete: if isOwner(uid) && resource.data.catalogId != placementCatalog().id;
+        }
+        function placementSetEquals(values, expected) {
+          return values is list && values.toSet().size() == values.size() && values.toSet() == expected;
+        }
+        function placementDestination(session, proof, catalog) {
+          let count = proof.passedRankIds.size();
+          return count == session.orderedRankIds.size() ? catalog.next[session.cefrLevel] :
+            { 'rankId': session.orderedRankIds[count], 'gateId': catalog.ranks[session.orderedRankIds[count]][0], 'level': '' };
+        }
+        function matchesScoredLevelResult(result, session, proof, destination) {
+          let passed = proof.passedRankIds.size() == session.orderedRankIds.size();
+          let rank = destination.rankId;
+          let gate = destination.gateId;
+          return result.keys().hasOnly(['status', 'resultApplied', 'correctCount', 'passedLevel', 'passedRankIds',
+              'passedPrefixLength', 'perRankStats', 'recommendedStartRankId', 'recommendedStartGateId', 'nextCefrLevel',
+              'resultStartRankId', 'resultStartGateId', 'completedCurrentContent', 'resultUnlockedRankIds',
+              'resultUnlockedGateIds', 'resultClearedGateIds']) &&
+            result.status == 'completed' && result.resultApplied == true && result.correctCount == proof.correctCount &&
+            result.passedLevel == passed && result.passedRankIds == proof.passedRankIds &&
+            result.passedPrefixLength == proof.passedRankIds.size() && result.perRankStats == proof.statistics &&
+            result.recommendedStartRankId == (passed ? '' : rank) && result.recommendedStartGateId == (passed ? '' : gate) &&
+            result.nextCefrLevel == destination.level && result.resultStartRankId == rank && result.resultStartGateId == gate &&
+            result.completedCurrentContent == (rank == '' && gate == '') &&
+            placementSetEquals(result.resultUnlockedRankIds, proof.passedRankIds.toSet().union((rank == '' ? [] : [rank]).toSet())) &&
+            placementSetEquals(result.resultUnlockedGateIds, proof.clearedGateIds.toSet().union((gate == '' ? [] : [gate]).toSet())) &&
+            placementSetEquals(result.resultClearedGateIds, proof.clearedGateIds.toSet());
+        }
+        function matchesScoredJourneyResult(result, journey, session, grade) {
+          let level = session.cefrLevel;
+          let passed = journey.get('passedCefrLevels', []).toSet().union((grade.passedLevel ? [level] : []).toSet());
+          let partial = journey.get('partialCefrLevels', []).toSet()
+            .union((!grade.passedLevel && grade.passedPrefixLength > 0 ? [level] : []).toSet()).difference(passed);
+          return result.keys().hasOnly(['activeRankId', 'activeGateId', 'unlockedRankIds', 'unlockedGateIds',
+              'passedCefrLevels', 'partialCefrLevels', 'levelPlacementAssessmentIds', 'levelPlacementPassedRankIds',
+              'levelPlacementClearedGateIds', 'levelPlacementStatus', 'activeLevelPlacementAssessmentId',
+              'activeLevelPlacementCefrLevel', 'contentJourneyStatus']) &&
+            result.activeRankId == (grade.resultStartRankId == '' ? journey.activeRankId : grade.resultStartRankId) &&
+            result.activeGateId == (grade.resultStartGateId == '' ? journey.activeGateId : grade.resultStartGateId) &&
+            placementSetEquals(result.unlockedRankIds, journey.unlockedRankIds.toSet().union(grade.resultUnlockedRankIds.toSet())) &&
+            placementSetEquals(result.unlockedGateIds, journey.unlockedGateIds.toSet().union(grade.resultUnlockedGateIds.toSet())) &&
+            placementSetEquals(result.passedCefrLevels, passed) && placementSetEquals(result.partialCefrLevels, partial) &&
+            result.levelPlacementAssessmentIds.diff(journey.get('levelPlacementAssessmentIds', {})).affectedKeys().hasOnly([level]) &&
+            result.levelPlacementAssessmentIds[level] == session.assessmentId &&
+            placementSetEquals(result.levelPlacementPassedRankIds,
+              journey.get('levelPlacementPassedRankIds', []).toSet().union(grade.passedRankIds.toSet())) &&
+            placementSetEquals(result.levelPlacementClearedGateIds,
+              journey.get('levelPlacementClearedGateIds', []).toSet().union(grade.resultClearedGateIds.toSet())) &&
+            result.levelPlacementStatus == 'completed' && result.activeLevelPlacementAssessmentId == '' &&
+            result.activeLevelPlacementCefrLevel == '' &&
+            result.contentJourneyStatus == (grade.completedCurrentContent ? 'completed-current-content' : 'in-progress');
+        }
+        function validRulesPlacementReceipt(data, assessmentId) {
+          let session = placementSession(assessmentId);
+          let journey = placementJourney();
+          let catalog = placementCatalog();
+          let proof = get(/databases/$(database)/documents/users/$(uid)/contentProgress/$(worldId)/levelPlacementProofs/$(assessmentId)).data;
+          let destination = placementDestination(session, proof, catalog);
+          return data.keys().hasOnly(['sessionBefore', 'journeyBefore', 'sessionResult', 'journeyResult', 'worldCompletion', 'approvedAt']) &&
+            data.approvedAt == request.time && data.sessionBefore == session && data.journeyBefore == journey &&
+            canProvePlacement(session, journey, assessmentId) && eligibleProofRanks(session, catalog, journey) &&
+            proof.catalogId == catalog.id && proof.answeredAt == session.answersCompletedAt &&
+            proof.rankCursor == session.orderedRankIds.size() && proof.answerCount == session.answers.size() &&
+            matchesScoredLevelResult(data.sessionResult, session, proof, destination) &&
+            matchesScoredJourneyResult(data.journeyResult, journey, session, data.sessionResult) &&
+            data.worldCompletion == (data.sessionResult.completedCurrentContent && journey.get('worldCompletion', null) == null
+              ? catalog.worldCompletion : null);
+        }
+        match /levelPlacementOutcomeReceipts/{assessmentId} {
+          allow get: if isOwner(uid);
+          allow create, update: if isOwner(uid) && validRulesPlacementReceipt(request.resource.data, assessmentId);
+          allow list, delete: if false;
+        }
         match /placementSessions/{assessmentId} {
+          function placementFields() {
+            return ['assessmentId', 'worldId', 'rankId', 'currentGateId', 'currentQuestionIndex',
+              'orderedContentWordIds', 'orderedWordKeys', 'answers', 'correctCount', 'totalQuestions',
+              'passThreshold', 'requiredCorrect', 'status', 'source', 'suppressRewards', 'answersComplete',
+              'wordsLinked', 'gateProgressSaved', 'placementCompleted', 'nextGateUnlocked',
+              'completionStep', 'placementVersion', 'startedAt', 'updatedAt', 'outcome', 'score',
+              'rankCompletedByPlacement', 'completedAt', 'abandonedAt'];
+          }
           function validPlacementSession(data) {
             return data.assessmentId == assessmentId && data.worldId == worldId &&
               data.status in ['active', 'submitting', 'completed', 'abandoned'] &&
@@ -670,21 +1547,31 @@ service cloud.firestore {
             let order = data.orderedContentWordIds;
             let configuredRatio = gate.get('entryAssessmentPassRatio', null);
             let ratio = configuredRatio == null || configuredRatio == '' ? 0.75 : configuredRatio;
-            return cleanPlacementStart(data) && gate.status == 'published' && order.size() > 0 && order.size() <= 2000 &&
+            return data.keys().hasOnly(placementFields()) && activeLegacyPlacement(assessmentId, data.rankId, data.currentGateId) &&
+              cleanPlacementStart(data) && gate.status == 'published' && order.size() > 0 && order.size() <= 2000 &&
               order.toSet().size() == order.size() && order.toSet() == gate.get('publishedWordIds', order).toSet() &&
               data.orderedWordKeys.size() == order.size() && data.totalQuestions == order.size() && data.passThreshold == ratio &&
               data.requiredCorrect is int && data.requiredCorrect >= data.totalQuestions * ratio && data.requiredCorrect - 1 < data.totalQuestions * ratio;
           }
           function validPlacementUpdate(before, after) {
             let order = before.orderedContentWordIds;
-            return !after.diff(before).affectedKeys().hasAny(['rankId', 'currentGateId', 'orderedContentWordIds',
+            let changed = after.diff(before).affectedKeys();
+            let resultChanged = changed.hasAny(['outcome', 'score', 'completedAt', 'rankCompletedByPlacement',
+              'gateProgressSaved', 'placementCompleted', 'nextGateUnlocked']);
+            return changed.hasOnly(placementFields()) &&
+              !changed.hasAny(['rankId', 'currentGateId', 'orderedContentWordIds',
               'orderedWordKeys', 'totalQuestions', 'passThreshold', 'requiredCorrect', 'startedAt']) &&
               (after.currentQuestionIndex == before.currentQuestionIndex ? placementAnswersUnchanged(before, after) &&
-                (after.status == before.status || after.status == 'abandoned' ||
+                ((!resultChanged && (after.status == before.status ||
+                  (before.status in ['active', 'submitting'] && after.status == 'abandoned'))) ||
                   (before.status == 'submitting' && after.status == 'completed' && placementAnswersComplete(before, order.size()) &&
-                  after.outcome == (before.correctCount >= before.requiredCorrect ? 'passed' : 'failed'))) :
-                placementAnswerStep(before, after, order[before.currentQuestionIndex], 'contentWordId', 'selectedContentWordId') &&
+                    after.score == before.correctCount * 1.0 / order.size() &&
+                    after.outcome == (before.correctCount >= before.requiredCorrect ? 'passed' : 'failed') &&
+                    (after.outcome != 'failed' ||
+                      (after.get('nextGateUnlocked', false) == false && after.get('rankCompletedByPlacement', false) == false)))) :
+                !resultChanged && placementAnswerStep(before, after, order[before.currentQuestionIndex], 'contentWordId', 'selectedContentWordId') &&
                 after.status == (after.currentQuestionIndex == order.size() ? 'submitting' : 'active') &&
+                after.answers[before.currentQuestionIndex].wordKey == before.orderedWordKeys[before.currentQuestionIndex] &&
                 publishedPlacementWord(before.rankId, before.currentGateId, order[before.currentQuestionIndex], before.orderedWordKeys[before.currentQuestionIndex]));
           }
           allow create: if importingSavedGuest(uid) && validPlacementSession(request.resource.data);
@@ -705,25 +1592,91 @@ service cloud.firestore {
           function validLevelPlacementWord(answer) {
             return publishedPlacementWord(answer.rankId, answer.gateId, answer.contentWordId, answer.wordKey);
           }
+          function startLevelPlacementAtEligibleLevel(data) {
+            let path = /databases/$(database)/documents/users/$(uid)/contentProgress/$(worldId);
+            let previous = get(path).data;
+            let journey = getAfter(path).data;
+            let levels = previous.get('passedCefrLevels', []);
+            return journey.status == 'active' && journey.activeLevelPlacementAssessmentId == assessmentId &&
+              journey.activeLevelPlacementCefrLevel == data.cefrLevel && journey.levelPlacementStatus == 'active' &&
+              (data.cefrLevel == 'A1' ||
+                (data.cefrLevel == 'A2' && 'A1' in levels) ||
+                (data.cefrLevel == 'B1' && 'A2' in levels) ||
+                (data.cefrLevel == 'B2' && 'B1' in levels) ||
+                (data.cefrLevel == 'C1' && 'B2' in levels) ||
+                (data.cefrLevel == 'C2' && 'C1' in levels) ||
+                (data.get('assessmentMode', '') == 'new-ranks' && data.cefrLevel in levels));
+          }
+          function validLevelPlacementRankResult(data) {
+            return data.passedRankIds.size() == data.passedPrefixLength &&
+              data.passedRankIds.toSet().size() == data.passedPrefixLength &&
+              data.orderedRankIds.hasAll(data.passedRankIds) &&
+              data.passedLevel == (data.passedPrefixLength == data.orderedRankIds.size());
+          }
           function validLevelPlacementUpdate(before, after) {
             let order = before.orderedQuestionIds;
             let changed = after.diff(before).affectedKeys();
-            return !changed.hasAny(['cefrLevel', 'selectedWords', 'selectedContentWordIds', 'startedAt']) &&
-              (before.get('resultApplied', false) == false || !changed.hasAny(['status', 'resultApplied', 'completedAt',
-                'resultStartRankId', 'resultStartGateId', 'resultUnlockedRankIds', 'resultUnlockedGateIds',
-                'resultClearedGateIds', 'completedCurrentContent', 'passedRankIds'])) &&
+            return !changed.hasAny(['cefrLevel', 'placementVersion', 'selectedWords', 'selectedContentWordIds', 'startedAt']) &&
+              before.get('resultApplied', false) == false &&
+              !after.get('resultApplied', false) && after.status != 'completed' &&
               (after.currentQuestionIndex == before.currentQuestionIndex ? placementAnswersUnchanged(before, after) &&
                 after.orderedQuestionIds == order &&
                 (after.status != 'awaiting-decision' || before.status == 'awaiting-decision') &&
-                (after.status != 'completed' || before.status == 'completed' ||
-                  (before.status in ['awaiting-decision', 'paused'] && placementAnswersComplete(before, order.size()))) :
+                changed.hasOnly(['status', 'pausedAt', 'resumedAt', 'abandonedAt', 'updatedAt']) :
                 placementAnswerStep(before, after, order[before.currentQuestionIndex], 'questionId', 'selectedQuestionId') &&
                 after.orderedQuestionIds.hasAll(order) && validLevelPlacementWord(after.answers[before.currentQuestionIndex]) &&
-                (after.status == 'active' || (after.status == 'awaiting-decision' && placementAnswersComplete(after, order.size()))));
+                (after.status == 'active' || (after.status == 'awaiting-decision' &&
+                  placementAnswersComplete(after, order.size()) && validLevelPlacementRankResult(after))));
           }
-          allow create: if importingSavedGuest(uid) && validLevelPlacementSession(request.resource.data);
-          allow create: if isOwner(uid) && validLevelPlacementSession(request.resource.data) && cleanPlacementStart(request.resource.data);
-          allow update: if isOwner(uid) && validLevelPlacementSession(request.resource.data) && validLevelPlacementUpdate(resource.data, request.resource.data);
+          function finishAppliedLevelPlacement(before, after) {
+            let path = /databases/$(database)/documents/users/$(uid)/contentProgress/$(worldId);
+            let journeyBefore = get(path).data;
+            let journey = getAfter(path).data;
+            return before.status in ['paused', 'awaiting-decision'] &&
+              journeyBefore.get('activeLevelPlacementAssessmentId', '') == assessmentId &&
+              journey.diff(journeyBefore).affectedKeys().hasOnly(['levelPlacementStatus',
+                'activeLevelPlacementAssessmentId', 'activeLevelPlacementCefrLevel', 'updatedAt']) &&
+              after.diff(before).affectedKeys().hasOnly(['status', 'completedAt', 'pausedAt', 'updatedAt']) &&
+              after.updatedAt == request.time && journey.updatedAt == request.time &&
+              ((after.status == 'completed' && after.completedAt == request.time &&
+                after.get('pausedAt', null) == before.get('pausedAt', null) &&
+                journey.levelPlacementStatus == 'completed' && journey.get('activeLevelPlacementAssessmentId', '') == '') ||
+                (after.status == 'paused' && after.pausedAt == request.time &&
+                  after.get('completedAt', null) == before.get('completedAt', null) &&
+                  journey.levelPlacementStatus == 'paused' && journey.activeLevelPlacementAssessmentId == assessmentId));
+          }
+          function preserveAppliedLevelPlacement(before, after) {
+            let choice = before.get('saveWordChoice', 'undecided');
+            return before.get('resultApplied', false) == true &&
+              ((after.diff(before).affectedKeys().hasOnly(['saveWordChoice', 'saveWordPendingIds', 'saveWordSavedIds',
+                'saveWordFailures', 'saveWordSummary', 'wordsSaveCompletedAt', 'updatedAt']) &&
+                after.saveWordChoice in ['none', 'incorrect-only', 'all'] &&
+                (choice == 'undecided' || choice == after.saveWordChoice)) ||
+                finishAppliedLevelPlacement(before, after));
+          }
+          function matchesImportedPlacementSession(data) {
+            let source = get(savedGuestPermit(uid)).data.sourceUid;
+            let original = get(/databases/$(database)/documents/users/$(source)/contentProgress/$(worldId)/levelPlacementSessions/$(assessmentId)).data;
+            return data.diff(original).affectedKeys().hasOnly(['_savedGuestImportedAt']);
+          }
+          function commitVerifiedOutcome(before, after) {
+            let journey = /databases/$(database)/documents/users/$(uid)/contentProgress/$(worldId);
+            return verifiedLevelPlacementOutcome(assessmentId, before, after, get(journey).data, getAfter(journey).data);
+          }
+          allow create: if importingSavedGuest(uid) && validLevelPlacementSession(request.resource.data) &&
+            matchesImportedPlacementSession(request.resource.data);
+          allow create: if isOwner(uid) && validLevelPlacementSession(request.resource.data) &&
+            cleanPlacementStart(request.resource.data) && !request.resource.data.get('resultApplied', false) &&
+            startLevelPlacementAtEligibleLevel(request.resource.data);
+          allow update: if isOwner(uid) && validLevelPlacementSession(request.resource.data) &&
+            ((resource.data.get('resultApplied', false) == true &&
+              preserveAppliedLevelPlacement(resource.data, request.resource.data)) ||
+              (resource.data.status in ['paused', 'awaiting-decision'] && request.resource.data.status == 'awaiting-decision' &&
+                request.resource.data.get('resultApplied', false) == true &&
+                approvedLegacyLevelResume(assessmentId)) ||
+              (request.resource.data.status == 'completed' && !resource.data.get('resultApplied', false) &&
+                commitVerifiedOutcome(resource.data, request.resource.data)) ||
+              validLevelPlacementUpdate(resource.data, request.resource.data));
           allow delete: if false;
         }
         match /gateClearAttempts/{attemptId} {
@@ -757,7 +1710,8 @@ service cloud.firestore {
             return journey.status == 'active' && journey.activeGateId == data.gateId && journey.activeRankId == data.rankId &&
               progress.status == 'ready' && progress.get('activeClearAttemptId', '') == '' &&
               data.questionOrder.toSet() == progress.loadedContentWordIds.toSet() &&
-              completeGateProof(uid, progress, worldId, data.rankId, data.gateId, data.passRatio);
+              completeGateProof(uid, progress, worldId, data.rankId, data.gateId, data.passRatio) &&
+              (gateLessonCompatibilityOpen() || lessonReady(uid, worldId, data.rankId, data.gateId, progress));
           }
 
           function validGateClearAttemptCreate(data) {
@@ -849,6 +1803,7 @@ service cloud.firestore {
             return data.worldId == worldId && data.rankId == rankId && data.gateId == gateId &&
               data.journeyVersion == 1 &&
               data.status in ['available', 'learning', 'ready', 'cleared'] &&
+              (!('snapshotVersion' in data) || (data.snapshotVersion is int && data.snapshotVersion >= 1)) &&
               data.lastActivityAt is timestamp && data.readyEvidenceCount is int &&
               data.readyEvidenceCount >= 0 && data.clearAttempts is int && data.clearAttempts >= 0 &&
               (!('clearCorrect' in data) || (data.clearCorrect is int && data.clearCorrect >= 0)) &&
@@ -872,21 +1827,38 @@ service cloud.firestore {
               after.loadedWordKeys.hasAll(after.runnerReviewCompletedDueWordKeys) && session.completedAt >= before.loadedAt &&
               (previous == '' || session.completedAt > get(/databases/$(database)/documents/users/$(uid)/quizEvidenceSessions/$(previous)).data.completedAt);
           }
-          function validLevelPlacementGate(id) {
+          function validLevelPlacementGate(gate, id) {
             let result = getAfter(/databases/$(database)/documents/users/$(uid)/contentProgress/$(worldId)/levelPlacementSessions/$(id)).data;
-            return result.status == 'completed' && result.resultApplied == true &&
-              gateId in result.resultClearedGateIds && rankId in result.passedRankIds;
+            let score = result.get('perRankStats', {}).get(rankId, {}).get('ratio', null);
+            return result.resultApplied == true &&
+              gateId in result.resultClearedGateIds && rankId in result.passedRankIds &&
+              score is number && score >= 0 && score <= 1 && gate.levelPlacementScore == score &&
+              (result.status == 'completed' || (result.status == 'awaiting-decision' &&
+                result.get('placementVersion', 1) == 1 && approvedLegacyGateProjection(gate, id)));
           }
-          function validLegacyPlacementGate(id) {
+          function approvedLegacyGateProjection(gate, id) {
+            let previous = resource == null ? {} : resource.data;
+            return gate.diff(previous).affectedKeys().hasOnly(['worldId', 'rankId', 'gateId', 'status', 'journeyVersion',
+              'readyEvidenceCount', 'clearAttempts', 'clearedAt', 'clearedBy', 'levelPlacementAssessmentId',
+              'levelPlacementScore', 'placementClearedWithoutLoad', 'lastActivityAt']) &&
+              gate.clearedAt == request.time && gate.lastActivityAt == request.time &&
+              gate.readyEvidenceCount == previous.get('readyEvidenceCount', 0) &&
+              gate.clearAttempts == previous.get('clearAttempts', 0) && approvedLegacyLevelResume(id);
+          }
+          function validLegacyPlacementGate(gate, id, passed) {
             let result = getAfter(/databases/$(database)/documents/users/$(uid)/contentProgress/$(worldId)/placementSessions/$(id)).data;
-            return result.rankId == rankId && result.currentGateId == gateId && result.status in ['submitting', 'completed'] &&
-              placementAnswersComplete(result, result.orderedContentWordIds.size()) && result.correctCount >= result.requiredCorrect;
+            let total = result.orderedContentWordIds.size();
+            return activeLegacyPlacement(id, rankId, gateId) &&
+              result.rankId == rankId && result.currentGateId == gateId && result.status in ['submitting', 'completed'] &&
+              placementAnswersComplete(result, total) && (result.correctCount >= result.requiredCorrect) == passed &&
+              gate.placementTotal == total && gate.placementCorrect == result.correctCount &&
+              gate.placementScore == result.correctCount * 1.0 / total;
           }
           function placementGate(gate) {
             let source = gate.get('clearedBy', '');
             return gate.status == 'cleared' && publishedGate(worldId, rankId, gateId) &&
-              (source == 'level-placement' ? nonEmptyString(gate.get('levelPlacementAssessmentId', ''), 500) && validLevelPlacementGate(gate.levelPlacementAssessmentId) :
-               source == 'placement' && nonEmptyString(gate.get('placementAssessmentId', ''), 500) && validLegacyPlacementGate(gate.placementAssessmentId));
+              (source == 'level-placement' ? nonEmptyString(gate.get('levelPlacementAssessmentId', ''), 500) && validLevelPlacementGate(gate, gate.levelPlacementAssessmentId) :
+               source == 'placement' && nonEmptyString(gate.get('placementAssessmentId', ''), 500) && validLegacyPlacementGate(gate, gate.placementAssessmentId, true));
           }
           function validReviewChange(before, after) {
             return !after.diff(before).affectedKeys().hasAny([
@@ -894,18 +1866,25 @@ service cloud.firestore {
             ]) || validReviewMarker(before, after);
           }
           function validLearningGate(before, after) {
-            return (before.status in ['available', 'learning'] &&
+            return (!after.diff(before).affectedKeys().hasAny(['placementAssessmentId', 'placementScore',
+                'placementCorrect', 'placementTotal']) ||
+              (nonEmptyString(after.get('placementAssessmentId', ''), 500) &&
+                after.get('clearedBy', '') == '' &&
+                validLegacyPlacementGate(after, after.placementAssessmentId, false))) &&
+              ((before.status in ['available', 'learning'] &&
                 after.readyEvidenceCount < after.get('requiredWordCount', 1) &&
                 after.loadedContentWordIds.hasAll(before.get('loadedContentWordIds', [])) &&
                 after.loadedWordKeys.hasAll(before.get('loadedWordKeys', [])) &&
                 after.get('activeClearAttemptId', '') == before.get('activeClearAttemptId', '') &&
                 after.clearAttempts == before.clearAttempts && validReviewChange(before, after)) ||
-              (before.status == 'cleared' && before.get('clearedBy', '') == 'placement');
+              (before.status == 'cleared' && before.get('clearedBy', '') == 'placement'));
           }
           function validReadyGate(before, after) {
             let oldAttempt = before.get('activeClearAttemptId', '');
             let newAttempt = after.get('activeClearAttemptId', '');
+            let readyAt = after.get('readyAt', null);
             return before.status in ['learning', 'ready'] && sameLoadedGate(before, after) &&
+              (!(readyAt is timestamp) || readyAt == request.time || readyAt == before.get('readyAt', null)) &&
               after.readyEvidenceCount == after.loadedWordKeys.size() &&
               (oldAttempt == newAttempt ||
                 (oldAttempt == '' && nonEmptyString(newAttempt, 500) && linkedAttempt(newAttempt)) ||
@@ -915,27 +1894,159 @@ service cloud.firestore {
           function validClearedGate(before, after) {
             let source = after.get('clearedBy', '');
             return (before.status == 'cleared' && source == before.get('clearedBy', '') &&
+                (source != 'level-placement' ||
+                  (after.get('levelPlacementAssessmentId', null) == before.get('levelPlacementAssessmentId', null) &&
+                    after.get('levelPlacementScore', null) == before.get('levelPlacementScore', null))) &&
                 (source != 'gate-clear' || (sameLoadedGate(before, after) && after.clearedAt == before.clearedAt))) ||
               (source == 'gate-clear' ? before.status == 'ready' && sameLoadedWords(before, after) &&
                 completeGateProof(uid, before, worldId, rankId, gateId, null) &&
                 passedActiveAttempt(before, after, uid, worldId, rankId, gateId) : placementGate(after));
           }
           function validGateUpdate(before, after) {
-            return after.status == 'learning' ? validLearningGate(before, after) :
+            return after.get('masteryComplete', false) == before.get('masteryComplete', false) &&
+              stableLoadedAt(before, after) && (after.status == 'learning' ? validLearningGate(before, after) :
               after.status == 'ready' ? validReadyGate(before, after) :
-              after.status == 'cleared' && validClearedGate(before, after);
+              after.status == 'cleared' && validClearedGate(before, after));
+          }
+          function importedGateKeepsDates(before, after) {
+            let sourceUid = get(savedGuestPermit(uid)).data.sourceUid;
+            let source = get(ownerGatePath(sourceUid, worldId, rankId, gateId)).data;
+            let previousMastery = before.get('masteryComplete', false);
+            let nextMastery = after.get('masteryComplete', false);
+            return (nextMastery == previousMastery ||
+                (nextMastery == true && source.get('masteryComplete', false) == true)) &&
+              sameImportedDate(before, after, source, 'loadedAt') &&
+              sameImportedDate(before, after, source, 'readyAt') && sameImportedDate(before, after, source, 'clearedAt');
+          }
+
+          function sameImportedDate(before, after, source, field) {
+            let value = after.get(field, null);
+            return value == null || value == before.get(field, null) || value == source.get(field, null);
+          }
+
+          function stableLoadedAt(before, after) {
+            let previous = before.get('loadedAt', null);
+            let next = after.get('loadedAt', null);
+            return next == previous || (previous == null && next == request.time);
           }
           allow read: if isOwner(uid);
           function unlockedGate() {
             let journey = getAfter(/databases/$(database)/documents/users/$(uid)/contentProgress/$(worldId)).data;
             return rankId in journey.unlockedRankIds && gateId in journey.unlockedGateIds;
           }
-          allow create, update: if importingSavedGuest(uid) && validGateProgress(request.resource.data);
+          allow create: if importingSavedGuest(uid) && validGateProgress(request.resource.data) && importedGateKeepsDates({}, request.resource.data);
+          allow update: if importingSavedGuest(uid) && validGateProgress(request.resource.data) && importedGateKeepsDates(resource.data, request.resource.data);
           allow create: if isOwner(uid) && validGateProgress(request.resource.data) &&
+            request.resource.data.get('masteryComplete', false) == false &&
+            stableLoadedAt({}, request.resource.data) &&
             ((request.resource.data.status in ['available', 'learning'] && request.resource.data.readyEvidenceCount == 0 &&
               request.resource.data.get('activeClearAttemptId', '') == '' && unlockedGate()) || placementGate(request.resource.data));
           allow update: if isOwner(uid) && validGateProgress(request.resource.data) && validGateUpdate(resource.data, request.resource.data);
           allow delete: if false;
+
+          match /lesson/legacyCredit {
+            allow get: if isOwner(uid);
+            allow write: if false;
+          }
+
+          match /lesson/progress {
+            function idsWithin(values, parent) {
+              return values is list && values.toSet().size() == values.size() && parent.hasAll(values);
+            }
+
+            function validStudy(data) {
+              let study = data.study;
+              let recalled = study.recalled.toSet();
+              let recallAnswers = study.remembered.toSet().union(study.misses.keys().toSet());
+              let missed = recalled.intersection(study.misses.keys().toSet());
+              let completed = data.creditedIds.toSet().union(data.legacyCompletedIds.toSet())
+                .union(recalled.intersection(study.remembered.toSet())).union(study.retried.toSet());
+              return study.keys().hasOnly(['explained', 'details', 'taught', 'hinted', 'applied',
+                  'remembered', 'recalled', 'reinforced', 'retried', 'applications', 'misses', 'retries']) &&
+                idsWithin(study.explained, data.wordIds) && idsWithin(study.details, study.explained) &&
+                idsWithin(study.taught, study.explained) && idsWithin(study.hinted, study.taught) &&
+                study.applications is map && study.taught.hasAll(study.applications.keys()) &&
+                study.applications.values().hasOnly(['correct', 'wrong', 'revealed', 'assisted']) &&
+                idsWithin(study.applied, study.applications.keys()) &&
+                idsWithin(study.remembered, study.applied) && study.misses is map &&
+                study.applied.hasAll(study.misses.keys()) && study.misses.values().hasOnly(['wrong', 'revealed']) &&
+                idsWithin(study.recalled, recallAnswers) && idsWithin(study.reinforced, missed) &&
+                study.retries is map && missed.hasAll(study.retries.keys()) &&
+                study.retries.values().hasOnly(['correct', 'wrong', 'revealed']) &&
+                idsWithin(study.retried, study.retries.keys()) && data.completedWordIds.toSet() == completed;
+            }
+
+            function validLesson(data) {
+              return data.keys().hasOnly(['version', 'wordIds', 'creditedIds', 'legacyCompletedIds', 'answers',
+                  'passed', 'study', 'completedWordIds', 'updatedAt', '_savedGuestImportedAt']) &&
+                data.version == 2 && data.wordIds is list && data.wordIds.size() > 0 &&
+                data.wordIds.size() <= 2000 && data.wordIds.toSet().size() == data.wordIds.size() &&
+                idsWithin(data.creditedIds, data.wordIds) && idsWithin(data.legacyCompletedIds, data.wordIds) &&
+                idsWithin(data.completedWordIds, data.wordIds) &&
+                data.answers is map && data.answers.size() <= data.wordIds.size() * 2 &&
+                data.answers.values().hasOnly(['correct', 'wrong', 'revealed']) &&
+                idsWithin(data.passed, data.answers.keys()) && validStudy(data) &&
+                data.updatedAt == request.time && (!('_savedGuestImportedAt' in data) || importingSavedGuest(uid));
+            }
+
+            function historicalIds(checkpoint) {
+              return checkpoint.get('version', 0) == 1
+                ? checkpoint.get('completedWordIds', []).toSet().difference(checkpoint.get('creditedIds', []).toSet())
+                : checkpoint.get('legacyCompletedIds', []).toSet();
+            }
+
+            function importedLessonIds(data, before) {
+              let sourceUid = get(savedGuestPermit(uid)).data.sourceUid;
+              let source = get(gateLessonPath(sourceUid, worldId, rankId, gateId)).data;
+              return source.wordIds.toSet() == data.wordIds.toSet() &&
+                historicalIds(before).union(historicalIds(source)).hasAll(data.legacyCompletedIds) &&
+                before.get('creditedIds', []).toSet().union(source.creditedIds.toSet()).hasAll(data.creditedIds);
+            }
+
+            function grantedLegacyCredit(data, before) {
+              let grantPath = /databases/$(database)/documents/users/$(uid)/contentProgress/$(worldId)/ranks/$(rankId)/gates/$(gateId)/lesson/legacyCredit;
+              let grant = get(grantPath).data;
+              return exists(gateLessonRelease()) && gateLessonCutoff() is timestamp &&
+                grant.capturedAt is timestamp && grant.capturedAt < gateLessonCutoff() &&
+                grant.wordIds.toSet() == data.wordIds.toSet() &&
+                before.get('creditedIds', []).toSet().union(grant.creditedIds.toSet()).hasAll(data.creditedIds);
+            }
+
+            function keepsCompatibleCredit(data, before) {
+              return historicalIds(before).hasAll(data.legacyCompletedIds) &&
+                (before.get('creditedIds', []).hasAll(data.creditedIds) || grantedLegacyCredit(data, before));
+            }
+
+            function validCredit(data, before) {
+              return keepsCompatibleCredit(data, before) || (importingSavedGuest(uid) && importedLessonIds(data, before));
+            }
+
+            function keepsStudy(data, before) {
+              let old = before.get('study', {});
+              let next = data.study;
+              return next.explained.hasAll(old.get('explained', [])) && next.details.hasAll(old.get('details', [])) &&
+                next.taught.hasAll(old.get('taught', [])) && next.hinted.hasAll(old.get('hinted', [])) &&
+                next.applied.hasAll(old.get('applied', [])) && next.remembered.hasAll(old.get('remembered', [])) &&
+                next.recalled.hasAll(old.get('recalled', [])) && next.reinforced.hasAll(old.get('reinforced', [])) &&
+                next.retried.hasAll(old.get('retried', [])) &&
+                next.applications.keys().hasAll(old.get('applications', {}).keys()) &&
+                next.misses.keys().hasAll(old.get('misses', {}).keys()) &&
+                next.retries.keys().hasAll(old.get('retries', {}).keys());
+            }
+
+            allow read: if isOwner(uid);
+            allow create: if isOwner(uid) && validLesson(request.resource.data) &&
+              get(gateContentPath(worldId, rankId, gateId)).data.publishedWordIds.toSet() == request.resource.data.wordIds.toSet() &&
+              validCredit(request.resource.data, {});
+            allow update: if isOwner(uid) && validLesson(request.resource.data) &&
+              request.resource.data.wordIds == resource.data.wordIds &&
+              validCredit(request.resource.data, resource.data) &&
+              request.resource.data.creditedIds.hasAll(resource.data.creditedIds) &&
+              request.resource.data.completedWordIds.hasAll(resource.data.completedWordIds) &&
+              request.resource.data.passed.hasAll(resource.data.passed) &&
+              request.resource.data.answers.keys().hasAll(resource.data.answers.keys()) &&
+              keepsStudy(request.resource.data, resource.data);
+          }
 
           match /readiness/proof {
             allow read: if isOwner(uid);
@@ -975,17 +2086,70 @@ service cloud.firestore {
           return ['eligibleEvidenceCount', 'lastEligibleEvidenceAt', 'lastEvidenceEventId', 'evidenceVersion',
             'evidenceTimezoneOffsetMinutes', 'lastEvidenceLocalDayKey'];
         }
+        function validForgetCountStep() {
+          let before = resource.data.get('forgetCount', 0);
+          let after = request.resource.data.forgetCount;
+          return before is int && after is int && after >= 0 && after <= 100000 &&
+            (after == before + 1 || after == before - 1);
+        }
         allow create, update: if importingSavedGuest(uid) && validContentWord(request.resource.data);
         allow create: if isOwner(uid) && validContentWord(request.resource.data) &&
           request.resource.data.get('eligibleEvidenceCount', 0) == 0 &&
           request.resource.data.get('lastEligibleEvidenceAt', null) == null &&
           request.resource.data.get('lastEvidenceEventId', '') == '';
         allow update: if isOwner(uid) && validContentWord(request.resource.data) &&
+          request.resource.data.normalizedWord == resource.data.normalizedWord &&
+          request.resource.data.masteryKey == resource.data.masteryKey &&
+          resource.data.get('wordKey', contentWordId) == contentWordId &&
+          (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['forgetCount']) || validForgetCountStep()) &&
           (!request.resource.data.diff(resource.data).affectedKeys().hasAny(evidenceFields()) ||
             (request.resource.data.diff(resource.data).affectedKeys().hasOnly(evidenceFields().concat(['updatedAt'])) &&
               validEvidenceProjection(resource.data, request.resource.data, uid, contentWordId)));
+        allow update: if isOwner(uid) && !('wordKey' in resource.data) &&
+          resource.data.canonicalId == contentWordId && resource.data.masteryKey == contentWordId &&
+          request.resource.data.diff(resource.data).affectedKeys().hasOnly(['forgetCount', 'updatedAt']) &&
+          validForgetCountStep();
         allow delete: if false;
         match /sources/{sourceId} {
+          function validPublishedGateSource(data) {
+            let journey = getAfter(/databases/$(database)/documents/users/$(uid)/contentProgress/$(data.worldId)).data;
+            let pointer = getAfter(/databases/$(database)/documents/users/$(uid)/meta/active_content_journey).data;
+            let gate = get(gateContentPath(data.worldId, data.rankId, data.gateId)).data;
+            let word = get(/databases/$(database)/documents/content_worlds/$(data.worldId)/ranks/$(data.rankId)/gates/$(data.gateId)/words/$(data.contentWordId)).data;
+            let canonical = getAfter(/databases/$(database)/documents/users/$(uid)/contentWords/$(contentWordId)).data;
+            return pointer.worldId == data.worldId && journey.status == 'active' &&
+              data.rankId in journey.unlockedRankIds && data.gateId in journey.unlockedGateIds &&
+              publishedWorld(data.worldId) && publishedRank(data.worldId, data.rankId) &&
+              gate.status == 'published' && word.status == 'published' &&
+              gate.worldId == data.worldId && gate.rankId == data.rankId && gate.gateId == data.gateId &&
+              word.worldId == data.worldId && word.rankId == data.rankId &&
+              word.gateId == data.gateId && word.contentWordId == data.contentWordId &&
+              data.contentWordId in gate.get('publishedWordIds', [data.contentWordId]) &&
+              word.wordKey == contentWordId && canonical.canonicalId == contentWordId &&
+              canonical.wordKey == contentWordId && canonical.normalizedWord == word.normalizedWord &&
+              canonical.masteryKey == contentWordId &&
+              sourceId == 'published_' + data.worldId + '~' + data.rankId + '~' + data.gateId + '~' + data.contentWordId;
+          }
+          function validImportedSource(data) {
+            let sourceUid = get(savedGuestPermit(uid)).data.sourceUid;
+            let original = get(/databases/$(database)/documents/users/$(sourceUid)/contentWords/$(contentWordId)/sources/$(sourceId)).data;
+            return data.diff(original).affectedKeys().hasOnly(['_savedGuestImportedAt']);
+          }
+          function validLevelPlacementSource(data) {
+            let session = getAfter(/databases/$(database)/documents/users/$(uid)/contentProgress/$(data.worldId)/levelPlacementSessions/$(data.assessmentId)).data;
+            let word = get(/databases/$(database)/documents/content_worlds/$(data.worldId)/ranks/$(data.rankId)/gates/$(data.gateId)/words/$(data.contentWordId)).data;
+            return data.type == 'level-placement' && data.linkedAt == request.time &&
+              data.operationId == 'level-placement:' + data.assessmentId &&
+              sourceId == 'level_placement_' + data.assessmentId + '~' + data.contentWordId &&
+              session.assessmentId == data.assessmentId && session.worldId == data.worldId &&
+              session.cefrLevel == data.cefrLevel && session.status in ['awaiting-decision', 'paused', 'completed'] &&
+              data.contentWordId in session.selectedContentWordIds &&
+              data.placementResult in ['correct', 'incorrect'] &&
+              word.status == 'published' && word.wordKey == contentWordId &&
+              word.worldId == data.worldId && word.rankId == data.rankId && word.gateId == data.gateId &&
+              word.contentWordId == data.contentWordId &&
+              publishedGate(data.worldId, data.rankId, data.gateId);
+          }
           function validSource(data) {
             return data.addedFrom in [
                 'manual', 'dictionary-search', 'private-world', 'import',
@@ -995,8 +2159,12 @@ service cloud.firestore {
               (!('customWorldId' in data) || nonEmptyString(data.customWorldId, 500)) &&
               (!('importId' in data) || nonEmptyString(data.importId, 500));
           }
-          allow read, delete: if isOwner(uid);
-          allow create: if isOwner(uid) && validSource(request.resource.data);
+          allow read: if isOwner(uid);
+          allow delete: if isOwner(uid) && !(resource.data.addedFrom in ['published-gate', 'level-placement']);
+          allow create: if (importingSavedGuest(uid) && validImportedSource(request.resource.data)) ||
+            (isOwner(uid) && validSource(request.resource.data) &&
+              (request.resource.data.addedFrom == 'published-gate' ? validPublishedGateSource(request.resource.data) :
+                request.resource.data.addedFrom != 'level-placement' || validLevelPlacementSource(request.resource.data)));
           allow update: if false;
         }
         match /evidence/{eventId} {

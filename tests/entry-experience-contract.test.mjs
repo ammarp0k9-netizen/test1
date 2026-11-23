@@ -79,10 +79,10 @@ function authenticatedFresh(overrides = {}) {
 test('the versioned Entry Experience contract exposes frozen central enums and APIs', () => {
   assert.ok(entry);
   assert.equal(entry.EXPERIENCE_VERSION, 2);
-  assert.equal(entry.CONTRACT_VERSION, 2);
+  assert.equal(entry.CONTRACT_VERSION, 3);
   assert.deepEqual(Array.from(entry.STATUSES), ['in-progress', 'completed']);
   assert.deepEqual(Array.from(entry.AUDIENCES), ['new', 'returning', 'returning-guest']);
-  assert.deepEqual(Array.from(entry.STEPS), ['welcome', 'interests', 'theme', 'worlds', 'journey', 'destination', 'return']);
+  assert.deepEqual(Array.from(entry.STEPS), ['welcome', 'theme', 'interests', 'discover']);
   assert.deepEqual(Array.from(entry.JOURNEY_STATUSES), ['pending', 'world-selected', 'structure-explored', 'return-reviewed']);
   assert.ok(Object.isFrozen(entry));
   assert.ok(Object.isFrozen(entry.INTERESTS));
@@ -284,7 +284,7 @@ test('World-completed destination aligns Product Entry to the terminal shortcut 
     {}
   );
   const aligned = entry.alignStateToJourneyDestination(draft, destination, FIXED_NOW);
-  assert.equal(aligned.currentStep, 'destination');
+  assert.equal(aligned.currentStep, 'discover');
   assert.equal(aligned.journeyStatus, 'return-reviewed');
   assert.equal(aligned.status, 'in-progress');
 });
@@ -487,71 +487,22 @@ test('a legacy unlocked appearance can be preserved but cannot be newly selected
   );
 });
 
-test('the full v2 route requires a real World choice and a Journey-structure interaction before destination', () => {
-  const classified = entry.classifyUser(legacyEntryFixtures.accountWordsAndXpNoJourney.input);
-  const initial = entry.createEntryDraft(classified, {});
-  const selected = entry.transitionState(initial, {
-    type: 'select-interests',
-    interestIds: ['games', 'invalid', 'games', 'technology'],
-  }, FIXED_NOW);
-  assert.deepEqual(Array.from(selected.interestIds), ['games', 'technology']);
-  assert.equal(selected.interestsStatus, 'selected');
-  assert.equal(selected.currentStep, 'interests');
-  assert.ok(selected.startedAt > 0);
-
-  const themeStep = entry.transitionState(
-    selected,
-    { type: 'continue-interests' },
-    FIXED_NOW + 1000
-  );
-  assert.equal(themeStep.currentStep, 'theme');
-
-  const themed = entry.transitionState(themeStep, {
-    type: 'select-theme', themeId: 'ocean', oasisMode: 'dark',
-  }, FIXED_NOW + 2000);
-  assert.equal(themed.themeId, 'ocean');
-  assert.equal(themed.oasisMode, 'dark');
-  assert.equal(themed.themeStatus, 'selected');
-  assert.equal(themed.themeExplicit, true);
-
-  const worlds = entry.transitionState(themed, { type: 'continue-theme' }, FIXED_NOW + 3000);
-  assert.equal(worlds.currentStep, 'worlds');
-  assert.throws(() => entry.transitionState(worlds, { type: 'continue-worlds' }), /world must be selected/i);
-
-  const selectedWorld = entry.transitionState(worlds, {
-    type: 'select-world', worldId: 'published-world-games',
-  }, FIXED_NOW + 4000);
-  assert.equal(selectedWorld.selectedWorldId, 'published-world-games');
-  assert.equal(selectedWorld.journeyStatus, 'world-selected');
-
-  const journey = entry.transitionState(selectedWorld, { type: 'continue-worlds' }, FIXED_NOW + 5000);
-  assert.equal(journey.currentStep, 'journey');
-  assert.throws(() => entry.transitionState(journey, { type: 'continue-journey' }), /explored/i);
-
-  const explored = entry.transitionState(journey, { type: 'explore-structure' }, FIXED_NOW + 6000);
-  assert.equal(explored.journeyStatus, 'structure-explored');
-  assert.equal(explored.status, 'in-progress');
-
-  const destination = entry.transitionState(explored, { type: 'continue-journey' }, FIXED_NOW + 7000);
-  assert.equal(destination.currentStep, 'destination');
-  assert.equal(destination.gamerStatus, 'not-applicable');
-
-  const completed = entry.transitionState(destination, { type: 'complete' }, FIXED_NOW + 9000);
-  assert.equal(completed.status, 'completed');
-  assert.equal(completed.currentStep, 'destination');
-  assert.equal(completed.journeyStatus, 'structure-explored');
+test('Entry completes at Discover Worlds without selecting or previewing a world', () => {
+  const initial = entry.createEntryDraft({ classification: 'brand-new', audience: 'new' }, {});
+  assert.throws(() => entry.transitionState(initial, { type: 'complete' }), /Discover Worlds/);
+  const theme = entry.transitionState(initial, { type: 'continue-welcome' }, FIXED_NOW);
+  const selectedTheme = entry.transitionState(theme, { type: 'select-theme', themeId: 'ocean', oasisMode: 'dark' });
+  const interests = entry.transitionState(selectedTheme, { type: 'continue-theme' });
+  const selected = entry.transitionState(interests, { type: 'select-interests', interestIds: ['games', 'invalid', 'games'] });
+  const discover = entry.transitionState(selected, { type: 'continue-interests' });
+  assert.equal(discover.currentStep, 'discover');
+  assert.equal(discover.selectedWorldId, '');
+  assert.deepEqual(Array.from(discover.interestIds), ['games']);
+  assert.equal(discover.themeId, 'ocean');
+  assert.equal(discover.oasisMode, 'dark');
+  const completed = entry.transitionState(discover, { type: 'complete' }, FIXED_NOW + 9000);
   assert.equal(completed.completedAt, FIXED_NOW + 9000);
-  assert.equal(completed.skippedAt, 0);
   assert.equal(entry.shouldPresent(completed), false);
-
-  assert.throws(
-    () => entry.transitionState(initial, { type: 'continue-interests' }, FIXED_NOW),
-    RangeError
-  );
-  assert.throws(
-    () => entry.transitionState(initial, { type: 'select-theme', themeId: 'golden' }, FIXED_NOW),
-    RangeError
-  );
 });
 
 test('a truly new learner starts with the restored welcome and resumes it safely', () => {
@@ -569,18 +520,18 @@ test('a truly new learner starts with the restored welcome and resumes it safely
   assert.throws(() => entry.transitionState(initial, { type: 'continue-interests' }, FIXED_NOW), /interest/i);
 
   const interests = entry.transitionState(initial, { type: 'continue-welcome' }, FIXED_NOW);
-  assert.equal(interests.currentStep, 'interests');
+  assert.equal(interests.currentStep, 'theme');
   const returned = entry.transitionState(interests, { type: 'back' }, FIXED_NOW + 1);
   assert.equal(returned.currentStep, 'welcome');
 });
 
-test('skipping interests reaches theme, while Back restores the interests step', () => {
+test('skipping interests reaches Discover Worlds, while Back restores the interests step', () => {
   const classified = entry.classifyUser(legacyEntryFixtures.guestWithLocalWords.input);
   const initial = entry.createEntryDraft(classified, { themeId: 'ocean', oasisMode: 'light' });
   const skipped = entry.transitionState(initial, { type: 'skip-interests' }, FIXED_NOW);
   assert.equal(skipped.interestsStatus, 'skipped');
   assert.deepEqual(Array.from(skipped.interestIds), []);
-  assert.equal(skipped.currentStep, 'theme');
+  assert.equal(skipped.currentStep, 'discover');
   assert.equal(skipped.themeId, 'ocean');
   assert.equal(skipped.themeStatus, 'preserved');
 
@@ -626,14 +577,14 @@ test('normalization restores supported v2 stages and advances the removed contex
     journeyStatus: 'structure-explored', selectedWorldId: 'world-a', gamerStatus: 'running',
   });
   const migrated = entry.normalizeEntryState(plain(legacyContext));
-  assert.equal(migrated.currentStep, 'destination');
+  assert.equal(migrated.currentStep, 'discover');
   assert.equal(migrated.journeyStatus, 'structure-explored');
   assert.equal(migrated.selectedWorldId, 'world-a');
   assert.equal(migrated.gamerStatus, 'running');
   assert.equal(entry.shouldPresent(migrated), true);
 });
 
-test('only completed v2 with Journey proof is once-only for the same scoped account', () => {
+test('completed Entry is once-only for the same scoped account', () => {
   const completedRaw = v2State({
     status: 'completed',
     currentStep: 'destination',
@@ -664,18 +615,8 @@ test('only completed v2 with Journey proof is once-only for the same scoped acco
   );
   assert.equal(entry.shouldPresent(statesByKey.get(entry.entryStorageKey({ uid: 'account-c' }))), true);
 
-  const missingProof = plain(completedBootTwo);
-  missingProof.journeyStatus = 'pending';
-  const normalizedMissingProof = entry.normalizeEntryState(missingProof);
-  assert.equal(entry.shouldPresent(normalizedMissingProof), true);
-  const recoveredProgress = entry.recoverUnverifiedTerminal(
-    normalizedMissingProof,
-    { classification: 'returning-with-progress' },
-    FIXED_NOW
-  );
-  assert.equal(recoveredProgress.status, 'in-progress');
-  assert.equal(recoveredProgress.currentStep, 'return');
-  assert.equal(recoveredProgress.journeyStatus, 'pending');
+  const noPreview = { ...completedBootTwo, journeyStatus: 'pending' };
+  assert.equal(entry.shouldPresent(noPreview), false);
 });
 
 test('guest-to-account merge preserves v2 route state, terminal completion, and account authority', () => {
@@ -694,7 +635,7 @@ test('guest-to-account merge preserves v2 route state, terminal completion, and 
   );
   assert.equal(mergedDraft.source, 'merged-draft');
   assert.equal(mergedDraft.changed, true);
-  assert.equal(mergedDraft.state.currentStep, 'journey');
+  assert.equal(mergedDraft.state.currentStep, 'discover');
   assert.deepEqual(Array.from(mergedDraft.state.interestIds), ['study', 'games', 'travel']);
   assert.equal(mergedDraft.state.themeId, 'ocean');
   assert.equal(mergedDraft.state.oasisMode, 'dark');

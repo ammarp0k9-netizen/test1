@@ -66,6 +66,7 @@ function harness(options = {}) {
   };
   let quizWordReads = 0;
   const api = {
+    getGateLessonAccess: async () => ({ allowed: options.lessonComplete !== false }),
     getGateQuizWords: async () => {
       quizWordReads++;
       if (options.quizWordError) throw new Error('تعذر تحميل كلمات الاختبار');
@@ -103,7 +104,7 @@ function harness(options = {}) {
   };
   const sandbox = vm.createContext({
     window, document, Date, console, AbortController, localStorage: { getItem: () => null }, getJourneyCloudApi: () => api,
-    currentView: 'worlds', publishedContentState: state, isPublishedGateRoute: () => true, isCurrentPublishedGate: () => true,
+    currentView: options.currentView || 'worlds', publishedContentState: state, isPublishedGateRoute: () => true, isCurrentPublishedGate: () => true,
     publishedGateJourneyState: () => options.presentation || state.gateProgress?.status || 'available',
     publishedJourneyPresentation: () => ({ icon: '' }), animatePublishedGateProgress() {},
     appendMetaChip: (parent, label) => parent.append(label),
@@ -173,12 +174,23 @@ test('a new gate prioritizes start, start choice, or adding words based on the e
   joined.buttons[0].handlers.click(); assert.deepEqual(joined.calls, [['load', false]]);
 });
 
+test('an incomplete lesson blocks even a direct call to the gate picker', async () => {
+  const h = harness({ lessonComplete: false, gateProgress: { ...study, availableForReviewNowCount: 3 } });
+  assert.equal(await h.openPicker(), false);
+  assert.equal(h.picker, undefined);
+  assert.equal(h.quizWordReads, 0);
+});
+
 test('a due review uses the saved count and the games and cards are locked inside its picker', async () => {
   const progress = { ...study, availableForReviewNowCount: 2 };
   const h = harness({ gateProgress: progress }); h.render();
   assert.equal(h.buttons[0].textContent, 'ابدأ المراجعة الرسمية');
   assert.deepEqual(reviewFacts(h.panel), [['كلمات مستحقة الآن', '2']]);
-  assert.equal(reviewCopy(h.panel).dataset.onboardingGateReview, 'due');
+  assert.equal(h.buttons[0].dataset.onboardingGateReview, 'due');
+  assert.equal(reviewCopy(h.panel).dataset.onboardingGateReview, undefined);
+  const restored = harness({ gateProgress: progress, currentView: 'personal' });
+  restored.render();
+  assert.equal(restored.buttons[0].dataset.onboardingGateReview, 'due');
   for (const name of ['runner', 'bots']) assert.equal(h.panel.querySelector('.' + name), null);
   await h.openPicker();
   for (const name of ['runner', 'bots']) assert.equal(gameLaunch(h, name).disabled, true);
@@ -196,7 +208,8 @@ test('waiting locks training in the open picker exactly when the saved deadline 
   const copy = reviewCopy(h.panel);
   assert.equal(reviewTime(h.panel).tag, 'time');
   assert.equal(reviewTime(h.panel).dateTime, new Date(nextAt).toISOString());
-  assert.equal(copy.dataset.onboardingGateReview, 'waiting');
+  assert.equal(copy.dataset.onboardingGateReview, undefined);
+  assert.equal(h.buttons[0].dataset.onboardingGateReview, undefined);
   await h.openPicker();
   const cards = pickerModes(h.picker)[0];
   assert.equal(cards.disabled, false);
@@ -204,6 +217,7 @@ test('waiting locks training in the open picker exactly when the saved deadline 
   assert.equal(gameLaunch(h, 'bots').disabled, false);
   h.tick(nextAt - 1); assert.strictEqual(reviewCopy(h.panel), copy);
   h.tick(nextAt); assert.deepEqual(buttonLabels(h), ['ابدأ المراجعة الرسمية']);
+  assert.equal(h.buttons[0].dataset.onboardingGateReview, 'due');
   assert.equal(reviewFacts(h.panel), undefined);
   assert.equal(reviewTime(h.panel), undefined);
   assert.equal(cards.disabled, true);

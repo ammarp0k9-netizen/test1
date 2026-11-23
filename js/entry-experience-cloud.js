@@ -105,9 +105,10 @@ function safeEntryWriteContract(snapshot, payload) {
     checks: Object.freeze({
       payloadHasOnlyAllowedFields: payloadFields.every((field) => allowed.has(field)),
       payloadHasExactFieldCount: payloadFields.length === ENTRY_V2_FIELDS.length,
-      currentVersion: payload.contractVersion === 2 && payload.experienceVersion === 2,
+      currentVersion: payload.contractVersion === contract().CONTRACT_VERSION &&
+        payload.experienceVersion === contract().EXPERIENCE_VERSION,
       completionShape: payload.status !== 'completed' || (
-        payload.currentStep === 'destination' &&
+        payload.currentStep === 'discover' &&
         ['structure-explored', 'return-reviewed'].includes(payload.journeyStatus) &&
         safeValueType(payload.completedAt) === 'timestamp'
       ),

@@ -1,0 +1,339 @@
+html:has(body.gate-lesson-active), body.gate-lesson-active { overflow: hidden; }
+body.gate-lesson-active :is(#onboardingResume, .lootlingua-popover) { visibility: hidden !important; }
+body.gate-lesson-active #toastMessage:not(.toast-danger):not(.toast-warning):not(.toast-critical),
+body.gate-lesson-active #toastMessage.toast-notification:not(.toast-danger):not(.toast-warning):not(.toast-critical) { visibility: hidden; }
+
+.gate-lesson-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 10070;
+  display: grid;
+  align-items: start;
+  justify-items: center;
+  height: 100dvh;
+  padding: clamp(22px, 5vh, 54px) 24px;
+  overflow: hidden;
+  background: radial-gradient(ellipse at 90% 0%, color-mix(in srgb, var(--accent) 15%, transparent), transparent 58%),
+    var(--main-bg, #0c1220);
+}
+html[data-theme="lootlingua"] .gate-lesson-overlay {
+  background:
+    radial-gradient(ellipse at 83% -12%, color-mix(in srgb, var(--accent) 29%, var(--main-bg)), transparent 62%),
+    radial-gradient(ellipse at 3% 105%, color-mix(in srgb, var(--accent2) 25%, var(--main-bg)), transparent 61%),
+    linear-gradient(150deg, var(--main-bg), var(--card-bg));
+}
+html[data-theme="glass"] .gate-lesson-overlay { background: linear-gradient(135deg, #21455d, #29475e 65%, #3f4660); }
+
+.gate-lesson {
+  --lesson-text: var(--text-white, #f7f3ff);
+  --lesson-surface: var(--card-bg, #201832);
+  --lesson-accent: var(--accent, #987cff);
+  --lesson-accent-alt: var(--accent2, #f19bd2);
+  --lesson-line: color-mix(in srgb, var(--lesson-text) 18%, transparent);
+  --lesson-muted: color-mix(in srgb, var(--lesson-text) 75%, var(--lesson-surface));
+  --lesson-inline: clamp(20px, 4vw, 40px);
+  --lesson-gap: clamp(12px, 2.5vw, 20px);
+  box-sizing: border-box;
+  width: min(100%, 760px);
+  max-height: 100%;
+  min-height: 0;
+  display: grid;
+  grid-template-rows: auto auto minmax(0, 1fr);
+  color: var(--lesson-text);
+  background: color-mix(in srgb, var(--lesson-surface) 90%, var(--main-bg));
+  border: 1px solid var(--lesson-line);
+  border-radius: 24px;
+  box-shadow: 0 24px 64px #080a2a36;
+}
+html[data-theme="lootlingua"] .gate-lesson {
+  --lesson-surface: color-mix(in srgb, var(--card-bg) 90%, var(--accent));
+  --lesson-accent: var(--header-grad, var(--accent));
+  --lesson-accent-alt: color-mix(in srgb, var(--accent2) 64%, var(--text-white));
+  border-color: color-mix(in srgb, var(--lesson-accent) 27%, var(--card-bg));
+  background: linear-gradient(152deg,
+    color-mix(in srgb, var(--card-bg) 83%, var(--accent)),
+    var(--card-bg) 52%,
+    color-mix(in srgb, var(--card-bg) 85%, var(--accent2)));
+  box-shadow: 0 24px 78px color-mix(in srgb, var(--main-bg) 62%, transparent),
+    inset 0 1px color-mix(in srgb, var(--lesson-accent) 14%, transparent);
+}
+.gate-lesson *, .gate-lesson *::before, .gate-lesson *::after { box-sizing: border-box; }
+.gate-lesson [hidden] { display: none !important; }
+.gate-lesson [dir] { unicode-bidi: isolate; }
+.gate-lesson [dir="ltr"]:not(button) { text-align: left; }
+.gate-lesson [dir="rtl"]:is(p, strong, span, div, input) { text-align: right; }
+
+.gate-lesson-header, .gate-lesson-meter, .gate-lesson-stage { padding-inline: var(--lesson-inline); }
+.gate-lesson-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding-block: 16px 10px;
+}
+.gate-lesson-identity { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.gate-lesson-identity > div { display: grid; gap: 2px; min-width: 0; }
+.gate-lesson-identity strong, .gate-lesson-world { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.gate-lesson-world { font-size: .77rem; color: var(--lesson-muted); }
+.gate-lesson-emblem {
+  inline-size: 38px;
+  block-size: 38px;
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+  background: color-mix(in srgb, var(--lesson-accent) 14%, transparent);
+  border: 1px solid var(--lesson-line);
+  border-radius: 11px;
+  color: var(--lesson-accent);
+}
+.gate-lesson-meter { display: grid; gap: 8px; padding-block: 0 15px; border-block-end: 1px solid var(--lesson-line); }
+.gate-lesson-meter-copy { display: flex; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
+.gate-lesson-count, .gate-lesson-studied { font-size: .78rem; font-variant-numeric: tabular-nums; }
+.gate-lesson-studied { color: var(--lesson-muted); }
+.gate-lesson-track {
+  position: relative;
+  block-size: 7px;
+  border-radius: 100px;
+  background: var(--lesson-line);
+  overflow: hidden;
+}
+html[data-theme="lootlingua"] .gate-lesson-track {
+  background: color-mix(in srgb, var(--lesson-accent) 22%, var(--lesson-surface));
+}
+.gate-lesson-progress { position: absolute; inset: 0; inline-size: 100%; block-size: 100%; margin: 0; opacity: 0; }
+.gate-lesson-fill {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(90deg, var(--lesson-accent-alt), var(--lesson-accent));
+  border-radius: inherit;
+  transform-origin: right center;
+  transform: scaleX(var(--lesson-progress, 0));
+  transition: transform 260ms ease-out;
+  pointer-events: none;
+}
+
+.gate-lesson-stage {
+  display: grid;
+  align-content: start;
+  gap: var(--lesson-gap);
+  min-height: 0;
+  overflow: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+  scrollbar-color: var(--lesson-line) transparent;
+  padding-block: 20px 24px;
+  overflow-wrap: anywhere;
+}
+.gate-lesson-stage-title { display: flex; align-items: baseline; justify-content: space-between; flex-wrap: wrap; gap: 4px 14px; }
+.gate-lesson-heading { margin: 0; font-size: clamp(1.14rem, 2.5vw, 1.42rem); font-weight: 750; line-height: 1.45; }
+.gate-lesson-station-position { margin: 0; color: var(--lesson-muted); font-size: .8rem; }
+.gate-lesson-heading:focus, .gate-lesson-feedback-title:focus { outline: none; }
+.gate-lesson-workspace, .gate-lesson-footer, .gate-lesson-actions,
+.gate-lesson-response, .gate-lesson-prompt, .gate-lesson-teaching-copy {
+  display: grid;
+  gap: var(--lesson-gap);
+  min-width: 0;
+}
+.gate-lesson :is(.gate-lesson-prompt, .gate-lesson-response, .gate-lesson-teaching-copy, .gate-lesson-notice, .gate-lesson-actions):empty { display: none; }
+.gate-lesson-word-line {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 8px 14px;
+}
+.gate-lesson-word-carrier { display: flex; align-items: center; flex-wrap: wrap; gap: 5px clamp(12px, 3vw, 28px); min-inline-size: 0; }
+.gate-lesson-lexeme { min-inline-size: 0; }
+.gate-lesson-word { margin: 0; font-size: clamp(2.3rem, 6vw, 3.7rem); line-height: 1.12; font-weight: 800; letter-spacing: -.035em; }
+.gate-lesson-part-of-speech { display: block; margin-block: 3px 0; font-size: .83rem; color: var(--lesson-muted); }
+.gate-lesson-context {
+  min-width: 0;
+  background: linear-gradient(120deg, color-mix(in srgb, var(--lesson-accent) 10%, var(--lesson-surface)), transparent);
+  border: 1px solid var(--lesson-line);
+  border-inline-end: 3px solid var(--lesson-accent);
+  border-radius: 12px;
+  padding: 12px 16px;
+}
+.gate-lesson-example { margin: 0; font-size: clamp(1.17rem, 3vw, 1.6rem); font-weight: 650; line-height: 1.6; }
+.gate-lesson-example mark { color: var(--lesson-accent); background: transparent; text-decoration: underline; text-underline-offset: .17em; }
+.gate-lesson .gate-lesson-gap {
+  display: inline-block;
+  min-width: 2.2em;
+  padding-inline: .2em;
+  border: 1px dashed var(--lesson-accent);
+  background: color-mix(in srgb, var(--lesson-accent) 8%, transparent);
+  border-radius: 7px;
+  text-align: center;
+  text-decoration: none;
+}
+.gate-lesson-explanation { display: grid; gap: 3px; }
+.gate-lesson-cue-label { margin: 0; font-size: .82rem; color: var(--lesson-muted); }
+.gate-lesson-meaning { margin: 0; font-size: clamp(1.55rem, 5vw, 2.5rem); line-height: 1.45; font-weight: 750; }
+.gate-lesson-answer-meaning { font-size: 1.25rem; }
+.gate-lesson-translation, .gate-lesson-definition, .gate-lesson-discover-prompt, .gate-lesson-definition-more {
+  margin: 0;
+  font-size: .92rem;
+  line-height: 1.7;
+  color: var(--lesson-muted);
+}
+.gate-lesson-teaching-copy { gap: 6px; }
+.gate-lesson-context .gate-lesson-translation, .gate-lesson-definition-more p { margin-block-start: 7px; }
+.gate-lesson-definition-more summary { cursor: pointer; color: var(--lesson-accent); }
+
+.gate-lesson button { font: inherit; color: inherit; border: 0; cursor: pointer; -webkit-tap-highlight-color: transparent; touch-action: manipulation; }
+.gate-lesson :is(button, input, summary):focus-visible { outline: 2px solid var(--lesson-accent); outline-offset: 3px; }
+.gate-lesson button:disabled { opacity: .6; cursor: progress; }
+.gate-lesson .gate-lesson-exit { display: flex; align-items: center; gap: 8px; min-height: 44px; padding: 0 3px; background: transparent; font-size: .8rem; flex-shrink: 0; }
+.gate-lesson-exit:hover > span { text-decoration: underline; text-underline-offset: .25em; }
+.gate-lesson-sound { display: flex; flex-direction: column; align-items: flex-start; gap: 5px; }
+.gate-lesson .gate-lesson-audio {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 44px;
+  padding: 7px 12px;
+  border-radius: 30px;
+  background: color-mix(in srgb, var(--lesson-accent) 12%, var(--lesson-surface));
+  border: 1px solid var(--lesson-line);
+  font-size: .81rem;
+}
+.gate-lesson-audio i, .gate-lesson-assistance i { color: var(--lesson-accent); }
+.gate-lesson .gate-lesson-audio:hover { border-color: var(--lesson-accent); }
+.gate-lesson-audio-status, .gate-lesson-written-label, .gate-lesson-pronunciation { max-width: 30ch; font-size: .78rem; line-height: 1.55; color: var(--lesson-muted); }
+.gate-lesson-audio-status:empty { display: none; }
+.gate-lesson-wave { display: none; align-items: center; gap: 3px; height: 15px; color: var(--lesson-accent); }
+.gate-lesson-sound[data-audio-state="playing"] .gate-lesson-wave { display: flex; }
+.gate-lesson-wave > span { width: 2px; height: 7px; background: currentColor; border-radius: 5px; animation: lesson-wave 650ms ease-in-out infinite alternate; }
+.gate-lesson-wave > span:nth-child(2n) { height: 12px; animation-delay: -300ms; }
+.gate-lesson-wave > span:nth-child(3n) { height: 15px; }
+@keyframes lesson-wave { from { transform: scaleY(.55); opacity: .5; } to { transform: scaleY(1); opacity: 1; } }
+
+.gate-lesson-footer { gap: 8px; }
+.gate-lesson-actions { gap: 8px; }
+.gate-lesson-actions > .gate-lesson-next, .gate-lesson-actions > .gate-lesson-word-link { justify-self: start; }
+.gate-lesson-options {
+  border: 0;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 8.5rem), 1fr));
+  gap: 8px;
+  min-width: 0;
+}
+.gate-lesson-options legend { padding: 0 0 9px; font-size: .85rem; color: var(--lesson-muted); }
+.gate-lesson .gate-lesson-choice, .gate-lesson .gate-lesson-answer-input {
+  width: 100%;
+  min-width: 0;
+  min-height: 48px;
+  padding: 8px 12px;
+  border: 1px solid var(--lesson-line);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--lesson-surface) 82%, var(--lesson-text) 6%);
+  color: var(--lesson-text);
+  line-height: 1.45;
+}
+.gate-lesson .gate-lesson-choice { text-align: center; overflow-wrap: anywhere; transition: background 150ms, border 150ms; }
+.gate-lesson .gate-lesson-choice:hover {
+  border-color: var(--lesson-accent);
+  background: color-mix(in srgb, var(--lesson-accent) 13%, var(--lesson-surface));
+}
+.gate-lesson .gate-lesson-next, .gate-lesson .gate-lesson-answer-submit, .gate-lesson .gate-lesson-word-link {
+  min-height: 48px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  width: fit-content;
+  max-width: 100%;
+  padding: 9px 16px;
+  border-radius: 11px;
+  background: var(--lesson-text);
+  color: var(--lesson-surface);
+  font-weight: 750;
+}
+.gate-lesson .gate-lesson-word-link { overflow-wrap: anywhere; display: block; min-width: 8ch; }
+.gate-lesson :is(.gate-lesson-next, .gate-lesson-answer-submit, .gate-lesson-word-link):hover { opacity: .87; }
+.gate-lesson-answer-form { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 7px; align-items: end; }
+.gate-lesson-answer-form label { grid-column: 1 / -1; font-size: .85rem; }
+.gate-lesson-assistance { display: flex; align-items: center; column-gap: 18px; flex-wrap: wrap; }
+.gate-lesson :is(.gate-lesson-reveal, .gate-lesson-hint) {
+  display: inline-flex;
+  min-height: 44px;
+  padding: 5px 2px;
+  align-items: center;
+  gap: 7px;
+  background: transparent;
+  color: var(--lesson-muted);
+  font-size: .83rem;
+}
+.gate-lesson :is(.gate-lesson-reveal, .gate-lesson-hint):hover { text-decoration: underline; text-underline-offset: .2em; }
+.gate-lesson-hint-panel, .gate-lesson-receipt {
+  margin: 0;
+  padding: 7px 10px;
+  border-inline-start: 2px solid var(--lesson-accent);
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--lesson-accent) 9%, transparent);
+  font-size: .82rem;
+}
+.gate-lesson-receipt { display: flex; align-items: center; gap: 5px 9px; flex-wrap: wrap; }
+.gate-lesson-receipt i, .gate-lesson-relation i { color: var(--lesson-accent); }
+.gate-lesson-receipt:is([data-outcome="assisted"], [data-outcome="guided"]) i { display: none; }
+.gate-lesson-feedback {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  border-radius: 12px;
+  border: 1px solid var(--lesson-line);
+  background: color-mix(in srgb, var(--lesson-accent) 6%, transparent);
+}
+.gate-lesson-feedback-head, .gate-lesson-relation { display: flex; align-items: center; gap: 9px; flex-wrap: wrap; }
+.gate-lesson-feedback-icon { color: var(--lesson-accent); }
+.gate-lesson-feedback-title { font-size: .94rem; margin: 0; line-height: 1.5; }
+.gate-lesson-relation { gap: 13px; }
+.gate-lesson-answer-word { font-size: 1.55rem; font-weight: 750; }
+.gate-lesson-feedback .gate-lesson-example { font-size: 1rem; }
+.gate-lesson-notice { font-size: .78rem; line-height: 1.6; color: var(--lesson-muted); margin: 0; }
+.gate-lesson-complete-copy { font-size: 1rem; line-height: 1.7; margin: 0; }
+.gate-lesson-complete-seal { color: var(--lesson-accent); font-size: 1.5rem; }
+.gate-lesson > h2, .gate-lesson > button { margin: 16px var(--lesson-inline); justify-self: start; }
+.gate-lesson-live-result { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+.gate-lesson .toast-host { top: auto; bottom: max(20px, env(safe-area-inset-bottom)); }
+
+@media (max-width: 760px) {
+  .gate-lesson-overlay { padding: 0; }
+  .gate-lesson { --lesson-inline: max(16px, env(safe-area-inset-left), env(safe-area-inset-right)); height: 100%; border: 0; border-radius: 0; box-shadow: none; }
+  .gate-lesson-word-line { column-gap: 8px; }
+  .gate-lesson-header { padding-block-start: max(10px, env(safe-area-inset-top)); }
+  .gate-lesson-stage { padding-block: 16px max(18px, env(safe-area-inset-bottom)); }
+  .gate-lesson-options { grid-template-columns: repeat(auto-fit, minmax(min(100%, 6rem), 1fr)); }
+}
+@media (max-height: 620px) {
+  .gate-lesson-stage { padding-block-start: 12px; }
+  .gate-lesson-meter { padding-block-end: 10px; }
+}
+.gate-lesson-stage:is([data-motion="arrival"], [data-motion="word"], [data-motion="leave-station"], [data-motion="prompt"]) .gate-lesson-workspace,
+.gate-lesson-stage:is([data-motion="arrival"], [data-motion="leave-station"]) .gate-lesson-complete-copy {
+  animation: lesson-flow-content 180ms ease-out;
+}
+.gate-lesson-stage:is([data-motion="station"], [data-motion="return"]) :is(.gate-lesson-workspace, .gate-lesson-station-position) {
+  animation: lesson-flow-content 210ms ease-out;
+}
+.gate-lesson-stage[data-motion="practice"] :is(.gate-lesson-actions, .gate-lesson-gap),
+.gate-lesson-stage[data-motion="hint"] .gate-lesson-hint-panel,
+.gate-lesson-stage[data-motion]:not([data-motion=""]) .gate-lesson-receipt {
+  animation: lesson-flow-reveal 150ms ease-out;
+}
+.gate-lesson-stage[data-motion="feedback"] .gate-lesson-feedback {
+  animation: lesson-flow-content 180ms ease-out;
+}
+@keyframes lesson-flow-content {
+  from { opacity: .72; transform: translateY(5px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+@keyframes lesson-flow-reveal {
+  from { opacity: .72; }
+  to { opacity: 1; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .gate-lesson *, .gate-lesson *::before, .gate-lesson *::after { animation: none !important; transition: none !important; }
+}

@@ -1181,8 +1181,8 @@ async function recordOfficialRunnerReview(user, review, sessionId, existingSessi
   const ref = gateProgressRef(user.uid, review.worldId, review.rankId, review.gateId);
   const saved = await runTransaction(db, async (transaction) => {
     const snapshot = await transaction.get(ref), progress = snapshot.data() || {};
-    if (!snapshot.exists() || !['learning', 'ready'].includes(progress.status) ||
-        progress.runnerReviewCompletedSessionId === sessionId) return false;
+    if (progress.runnerReviewCompletedSessionId === sessionId) return true;
+    if (!snapshot.exists() || !['learning', 'ready'].includes(progress.status)) return false;
     const loaded = new Set((progress.loadedWordKeys || []).map(String));
     if (!review.dueWordKeys.every((key) => loaded.has(key))) return false;
     if (existingSession && progress.runnerReviewCompletedSessionId) {
@@ -1212,6 +1212,11 @@ async function ensureQuizEvidenceSession(user, input, entries) {
     window.LootLinguaWordLifecycle?.wordKeyOf?.(entry.word)
   ).filter(Boolean)));
   const review = officialReviewGate(input);
+  const lesson = window.LootLinguaGateLesson;
+  const gate = lesson?.gateContext(input.gateContext || input.officialReviewGate || input);
+  if (lesson?.hasGateIntent(input) && !gate) throw journeyCloudError('lesson/missing-gate');
+  if (review && lesson && lesson.keyFor(gate) !== lesson.keyFor(review)) throw journeyCloudError('lesson/gate-mismatch');
+  const gateFields = gate ? { lessonWorldId: gate.worldId, lessonRankId: gate.rankId, lessonGateId: gate.gateId } : {};
   const reviewFields = review ? {
     officialReviewWorldId: review.worldId,
     officialReviewRankId: review.rankId,
@@ -1228,6 +1233,9 @@ async function ensureQuizEvidenceSession(user, input, entries) {
     if (snapshot.exists()) {
       const saved = snapshot.data() || {};
       if (
+        (saved.lessonGateId && (
+          saved.lessonWorldId !== gate?.worldId || saved.lessonRankId !== gate?.rankId || saved.lessonGateId !== gate?.gateId
+        )) ||
         saved.status !== 'completed' ||
         saved.sourceType !== sourceType ||
         String(saved.privateWorldId || '') !== privateWorldId ||
@@ -1254,6 +1262,7 @@ async function ensureQuizEvidenceSession(user, input, entries) {
       totalCount: wordKeys.length,
       correctCount: correctWordKeys.length,
       evidenceVersion: evidenceCore().EVIDENCE_VERSION,
+      ...gateFields,
       ...reviewFields,
       completedAt: serverTimestamp(),
     });
@@ -1385,10 +1394,13 @@ async function recordQuizEvidenceBatch(input = {}) {
       return 'recorded';
     });
   }));
-  await recordOfficialRunnerReview(user, review, session.sessionId, session.existingSession);
+  const officialReviewCommitted = await recordOfficialRunnerReview(user, review, session.sessionId, session.existingSession);
   const summary = {
     recorded: results.filter((result) => result === 'recorded').length,
     duplicate: results.filter((result) => result === 'duplicate').length,
+    officialReviewCommitted: officialReviewCommitted && results.some((result, index) =>
+      (result === 'recorded' || result === 'duplicate') &&
+      review.dueWordKeys.includes(lifecycle?.wordKeyOf?.(correctEntries[index].word))),
     ineligible: results.filter((result) => result === 'ineligible').length +
       Math.max(0, entries.length - correctEntries.length),
   };
@@ -1558,6 +1570,116 @@ async function gateClearBundle(worldId, rankId, gateId, attempt) {
   };
 }
 
+function gateLessonRef(uid, { worldId, rankId, gateId }) {
+  return doc(gateProgressRef(uid, worldId, rankId, gateId), 'lesson', 'progress');
+}
+
+async function getGateLessonCutoff() {
+  const release = await getDoc(doc(db, 'releaseConfig', 'gateLesson'));
+  const data = release.data() || {};
+  return { ...data, compatibilityOpen: !release.metadata?.fromCache && !release.metadata?.hasPendingWrites &&
+    data.captureStartedAt == null && data.activatedAt == null };
+}
+
+async function getGateLessonAccess(context, options = {}) {
+  const user = requireUser();
+  const { worldId, rankId, gateId } = context;
+  const lesson = window.LootLinguaGateLesson;
+  const [snapshot, progress] = await Promise.all([
+    getDoc(gateLessonRef(user.uid, context)),
+    options.progress || getGateProgress(worldId, rankId, gateId, { force: true }),
+  ]);
+  const state = snapshot.exists() ? snapshot.data() : null;
+  const result = allowed => {
+    if (auth.currentUser?.uid !== user.uid) throw journeyCloudError('journey/auth-changed');
+    return { allowed, state, confirmed: !snapshot.metadata?.fromCache && !snapshot.metadata?.hasPendingWrites };
+  };
+  if (!progress?.loadedAt) return result(false);
+  if (!snapshot.metadata?.hasPendingWrites && lesson.complete(state, progress.loadedContentWordIds)) return result(true);
+  if (!options.session?.id && !['ready', 'cleared'].includes(progress.status)) return result(false);
+  const { activatedAt: cutoff, captureStartedAt, compatibilityOpen } = await getGateLessonCutoff();
+  if (compatibilityOpen && options.session?.id && ['learning', 'ready', 'cleared'].includes(progress.status)) {
+    const session = options.session;
+    const source = lesson.gateContext(session) || lesson.gateContext(session.officialReviewGate);
+    const keys = session.selectedWordKeys?.length ? session.selectedWordKeys : session.words?.map(word => word.wordKey);
+    if (source && lesson.keyFor(source) === lesson.keyFor(context) &&
+        keys?.length && keys.every(key => progress.loadedWordKeys?.includes(key)) &&
+        (session.officialReviewDueWordKeys || []).every(key => keys.includes(key))) {
+      return { ...result(true), compatibilityResume: true };
+    }
+  }
+  if (!lesson.time(cutoff)) return result(false);
+  if (options.session?.id) {
+    const meta = ['users', user.uid, 'meta'];
+    const [draftSnapshot, sealSnapshot] = await Promise.all([
+      getDoc(doc(db, ...meta, 'active_quiz_session')),
+      getDoc(doc(db, ...meta, 'legacy_gate_quiz')),
+    ]);
+    const draft = draftSnapshot.data();
+    const seal = sealSnapshot.data();
+    const draftGate = lesson.gateContext(draft) || lesson.gateContext(draft?.officialReviewGate);
+    if (lesson.isLegacy(seal?.capturedAt, captureStartedAt) && lesson.time(captureStartedAt) <= lesson.time(cutoff) &&
+        seal?.sessionId === options.session.id && draft?.id === seal.sessionId &&
+        seal.source === draft.source && seal.source === options.session.source &&
+        seal.mode === draft.mode && seal.mode === options.session.mode && lesson.isLegacy(seal.capturedAt, cutoff) &&
+        draftGate && lesson.keyFor(draftGate) === lesson.keyFor(context) &&
+        lesson.keyFor(seal) === lesson.keyFor(context) &&
+        sameEvidenceWordKeys(seal.dueWordKeys, options.session.officialReviewDueWordKeys) &&
+        sameEvidenceWordKeys(seal.wordKeys, options.session.words?.map(word => word.wordKey) || options.session.selectedWordKeys)) return result(true);
+  }
+  if (progress.status === 'cleared' && progress.clearedBy === 'gate-clear' &&
+      lesson.isLegacy(progress.clearedAt, cutoff)) return result(true);
+  if (progress.status !== 'ready' || !lesson.isLegacy(progress.readyAt, cutoff)) return result(false);
+  const [proof, gate] = await Promise.all([
+    getDoc(doc(gateProgressRef(user.uid, worldId, rankId, gateId), 'readiness', 'proof')),
+    contentApi().getPublishedGate(worldId, rankId, gateId),
+  ]);
+  const ids = progress.loadedContentWordIds || [];
+  return result(ids.length > 0 && gate?.status === 'published' &&
+    lesson.sameWords(gate.publishedWordIds || ids, ids) && ids.every(id => proof.data()?.wordIds?.includes(id)));
+}
+
+async function saveGateLessonState(context, candidate) {
+  const user = requireUser();
+  const lesson = window.LootLinguaGateLesson;
+  const target = gateLessonRef(user.uid, context);
+  return runTransaction(db, async transaction => {
+    const snapshot = await transaction.get(target);
+    if (auth.currentUser?.uid !== user.uid) throw journeyCloudError('journey/auth-changed');
+    const current = snapshot.exists() ? snapshot.data() : null;
+    if (current && !lesson.sameWords(current.wordIds, candidate.wordIds)) {
+      throw journeyCloudError('lesson/content-changed', 'The published word set has changed.');
+    }
+    const prior = lesson.upgrade(current, { confirmed: true });
+    const state = lesson.merge(prior, candidate);
+    if (current?.version !== state.version || lesson.checkpointKey(prior) !== lesson.checkpointKey(state)) {
+      transaction.set(target, { ...state, updatedAt: serverTimestamp() });
+    }
+    return state;
+  });
+}
+
+async function getLegacyLessonWordIds(context, progress) {
+  const lesson = window.LootLinguaGateLesson;
+  if (!progress?.loadedAt) return [];
+  const { activatedAt: cutoff } = await getGateLessonCutoff();
+  if (!lesson.isLegacy(progress.loadedAt, cutoff)) return [];
+  const { worldId, rankId, gateId } = context;
+  const user = requireUser();
+  const snapshot = await getDoc(doc(gateProgressRef(user.uid, worldId, rankId, gateId), 'lesson', 'legacyCredit'));
+  if (auth.currentUser?.uid !== user.uid) return [];
+  const grant = snapshot.data();
+  const ids = progress.loadedContentWordIds;
+  if (!lesson.isLegacy(grant?.capturedAt, cutoff) || !lesson.sameWords(grant.wordIds, ids)) return [];
+  return ids.filter(id => grant.creditedIds?.includes(id));
+}
+
+async function requireGateLessonAccess(context, options) {
+  if (!(await getGateLessonAccess(context, options)).allowed) {
+    throw journeyCloudError('lesson/incomplete', 'Complete this lesson before opening the gate review.');
+  }
+}
+
 async function startGateClearAttempt(worldId, rankId, gateId) {
   const user = requireUser();
   const [journey, progress, gate, words] = await Promise.all([
@@ -1579,6 +1701,7 @@ async function startGateClearAttempt(worldId, rankId, gateId) {
       return gateClearBundle(worldId, rankId, gateId, active);
     }
   }
+  await requireGateLessonAccess({ worldId, rankId, gateId }, { progress });
   const attemptId = createGateClearAttemptId(worldId, rankId, gateId);
   const passRatio = gateClearCore().resolvePassThreshold(gate, schemaApi());
   const seed = gateClearCore().createSessionSeed({
@@ -2344,6 +2467,10 @@ async function getGateQuizWords(worldId, rankId, gateId, options) {
       ? await getDoc(doc(db, 'users', user.uid, 'words', legacyWordId))
       : null;
     const legacy = legacySnapshot?.exists() ? legacySnapshot.data() || {} : {};
+    const meaning = value => String(value || '').trim().normalize('NFKC');
+    const lessonHistory = options?.lessonHistory ? {
+      lessonMeaningMatches: Boolean(word.translation && meaning(word.translation) === meaning(canonical.translation || legacy.meaning)),
+    } : {};
     return {
       ...word,
       ...canonical,
@@ -2355,6 +2482,7 @@ async function getGateQuizWords(worldId, rankId, gateId, options) {
       word: word.word || canonical.word || legacy.word || legacy.text || '',
       meaning: word.translation || canonical.meaning || canonical.translation || legacy.meaning || legacy.translation || '',
       translation: word.translation || canonical.translation || legacy.translation || legacy.meaning || '',
+      ...lessonHistory,
     };
   }));
   return trustedWords.filter(Boolean);
@@ -3786,16 +3914,6 @@ async function reconcilePlacementOutcomeProgress(user, world, assessment, sessio
 }
 
 async function reconcilePreviouslyAppliedPlacementOutcome(user, world, assessment, session) {
-  let progressReconciliationError = null;
-  try {
-    await reconcilePlacementOutcomeProgress(user, world, assessment, session);
-  } catch (error) {
-    progressReconciliationError = journeyOperationError(
-      error,
-      'reconcile-placement-outcome-progress',
-      { uid: user.uid, worldId: world, assessmentId: assessment }
-    );
-  }
   let sessionReconciliationError = null;
   let savedSession = session;
   if (session.status !== 'completed') {
@@ -3807,6 +3925,18 @@ async function reconcilePreviouslyAppliedPlacementOutcome(user, world, assessmen
         error,
         'reconcile-placement-session-status',
         { worldId: world, assessmentId: assessment }
+      );
+    }
+  }
+  let progressReconciliationError = null;
+  if (savedSession.status === 'completed') {
+    try {
+      await reconcilePlacementOutcomeProgress(user, world, assessment, savedSession);
+    } catch (error) {
+      progressReconciliationError = journeyOperationError(
+        error,
+        'reconcile-placement-outcome-progress',
+        { uid: user.uid, worldId: world, assessmentId: assessment }
       );
     }
   }
@@ -3831,6 +3961,145 @@ async function reconcilePreviouslyAppliedPlacementOutcome(user, world, assessmen
   });
 }
 
+async function commitVerifiedLevelPlacement(user, world, assessment, receipt) {
+  const sessionRef = levelPlacementSessionRef(user.uid, world, assessment);
+  const targetJourneyRef = journeyRef(user.uid, world);
+  const pointerRef = activeJourneyRef(user.uid);
+  const session = await runTransaction(db, async transaction => {
+    const [savedJourney, savedSession] = await Promise.all([
+      transaction.get(targetJourneyRef), transaction.get(sessionRef)
+    ]);
+    const current = savedSession.data();
+    if (auth.currentUser?.uid !== user.uid || !current) {
+      throw journeyCloudError('level-placement/session-mismatch', 'Placement session changed.');
+    }
+    if (current.resultApplied && current.status === 'completed') return current;
+    if (savedJourney.data()?.activeLevelPlacementAssessmentId !== assessment) {
+      throw journeyCloudError('level-placement/session-mismatch', 'Placement session changed.');
+    }
+    if (!receipt.sessionBefore.updatedAt?.isEqual(current.updatedAt) ||
+        !receipt.journeyBefore.updatedAt?.isEqual(savedJourney.data().updatedAt)) {
+      throw journeyCloudError('level-placement/receipt-stale', 'Placement approval needs to be refreshed.');
+    }
+    const completion = receipt.worldCompletion
+      ? { worldCompletion: { ...receipt.worldCompletion, completedAt: serverTimestamp() } } : {};
+    transaction.update(sessionRef, { ...receipt.sessionResult,
+      assessedAt: serverTimestamp(), completedAt: serverTimestamp(), updatedAt: serverTimestamp() });
+    transaction.update(targetJourneyRef, { ...receipt.journeyResult, ...completion, updatedAt: serverTimestamp() });
+    transaction.set(pointerRef, { worldId: world, journeyVersion: core().JOURNEY_VERSION, updatedAt: serverTimestamp() });
+    return { ...current, ...receipt.sessionResult };
+  });
+  cache.levelPlacementSessions.set(`${world}/${assessment}`, session);
+  return reconcilePreviouslyAppliedPlacementOutcome(user, world, assessment, session);
+}
+
+function scorePlacementRank(session, catalog, proof) {
+  const rank = session.orderedRankIds[proof.rankCursor];
+  const indices = session.answers.flatMap((answer, index) => answer.rankId === rank ? [index] : []);
+  const questions = indices.map(index => catalog.questions[session.orderedQuestionIds[index]]);
+  const wordKeys = questions.map(question => question.wordKey);
+  const asked = indices.length;
+  const correct = indices.filter(index => session.answers[index].selectedQuestionId === session.orderedQuestionIds[index]).length;
+  const threshold = questions.reduce((sum, question) => sum + question.threshold, 0);
+  const requiredCorrect = asked ? Math.ceil(threshold - 1e-9) : 1;
+  const stats = {
+    asked, correct, requiredCorrect,
+    ratio: asked ? correct / asked : 0,
+    passThreshold: asked ? threshold / asked : 0.75,
+    confidence: asked >= 4 ? 'high' : asked >= 3 ? 'medium' : 'low',
+    status: asked < 3 ? 'insufficient-sample' : correct >= requiredCorrect ? 'passed' : 'failed',
+  };
+  const passed = proof.passedRankIds.length === proof.rankCursor && stats.status === 'passed';
+  return {
+    ...proof,
+    step: { indices, wordKeys },
+    rankCursor: proof.rankCursor + 1,
+    answerCount: proof.answerCount + asked,
+    correctCount: proof.correctCount + correct,
+    passedRankIds: passed ? [...proof.passedRankIds, rank] : proof.passedRankIds,
+    clearedGateIds: passed ? [...proof.clearedGateIds, ...catalog.ranks[rank]] : proof.clearedGateIds,
+    wordKeys: [...proof.wordKeys, ...wordKeys],
+    statistics: { ...proof.statistics, [rank]: stats },
+  };
+}
+
+function buildScoredPlacementOutcome(session, journey, proof, catalog) {
+  const union = (values = [], added = []) => [...new Set([...values, ...added])];
+  const { cefrLevel, assessmentId } = session;
+  const passedPrefixLength = proof.passedRankIds.length;
+  const passedLevel = passedPrefixLength === session.orderedRankIds.length;
+  const recommendedRank = passedLevel ? '' : session.orderedRankIds[passedPrefixLength];
+  const recommendedGate = recommendedRank ? catalog.ranks[recommendedRank][0] : '';
+  const destination = passedLevel ? catalog.next[cefrLevel] : { rankId: recommendedRank, gateId: recommendedGate, level: '' };
+  const { rankId, gateId, level } = destination;
+  const completedCurrentContent = !rankId && !gateId;
+  const resultClearedGateIds = union(proof.clearedGateIds);
+  const resultUnlockedRankIds = union(proof.passedRankIds, rankId ? [rankId] : []);
+  const resultUnlockedGateIds = union(resultClearedGateIds, gateId ? [gateId] : []);
+  const passedCefrLevels = union(journey.passedCefrLevels, passedLevel ? [cefrLevel] : []).sort();
+  const partialCefrLevels = union(journey.partialCefrLevels, !passedLevel && passedPrefixLength > 0 ? [cefrLevel] : [])
+    .filter(partial => !passedCefrLevels.includes(partial));
+  return {
+    sessionBefore: session,
+    journeyBefore: journey,
+    sessionResult: {
+      status: 'completed', resultApplied: true, correctCount: proof.correctCount,
+      passedLevel, passedRankIds: proof.passedRankIds, passedPrefixLength, perRankStats: proof.statistics,
+      recommendedStartRankId: recommendedRank, recommendedStartGateId: recommendedGate,
+      nextCefrLevel: level, resultStartRankId: rankId, resultStartGateId: gateId, completedCurrentContent,
+      resultUnlockedRankIds, resultUnlockedGateIds, resultClearedGateIds,
+    },
+    journeyResult: {
+      activeRankId: rankId || journey.activeRankId,
+      activeGateId: gateId || journey.activeGateId,
+      unlockedRankIds: union(journey.unlockedRankIds, resultUnlockedRankIds),
+      unlockedGateIds: union(journey.unlockedGateIds, resultUnlockedGateIds),
+      passedCefrLevels, partialCefrLevels,
+      levelPlacementAssessmentIds: { ...journey.levelPlacementAssessmentIds, [cefrLevel]: assessmentId },
+      levelPlacementPassedRankIds: union(journey.levelPlacementPassedRankIds, proof.passedRankIds),
+      levelPlacementClearedGateIds: union(journey.levelPlacementClearedGateIds, resultClearedGateIds),
+      levelPlacementStatus: 'completed', activeLevelPlacementAssessmentId: '', activeLevelPlacementCefrLevel: '',
+      contentJourneyStatus: completedCurrentContent ? 'completed-current-content' : 'in-progress',
+    },
+    worldCompletion: completedCurrentContent && !journey.worldCompletion ? catalog.worldCompletion : null,
+  };
+}
+
+async function verifyPlacementWithRules(user, world, assessment, receiptRef, catalog) {
+  const sessionRef = levelPlacementSessionRef(user.uid, world, assessment);
+  const targetJourneyRef = journeyRef(user.uid, world);
+  const proofRef = doc(targetJourneyRef, 'levelPlacementProofs', assessment);
+  for (;;) {
+    const verified = await runTransaction(db, async transaction => {
+      const [savedSession, savedProof] = await Promise.all([transaction.get(sessionRef), transaction.get(proofRef)]);
+      const session = savedSession.data();
+      const proof = savedProof.data();
+      if (auth.currentUser?.uid !== user.uid || !session) {
+        throw journeyCloudError('level-placement/session-mismatch', 'Placement session changed.');
+      }
+      if (session.resultApplied) return { session };
+      if (proof?.catalogId && proof.catalogId !== catalog.id) {
+        transaction.delete(proofRef);
+      } else if (!proof) {
+        transaction.set(proofRef, {
+          catalogId: catalog.id, answeredAt: session.answersCompletedAt, rankCursor: 0,
+          answerCount: 0, correctCount: 0, passedRankIds: [], clearedGateIds: [], wordKeys: [], statistics: {},
+        });
+      } else if (proof.rankCursor < session.orderedRankIds.length) {
+        transaction.set(proofRef, scorePlacementRank(session, catalog, proof));
+      } else {
+        const journey = (await transaction.get(targetJourneyRef)).data();
+        const receipt = buildScoredPlacementOutcome(session, journey, proof, catalog);
+        transaction.set(receiptRef, { ...receipt, approvedAt: serverTimestamp() });
+        return { receipt };
+      }
+      return null;
+    });
+    if (verified?.session) return reconcilePreviouslyAppliedPlacementOutcome(user, world, assessment, verified.session);
+    if (verified?.receipt) return commitVerifiedLevelPlacement(user, world, assessment, verified.receipt);
+  }
+}
+
 async function applyPlacementOutcome(worldId, assessmentId) {
   const user = requireUser();
   const world = core().cleanId(worldId, 'World');
@@ -3853,6 +4122,21 @@ async function applyPlacementOutcome(worldId, assessmentId) {
       'level-placement/result-not-ready',
       'Level Placement result is not ready.'
     );
+  }
+
+  if (session.placementVersion === 2) {
+    const receiptRef = doc(journeyRef(user.uid, world), 'levelPlacementOutcomeReceipts', assessment);
+    const proof = await getDoc(receiptRef);
+    if (proof.exists()) {
+      try {
+        return await commitVerifiedLevelPlacement(user, world, assessment, proof.data());
+      } catch (error) {
+        if (error.code !== 'level-placement/receipt-stale') throw error;
+      }
+    }
+    const catalog = await getDoc(doc(db, 'content_worlds', world, 'placementCatalog', 'current'));
+    if (catalog.exists()) return verifyPlacementWithRules(user, world, assessment, receiptRef, catalog.data());
+    throw journeyCloudError('level-placement/verification-unavailable', 'Saved answers are waiting for verification.');
   }
 
   const [journeyBeforeResult, publishedRanks] = await Promise.all([
@@ -4765,6 +5049,7 @@ function installQuizEvidenceBeforeRewardHook() {
       completed: true,
       entries,
       projectReadiness: false,
+      gateContext: context.gateContext,
       officialReviewGate: context.officialReviewGate || null,
       officialReviewDueWordKeys: context.officialReviewDueWordKeys || [],
     });
@@ -4836,6 +5121,9 @@ const API = Object.freeze({
   findNewGateWords,
   getGateMasteryView,
   getGateQuizWords,
+  getGateLessonAccess,
+  saveGateLessonState,
+  getLegacyLessonWordIds,
   getGateNotificationFacts,
   subscribeGateProgress,
   recordQuizEvidenceBatch,

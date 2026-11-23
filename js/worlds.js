@@ -4214,6 +4214,10 @@ const GATE_QUIZ_MODE_CARDS = [
 
 let activePublishedGatePicker = null;
 
+function publishedLessonContext(world, rank, gate) {
+  return { worldId: world.worldId, rankId: rank.rankId, gateId: gate.gateId };
+}
+
 async function openPublishedGateQuizPicker(world, rank, gate, { gamesOnly = false } = {}) {
   if (!gamesOnly && isPublishedGateWordsLoading()) {
     showToast('استنى لحد ما يكتمل تحميل كلمات البوابة، وبعدها ابدأ الاختبار.', 'info', 4200);
@@ -4228,6 +4232,11 @@ async function openPublishedGateQuizPicker(world, rank, gate, { gamesOnly = fals
     window.__dictionaryNavigationGeneration === navigation &&
     (origin !== 'worlds' || isPublishedGateRoute(world.worldId, rank.rankId, gate.gateId));
   const currentProgress = () => publishedContentState.gateProgress || progress;
+  const lesson = publishedLessonContext(world, rank, gate);
+  if (!(await getJourneyCloudApi().getGateLessonAccess(lesson).catch(() => null))?.allowed) {
+    if (pickerCurrent()) showToast('أكمل تعلّم كلمات البوابة أولًا.', 'info');
+    return false;
+  }
   let words = [];
   let quizError = '';
   if (!gamesOnly) {
@@ -4369,6 +4378,7 @@ async function openPublishedGateQuizPicker(world, rank, gate, { gamesOnly = fals
   requestAnimationFrame(() => shell.classList.add('is-visible'));
   if (window.LootLinguaModalFocus) window.LootLinguaModalFocus.open(shell, { dialog: shell.querySelector('.published-gate-quiz-card'), onEscape: close });
   else shell.querySelector('.published-gate-quiz-mode')?.focus();
+  return true;
 }
 
 // Smart Journey notifications use this entry point instead of the general
@@ -4391,13 +4401,16 @@ window.openPublishedGatePractice = async function openPublishedGatePractice(worl
     }
     publishedContentState.gateProgress = progress;
     publishedContentState.gateProgressById.set(String(gateId), progress);
+    if (!(await journey.getGateLessonAccess({ worldId, rankId, gateId }, { progress })).allowed) {
+      await window.openPublishedGate(worldId, rankId, gateId);
+      return false;
+    }
     // Pass guided:true so the onboarding guard does not block this legitimate
     // gate-practice entry point (notification-triggered practice on the user's
     // active gate should always open during an active guided journey).
     const viewOpened = window.loadQuizView?.({ skipResume: true, guided: true });
     if (viewOpened === false) return false;
-    await openPublishedGateQuizPicker(world, rank, gate);
-    return true;
+    return await openPublishedGateQuizPicker(world, rank, gate) !== false;
   } catch (error) {
     showToast(publishedJourneyErrorText(error), 'danger', 4800);
     return false;
@@ -4557,8 +4570,8 @@ function makePublishedJourneyPanel(world, ranks, journey, activeJourney) {
           ? 'تابع من البوابة النشطة دون فقدان تقدمك.'
           : 'يمكنك جعل هذا العالم رحلتك النشطة مع بقاء تقدم العالم الآخر محفوظًا.')
         : (!window.auth?.currentUser
-          ? 'ابدأ كضيف، وأضف كلمات البوابة حتى تراجعها.'
-          : 'أضف كلمات البوابة إلى قاموسك، وبعدها ابدأ مراجعتها.')))
+          ? 'ابدأ كضيف وتعلّم كلمات أول بوابة.'
+          : 'ابدأ بأول بوابة وتعلّم كلماتها.')))
     )
   );
   panel.append(copy);
@@ -4601,19 +4614,29 @@ function makePublishedJourneyPanel(world, ranks, journey, activeJourney) {
       'fa-solid fa-forward-step'
     );
     beginning.disabled = !firstRank;
+    if (!beginning.disabled) beginning.dataset.guideStartWorld = '';
     choices.append(beginning);
     panel.append(choices);
   } else {
   const button = publishedButton(
     pending
       ? 'جارٍ تجهيز الرحلة'
-      : (startsAtFirstGate ? 'ابدأ من البوابة الأولى' : 'تابع رحلتك'),
+      : (startsAtFirstGate ? 'ابدأ من البداية' : 'تابع رحلتك'),
     'published-action-btn published-journey-btn published-journey-cta' + (startsAtFirstGate ? ' published-first-journey-start' : ''),
     () => startsAtFirstGate ? beginPublishedJourneyFromStart(world) : startOrResumePublishedJourney(world),
     pending ? 'fa-solid fa-circle-notch fa-spin' : 'fa-solid fa-route'
   );
   button.disabled = pending || (!existing && !firstRank);
+  if (startsAtFirstGate && !button.disabled) button.dataset.guideStartWorld = '';
   panel.append(button);
+  }
+  const placementLevel = firstRank?.cefrLevel;
+  if (startsAtFirstGate && placementLevel && publishedLevelState(placementLevel, journey) === 'available') {
+    const placement = publishedButton('اختبار المستوى', 'published-action-btn',
+      () => beginPublishedLevelPlacement(world, placementLevel), 'fa-solid fa-list-check');
+    placement.disabled = pending;
+    placement.dataset.initialPlacementLevel = placementLevel;
+    panel.append(placement);
   }
   if (!existing && !firstRank) {
     panel.append(publishedElement(
@@ -5056,8 +5079,9 @@ function makePublishedGateJourneyPanel(world, rank, gate) {
     'section',
     `published-gate-journey published-gate-journey-${state} published-gate-state-card`
   );
-  const isCurrentGate = () => currentView === 'worlds' && publishedContentState.tab === 'published' &&
+  const isRenderedGate = () => publishedContentState.tab === 'published' &&
     isPublishedGateRoute(world.worldId, rank.rankId, gate.gateId);
+  const isCurrentGate = () => currentView === 'worlds' && isRenderedGate();
   const clearedWithoutLoad = Boolean(
     progress?.status === 'cleared' &&
     progress?.clearedBy === 'level-placement' &&
@@ -5079,6 +5103,26 @@ function makePublishedGateJourneyPanel(world, rank, gate) {
     (String(activeJourney.activeGateId) !== String(gate.gateId) || String(activeJourney.activeRankId || rank.rankId) !== String(rank.rankId));
   const entryAction = needsPlacementChoice ? 'choose-start' : (!journey || !activeForWorld ? 'start' : 'load');
   const missionAction = hasNextGate ? 'next' : (cleared && worldComplete ? 'explore' : entryAction);
+  const lessonContext = publishedLessonContext(world, rank, gate);
+  const lesson = window.LootLinguaGateLessonView;
+  const lessonStatus = lesson?.status(lessonContext);
+  if (lesson && state !== 'locked' && canRevealPublishedGateWords(state, journey) && !needsPlacementChoice && !lessonStatus.allowed) {
+    const actions = publishedElement('div', 'published-journey-actions');
+    const existingLesson = Boolean(lessonStatus.state);
+    const hasAttempt = Boolean(progress?.activeClearAttemptId);
+    const button = publishedButton(hasAttempt ? 'استأنف اختبار الاجتياز' :
+      existingLesson ? 'أكمل تعلّم كلماتك' : 'تعلّم كلمات البوابة',
+      'published-action-btn published-journey-cta',
+      async () => {
+        if (hasAttempt) return beginPublishedGateClear(world, rank, gate);
+        if (!window.auth?.currentUser || !activeForWorld) return startOrResumePublishedJourney(world);
+        return openPublishedLesson(world, rank, gate, progress, isCurrentGate);
+      }, 'fa-solid fa-book-open-reader');
+    if (activeForWorld && !existingLesson && !hasAttempt) button.dataset.guideLearnGate = '';
+    actions.append(button);
+    panel.append(actions);
+    return panel;
+  }
   const presentation = publishedJourneyPresentation(state);
   const stateIcon = publishedElement('span', `published-gate-state-icon is-${state}`);
   stateIcon.append(publishedIcon(presentation.icon));
@@ -5142,16 +5186,11 @@ function makePublishedGateJourneyPanel(world, rank, gate) {
       const time = publishedElement('time', '', localTime);
       time.dateTime = next.toISOString();
       const dateRow = publishedElement('span', 'published-gate-review-time');
+      if (state === 'learning' && review.kind === 'waiting') dateRow.dataset.onboardingGateReview = 'waiting';
       dateRow.append(review.kind === 'due' ? 'أقرب موعد للكلمات المنتظرة' : 'موعد المراجعة التالية', time);
       readinessCopy.append(dateRow);
     }
 
-    if (review && isCurrentGate()) {
-      if (review.kind !== 'practice') readinessCopy.dataset.onboardingGateReview = review.kind;
-      if (readinessCopy.dataset.onboardingGateReview) queueMicrotask(() => {
-        if (readinessCopy.isConnected) window.dispatchEvent(new CustomEvent('lootlingua:gate-guide-state'));
-      });
-    }
     readiness.append(heading);
     if (review) {
       const facts = publishedElement('dl', 'published-gate-review-facts');
@@ -5275,7 +5314,7 @@ function makePublishedGateJourneyPanel(world, rank, gate) {
     actions.append(load);
   } else if (state === 'learning') {
     hasReviewPicker = true;
-    actions.append(publishedButton(
+    const reviewButton = publishedButton(
       review.kind === 'due' ? 'ابدأ المراجعة الرسمية'
         : (review.kind === 'waiting' ? 'تدرّب على كلمات البوابة' : 'راجع كلمات البوابة'),
       (review.kind === 'due' ? primaryClass : 'published-action-btn published-journey-btn') +
@@ -5288,7 +5327,14 @@ function makePublishedGateJourneyPanel(world, rank, gate) {
         void openPublishedGateQuizPicker(world, rank, gate);
       },
       'fa-solid fa-crosshairs'
-    ));
+    );
+    if (review.kind === 'due' && !retryable && !pending && isRenderedGate()) {
+      reviewButton.dataset.onboardingGateReview = 'due';
+      queueMicrotask(() => {
+        if (reviewButton.isConnected) window.dispatchEvent(new CustomEvent('lootlingua:gate-guide-state'));
+      });
+    }
+    actions.append(reviewButton);
     if (publishedContentState.newGateWords.length) {
       const sync = publishedButton(
         pending ? 'جارٍ مزامنة الكلمات' : 'مزامنة الكلمات الجديدة',
@@ -5460,7 +5506,7 @@ function renderPublishedWorlds(items, activeJourney, accountDestination) {
   window.LootLinguaGuidedFirstJourney?.applyRoute?.({ type: 'worlds', root });
 }
 
-function makePublishedLevelSection(world, cefrLevel, ranks, journey, activeJourney) {
+function makePublishedLevelSection(world, cefrLevel, ranks, journey, activeJourney, initialPlacementLevel) {
   const schema = window.LootLinguaContentSchema;
   const meta = schema.CEFR_LEVEL_META[cefrLevel];
   const state = publishedLevelState(cefrLevel, journey);
@@ -5511,7 +5557,7 @@ function makePublishedLevelSection(world, cefrLevel, ranks, journey, activeJourn
     button.disabled = state === 'locked' || state === 'passed' ||
       publishedContentState.levelPlacementPending;
     if (['available', 'in-progress', 'new-content'].includes(state)) button.dataset.guidePlacementLevel = cefrLevel;
-    summary.append(button);
+    if (state !== 'available' || cefrLevel !== initialPlacementLevel) summary.append(button);
     const history = overview?.history;
     const pendingWordDecision = history?.resultApplied === true &&
       history?.status === 'completed' &&
@@ -5585,6 +5631,7 @@ function renderPublishedRanks(world, ranks, journey, activeJourney) {
   });
   const journeyPanel = makePublishedJourneyPanel(world, ranks, journey, activeJourney);
   section.append(journeyPanel);
+  const initialPlacementLevel = journeyPanel.querySelector('[data-initial-placement-level]')?.dataset.initialPlacementLevel;
   const rewardGoal = window.LootLinguaMotivation?.makeGoal?.(world.worldId, null, { gateCount: world.gateCount, complete: journey?.contentJourneyStatus === 'completed-current-content' });
   if (rewardGoal) section.append(rewardGoal);
   if (!ranks.length) {
@@ -5594,24 +5641,9 @@ function renderPublishedRanks(world, ranks, journey, activeJourney) {
     window.LootLinguaContentSchema.CEFR_LEVELS.forEach((level) => {
       const levelRanks = groups.get(level) || [];
       if (levelRanks.length) {
-        section.append(makePublishedLevelSection(world, level, levelRanks, journey, activeJourney));
+        section.append(makePublishedLevelSection(world, level, levelRanks, journey, activeJourney, initialPlacementLevel));
       }
     });
-  }
-  const startButton = journeyPanel.querySelector('.published-first-journey-start:not([disabled])');
-  const levelTest = section.querySelector('.published-level-test-btn[data-guide-placement-level]:not([disabled])');
-  if (startButton && levelTest) {
-    const actions = publishedElement('div', 'published-journey-actions');
-    startButton.replaceWith(actions);
-    actions.append(startButton, publishedButton(
-      'اختبر مستواك (اختياري)',
-      'published-action-btn',
-      () => {
-        levelTest.scrollIntoView({ block: 'center' });
-        levelTest.focus({ preventScroll: true });
-      },
-      'fa-solid fa-location-crosshairs'
-    ));
   }
   content.append(section);
   root.replaceChildren(content);
@@ -6235,10 +6267,12 @@ async function loadPublishedWorlds(options) {
     publishedContentState.activeJourneyDestination = accountDestination;
     publishedContentState.worlds = items;
     renderPublishedWorlds(items, activeJourney, accountDestination);
+    return true;
   } catch (error) {
     if (generation !== publishedContentState.generation) return;
     logPublishedContentError('worlds', error);
     renderPublishedError('worlds', error, () => loadPublishedWorlds({ force: true }));
+    return false;
   } finally {
     if (generation === publishedContentState.generation) publishedContentState.loading = false;
   }
@@ -6275,9 +6309,10 @@ window.loadWorldsView = function() {
   prepareWorldsShell();
   setPublishedTabState('published');
   setPublishedTabsVisible(true);
-  loadPublishedWorlds();
+  const loaded = loadPublishedWorlds();
   restoreViewScroll('worlds');
   setAppViewRoute('worlds');
+  return loaded;
 };
 
 async function loadPublishedRouteData(route, options) {
@@ -6447,6 +6482,8 @@ async function loadPublishedRouteData(route, options) {
       journeyContext.journey,
       gateProgress
     );
+    await window.LootLinguaGateLessonView?.inspect(publishedLessonContext(world, rank, gate), gateProgress);
+    if (generation !== publishedContentState.generation) return;
     let gateLoadResume = null;
     if (
       window.auth?.currentUser &&
@@ -6589,8 +6626,41 @@ window.openPublishedGate = function(worldId, rankId, gateId) {
     },
   };
   setPublishedContentRoute(route.key, route.params);
-  window.loadPublishedContentRoute(route);
+  return window.loadPublishedContentRoute(route);
 };
+
+function openPublishedLesson(world, rank, gate, progress, isCurrentGate) {
+  return window.LootLinguaGateLessonView?.open({
+    context: publishedLessonContext(world, rank, gate), title: gate.title || 'البوابة', world: world.title || 'العالم', progress,
+    prepare: !progress?.loadedAt ? () => runPublishedGateLoad(false) : null,
+    onClose: () => { if (isCurrentGate()) rerenderPublishedRoute(); },
+  });
+}
+
+window.resumePublishedGateLesson = async function({ worldId, rankId, gateId }, expectedUid) {
+  if (!expectedUid || window.auth?.currentUser?.uid !== expectedUid) return false;
+  await window.openPublishedGate(worldId, rankId, gateId);
+  const current = () => window.auth?.currentUser?.uid === expectedUid && isPublishedGateRoute(worldId, rankId, gateId);
+  if (!current()) return false;
+  const { world, rank, gate, gateProgress, activeJourney } = publishedContentState;
+  if (!world || !rank || !gate || activeJourney?.worldId !== worldId || activeJourney?.activeRankId !== rankId ||
+      activeJourney?.activeGateId !== gateId || gateProgress?.activeClearAttemptId ||
+      window.LootLinguaGateLessonView?.status({ worldId, rankId, gateId }).allowed) return false;
+  return openPublishedLesson(world, rank, gate, gateProgress, current);
+};
+
+window.resumePublishedLearning = async function(worldId) {
+  await window.loadWorldsView();
+  return openPublishedJourneyDestination(worldId, { resumePausedLevelPlacement: true });
+};
+
+window.addEventListener('lootlingua:gate-lesson-changed', async ({ detail }) => {
+  if (detail.uid !== window.auth?.currentUser?.uid || !isPublishedGateRoute(detail.worldId, detail.rankId, detail.gateId)) return;
+  await window.LootLinguaGateLessonView?.inspect(detail, publishedContentState.gateProgress);
+  if (detail.uid === window.auth?.currentUser?.uid && isPublishedGateRoute(detail.worldId, detail.rankId, detail.gateId)) {
+    rerenderPublishedRoute();
+  }
+});
 
 window.addEventListener('lootlingua:auth-state', () => {
   clearPublishedJourneyViewState({ clearError: true });
@@ -7566,12 +7636,17 @@ window.loadQuizView = function(options = {}) {
   document.getElementById('quizView').style.display = 'block';
   showQuizModes({ guideOrigin: options.guided ? 'journey' : 'general' });
   if (options?.skipResume !== true) {
-    loadStoredActiveQuizSession().then((session) => {
-      if (currentView !== 'quiz') return;
+    const owner = window.auth?.currentUser?.uid;
+    const generation = window.__dictionaryNavigationGeneration;
+    const isCurrent = () => currentView === 'quiz' && owner === window.auth?.currentUser?.uid &&
+      generation === window.__dictionaryNavigationGeneration;
+    loadStoredActiveQuizSession().then(async (session) => {
+      if (!isCurrent()) return;
       if (!isResumableQuizSession(session)) {
         if (session) clearActiveQuizSessionStorage();
         return;
       }
+      if (!await canOpenGateQuiz(session, true) || !isCurrent()) return;
       window.__pendingQuizResumeSession = session;
       showQuizResumePrompt();
     });

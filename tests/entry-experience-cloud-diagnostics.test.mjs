@@ -16,12 +16,12 @@ function timestamp(millis) {
 
 function completedEntryState(overrides = {}) {
   return {
-    contractVersion: 2,
+    contractVersion: 3,
     experienceVersion: 2,
     status: 'completed',
     audience: 'returning',
     classification: 'returning-with-progress',
-    currentStep: 'destination',
+    currentStep: 'discover',
     interestsStatus: 'selected',
     interestIds: ['study'],
     themeStatus: 'preserved',
@@ -125,7 +125,7 @@ test('completed-user Product Entry payload writes and verifies through the real 
   );
 
   assert.equal(result.status, 'completed');
-  assert.equal(result.currentStep, 'destination');
+  assert.equal(result.currentStep, 'discover');
   assert.equal(result.journeyStatus, 'return-reviewed');
   assert.equal(harness.diagnostics.length, 0);
   const stored = harness.values.get('users/entry-cloud-user/entryExperiences/v2');
@@ -202,7 +202,7 @@ test('auth readiness failures are diagnostic without exposing the account identi
 test('dev diagnostics compare the actual update shape with an existing document safely', async () => {
   const existing = completedEntryState({
     status: 'in-progress',
-    currentStep: 'return',
+    currentStep: 'discover',
     journeyStatus: 'pending',
     completedAt: 0,
   });

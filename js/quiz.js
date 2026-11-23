@@ -106,7 +106,10 @@ document.addEventListener('focusin', (e) => {
 });
 
 function setQuizImmersive(active) {
-  document.body.classList.toggle('quiz-active', Boolean(active));
+  const immersive = Boolean(active);
+  const before = document.body.classList.contains('quiz-active');
+  document.body.classList.toggle('quiz-active', immersive);
+  if (before !== immersive) window.dispatchEvent(new CustomEvent('lootlingua:quiz-mode-changed'));
 }
 
 function serializeActiveQuizSession() {
@@ -314,9 +317,32 @@ function applyStoredQuizSession(session) {
   return true;
 }
 
-window.resumeActiveQuizSession = function() {
-  hideQuizResumePrompt();
+async function canOpenGateQuiz(source, stored = false) {
+  const lesson = window.LootLinguaGateLesson;
+  if (!lesson?.hasGateIntent(source)) return true;
+  const context = lesson.gateContext(source) || lesson.gateContext(source?.officialReviewGate);
+  if (!context) return false;
+  const owner = window.auth?.currentUser?.uid;
+  try {
+    const access = await window.LootLinguaJourneyCloud.getGateLessonAccess(context, stored ? { session: source } : {});
+    if (owner !== window.auth?.currentUser?.uid) return false;
+    if (access.compatibilityResume) {
+      const saved = await window.saveActiveQuizSessionToCloud?.(source);
+      if (!saved) showToast('تعذّرت مزامنة المحاولة. حاول مرة ثانية، مسودتك لسه محفوظة.', 'warning');
+      return Boolean(saved);
+    }
+    if (access.allowed) return true;
+  } catch (_) {}
+  showToast('أكمل تعلّم كلمات البوابة أولًا.', 'info');
+  return false;
+}
+
+window.resumeActiveQuizSession = async function() {
   const saved = window.__pendingQuizResumeSession;
+  const owner = window.auth?.currentUser?.uid || '';
+  if (window.LootLinguaGateLesson?.hasGateIntent(saved) && !await canOpenGateQuiz(saved, true)) return false;
+  if (owner !== (window.auth?.currentUser?.uid || '') || saved !== window.__pendingQuizResumeSession) return false;
+  hideQuizResumePrompt();
   const finishSavedResult = !activeQuizSession && saved && applyStoredQuizSession(saved) &&
     isQuizResultAwaitingSave(saved);
   if (!activeQuizSession) return;
@@ -829,6 +855,7 @@ window.getActiveVerifiedQuizCommitContext = function(sessionId) {
     sessionId: requestedSessionId,
     mode: activeQuizSession.mode,
     source: activeQuizSession.source || currentQuizSource,
+    gateContext: window.LootLinguaGateLesson?.gateContext(activeQuizSession),
     officialReviewGate: activeQuizSession.officialReviewGate || null,
     officialReviewDueWordKeys: Array.isArray(activeQuizSession.officialReviewDueWordKeys) ? activeQuizSession.officialReviewDueWordKeys : [],
   };
@@ -1384,6 +1411,8 @@ async function startDictionaryRunner() {
 
 let personalQuizPreparation = null;
 async function startActualQuiz(mode, options = {}) {
+  const intent = { ...options, source: options.source || currentQuizSource };
+  if (window.LootLinguaGateLesson?.hasGateIntent(intent) && !await canOpenGateQuiz(intent)) return false;
   const flashcardsLocked = () => !isVerifiedQuizMode(mode) &&
     (options.journeyGateId ? options.isGateFlashcardsLocked?.() : isPersonalQuizDue());
   const showPracticeLock = () => {
@@ -1482,6 +1511,15 @@ async function startActualQuiz(mode, options = {}) {
     window.__lootlinguaQuizSelectionReport = preparedQuiz.plan;
     configuredProgressQuiz = null;
   }
+  const owner = window.auth?.currentUser?.uid || '';
+  const navigation = window.__dictionaryNavigationGeneration;
+  const saved = window.__pendingQuizResumeSession || await loadStoredActiveQuizSession();
+  if (owner !== (window.auth?.currentUser?.uid || '') || navigation !== window.__dictionaryNavigationGeneration) return false;
+  if (isResumableQuizSession(saved) && saved.id !== sessionId) {
+    if (!window.confirm('لديك اختبار محفوظ. هل تريد استبداله بهذا الاختبار؟')) return false;
+    window.__pendingQuizResumeSession = null;
+    clearActiveQuizSessionStorage();
+  }
   rememberQuizGate(options);
   const selectedWords = words.map(word => ({ ...word }));
   currentQuizWords = selectedWords.map(word => ({ ...word }));
@@ -1551,6 +1589,9 @@ async function startActualQuiz(mode, options = {}) {
 // Used by the Journey surface only. The normal Quiz setup keeps its own source
 // selector; this entry point receives an already restricted Gate cohort.
 window.startGateQuiz = async function(mode, input = {}) {
+  const owner = window.auth?.currentUser?.uid;
+  const context = window.LootLinguaGateLesson?.gateContext(input);
+  if (!context || !await canOpenGateQuiz({ gateContext: context }) || owner !== window.auth?.currentUser?.uid) return false;
   const selectedMode = QUIZ_MODE_META[mode] ? mode : 'scramble';
   const sourceParts = [input.worldId, input.rankId, input.gateId]
     .map((value) => String(value || '').replace(/[^a-zA-Z0-9_-]/g, '_'))
@@ -1573,8 +1614,6 @@ window.startGateQuiz = async function(mode, input = {}) {
     showToast('لا توجد كلمات محمّلة لهذه البوابة بعد.', 'warning', 4200);
     return false;
   }
-  clearActiveQuizSessionStorage();
-  window.__pendingQuizResumeSession = null;
   // loadQuizView now returns false if the guided guard or feature lock blocks
   // the transition. In that case, abort entirely — do NOT call startActualQuiz
   // or hide docks, which would leave the interface in a broken half-state.
@@ -1625,6 +1664,9 @@ function gateGapReviewWords(wordKeys) {
 }
 
 window.startGateGapReview = async function(wordKeys, context = {}) {
+  const owner = window.auth?.currentUser?.uid;
+  const gateContext = window.LootLinguaGateLesson?.gateContext(context);
+  if (!gateContext || !await canOpenGateQuiz({ gateContext }) || owner !== window.auth?.currentUser?.uid) return false;
   if (await window.LootLinguaDictionaryPages?.requireComplete() === false) return false;
   if (!isFeatureUnlocked('quiz')) {
     window.loadQuizView();
@@ -1635,8 +1677,6 @@ window.startGateGapReview = async function(wordKeys, context = {}) {
     showToast('لا توجد كلمات متبقية متاحة للمراجعة في هذه البوابة.', 'info', 4200);
     return false;
   }
-  clearActiveQuizSessionStorage();
-  window.__pendingQuizResumeSession = null;
   const viewOpened = window.loadQuizView({
     skipResume: true,
     guided: true,
@@ -1645,12 +1685,14 @@ window.startGateGapReview = async function(wordKeys, context = {}) {
   const sourceParts = [context.worldId, context.rankId, context.gateId]
     .map((value) => String(value || '').replace(/[^a-zA-Z0-9_-]/g, '_'))
     .filter(Boolean);
-  startActualQuiz('scramble', {
+  return startActualQuiz('scramble', {
     words: reviewWords,
     source: `gate-gap:${sourceParts.join('~')}`.slice(0, 500),
+    journeyWorldId: gateContext.worldId,
+    journeyRankId: gateContext.rankId,
+    journeyGateId: gateContext.gateId,
     skipAvailabilityCheck: true,
   });
-  return true;
 };
 
 window.startNotificationWordReview = function(wordKeys, context = {}) {
@@ -1666,8 +1708,6 @@ window.startNotificationWordReview = function(wordKeys, context = {}) {
     showToast('لا توجد كلمات مؤهلة لهذا التذكير الآن.', 'info', 3600);
     return false;
   }
-  clearActiveQuizSessionStorage();
-  window.__pendingQuizResumeSession = null;
   const viewOpened = window.loadQuizView({ skipResume: true, guided: true });
   if (viewOpened === false) return false;
   startActualQuiz('scramble', {

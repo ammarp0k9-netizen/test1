@@ -8,12 +8,13 @@ const [controller, entry, dictionary] = await Promise.all([
   readFile(new URL('../js/dictionary.js', import.meta.url), 'utf8'),
 ]);
 
-test('personal dictionary hand-off is independent and waits for the public gate journey', () => {
+test('personal dictionary help stays independent and an old checkpoint resumes only by choice', () => {
   assert.match(controller, /lootlingua:personal-dictionary-onboarding:v1:/);
   assert.match(controller, /'awaiting-journey', 'intro', 'awaiting-first-word', 'completed'/);
   assert.match(controller, /lootlingua:guided-first-journey-change/);
   assert.match(controller, /currentJourneyCompleted\(\)/);
-  assert.match(entry, /LootLinguaPersonalDictionaryOnboarding\?\.planForFirstJourney/);
+  assert.doesNotMatch(entry, /LootLinguaPersonalDictionaryOnboarding\?\.planForFirstJourney/);
+  assert.match(controller, /if \(fullTourRequested\) renderStep\(\);\s+else offerResume\(state\)/);
 });
 
 test('guest first-word completion listens only for a persisted dictionary save', () => {

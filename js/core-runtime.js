@@ -101,7 +101,8 @@ function handleEscapeShortcut(e) {
 }
 
 document.addEventListener('keydown', function(e) {
-  if (e.defaultPrevented || window.__lootlinguaRunnerInputActive || window.__entryExperienceActive || document.getElementById('journeyAuthPrompt')) return;
+  if (e.defaultPrevented || window.__lootlinguaRunnerInputActive || window.__entryExperienceActive ||
+      window.LootLinguaGateLessonView?.isOpen?.() || document.getElementById('journeyAuthPrompt')) return;
   if (currentView === 'admin' && e.altKey && (e.key === 'ArrowRight' || e.key === 'ArrowLeft')) {
     e.preventDefault();
     return;
@@ -131,7 +132,7 @@ document.addEventListener('keydown', function(e) {
   const active = document.activeElement;
   if (active.id === 'wordInput') { e.preventDefault(); window.fetchSuggestions(); }
   else if (active.id === 'scrambleInput') { e.preventDefault(); submitScrambleAnswer(); }
-  else if (!['INPUT','TEXTAREA','BUTTON','SELECT'].includes(active.tagName)) {
+  else if (!['INPUT','TEXTAREA','BUTTON','SELECT','SUMMARY'].includes(active.tagName)) {
     e.preventDefault();
     document.getElementById('addBtn')?.click();
   }
