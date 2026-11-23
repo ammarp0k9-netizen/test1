@@ -220,13 +220,16 @@ test('release rehearsal seals only pre-capture server snapshots and keeps person
   const app = initializeApp({ projectId }, 'release-' + crypto.randomUUID());
   const server = getFirestore(app);
   const release = gateLessonEmulatorRelease(app);
-  const uid = 'historical-owner', lateUid = 'late-owner', guestUid = 'historical-guest';
+  const fixtureId = crypto.randomUUID();
+  const uid = 'historical-owner-' + fixtureId;
+  const lateUid = 'late-owner-' + fixtureId;
+  const guestUid = 'historical-guest-' + fixtureId;
   const user = env.authenticatedContext(uid).firestore();
   const secondTab = env.authenticatedContext(uid).firestore();
   const guest = env.authenticatedContext(guestUid, { firebase: { sign_in_provider: 'anonymous' } }).firestore();
   const other = env.authenticatedContext(lateUid).firestore();
   const meta = id => 'users/' + id + '/meta/active_quiz_session';
-  const worldId = 'release-world', rankId = 'a1', gateId = 'first';
+  const worldId = 'release-world-' + fixtureId, rankId = 'a1', gateId = 'first';
   const scope = { worldId, rankId, gateId };
   const old = { id: 'old-attempt', mode: 'scramble', source: 'journey:' + worldId + '~' + rankId + '~' + gateId,
     words: [{ wordKey: 'term' }], quizIndex: 1, quizSessionResults: [{ wordKey: 'term', correct: true }],

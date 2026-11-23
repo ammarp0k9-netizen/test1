@@ -570,6 +570,14 @@ service cloud.firestore {
           (!('version' in data) || (data.version is int && data.version >= 0));
       }
 
+      function validWorldInterests(data, fields) {
+        let interests = ['games', 'movies', 'study', 'general', 'technology', 'travel'];
+        let tags = data.get('interestTags', []);
+        return (!fields.hasAny(['primaryInterest']) || !('primaryInterest' in data) || data.primaryInterest in interests) &&
+          (!fields.hasAny(['interestTags']) ||
+            (tags is list && tags.size() <= interests.size() && tags.hasOnly(interests) && tags.toSet().size() == tags.size()));
+      }
+
       function worldPath() {
         return /databases/$(database)/documents/content_worlds/$(worldId);
       }
@@ -592,14 +600,22 @@ service cloud.firestore {
 
       allow read: if isAdmin() || resource.data.status == 'published';
       allow create: if isAdmin() && validWorldShape(request.resource.data) &&
+        validWorldInterests(request.resource.data, request.resource.data.keys()) &&
         request.resource.data.get('rankCount', 0) == 0;
       allow update: if isAdmin() && validWorldShape(request.resource.data) &&
+        !('_adminWorldOperation' in resource.data) &&
+        !request.resource.data.diff(resource.data).affectedKeys().hasAny(['_adminWorldOperation']) &&
+        validWorldInterests(request.resource.data, request.resource.data.diff(resource.data).affectedKeys()) &&
         (request.resource.data.get('rankCount', null) == resource.data.get('rankCount', null) ||
           rankCountChanged(resource.data, request.resource.data));
       allow delete: if isAdmin() && resource.data.status == 'archived' &&
         resource.data.get('_deleteLock', {}).get('adminUid', '') == request.auth.uid;
 
       match /ranks/{rankId} {
+        function worldAvailableForAdminEdits() {
+          return !('_adminWorldOperation' in get(worldPath()).data);
+        }
+
         function validRankShape(data) {
           return data.worldId == worldId && data.rankId == rankId &&
             validContentStatus(data.status) &&
@@ -646,40 +662,83 @@ service cloud.firestore {
 
         allow read: if isAdmin() ||
           (resource.data.status == 'published' && publishedWorld(worldId));
-        allow create: if isAdmin() && validRankShape(request.resource.data) &&
+        allow create: if isAdmin() && worldAvailableForAdminEdits() && validRankShape(request.resource.data) &&
           validRankLevel(request.resource.data.get('cefrLevel', 'unclassified')) &&
           request.resource.data.version == 1 && request.resource.data.gateCount == 0 &&
           request.resource.data.wordCount == 0 && !('_adminRankOperation' in request.resource.data) &&
           (('_adminCopyOperation' in request.resource.data)
             ? request.resource.data.status == 'draft' && nonEmptyString(request.resource.data._adminCopyOperation, 180)
             : rankCountDelta(1));
-        allow update: if isAdmin() && validRankShape(request.resource.data) &&
+        allow update: if isAdmin() && worldAvailableForAdminEdits() && validRankShape(request.resource.data) &&
           validRankUpdate(resource.data, request.resource.data);
         allow delete: if isAdmin() && (deletingArchivedWorld() ||
           (resource.data.status == 'archived' && !('_adminRankOperation' in resource.data) && rankCountDelta(-1)));
 
         match /gates/{gateId} {
+          function rankAvailableForAdminEdits() {
+            return worldAvailableForAdminEdits() && !('_adminRankOperation' in get(rankPath(rankId)).data);
+          }
+
+          function gateCountIncrement() {
+            return getAfter(worldPath()).data.gateCount == get(worldPath()).data.gateCount + 1 &&
+              getAfter(rankPath(rankId)).data.gateCount == get(rankPath(rankId)).data.gateCount + 1;
+          }
+
+          function optionalPassRatio(ratio) {
+            return ratio == null || (ratio is number && ratio > 0 && ratio <= 1);
+          }
+
           function validGateShape(data) {
             return data.worldId == worldId && data.rankId == rankId && data.gateId == gateId &&
               validContentStatus(data.status) &&
               (!('title' in data) || nonEmptyString(data.title, 160)) &&
+              optionalPassRatio(data.get('entryAssessmentPassRatio', null)) &&
+              optionalPassRatio(data.get('passThreshold', null)) &&
               (!('schemaVersion' in data) || data.schemaVersion == 1) &&
               (!('version' in data) || (data.version is int && data.version >= 1));
+          }
+
+          function validGateCreate(data) {
+            return !('_adminGateOperation' in data) && data.get('wordCount', 0) == 0 &&
+              (('_adminGateCopyOperation' in data)
+                ? data.status == 'draft' && nonEmptyString(data._adminGateCopyOperation, 180)
+                : (('_adminCopyOperation' in get(rankPath(rankId)).data && data.status == 'draft') || gateCountIncrement()));
+          }
+
+          function validAdminGateUpdate(before, after) {
+            let changed = after.diff(before).affectedKeys();
+            return !('_adminGateOperation' in before) && !changed.hasAny(['_adminGateOperation']) &&
+              (('_adminGateCopyOperation' in before)
+                ? after.status == 'draft' && !('_adminGateCopyOperation' in after) && gateCountIncrement() &&
+                  changed.hasOnly(['_adminGateCopyOperation', 'wordCount', 'updatedAt', 'updatedBy'])
+                : !('_adminGateCopyOperation' in after) &&
+                  (changed.hasOnly(['wordCount', 'updatedAt', 'updatedBy']) ||
+                    (after.version == before.get('version', 1) + 1 &&
+                      !changed.hasAny(['wordCount', 'createdAt', 'createdBy']))));
           }
 
           allow read: if isAdmin() ||
             (resource.data.status == 'published' && publishedWorld(worldId) &&
               publishedRank(worldId, rankId));
-          allow create, update: if isAdmin() && validGateShape(request.resource.data);
+          allow create: if isAdmin() && rankAvailableForAdminEdits() &&
+            validGateShape(request.resource.data) && validGateCreate(request.resource.data);
+          allow update: if isAdmin() && rankAvailableForAdminEdits() &&
+            validGateShape(request.resource.data) && validAdminGateUpdate(resource.data, request.resource.data);
           allow delete: if isAdmin();
 
           match /words/{contentWordId} {
+            function gateAvailableForWordEdits() {
+              let gate = get(/databases/$(database)/documents/content_worlds/$(worldId)/ranks/$(rankId)/gates/$(gateId)).data;
+              return rankAvailableForAdminEdits() && !('_adminGateOperation' in gate);
+            }
+
             function validContentWordShape(data) {
               return data.worldId == worldId && data.rankId == rankId &&
                 data.gateId == gateId && data.contentWordId == contentWordId &&
                 validContentStatus(data.status) &&
                 nonEmptyString(data.word, 240) &&
                 nonEmptyString(data.translation, 1000) &&
+                (!('definition' in data) || (data.definition is string && data.definition.size() <= 4000)) &&
                 (!('schemaVersion' in data) || data.schemaVersion == 1) &&
                 (!('version' in data) || (data.version is int && data.version >= 1));
             }
@@ -687,7 +746,9 @@ service cloud.firestore {
             allow read: if isAdmin() ||
               (resource.data.status == 'published' && publishedWorld(worldId) &&
                 publishedRank(worldId, rankId) && publishedGate(worldId, rankId, gateId));
-            allow create, update: if isAdmin() && validContentWordShape(request.resource.data);
+            allow create: if isAdmin() && gateAvailableForWordEdits() && validContentWordShape(request.resource.data);
+            allow update: if isAdmin() && gateAvailableForWordEdits() && validContentWordShape(request.resource.data) &&
+              request.resource.data.version == resource.data.get('version', 1) + 1;
             allow delete: if isAdmin();
           }
         }
@@ -716,6 +777,7 @@ service cloud.firestore {
           data.schemaVersion == 1 && data.normalizationVersion == 1 &&
           nonEmptyString(data.word, 240) && nonEmptyString(data.normalizedWord, 240) &&
           nonEmptyString(data.wordKey, 240) && nonEmptyString(data.translation, 1000) &&
+          (!('tags' in data) || (data.tags is list && data.tags.size() <= 50)) &&
           data.order is int && data.order >= 0 && data.stagingStatus in ['pending', 'distributing', 'distributed'] &&
           (!('distributionTarget' in data) || validStagingTarget(data.distributionTarget)) &&
           (!('distributionOperationId' in data) || nonEmptyString(data.distributionOperationId, 128)) &&
@@ -839,19 +901,50 @@ service cloud.firestore {
       // Personal dictionary and custom worlds are owner-scoped. These docs do
       // not confer admin authority or access to another account.
       match /words/{wordId} {
+        function validLegacyStreak(data) {
+          return !('mastery_streak' in data) ||
+            (data.mastery_streak is int && data.mastery_streak >= 0 && data.mastery_streak <= 3);
+        }
         function validPersonalWord(data) {
           return data.userId == uid && data.meaning is string && data.meaning.size() <= 2000 &&
             data.category is string && data.category.size() <= 120 &&
             (('text' in data && nonEmptyString(data.text, 500)) ||
               ('word' in data && nonEmptyString(data.word, 500))) &&
             (!('forgetCount' in data) || (data.forgetCount is int && data.forgetCount >= 0)) &&
+            (!('notes' in data) || (data.notes is string && data.notes.size() <= 4000)) &&
+            validLegacyStreak(data) &&
             (!('personalDictionaryState' in data) || data.personalDictionaryState in ['active', 'moved-to-private-world']) &&
             (!('starred' in data) || data.starred is bool);
         }
-        allow read, delete: if isOwner(uid);
+        function validPersonalWordUpdate(before, after) {
+          let changed = after.diff(before).affectedKeys();
+          let srs = ['forgetCount', 'xpValue', 'mastery_status', 'mastery_streak', 'last_recalled_at',
+            'first_recalled_at', 'last_recall_day', 'last_recall_session_id', 'last_quizzed_at',
+            'quiz_seen_count', 'mastered_once', 'firstMasteredAt', 'hasEarnedMasteryXP',
+            'earnedTransitions', 'remasteryAwardCount', 'xpEconomyVersion'];
+          let visibility = ['hiddenFromDictionary', 'hiddenFromDictionaryAt'];
+          return after.get('xpValue', 0) == before.get('xpValue', 0) &&
+            (changed.hasAny(visibility)
+              ? changed.hasOnly(visibility.concat(['personalDictionaryState'])) &&
+                (!('personalDictionaryState' in after) || after.personalDictionaryState in ['active', 'moved-to-private-world']) &&
+                ((after.hiddenFromDictionary == true && after.hiddenFromDictionaryAt == request.time) ||
+                  (after.hiddenFromDictionary == false && after.hiddenFromDictionaryAt == null))
+              : changed.hasAny(srs)
+                ? changed.hasOnly(srs) && validLegacyStreak(after) && after.get('forgetCount', 0) is int &&
+                  after.get('forgetCount', 0) >= 0 && after.get('forgetCount', 0) <= 100000
+                : validPersonalWord(after));
+        }
+        function unlinkLeavesNoSources(data) {
+          let wordKey = data.get('wordKey', '');
+          let canonical = /databases/$(database)/documents/users/$(uid)/contentWords/$(wordKey);
+          return wordKey == '' || !exists(canonical) ||
+            (getAfter(canonical).data.sourceCount == 0 &&
+              !(get(canonical).data.get('primarySource', {}).get('addedFrom', '') in ['published-gate', 'level-placement']));
+        }
+        allow read: if isOwner(uid);
+        allow delete: if isOwner(uid) && unlinkLeavesNoSources(resource.data);
         allow create: if isOwner(uid) && validPersonalWord(request.resource.data);
-        allow update: if isOwner(uid) && validPersonalWord(request.resource.data) &&
-          request.resource.data.get('xpValue', 0) == resource.data.get('xpValue', 0);
+        allow update: if isOwner(uid) && validPersonalWordUpdate(resource.data, request.resource.data);
       }
       match /customWorlds/{worldId} {
         function validCustomWorld(data) {
@@ -1004,13 +1097,28 @@ service cloud.firestore {
 
       match /notifications/{notificationId} {
         function validNotification(data) {
-          return data.ownerId == uid && data.id == notificationId &&
+          let cta = data.get('cta', null);
+          return data.keys().hasOnly(['id', 'schemaVersion', 'ownerId', 'kind', 'notificationType',
+              'occurrenceKey', 'actionGroup', 'priority', 'severity', 'status', 'visualType', 'title',
+              'message', 'cta', 'context', 'createdAt', 'updatedAt', 'eligibleSince', 'eligibleAt',
+              'firstShownAt', 'lastShownAt', 'showCount', 'shownSlots', 'readAt', 'resolvedAt',
+              'dismissedAt', 'resolutionReason', 'expiresAt', 'policyVersion']) &&
+            data.ownerId == uid && data.id == notificationId &&
             data.status in ['pending', 'active', 'resolved', 'dismissed'] &&
             data.message is string && data.message.size() <= 4000 &&
+            (cta == null || (cta is map && cta.keys().hasOnly(['id', 'label', 'args']))) &&
             (!('priority' in data) || (data.priority is int && data.priority >= 0 && data.priority <= 100));
         }
+        function notificationUpdateKeepsState(before, after) {
+          let readAt = before.get('readAt', null);
+          return before.get('occurrenceKey', '') == after.get('occurrenceKey', '') &&
+            before.get('createdAt', null) == after.get('createdAt', null) &&
+            (!(before.status in ['resolved', 'dismissed']) || after.status == before.status) &&
+            (readAt == null || (after.readAt is timestamp && after.readAt >= readAt));
+        }
         allow read: if isOwner(uid);
-        allow create, update: if isOwner(uid) && validNotification(request.resource.data);
+        allow create, update: if isOwner(uid) && validNotification(request.resource.data) &&
+          (resource == null || notificationUpdateKeepsState(resource.data, request.resource.data));
         allow delete: if false;
       }
 
@@ -1028,7 +1136,7 @@ service cloud.firestore {
       // production ruleset adds the remaining cross-document/batch invariants.
       match /contentProgress/{worldId} {
         function validJourney(data) {
-          return !data.keys().hasAny(['userXP', 'xp', 'xpEconomyVersion']) &&
+          return !data.keys().hasAny(['userXP', 'xp', 'rewardXp', 'xpEconomyVersion']) &&
             data.worldId == worldId && data.journeyVersion == 1 &&
             data.status in ['active', 'paused'] &&
             nonEmptyString(data.activeRankId, 128) && nonEmptyString(data.activeGateId, 128) &&
@@ -1066,11 +1174,41 @@ service cloud.firestore {
             after.get('levelPlacementClearedGateIds', []).toSet() == before.get('levelPlacementClearedGateIds', []).toSet().union(result.resultClearedGateIds.toSet()) &&
             after.contentJourneyStatus == (result.completedCurrentContent == true ? 'completed-current-content' : 'in-progress');
         }
+        // The legacy client applied a paused result while retaining the decision
+        // screen. Only a server-approved snapshot and its exact result may do so.
+        function approvedLegacyLevelResume(id) {
+          let path = /databases/$(database)/documents/users/$(uid)/contentProgress/$(worldId);
+          let attempt = /databases/$(database)/documents/users/$(uid)/contentProgress/$(worldId)/levelPlacementSessions/$(id);
+          let receipt = get(/databases/$(database)/documents/users/$(uid)/contentProgress/$(worldId)/levelPlacementResumeReceipts/$(id)).data;
+          let beforeSession = get(attempt).data;
+          let afterSession = getAfter(attempt).data;
+          let beforeJourney = get(path).data;
+          let afterJourney = getAfter(path).data;
+          return receipt.capturedAt is timestamp && receipt.capturedAt <= request.time &&
+            receipt.pausedSession == beforeSession && receipt.pausedJourney == beforeJourney &&
+            beforeSession.status == 'paused' && !beforeSession.get('resultApplied', false) &&
+            beforeJourney.get('activeLevelPlacementAssessmentId', '') == id &&
+            beforeJourney.get('levelPlacementStatus', '') == 'paused' &&
+            afterSession.status == 'awaiting-decision' && afterSession.resultApplied == true &&
+            afterJourney.levelPlacementStatus == 'awaiting-decision' &&
+            afterSession.resumedAt == request.time && afterSession.assessedAt == request.time &&
+            afterSession.updatedAt == request.time && afterJourney.updatedAt == request.time &&
+            afterSession.diff(beforeSession).affectedKeys().hasOnly(
+              receipt.sessionResult.keys().concat(['resumedAt', 'assessedAt', 'updatedAt'])) &&
+            afterJourney.diff(beforeJourney).affectedKeys().hasOnly(
+              receipt.journeyResult.keys().concat(['updatedAt'])) &&
+            afterSession.diff(receipt.sessionResult).unchangedKeys().hasAll(receipt.sessionResult.keys()) &&
+            afterJourney.diff(receipt.journeyResult).unchangedKeys().hasAll(receipt.journeyResult.keys());
+        }
         function placementAllowsAdvance(before, after) {
           let id = before.get('activePlacementAssessmentId', '');
           let level = before.get('activeLevelPlacementAssessmentId', '');
           return (id != '' && legacyPlacementAdvance(before, after, id)) ||
-            (level != '' && levelPlacementAdvance(before, after, level)) ||
+            (level != '' &&
+              ((before.get('levelPlacementStatus', '') == 'paused' &&
+                after.get('levelPlacementStatus', '') == 'awaiting-decision' && approvedLegacyLevelResume(level)) ||
+                (after.get('levelPlacementStatus', '') == 'completed' &&
+                  levelPlacementAdvance(before, after, level)))) ||
             (before.get('contentJourneyStatus', '') == 'completed-current-content' && after.contentJourneyStatus == 'in-progress' &&
               after.diff(before).affectedKeys().hasOnly(['contentJourneyStatus', 'updatedAt', 'status']));
         }
@@ -1123,12 +1261,16 @@ service cloud.firestore {
           get(/databases/$(database)/documents/content_worlds/$(worldId)/ranks/$(request.resource.data.activeRankId)).data.get('unlockConfig', {}).get('initialStatus', '') == 'available' &&
           publishedGate(worldId, request.resource.data.activeRankId, request.resource.data.activeGateId);
         allow update: if isOwner(uid) && validJourney(request.resource.data) &&
-          (unchangedJourneyTarget(resource.data, request.resource.data) ||
+          (placementAllowsAdvance(resource.data, request.resource.data) ||
+            unchangedJourneyTarget(resource.data, request.resource.data) ||
             (resource.data.activeGateId != request.resource.data.activeGateId &&
               normalProgressAdvance(resource.data, request.resource.data, uid, worldId)) ||
             (request.resource.data.get('contentJourneyStatus', '') == 'completed-current-content' &&
-              finishedJourney(resource.data, request.resource.data)) || placementAllowsAdvance(resource.data, request.resource.data));
+              finishedJourney(resource.data, request.resource.data)));
         allow delete: if false;
+        match /levelPlacementResumeReceipts/{assessmentId} {
+          allow read, write: if false;
+        }
         match /placementSessions/{assessmentId} {
           function placementFields() {
             return ['assessmentId', 'worldId', 'rankId', 'currentGateId', 'currentQuestionIndex',
@@ -1197,13 +1339,32 @@ service cloud.firestore {
           function validLevelPlacementWord(answer) {
             return publishedPlacementWord(answer.rankId, answer.gateId, answer.contentWordId, answer.wordKey);
           }
+          function startLevelPlacementAtEligibleLevel(data) {
+            let path = /databases/$(database)/documents/users/$(uid)/contentProgress/$(worldId);
+            let previous = get(path).data;
+            let journey = getAfter(path).data;
+            let levels = previous.get('passedCefrLevels', []);
+            return journey.status == 'active' && journey.activeLevelPlacementAssessmentId == assessmentId &&
+              journey.activeLevelPlacementCefrLevel == data.cefrLevel && journey.levelPlacementStatus == 'active' &&
+              (data.cefrLevel == 'A1' ||
+                (data.cefrLevel == 'A2' && 'A1' in levels) ||
+                (data.cefrLevel == 'B1' && 'A2' in levels) ||
+                (data.cefrLevel == 'B2' && 'B1' in levels) ||
+                (data.cefrLevel == 'C1' && 'B2' in levels) ||
+                (data.cefrLevel == 'C2' && 'C1' in levels) ||
+                (data.get('assessmentMode', '') == 'new-ranks' && data.cefrLevel in levels));
+          }
+          function validLevelPlacementRankResult(data) {
+            return data.passedRankIds.size() == data.passedPrefixLength &&
+              data.passedRankIds.toSet().size() == data.passedPrefixLength &&
+              data.orderedRankIds.hasAll(data.passedRankIds) &&
+              data.passedLevel == (data.passedPrefixLength == data.orderedRankIds.size());
+          }
           function validLevelPlacementUpdate(before, after) {
             let order = before.orderedQuestionIds;
             let changed = after.diff(before).affectedKeys();
             return !changed.hasAny(['cefrLevel', 'selectedWords', 'selectedContentWordIds', 'startedAt']) &&
-              (before.get('resultApplied', false) == false || !changed.hasAny(['status', 'resultApplied', 'completedAt',
-                'resultStartRankId', 'resultStartGateId', 'resultUnlockedRankIds', 'resultUnlockedGateIds',
-                'resultClearedGateIds', 'completedCurrentContent', 'passedRankIds'])) &&
+              before.get('resultApplied', false) == false &&
               (after.currentQuestionIndex == before.currentQuestionIndex ? placementAnswersUnchanged(before, after) &&
                 after.orderedQuestionIds == order &&
                 (after.status != 'awaiting-decision' || before.status == 'awaiting-decision') &&
@@ -1211,11 +1372,44 @@ service cloud.firestore {
                   (before.status in ['awaiting-decision', 'paused'] && placementAnswersComplete(before, order.size()))) :
                 placementAnswerStep(before, after, order[before.currentQuestionIndex], 'questionId', 'selectedQuestionId') &&
                 after.orderedQuestionIds.hasAll(order) && validLevelPlacementWord(after.answers[before.currentQuestionIndex]) &&
-                (after.status == 'active' || (after.status == 'awaiting-decision' && placementAnswersComplete(after, order.size()))));
+                (after.status == 'active' || (after.status == 'awaiting-decision' &&
+                  placementAnswersComplete(after, order.size()) && validLevelPlacementRankResult(after))));
+          }
+          function finishAppliedLevelPlacement(before, after) {
+            let path = /databases/$(database)/documents/users/$(uid)/contentProgress/$(worldId);
+            let journeyBefore = get(path).data;
+            let journey = getAfter(path).data;
+            return before.status in ['paused', 'awaiting-decision'] &&
+              journeyBefore.get('activeLevelPlacementAssessmentId', '') == assessmentId &&
+              journey.diff(journeyBefore).affectedKeys().hasOnly(['levelPlacementStatus',
+                'activeLevelPlacementAssessmentId', 'activeLevelPlacementCefrLevel', 'updatedAt']) &&
+              after.diff(before).affectedKeys().hasOnly(['status', 'completedAt', 'pausedAt', 'updatedAt']) &&
+              after.updatedAt == request.time && journey.updatedAt == request.time &&
+              ((after.status == 'completed' && after.completedAt == request.time &&
+                after.get('pausedAt', null) == before.get('pausedAt', null) &&
+                journey.levelPlacementStatus == 'completed' && journey.get('activeLevelPlacementAssessmentId', '') == '') ||
+                (after.status == 'paused' && after.pausedAt == request.time &&
+                  after.get('completedAt', null) == before.get('completedAt', null) &&
+                  journey.levelPlacementStatus == 'paused' && journey.activeLevelPlacementAssessmentId == assessmentId));
+          }
+          function preserveAppliedLevelPlacement(before, after) {
+            let choice = before.get('saveWordChoice', 'undecided');
+            return before.get('resultApplied', false) == true &&
+              ((after.diff(before).affectedKeys().hasOnly(['saveWordChoice', 'saveWordPendingIds', 'saveWordSavedIds',
+                'saveWordFailures', 'saveWordSummary', 'wordsSaveCompletedAt', 'updatedAt']) &&
+                after.saveWordChoice in ['none', 'incorrect-only', 'all'] &&
+                (choice == 'undecided' || choice == after.saveWordChoice)) ||
+                finishAppliedLevelPlacement(before, after));
           }
           allow create: if importingSavedGuest(uid) && validLevelPlacementSession(request.resource.data);
-          allow create: if isOwner(uid) && validLevelPlacementSession(request.resource.data) && cleanPlacementStart(request.resource.data);
-          allow update: if isOwner(uid) && validLevelPlacementSession(request.resource.data) && validLevelPlacementUpdate(resource.data, request.resource.data);
+          allow create: if isOwner(uid) && validLevelPlacementSession(request.resource.data) &&
+            cleanPlacementStart(request.resource.data) && startLevelPlacementAtEligibleLevel(request.resource.data);
+          allow update: if isOwner(uid) && validLevelPlacementSession(request.resource.data) &&
+            ((resource.data.get('resultApplied', false) == true &&
+              preserveAppliedLevelPlacement(resource.data, request.resource.data)) ||
+              (resource.data.status == 'paused' && request.resource.data.status == 'awaiting-decision' &&
+                approvedLegacyLevelResume(assessmentId)) ||
+              validLevelPlacementUpdate(resource.data, request.resource.data));
           allow delete: if false;
         }
         match /gateClearAttempts/{attemptId} {
@@ -1663,6 +1857,21 @@ service cloud.firestore {
             let original = get(/databases/$(database)/documents/users/$(sourceUid)/contentWords/$(contentWordId)/sources/$(sourceId)).data;
             return data.diff(original).affectedKeys().hasOnly(['_savedGuestImportedAt']);
           }
+          function validLevelPlacementSource(data) {
+            let session = getAfter(/databases/$(database)/documents/users/$(uid)/contentProgress/$(data.worldId)/levelPlacementSessions/$(data.assessmentId)).data;
+            let word = get(/databases/$(database)/documents/content_worlds/$(data.worldId)/ranks/$(data.rankId)/gates/$(data.gateId)/words/$(data.contentWordId)).data;
+            return data.type == 'level-placement' && data.linkedAt == request.time &&
+              data.operationId == 'level-placement:' + data.assessmentId &&
+              sourceId == 'level_placement_' + data.assessmentId + '~' + data.contentWordId &&
+              session.assessmentId == data.assessmentId && session.worldId == data.worldId &&
+              session.cefrLevel == data.cefrLevel && session.status in ['awaiting-decision', 'paused', 'completed'] &&
+              data.contentWordId in session.selectedContentWordIds &&
+              data.placementResult in ['correct', 'incorrect'] &&
+              word.status == 'published' && word.wordKey == contentWordId &&
+              word.worldId == data.worldId && word.rankId == data.rankId && word.gateId == data.gateId &&
+              word.contentWordId == data.contentWordId &&
+              publishedGate(data.worldId, data.rankId, data.gateId);
+          }
           function validSource(data) {
             return data.addedFrom in [
                 'manual', 'dictionary-search', 'private-world', 'import',
@@ -1672,10 +1881,12 @@ service cloud.firestore {
               (!('customWorldId' in data) || nonEmptyString(data.customWorldId, 500)) &&
               (!('importId' in data) || nonEmptyString(data.importId, 500));
           }
-          allow read, delete: if isOwner(uid);
-          allow create: if isOwner(uid) && validSource(request.resource.data) &&
-            (request.resource.data.addedFrom != 'published-gate' || validPublishedGateSource(request.resource.data));
-          allow create: if importingSavedGuest(uid) && validImportedSource(request.resource.data);
+          allow read: if isOwner(uid);
+          allow delete: if isOwner(uid) && !(resource.data.addedFrom in ['published-gate', 'level-placement']);
+          allow create: if (importingSavedGuest(uid) && validImportedSource(request.resource.data)) ||
+            (isOwner(uid) && validSource(request.resource.data) &&
+              (request.resource.data.addedFrom == 'published-gate' ? validPublishedGateSource(request.resource.data) :
+                request.resource.data.addedFrom != 'level-placement' || validLevelPlacementSource(request.resource.data)));
           allow update: if false;
         }
         match /evidence/{eventId} {

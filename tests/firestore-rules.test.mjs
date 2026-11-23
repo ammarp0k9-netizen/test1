@@ -592,6 +592,7 @@ async function seed() {
 
 let passed = 0;
 let selected = 0;
+const failures = [];
 const testFilter = String(process.env.FIRESTORE_RULES_TEST_FILTER || process.argv[2] || '');
 async function test(name, callback) {
   if (testFilter && !name.includes(testFilter)) return;
@@ -601,8 +602,8 @@ async function test(name, callback) {
     passed += 1;
     console.log(`ok - ${name}`);
   } catch (error) {
-    error.message = `${name}: ${error.message}`;
-    throw error;
+    failures.push(new Error(name, { cause: error }));
+    console.error(`not ok - ${name}`, error);
   }
 }
 
@@ -4696,15 +4697,18 @@ try {
     const uid = 'evidence-user';
     const wordKey = 'evidence-word';
     const sessionId = 'evidence-session';
-    const eventId = `e1~${uid}~${sessionId}~${wordKey}`;
+    const eventId = `e2~${uid}~${sessionId}~${wordKey}`;
     const legacyWordId = 'evidence-legacy-word';
     const canonicalPath = `users/${uid}/contentWords/${wordKey}`;
     const legacyPath = `users/${uid}/words/${legacyWordId}`;
     const sessionPath = `users/${uid}/quizEvidenceSessions/${sessionId}`;
     const eventPath = `${canonicalPath}/evidence/${eventId}`;
+    const historicalPath = `${canonicalPath}/evidence/e1~${uid}~archived~${wordKey}`;
+    const localDayKey = Math.floor(Date.now() / 86400000);
     await environment.withSecurityRulesDisabled(async (context) => {
       const db = context.firestore();
       await Promise.all([
+        setDoc(doc(db, historicalPath), { occurredAt: timestamp, evidenceVersion: 1 }),
         setDoc(doc(db, legacyPath), {
           word: wordKey,
           userId: uid,
@@ -4735,6 +4739,9 @@ try {
       ]);
     });
     const evidenceDb = environment.authenticatedContext(uid).firestore();
+    assert.equal((await assertSucceeds(getDoc(doc(evidenceDb, historicalPath)))).data().evidenceVersion, 1);
+    await assertFails(getDoc(doc(userB, historicalPath)));
+    await assertFails(updateDoc(doc(evidenceDb, historicalPath), { evidenceVersion: 2 }));
     await assertSucceeds(setDoc(doc(evidenceDb, sessionPath), {
       sessionId,
       status: 'completed',
@@ -4745,7 +4752,7 @@ try {
       correctWordKeys: [wordKey],
       totalCount: 1,
       correctCount: 1,
-      evidenceVersion: 1,
+      evidenceVersion: 2,
       completedAt: serverTimestamp()
     }));
     const evidenceBatch = writeBatch(evidenceDb);
@@ -4757,23 +4764,29 @@ try {
       privateWorldId: '',
       membershipWordId: '',
       mode: 'timeAttack',
+      submittedAnswer: legacyWordId,
+      answerDirection: 'ar-to-en',
       correct: true,
       completed: true,
       sequence: 1,
-      evidenceVersion: 1,
+      evidenceVersion: 2,
+      timezoneOffsetMinutes: 0,
+      localDayKey,
       occurredAt: serverTimestamp()
     });
     evidenceBatch.update(doc(evidenceDb, canonicalPath), {
       eligibleEvidenceCount: 1,
       lastEligibleEvidenceAt: serverTimestamp(),
       lastEvidenceEventId: eventId,
-      evidenceVersion: 1,
+      evidenceVersion: 2,
+      evidenceTimezoneOffsetMinutes: 0,
+      lastEvidenceLocalDayKey: localDayKey,
       updatedAt: serverTimestamp()
     });
     await assertSucceeds(evidenceBatch.commit());
     assert.equal((await getDoc(doc(evidenceDb, canonicalPath))).data().eligibleEvidenceCount, 1);
     await assertFails(updateDoc(doc(evidenceDb, eventPath), { sequence: 2 }));
-    const forgedId = `e1~other-user~${sessionId}~${wordKey}`;
+    const forgedId = `e2~other-user~${sessionId}~${wordKey}`;
     await assertFails(setDoc(doc(evidenceDb, `${canonicalPath}/evidence/${forgedId}`), {
       eventId: forgedId,
       sessionId,
@@ -4782,10 +4795,14 @@ try {
       privateWorldId: '',
       membershipWordId: '',
       mode: 'timeAttack',
+      submittedAnswer: legacyWordId,
+      answerDirection: 'ar-to-en',
       correct: true,
       completed: true,
       sequence: 2,
-      evidenceVersion: 1,
+      evidenceVersion: 2,
+      timezoneOffsetMinutes: 0,
+      localDayKey,
       occurredAt: serverTimestamp()
     }));
     await assertFails(getDoc(doc(userB, eventPath)));
@@ -4816,12 +4833,13 @@ try {
     );
 
     await assertSucceeds(createAsOwner('matching-v2-valid'));
-    await assertSucceeds(createAsOwner('time-attack-v1-valid', {
+    // Live rules require v2 for new writes. A v1 archive is tested above.
+    await assertFails(createAsOwner('time-attack-v1-invalid', {
       mode: 'timeAttack',
       evidenceVersion: 1,
     }));
     await assertSucceeds(createAsOwner('time-attack-v2-valid', { mode: 'timeAttack' }));
-    await assertSucceeds(createAsOwner('scramble-v1-valid', {
+    await assertFails(createAsOwner('scramble-v1-invalid', {
       mode: 'scramble',
       evidenceVersion: 1,
     }));
@@ -4916,6 +4934,8 @@ try {
         privateWorldId: '',
         membershipWordId: '',
         mode: 'timeAttack',
+        submittedAnswer: legacyWordId,
+        answerDirection: 'ar-to-en',
         correct: true,
         completed: true,
         sequence,
@@ -5102,6 +5122,8 @@ try {
         privateWorldId: '',
         membershipWordId: '',
         mode: 'timeAttack',
+        submittedAnswer: legacyWordId,
+        answerDirection: 'ar-to-en',
         correct: true,
         completed: true,
         sequence: 1,
@@ -5155,6 +5177,12 @@ try {
           readinessVersion: 1,
           readyAt: timestamp,
           activeClearAttemptId: ''
+        }),
+        setDoc(doc(db, `${progressPath}/readiness/proof`), {
+          wordIds: [contentWordId], addedWordId: contentWordId
+        }),
+        setDoc(doc(db, `${progressPath}/lesson/progress`), {
+          wordIds: [contentWordId], completedWordIds: [contentWordId]
         })
       ]);
     });
@@ -5290,6 +5318,9 @@ try {
             readyAt: timestamp,
             activeClearAttemptId: attemptId,
             clearAttempts: 1
+          }),
+          setDoc(doc(db, `${progressPath}/readiness/proof`), {
+            wordIds: [contentWordId], addedWordId: contentWordId
           }),
           setDoc(doc(db, attemptPath), {
             attemptId,
@@ -5489,6 +5520,24 @@ try {
     ));
   });
 
+  function completedLevelPlacementAnswers(rankGates, questionsPerRank) {
+    const selectedWords = Object.entries(rankGates).flatMap(([rankId, gateIds]) =>
+      Array.from({ length: questionsPerRank }, (_, index) => {
+        const id = `${rankId}-term-${index + 1}`;
+        return { questionId: id, contentWordId: id, wordKey: id, rankId, gateId: gateIds[index % gateIds.length] };
+      }));
+    const orderedQuestionIds = selectedWords.map(({ questionId }) => questionId);
+    return {
+      selectedWords,
+      selectedContentWordIds: selectedWords.map(({ contentWordId }) => contentWordId),
+      orderedQuestionIds,
+      answers: selectedWords.map((item) => ({ ...item, selectedQuestionId: item.questionId, correct: true })),
+      currentQuestionIndex: selectedWords.length,
+      correctCount: selectedWords.length,
+      answersCompletedAt: timestamp
+    };
+  }
+
   await test('diagnoses the production-sized new-ranks result commit', async () => {
     const uid = 'production-sized-outcome-user';
     const worldId = 'production-sized-outcome-world';
@@ -5610,7 +5659,7 @@ try {
               }
             },
             resultApplied: false,
-            answersCompletedAt: timestamp
+            ...completedLevelPlacementAnswers(rankGateIds, 4)
           })
         }
       ]);
@@ -5774,7 +5823,7 @@ try {
           status: 'passed'
         }])),
         resultApplied: false,
-        answersCompletedAt: timestamp
+        ...completedLevelPlacementAnswers(rankGateIds, 1)
       })]);
       for (const [path, data] of documents) {
         await setDoc(doc(seedDb, path), data);
@@ -5980,6 +6029,14 @@ try {
         doc(seedDb, `content_worlds/${worldId}/ranks/${nextRankId}/gates/${nextGateId}`),
         gate(worldId, nextRankId, nextGateId, 'published')
       );
+      for (const selected of selectedWords) {
+        const { rankId, gateId, contentWordId, wordKey, normalizedWord } = selected;
+        await setDoc(doc(seedDb, `content_worlds/${worldId}/ranks/${rankId}/gates/${gateId}/words/${contentWordId}`), {
+          ...word(worldId, rankId, gateId, contentWordId, 'published'),
+          wordKey,
+          normalizedWord
+        });
+      }
     });
     await seedJourneyCase(uid);
 
@@ -6139,8 +6196,11 @@ try {
     const assessmentId = 'level_placement_v2_A1_paused_result';
     const journeyPath = `users/${uid}/contentProgress/${worldId}`;
     const sessionPath = `${journeyPath}/levelPlacementSessions/${assessmentId}`;
+    const receiptPath = `${journeyPath}/levelPlacementResumeReceipts/${assessmentId}`;
     const pointerPath = `users/${uid}/meta/active_content_journey`;
     const db = environment.authenticatedContext(uid).firestore();
+    const otherTab = environment.authenticatedContext(uid).firestore();
+    const otherUser = environment.authenticatedContext('other-placement-user').firestore();
     await environment.withSecurityRulesDisabled(async (context) => {
       const seedDb = context.firestore();
       await setDoc(doc(seedDb, journeyPath), {
@@ -6179,22 +6239,18 @@ try {
       }));
     });
 
-    const resume = writeBatch(db);
-    resume.update(doc(db, sessionPath), {
+    const sessionResult = {
       status: 'awaiting-decision',
-      resumedAt: serverTimestamp(),
       resultApplied: true,
-      assessedAt: serverTimestamp(),
       nextCefrLevel: 'A2',
       resultStartRankId: 'level-rank-a2',
       resultStartGateId: 'level-gate-a2',
       resultUnlockedRankIds: ['level-rank-a1', 'level-rank-a2'],
       resultUnlockedGateIds: ['level-gate-a1', 'level-gate-a2'],
       resultClearedGateIds: ['level-gate-a1'],
-      completedCurrentContent: false,
-      updatedAt: serverTimestamp()
-    });
-    resume.update(doc(db, journeyPath), {
+      completedCurrentContent: false
+    };
+    const journeyResult = {
       activeRankId: 'level-rank-a2',
       activeGateId: 'level-gate-a2',
       unlockedRankIds: ['level-rank-a1', 'level-rank-a2'],
@@ -6204,11 +6260,67 @@ try {
       levelPlacementAssessmentIds: { A1: assessmentId },
       levelPlacementPassedRankIds: ['level-rank-a1'],
       contentJourneyStatus: 'in-progress',
-      levelPlacementStatus: 'awaiting-decision',
-      updatedAt: serverTimestamp()
+      levelPlacementStatus: 'awaiting-decision'
+    };
+    const writeResume = (write, client, resultOverride = {}) => {
+      write.update(doc(client, sessionPath), {
+        ...sessionResult,
+        ...resultOverride,
+        resumedAt: serverTimestamp(),
+        assessedAt: serverTimestamp(),
+        updatedAt: serverTimestamp()
+      });
+      write.update(doc(client, journeyPath), { ...journeyResult, updatedAt: serverTimestamp() });
+      write.update(doc(client, pointerPath), { updatedAt: serverTimestamp() });
+    };
+    const resume = (client, resultOverride) => {
+      const write = writeBatch(client);
+      writeResume(write, client, resultOverride);
+      return write.commit();
+    };
+    await assertFails(resume(db));
+    await environment.withSecurityRulesDisabled(async (context) => {
+      const seedDb = context.firestore();
+      const [session, journey] = await Promise.all([
+        getDoc(doc(seedDb, sessionPath)),
+        getDoc(doc(seedDb, journeyPath))
+      ]);
+      const receipt = {
+        capturedAt: timestamp,
+        pausedSession: session.data(),
+        pausedJourney: journey.data(),
+        sessionResult,
+        journeyResult
+      };
+      await assertFails(setDoc(doc(db, receiptPath), receipt));
+      await assertFails(setDoc(doc(admin, receiptPath), receipt));
+      await setDoc(doc(seedDb, receiptPath), receipt);
     });
-    resume.update(doc(db, pointerPath), { updatedAt: serverTimestamp() });
-    await assertSucceeds(resume.commit());
+    await assertFails(getDoc(doc(db, receiptPath)));
+    await assertFails(resume(otherUser));
+    await assertFails(resume(db, { resultClearedGateIds: ['another-gate'] }));
+    const resumeFromTab = (client) => runTransaction(client, async (transaction) => {
+      const [session, journey] = await Promise.all([
+        transaction.get(doc(client, sessionPath)),
+        transaction.get(doc(client, journeyPath))
+      ]);
+      assert.equal(journey.data().activeLevelPlacementAssessmentId, assessmentId);
+      if (session.data().resultApplied) return 'already-saved';
+      writeResume(transaction, client);
+      return 'saved';
+    });
+    const submissions = await Promise.allSettled([resumeFromTab(db), resumeFromTab(otherTab)]);
+    assert.equal(submissions.filter(({ value }) => value === 'saved').length, 1);
+    for (const { reason } of submissions) {
+      if (reason) assert.equal(reason.code, 'permission-denied');
+    }
+    assert.equal(await resumeFromTab(otherTab), 'already-saved');
+    const applied = (await assertSucceeds(getDoc(doc(db, sessionPath)))).data();
+    assert.equal(applied.status, 'awaiting-decision');
+    assert.deepEqual(applied.resultClearedGateIds, sessionResult.resultClearedGateIds);
+    assert.deepEqual(applied.answers.map((answer) => answer.questionId), ['level-question-a1']);
+    await assertFails(updateDoc(doc(db, sessionPath), { passedLevel: false, updatedAt: serverTimestamp() }));
+    await assertFails(updateDoc(doc(db, sessionPath), { nextCefrLevel: 'C2', updatedAt: serverTimestamp() }));
     await assertSucceeds(updateDoc(doc(db, sessionPath), {
       saveWordChoice: 'none',
       saveWordPendingIds: [],
@@ -6224,6 +6336,48 @@ try {
       wordsSaveCompletedAt: serverTimestamp(),
       updatedAt: serverTimestamp()
     }));
+    const finish = (client) => {
+      const write = writeBatch(client);
+      write.update(doc(client, sessionPath), {
+        status: 'completed',
+        completedAt: serverTimestamp(),
+        updatedAt: serverTimestamp()
+      });
+      write.update(doc(client, journeyPath), {
+        levelPlacementStatus: 'completed',
+        activeLevelPlacementAssessmentId: '',
+        activeLevelPlacementCefrLevel: '',
+        updatedAt: serverTimestamp()
+      });
+      return write.commit();
+    };
+    await assertSucceeds(finish(otherTab));
+    const completed = (await assertSucceeds(getDoc(doc(db, sessionPath)))).data();
+    assert.equal(completed.status, 'completed');
+    assert.deepEqual(completed.answers, applied.answers);
+    assert.deepEqual(completed.resultUnlockedGateIds, applied.resultUnlockedGateIds);
+
+    await environment.withSecurityRulesDisabled(async (context) => {
+      const seedDb = context.firestore();
+      await deleteDoc(doc(seedDb, receiptPath));
+      await updateDoc(doc(seedDb, sessionPath), {
+        status: 'paused',
+        completedAt: deleteField(),
+        pausedAt: timestamp
+      });
+      await updateDoc(doc(seedDb, journeyPath), {
+        levelPlacementStatus: 'paused',
+        activeLevelPlacementAssessmentId: assessmentId,
+        activeLevelPlacementCefrLevel: 'A1'
+      });
+    });
+    await assertFails(finish(otherUser));
+    await assertSucceeds(finish(otherTab));
+    const resumedApplied = (await getDoc(doc(db, sessionPath))).data();
+    assert.equal(resumedApplied.status, 'completed');
+    assert.equal(resumedApplied.resultApplied, true);
+    assert.deepEqual(resumedApplied.answers, applied.answers);
+    assert.deepEqual(resumedApplied.resultClearedGateIds, applied.resultClearedGateIds);
   });
 
   await test(productionEntryV2CandidateProfile
@@ -6336,9 +6490,9 @@ try {
     await assertFails(deleteDoc(doc(userA, path)));
   });
 
-  if (testFilter) assert.ok(selected > 0, `No Rules test matched "${testFilter}"`);
-  assert.equal(passed, testFilter ? selected : 84);
-  console.log(`# ${passed} Firestore Rules emulator tests passed`);
+  assert.ok(selected > 0, `No Rules test matched "${testFilter}"`);
+  console.log(`# Firestore Rules emulator: ${passed} passed, ${failures.length} failed, ${selected} run`);
+  if (failures.length) throw new AggregateError(failures, 'Firestore Rules assertions failed');
 } finally {
   await environment.cleanup();
 }

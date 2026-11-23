@@ -22,6 +22,7 @@ function createHarness(options = {}) {
   const controls = {
     failNextOutcomeCommit: false,
     failProgressProjection: false,
+    requireClosedPlacementForProjection: false,
     failWorldRefresh: false,
     failReadinessProjection: false,
     readinessProjectionFailures: 0,
@@ -72,6 +73,9 @@ function createHarness(options = {}) {
       const error = new Error('Injected projection failure');
       error.code = 'unavailable';
       throw error;
+    }
+    if (projectsGate && controls.requireClosedPlacementForProjection) {
+      assert.equal(values.get(sessionPath)?.status, 'completed');
     }
     if (appliesOutcome) controls.outcomeCommitCount += 1;
     writes.forEach((write) => {
@@ -469,6 +473,34 @@ test('actual final-answer retry resumes the saved outcome and applies it exactly
   const repeated = await harness.api.applyPlacementOutcome('world-a', 'assessment-a2');
   assert.equal(repeated.session.resultApplied, true);
   assert.equal(harness.controls.outcomeCommitCount, 1);
+});
+
+test('a previously applied paused result closes before projecting its gates without awarding the result again', async () => {
+  const harness = createHarness();
+  harness.controls.failProgressProjection = true;
+  await harness.api.applyPlacementOutcome('world-a', 'assessment-a2');
+  const session = harness.values.get(harness.sessionPath);
+  const before = { ...session, status: 'paused', completedAt: null, pausedAt: new Date() };
+  harness.values.set(harness.sessionPath, before);
+  harness.values.set(harness.journeyPath, {
+    ...harness.values.get(harness.journeyPath),
+    levelPlacementStatus: 'paused',
+    activeLevelPlacementAssessmentId: 'assessment-a2',
+    activeLevelPlacementCefrLevel: 'A2'
+  });
+  harness.controls.failProgressProjection = false;
+  harness.controls.requireClosedPlacementForProjection = true;
+  harness.api.invalidate('all');
+
+  const result = await harness.api.continueLevelPlacement('world-a');
+  assert.equal(result.session.status, 'completed');
+  assert.equal(result.sessionReconciliationError, null);
+  assert.equal(result.progressReconciliationError, null);
+  assert.equal(harness.controls.outcomeCommitCount, 1);
+  const saved = harness.values.get(harness.sessionPath);
+  assert.deepEqual(saved.answers, before.answers);
+  assert.deepEqual(saved.resultClearedGateIds, before.resultClearedGateIds);
+  assert.equal(harness.values.get(`${harness.journeyPath}/ranks/rank-a2/gates/old-gate`).status, 'cleared');
 });
 
 test('actual word flow upgrades legacy snapshots, retries pending only, and keeps defer/skip independent', async () => {

@@ -3902,16 +3902,6 @@ async function reconcilePlacementOutcomeProgress(user, world, assessment, sessio
 }
 
 async function reconcilePreviouslyAppliedPlacementOutcome(user, world, assessment, session) {
-  let progressReconciliationError = null;
-  try {
-    await reconcilePlacementOutcomeProgress(user, world, assessment, session);
-  } catch (error) {
-    progressReconciliationError = journeyOperationError(
-      error,
-      'reconcile-placement-outcome-progress',
-      { uid: user.uid, worldId: world, assessmentId: assessment }
-    );
-  }
   let sessionReconciliationError = null;
   let savedSession = session;
   if (session.status !== 'completed') {
@@ -3923,6 +3913,18 @@ async function reconcilePreviouslyAppliedPlacementOutcome(user, world, assessmen
         error,
         'reconcile-placement-session-status',
         { worldId: world, assessmentId: assessment }
+      );
+    }
+  }
+  let progressReconciliationError = null;
+  if (savedSession.status === 'completed') {
+    try {
+      await reconcilePlacementOutcomeProgress(user, world, assessment, savedSession);
+    } catch (error) {
+      progressReconciliationError = journeyOperationError(
+        error,
+        'reconcile-placement-outcome-progress',
+        { uid: user.uid, worldId: world, assessmentId: assessment }
       );
     }
   }
