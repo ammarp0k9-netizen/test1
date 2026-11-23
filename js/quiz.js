@@ -322,8 +322,15 @@ async function canOpenGateQuiz(source, stored = false) {
   if (!lesson?.hasGateIntent(source)) return true;
   const context = lesson.gateContext(source) || lesson.gateContext(source?.officialReviewGate);
   if (!context) return false;
+  const owner = window.auth?.currentUser?.uid;
   try {
     const access = await window.LootLinguaJourneyCloud.getGateLessonAccess(context, stored ? { session: source } : {});
+    if (owner !== window.auth?.currentUser?.uid) return false;
+    if (access.compatibilityResume) {
+      const saved = await window.saveActiveQuizSessionToCloud?.(source);
+      if (!saved) showToast('تعذّرت مزامنة المحاولة. حاول مرة ثانية، مسودتك لسه محفوظة.', 'warning');
+      return Boolean(saved);
+    }
     if (access.allowed) return true;
   } catch (_) {}
   showToast('أكمل تعلّم كلمات البوابة أولًا.', 'info');

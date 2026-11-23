@@ -1576,7 +1576,9 @@ function gateLessonRef(uid, { worldId, rankId, gateId }) {
 
 async function getGateLessonCutoff() {
   const release = await getDoc(doc(db, 'releaseConfig', 'gateLesson'));
-  return release.data() || {};
+  const data = release.data() || {};
+  return { ...data, compatibilityOpen: !release.metadata?.fromCache && !release.metadata?.hasPendingWrites &&
+    data.captureStartedAt == null && data.activatedAt == null };
 }
 
 async function getGateLessonAccess(context, options = {}) {
@@ -1595,7 +1597,17 @@ async function getGateLessonAccess(context, options = {}) {
   if (!progress?.loadedAt) return result(false);
   if (!snapshot.metadata?.hasPendingWrites && lesson.complete(state, progress.loadedContentWordIds)) return result(true);
   if (!options.session?.id && !['ready', 'cleared'].includes(progress.status)) return result(false);
-  const { activatedAt: cutoff, captureStartedAt } = await getGateLessonCutoff();
+  const { activatedAt: cutoff, captureStartedAt, compatibilityOpen } = await getGateLessonCutoff();
+  if (compatibilityOpen && options.session?.id && ['learning', 'ready', 'cleared'].includes(progress.status)) {
+    const session = options.session;
+    const source = lesson.gateContext(session) || lesson.gateContext(session.officialReviewGate);
+    const keys = session.selectedWordKeys?.length ? session.selectedWordKeys : session.words?.map(word => word.wordKey);
+    if (source && lesson.keyFor(source) === lesson.keyFor(context) &&
+        keys?.length && keys.every(key => progress.loadedWordKeys?.includes(key)) &&
+        (session.officialReviewDueWordKeys || []).every(key => keys.includes(key))) {
+      return { ...result(true), compatibilityResume: true };
+    }
+  }
   if (!lesson.time(cutoff)) return result(false);
   if (options.session?.id) {
     const meta = ['users', user.uid, 'meta'];

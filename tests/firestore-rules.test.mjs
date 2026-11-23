@@ -3706,34 +3706,128 @@ try {
       updatedAt: serverTimestamp()
     }));
 
-    const resultBatch = writeBatch(levelUser);
-    resultBatch.update(doc(levelUser, levelSessionPath), {
+    const sessionResult = {
       resultApplied: true,
       nextCefrLevel: 'A2',
       resultStartRankId: 'level-rank-a2',
       resultStartGateId: 'level-gate-a2',
       resultUnlockedRankIds: ['level-rank-a1', 'level-rank-a2'],
       resultUnlockedGateIds: ['level-gate-a1', 'level-gate-a2'],
-      updatedAt: serverTimestamp()
-    });
-    resultBatch.update(doc(levelUser, levelJourneyPath), {
+      resultClearedGateIds: ['level-gate-a1'],
+      completedCurrentContent: false
+    };
+    const journeyResult = {
       activeRankId: 'level-rank-a2',
       activeGateId: 'level-gate-a2',
       unlockedRankIds: ['level-rank-a1', 'level-rank-a2'],
       unlockedGateIds: ['level-gate-a1', 'level-gate-a2'],
       passedCefrLevels: ['A1'],
       partialCefrLevels: [],
-      levelPlacementStatus: 'awaiting-decision',
-      updatedAt: serverTimestamp()
+      levelPlacementAssessmentIds: { A1: levelAssessmentId },
+      levelPlacementPassedRankIds: ['level-rank-a1'],
+      contentJourneyStatus: 'in-progress',
+      levelPlacementStatus: 'awaiting-decision'
+    };
+    const receiptPath = `${levelJourneyPath}/levelPlacementResumeReceipts/${levelAssessmentId}`;
+    const result = (client, sessionPatch = {}, journeyPatch = {}, gateScore = 1) => {
+      const batch = writeBatch(client);
+      batch.update(doc(client, levelSessionPath), {
+        ...sessionResult, assessedAt: serverTimestamp(), updatedAt: serverTimestamp(), ...sessionPatch
+      });
+      batch.update(doc(client, levelJourneyPath), { ...journeyResult, updatedAt: serverTimestamp(), ...journeyPatch });
+      batch.set(doc(client, `${levelJourneyPath}/ranks/level-rank-a1/gates/level-gate-a1`), {
+        status: 'cleared', clearedAt: serverTimestamp(), clearedBy: 'level-placement', readyEvidenceCount: 0,
+        clearAttempts: 0, levelPlacementAssessmentId: levelAssessmentId, levelPlacementScore: gateScore,
+        placementClearedWithoutLoad: true, lastActivityAt: serverTimestamp()
+      }, { merge: true });
+      batch.set(
+        doc(client, `${levelJourneyPath}/ranks/level-rank-a2/gates/level-gate-a2`),
+        availableGateProgress('level-world', 'level-rank-a2', 'level-gate-a2')
+      );
+      batch.set(doc(client, 'users/level-user/meta/active_content_journey'), {
+        worldId: 'level-world', journeyVersion: 1, updatedAt: serverTimestamp()
+      });
+      return batch.commit();
+    };
+    await assertFails(result(levelUser));
+    await assertFails(updateDoc(doc(levelUser, levelSessionPath), {
+      ...sessionResult, status: 'completed', completedAt: serverTimestamp(), updatedAt: serverTimestamp()
+    }));
+    await assertFails(updateDoc(doc(levelUser, levelJourneyPath), { passedCefrLevels: ['A1'] }));
+    await environment.withSecurityRulesDisabled(async (context) => {
+      const db = context.firestore();
+      const [session, journey] = await Promise.all([
+        getDoc(doc(db, levelSessionPath)),
+        getDoc(doc(db, levelJourneyPath))
+      ]);
+      const receipt = {
+        capturedAt: timestamp, pausedSession: session.data(), pausedJourney: journey.data(), sessionResult, journeyResult
+      };
+      await assertFails(setDoc(doc(levelUser, receiptPath), receipt));
+      await setDoc(doc(db, receiptPath), receipt);
     });
-    resultBatch.set(
-      doc(levelUser, `${levelJourneyPath}/ranks/level-rank-a2/gates/level-gate-a2`),
-      availableGateProgress('level-world', 'level-rank-a2', 'level-gate-a2')
-    );
-    await assertSucceeds(resultBatch.commit());
+    await assertFails(result(userB));
+    await assertFails(result(levelUser, { passedLevel: false }));
+    await assertFails(result(levelUser, {}, { unlockedGateIds: ['unauthorized-gate'] }));
+    await assertFails(result(levelUser, {}, {}, 0.5));
+    await assertSucceeds(result(levelUser));
+    await assertFails(result(levelUser));
     const savedJourney = await getDoc(doc(levelUser, levelJourneyPath));
     assert.deepEqual(savedJourney.data().passedCefrLevels, ['A1']);
     assert.equal(savedJourney.data().activeRankId, 'level-rank-a2');
+  });
+
+  await test('a verified historical Level Placement failure is saved without unlocking a gate', async () => {
+    const uid = 'historical-level-failure';
+    const assessmentId = 'level_placement_v1_A1_failed';
+    const journeyPath = `users/${uid}/contentProgress/level-world`;
+    const sessionPath = `${journeyPath}/levelPlacementSessions/${assessmentId}`;
+    const receiptPath = `${journeyPath}/levelPlacementResumeReceipts/${assessmentId}`;
+    const source = levelPlacementSession(assessmentId);
+    const pausedSession = {
+      ...source, status: 'awaiting-decision', startedAt: timestamp, updatedAt: timestamp,
+      currentQuestionIndex: 1, answersCompletedAt: timestamp, resultApplied: false,
+      answers: [{ ...source.selectedWords[0], selectedQuestionId: 'different-question', correct: false }]
+    };
+    const pausedJourney = {
+      ...journey('level-world', 'level-rank-a1', 'level-gate-a1'),
+      startedAt: timestamp, updatedAt: timestamp, levelPlacementStatus: 'active',
+      activeLevelPlacementAssessmentId: assessmentId, activeLevelPlacementCefrLevel: 'A1'
+    };
+    const sessionResult = {
+      resultApplied: true, resultStartRankId: 'level-rank-a1', resultStartGateId: 'level-gate-a1',
+      resultUnlockedRankIds: ['level-rank-a1'], resultUnlockedGateIds: ['level-gate-a1'],
+      resultClearedGateIds: [], completedCurrentContent: false, nextCefrLevel: ''
+    };
+    const journeyResult = {
+      levelPlacementStatus: 'awaiting-decision', levelPlacementAssessmentIds: { A1: assessmentId },
+      passedCefrLevels: [], partialCefrLevels: [], levelPlacementPassedRankIds: []
+    };
+    await environment.withSecurityRulesDisabled(async context => {
+      const db = context.firestore();
+      await Promise.all([
+        setDoc(doc(db, journeyPath), pausedJourney),
+        setDoc(doc(db, sessionPath), pausedSession),
+        setDoc(doc(db, receiptPath), { capturedAt: timestamp, pausedSession, pausedJourney, sessionResult, journeyResult })
+      ]);
+    });
+    const db = environment.authenticatedContext(uid).firestore();
+    const record = (patch = {}) => {
+      const batch = writeBatch(db);
+      batch.update(doc(db, sessionPath), { ...sessionResult, ...patch, updatedAt: serverTimestamp() });
+      batch.update(doc(db, journeyPath), { ...journeyResult, updatedAt: serverTimestamp() });
+      return batch.commit();
+    };
+    await assertFails(record({ passedLevel: true }));
+    await assertSucceeds(record());
+    await assertFails(record({ resultClearedGateIds: ['level-gate-a1'] }));
+    const saved = (await getDoc(doc(db, sessionPath))).data();
+    const progress = (await getDoc(doc(db, journeyPath))).data();
+    assert.equal(saved.resultApplied, true);
+    assert.equal(saved.passedLevel, false);
+    assert.deepEqual(saved.resultClearedGateIds, []);
+    assert.deepEqual(progress.passedCefrLevels, []);
+    assert.deepEqual(progress.unlockedGateIds, ['level-gate-a1']);
   });
 
   await test('Level Placement v2 commits its authoritative outcome before retryable gate projection', async () => {

@@ -1,11 +1,127 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import test from 'node:test';
+import vm from 'node:vm';
 import '../js/gate-lesson.js';
 
 const address = /^127\.0\.0\.1:(\d+)$/.exec(process.env.FIRESTORE_EMULATOR_HOST || '');
 const authAddress = /^127\.0\.0\.1:(\d+)$/.exec(process.env.FIREBASE_AUTH_EMULATOR_HOST || '');
 const projectId = 'demo-lootlingua';
+
+test('an offline v1 browser draft resumes after the staged update and has one review result', {
+  skip: !address || !authAddress, timeout: 45_000,
+}, async () => {
+  const { initializeTestEnvironment, assertFails, assertSucceeds } = await import('@firebase/rules-unit-testing');
+  const { doc, getDoc, setDoc, updateDoc, disableNetwork, enableNetwork, serverTimestamp } = await import('firebase/firestore');
+  const candidate = readFileSync(new URL('../firestore.rules', import.meta.url), 'utf8');
+  const oldRules = process.env.LEGACY_FIRESTORE_RULES_FILE
+    ? readFileSync(process.env.LEGACY_FIRESTORE_RULES_FILE, 'utf8') : candidate;
+  const options = { projectId: 'demo-lootlingua-offline-' + crypto.randomUUID().slice(0, 8),
+    firestore: { host: '127.0.0.1', port: Number(address[1]) } };
+  const before = await initializeTestEnvironment({ ...options, firestore: { ...options.firestore, rules: oldRules } });
+  const oldTab = before.authenticatedContext('learner').firestore();
+  const progressPath = 'users/learner/contentProgress/world/ranks/rank/gates/gate';
+  const draftPath = 'users/learner/meta/active_quiz_session';
+  const reviewPath = 'users/learner/quizEvidenceSessions';
+  const gate = { worldId: 'world', rankId: 'rank', gateId: 'gate' };
+  const words = ['one', 'two'].map(wordKey => ({ wordKey }));
+  const payload = id => ({ sessionId: id, status: 'completed', mode: 'scramble', sourceType: 'personal',
+    privateWorldId: '', wordKeys: ['one', 'two'], correctWordKeys: ['one'], totalCount: 2,
+    correctCount: 1, evidenceVersion: 2, completedAt: serverTimestamp(), officialReviewWorldId: 'world',
+    officialReviewRankId: 'rank', officialReviewGateId: 'gate', officialReviewDueWordKeys: ['one', 'two'] });
+  const quiz = readFileSync(new URL('../js/quiz.js', import.meta.url), 'utf8');
+  const cloud = readFileSync(new URL('../js/journey-cloud.js', import.meta.url), 'utf8');
+  const lesson = globalThis.LootLinguaGateLesson;
+  const cut = (source, start, end) => source.slice(source.indexOf(start), source.indexOf(end));
+  const storage = new Map();
+  let after;
+  try {
+    await before.withSecurityRulesDisabled(async context => {
+      const db = context.firestore();
+      await setDoc(doc(db, progressPath), {
+        ...gate, status: 'learning', loadedAt: serverTimestamp(), loadedWordKeys: ['one', 'two'],
+        loadedContentWordIds: ['one', 'two']
+      });
+    });
+    await assertSucceeds(setDoc(doc(oldTab, reviewPath, 'old-protocol'), payload('old-protocol')));
+    if (process.env.LEGACY_FIRESTORE_RULES_FILE) {
+      await assertFails(setDoc(doc(oldTab, progressPath + '/lesson/progress'), {
+        ...lesson.start(words.map(word => ({ id: word.wordKey }))), updatedAt: serverTimestamp()
+      }));
+      await assertFails(setDoc(doc(oldTab, reviewPath, 'new-on-old-rules'), {
+        ...payload('new-on-old-rules'), lessonWorldId: 'world', lessonRankId: 'rank', lessonGateId: 'gate'
+      }));
+    }
+    await disableNetwork(oldTab);
+    const legacy = vm.createContext({
+      activeQuizSession: { id: 'offline-draft', mode: 'scramble', source: 'gate-gap:world~rank~gate',
+        officialReviewGate: gate, officialReviewDueWordKeys: ['one', 'two'], words, selectedWordKeys: ['one', 'two'] },
+      quizIndex: 1, currentStreak: 1, currentQuizMistakes: 0, timeAttackHp: 3,
+      quizSessionResults: [{ wordKey: 'one', correct: true }], currentQuizWords: words,
+      matchingQuizState: null, hasStartedAnswering: true, ACTIVE_QUIZ_SESSION_KEY: 'active_quiz_session',
+      isVerifiedQuizMode: mode => mode === 'scramble',
+      hasSignedInUser: () => false,
+      localStorage: { setItem: (key, value) => storage.set(key, value) }
+    });
+    vm.runInContext(cut(quiz, 'function serializeActiveQuizSession()', 'async function loadStoredActiveQuizSession()'), legacy);
+    vm.runInContext('saveActiveQuizSession()', legacy);
+    const stored = JSON.parse(storage.get('active_quiz_session'));
+
+    after = await initializeTestEnvironment({ ...options, firestore: { ...options.firestore, rules: candidate } });
+    const nextTab = after.authenticatedContext('learner').firestore();
+    const stranger = after.authenticatedContext('other-learner').firestore();
+    assert.equal((await getDoc(doc(nextTab, draftPath))).exists(), false);
+    assert.equal((await getDoc(doc(nextTab, 'releaseConfig/gateLesson'))).exists(), false);
+    await assertFails(setDoc(doc(nextTab, 'releaseConfig/gateLesson'), { activatedAt: serverTimestamp() }));
+
+    let saveBlocked = true;
+    const identity = { currentUser: { uid: 'learner' } };
+    const browser = vm.createContext({
+      window: { auth: identity, LootLinguaGateLesson: lesson },
+      auth: identity, db: nextTab, doc, getDoc,
+      requireUser: () => identity.currentUser,
+      gateLessonRef: () => doc(nextTab, progressPath + '/lesson/progress'),
+      getGateProgress: async () => (await getDoc(doc(nextTab, progressPath))).data(),
+      showToast: () => {}
+    });
+    vm.runInContext(cut(cloud, 'async function getGateLessonCutoff()', 'async function saveGateLessonState('), browser);
+    vm.runInContext(cut(quiz, 'async function canOpenGateQuiz(', 'window.resumeActiveQuizSession ='), browser);
+    browser.window.LootLinguaJourneyCloud = { getGateLessonAccess: browser.getGateLessonAccess };
+    browser.window.saveActiveQuizSessionToCloud = async saved => {
+      try {
+        await setDoc(doc(saveBlocked ? stranger : nextTab, draftPath), saved);
+        return true;
+      } catch (error) {
+        assert.equal(error.code, 'permission-denied');
+        return false;
+      }
+    };
+    assert.equal(await browser.canOpenGateQuiz(stored, true), false);
+    assert.equal(JSON.parse(storage.get('active_quiz_session')).quizIndex, 1);
+    assert.equal((await getDoc(doc(nextTab, draftPath))).exists(), false);
+    saveBlocked = false;
+    assert.equal(await browser.canOpenGateQuiz(stored, true), true);
+    assert.equal(await browser.canOpenGateQuiz(stored), false);
+
+    await enableNetwork(oldTab);
+    assert.equal((await getDoc(doc(oldTab, draftPath))).data().quizIndex, 1);
+    const finished = { ...stored, quizIndex: 2, quizSessionResults: [
+      ...stored.quizSessionResults, { wordKey: 'two', correct: false }
+    ] };
+    await assertSucceeds(setDoc(doc(nextTab, draftPath), finished));
+    await assertFails(setDoc(doc(oldTab, draftPath), stored));
+    await assertFails(updateDoc(doc(stranger, draftPath), { quizIndex: 0 }));
+    assert.deepEqual((await getDoc(doc(oldTab, draftPath))).data().quizSessionResults, finished.quizSessionResults);
+    const result = { ...payload(stored.id), lessonWorldId: 'world', lessonRankId: 'rank', lessonGateId: 'gate' };
+    await assertSucceeds(setDoc(doc(nextTab, reviewPath, stored.id), result));
+    await assertFails(setDoc(doc(oldTab, reviewPath, stored.id), payload(stored.id)));
+    assert.deepEqual((await getDoc(doc(oldTab, reviewPath, stored.id))).data().correctWordKeys, ['one']);
+    assert.equal((await getDoc(doc(nextTab, 'users/learner/meta/profile'))).exists(), false);
+  } finally {
+    await after?.cleanup();
+    await before.cleanup();
+  }
+});
 
 test('local Spark rules distinguish gate review and clear from independent quiz evidence', {
   skip: !address || !authAddress, timeout: 30_000,

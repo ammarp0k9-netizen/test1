@@ -326,6 +326,12 @@ service cloud.firestore {
       return get(gateLessonRelease()).data.get('activatedAt', null);
     }
 
+    function gateLessonCompatibilityOpen() {
+      let path = gateLessonRelease();
+      return !exists(path) || (get(path).data.get('captureStartedAt', null) == null &&
+        get(path).data.get('activatedAt', null) == null);
+    }
+
     function capturingGateDrafts() {
       return exists(gateLessonRelease()) && get(gateLessonRelease()).data.get('captureStartedAt', null) is timestamp &&
         !(gateLessonCutoff() is timestamp);
@@ -405,6 +411,36 @@ service cloud.firestore {
       return progress.get('loadedAt', null) is timestamp && lessonReady(uid, world, rank, gate, progress);
     }
 
+    function legacyDraftScope(draft) {
+      let source = draft.get('source', '');
+      let parts = source.matches('^(journey|gate-gap):[^~/]{1,128}~[^~/]{1,128}~[^~/]{1,128}$')
+        ? source.split(':')[1].split('~') : [];
+      return parts.size() == 3 ? {'worldId': parts[0], 'rankId': parts[1], 'gateId': parts[2]} :
+        draft.get('officialReviewGate', draft.get('journeyGateId', '') == '' ? null :
+          {'worldId': draft.journeyWorldId, 'rankId': draft.journeyRankId, 'gateId': draft.journeyGateId});
+    }
+
+    function compatibleGateDraft(uid, draft, scope) {
+      let progress = get(ownerGatePath(uid, scope.worldId, scope.rankId, scope.gateId)).data;
+      let selected = draft.get('selectedWordKeys', []);
+      let due = draft.get('officialReviewDueWordKeys', []);
+      return nonEmptyString(draft.get('id', ''), 220) && validEvidenceMode(draft.get('mode', '')) &&
+        scope.worldId.matches('[^~/]{1,128}') && scope.rankId.matches('[^~/]{1,128}') && scope.gateId.matches('[^~/]{1,128}') &&
+        coherentSealedScope(scope, draft) && progress.get('loadedAt', null) is timestamp &&
+        progress.status in ['learning', 'ready', 'cleared'] && draft.words is list && draft.words.size() > 0 &&
+        draft.words.size() <= 2000 && selected is list && due is list &&
+        progress.loadedWordKeys.hasAll(selected) && progress.loadedWordKeys.hasAll(due);
+    }
+
+    function compatibleStoredReview(data, uid, id, world, rank, gate) {
+      let draft = get(/databases/$(database)/documents/users/$(uid)/meta/active_quiz_session).data;
+      let scope = legacyDraftScope(draft);
+      return draft.id == id && draft.mode == data.mode && scope.worldId == world && scope.rankId == rank &&
+        scope.gateId == gate && coherentSealedScope(scope, draft) &&
+        draft.get('officialReviewDueWordKeys', []).toSet() == data.get('officialReviewDueWordKeys', []).toSet() &&
+        (draft.get('selectedWordKeys', []).size() == 0 || draft.selectedWordKeys.hasAll(data.wordKeys));
+    }
+
     function validGateLessonSession(data, uid, id) {
       let official = data.get('officialReviewGateId', '') != '';
       let world = data.get('lessonWorldId', data.get('officialReviewWorldId', ''));
@@ -414,14 +450,18 @@ service cloud.firestore {
         (nonEmptyString(world, 128) && nonEmptyString(rank, 128) && nonEmptyString(gate, 128) &&
           (!official || (world == data.officialReviewWorldId && rank == data.officialReviewRankId &&
             gate == data.officialReviewGateId)) &&
-          gateLessonQuizReady(data, uid, id, world, rank, gate));
+          (gateLessonQuizReady(data, uid, id, world, rank, gate) ||
+            (official && !data.keys().hasAny(['lessonWorldId', 'lessonRankId', 'lessonGateId']) &&
+              gateLessonCompatibilityOpen())));
     }
 
     function gateLessonQuizReady(data, uid, id, world, rank, gate) {
       let progress = get(ownerGatePath(uid, world, rank, gate)).data;
       return progress.status in ['learning', 'ready', 'cleared'] &&
         progress.loadedWordKeys.hasAll(data.wordKeys) &&
-        (lessonReady(uid, world, rank, gate, progress) || legacyGateReview(data, uid, id, world, rank, gate));
+        (lessonReady(uid, world, rank, gate, progress) ||
+          (exists(legacyGateDraftRef(uid)) && legacyGateReview(data, uid, id, world, rank, gate)) ||
+          (gateLessonCompatibilityOpen() && compatibleStoredReview(data, uid, id, world, rank, gate)));
     }
 
     function validOfficialReview(data, uid) {
@@ -1020,12 +1060,20 @@ service cloud.firestore {
       match /meta/active_quiz_session {
         function canSaveDraft() {
           let draft = request.resource.data;
-          return !gateDraft(draft) || allowedGateDraft(uid, draft);
+          return !gateDraft(draft) || allowedGateDraft(uid, draft) ||
+            (gateLessonCompatibilityOpen() && compatibleGateDraft(uid, draft, legacyDraftScope(draft)));
+        }
+        function keepsGateDraftProgress(before, after) {
+          return !gateDraft(before) || before.get('id', '') != after.get('id', '') ||
+            (before.get('source', '') == after.get('source', '') &&
+              before.get('mode', '') == after.get('mode', '') &&
+              after.get('quizIndex', 0) >= before.get('quizIndex', 0));
         }
         allow read: if isOwner(uid);
         allow delete: if isOwner(uid) && !(gateDraft(resource.data) && capturingGateDrafts());
         allow create: if isOwner(uid) && canSaveDraft();
-        allow update: if isOwner(uid) && !(gateDraft(resource.data) && capturingGateDrafts()) && (canSaveDraft() ||
+        allow update: if isOwner(uid) && !(gateDraft(resource.data) && capturingGateDrafts()) &&
+          keepsGateDraftProgress(resource.data, request.resource.data) && (canSaveDraft() ||
           (sealedGateDraft(uid, resource.data) && sealedGateDraft(uid, request.resource.data) &&
             request.resource.data.get('source', '') == resource.data.get('source', '') &&
             request.resource.data.get('officialReviewGate', null) == resource.data.get('officialReviewGate', null)));
@@ -1174,30 +1222,41 @@ service cloud.firestore {
             after.get('levelPlacementClearedGateIds', []).toSet() == before.get('levelPlacementClearedGateIds', []).toSet().union(result.resultClearedGateIds.toSet()) &&
             after.contentJourneyStatus == (result.completedCurrentContent == true ? 'completed-current-content' : 'in-progress');
         }
-        // The legacy client applied a paused result while retaining the decision
-        // screen. Only a server-approved snapshot and its exact result may do so.
+        function legacyLevelReceipt(id) {
+          return get(/databases/$(database)/documents/users/$(uid)/contentProgress/$(worldId)/levelPlacementResumeReceipts/$(id)).data;
+        }
+        function approvedLegacyLevelSession(before, after, receipt) {
+          return receipt.capturedAt is timestamp && receipt.capturedAt <= request.time &&
+            receipt.pausedSession == before && !before.get('resultApplied', false) &&
+            (before.status == 'paused' || (before.status == 'awaiting-decision' && before.get('placementVersion', 1) == 1)) &&
+            before.answersCompletedAt is timestamp && placementAnswersComplete(before, before.orderedQuestionIds.size()) &&
+            after.status == 'awaiting-decision' && after.resultApplied == true &&
+            after.updatedAt == request.time &&
+            (before.status == 'paused' ? after.resumedAt == request.time && after.assessedAt == request.time :
+              after.get('assessedAt', request.time) == request.time &&
+                after.get('resumedAt', null) == before.get('resumedAt', null)) &&
+            after.diff(before).affectedKeys().hasOnly(receipt.sessionResult.keys().concat(['resumedAt', 'assessedAt', 'updatedAt'])) &&
+            after.diff(receipt.sessionResult).unchangedKeys().hasAll(receipt.sessionResult.keys());
+        }
+        // Both older clients retain the decision screen. The approval freezes
+        // the previous attempt and the permitted destination before the commit.
         function approvedLegacyLevelResume(id) {
           let path = /databases/$(database)/documents/users/$(uid)/contentProgress/$(worldId);
           let attempt = /databases/$(database)/documents/users/$(uid)/contentProgress/$(worldId)/levelPlacementSessions/$(id);
-          let receipt = get(/databases/$(database)/documents/users/$(uid)/contentProgress/$(worldId)/levelPlacementResumeReceipts/$(id)).data;
+          let receipt = legacyLevelReceipt(id);
           let beforeSession = get(attempt).data;
           let afterSession = getAfter(attempt).data;
           let beforeJourney = get(path).data;
           let afterJourney = getAfter(path).data;
-          return receipt.capturedAt is timestamp && receipt.capturedAt <= request.time &&
-            receipt.pausedSession == beforeSession && receipt.pausedJourney == beforeJourney &&
-            beforeSession.status == 'paused' && !beforeSession.get('resultApplied', false) &&
+          return approvedLegacyLevelSession(beforeSession, afterSession, receipt) &&
+            receipt.pausedJourney == beforeJourney &&
             beforeJourney.get('activeLevelPlacementAssessmentId', '') == id &&
-            beforeJourney.get('levelPlacementStatus', '') == 'paused' &&
-            afterSession.status == 'awaiting-decision' && afterSession.resultApplied == true &&
-            afterJourney.levelPlacementStatus == 'awaiting-decision' &&
-            afterSession.resumedAt == request.time && afterSession.assessedAt == request.time &&
-            afterSession.updatedAt == request.time && afterJourney.updatedAt == request.time &&
-            afterSession.diff(beforeSession).affectedKeys().hasOnly(
-              receipt.sessionResult.keys().concat(['resumedAt', 'assessedAt', 'updatedAt'])) &&
+            (beforeSession.status == 'paused' ? beforeJourney.levelPlacementStatus == 'paused' :
+              beforeJourney.levelPlacementStatus in ['active', 'awaiting-decision']) &&
+            afterJourney.activeLevelPlacementAssessmentId == id &&
+            afterJourney.levelPlacementStatus == 'awaiting-decision' && afterJourney.updatedAt == request.time &&
             afterJourney.diff(beforeJourney).affectedKeys().hasOnly(
               receipt.journeyResult.keys().concat(['updatedAt'])) &&
-            afterSession.diff(receipt.sessionResult).unchangedKeys().hasAll(receipt.sessionResult.keys()) &&
             afterJourney.diff(receipt.journeyResult).unchangedKeys().hasAll(receipt.journeyResult.keys());
         }
         function placementAllowsAdvance(before, after) {
@@ -1205,8 +1264,7 @@ service cloud.firestore {
           let level = before.get('activeLevelPlacementAssessmentId', '');
           return (id != '' && legacyPlacementAdvance(before, after, id)) ||
             (level != '' &&
-              ((before.get('levelPlacementStatus', '') == 'paused' &&
-                after.get('levelPlacementStatus', '') == 'awaiting-decision' && approvedLegacyLevelResume(level)) ||
+              ((after.get('levelPlacementStatus', '') == 'awaiting-decision' && approvedLegacyLevelResume(level)) ||
                 (after.get('levelPlacementStatus', '') == 'completed' &&
                   levelPlacementAdvance(before, after, level)))) ||
             (before.get('contentJourneyStatus', '') == 'completed-current-content' && after.contentJourneyStatus == 'in-progress' &&
@@ -1243,7 +1301,11 @@ service cloud.firestore {
         function unchangedJourneyTarget(before, after) {
           return !after.diff(before).affectedKeys().hasAny(['activeRankId', 'activeGateId',
             'unlockedRankIds', 'unlockedGateIds', 'contentJourneyStatus', 'levelPlacementClearedGateIds',
-            'completedRankIds', 'rankCompletionVersions', 'worldCompletion']);
+            'completedRankIds', 'rankCompletionVersions', 'worldCompletion']) &&
+            after.get('passedCefrLevels', []) == before.get('passedCefrLevels', []) &&
+            after.get('partialCefrLevels', []) == before.get('partialCefrLevels', []) &&
+            after.get('levelPlacementAssessmentIds', {}) == before.get('levelPlacementAssessmentIds', {}) &&
+            after.get('levelPlacementPassedRankIds', []) == before.get('levelPlacementPassedRankIds', []);
         }
         function finishedJourney(before, after) {
           let gate = getAfter(ownerGatePath(uid, worldId, before.activeRankId, before.activeGateId)).data;
@@ -1363,11 +1425,14 @@ service cloud.firestore {
           function validLevelPlacementUpdate(before, after) {
             let order = before.orderedQuestionIds;
             let changed = after.diff(before).affectedKeys();
-            return !changed.hasAny(['cefrLevel', 'selectedWords', 'selectedContentWordIds', 'startedAt']) &&
+            return !changed.hasAny(['cefrLevel', 'placementVersion', 'selectedWords', 'selectedContentWordIds', 'startedAt']) &&
               before.get('resultApplied', false) == false &&
+              (!after.get('resultApplied', false) ||
+                (before.get('placementVersion', 1) == 2 && after.status == 'completed')) &&
               (after.currentQuestionIndex == before.currentQuestionIndex ? placementAnswersUnchanged(before, after) &&
                 after.orderedQuestionIds == order &&
-                (after.status != 'awaiting-decision' || before.status == 'awaiting-decision') &&
+                (after.status != 'awaiting-decision' || (before.status == 'awaiting-decision' &&
+                  !after.get('resultApplied', false))) &&
                 (after.status != 'completed' || before.status == 'completed' ||
                   (before.status in ['awaiting-decision', 'paused'] && placementAnswersComplete(before, order.size()))) :
                 placementAnswerStep(before, after, order[before.currentQuestionIndex], 'questionId', 'selectedQuestionId') &&
@@ -1403,11 +1468,13 @@ service cloud.firestore {
           }
           allow create: if importingSavedGuest(uid) && validLevelPlacementSession(request.resource.data);
           allow create: if isOwner(uid) && validLevelPlacementSession(request.resource.data) &&
-            cleanPlacementStart(request.resource.data) && startLevelPlacementAtEligibleLevel(request.resource.data);
+            cleanPlacementStart(request.resource.data) && !request.resource.data.get('resultApplied', false) &&
+            startLevelPlacementAtEligibleLevel(request.resource.data);
           allow update: if isOwner(uid) && validLevelPlacementSession(request.resource.data) &&
             ((resource.data.get('resultApplied', false) == true &&
               preserveAppliedLevelPlacement(resource.data, request.resource.data)) ||
-              (resource.data.status == 'paused' && request.resource.data.status == 'awaiting-decision' &&
+              (resource.data.status in ['paused', 'awaiting-decision'] && request.resource.data.status == 'awaiting-decision' &&
+                request.resource.data.get('resultApplied', false) == true &&
                 approvedLegacyLevelResume(assessmentId)) ||
               validLevelPlacementUpdate(resource.data, request.resource.data));
           allow delete: if false;
@@ -1444,7 +1511,7 @@ service cloud.firestore {
               progress.status == 'ready' && progress.get('activeClearAttemptId', '') == '' &&
               data.questionOrder.toSet() == progress.loadedContentWordIds.toSet() &&
               completeGateProof(uid, progress, worldId, data.rankId, data.gateId, data.passRatio) &&
-              lessonReady(uid, worldId, data.rankId, data.gateId, progress);
+              (gateLessonCompatibilityOpen() || lessonReady(uid, worldId, data.rankId, data.gateId, progress));
           }
 
           function validGateClearAttemptCreate(data) {
@@ -1563,9 +1630,20 @@ service cloud.firestore {
           function validLevelPlacementGate(gate, id) {
             let result = getAfter(/databases/$(database)/documents/users/$(uid)/contentProgress/$(worldId)/levelPlacementSessions/$(id)).data;
             let score = result.get('perRankStats', {}).get(rankId, {}).get('ratio', null);
-            return result.status == 'completed' && result.resultApplied == true &&
+            return result.resultApplied == true &&
               gateId in result.resultClearedGateIds && rankId in result.passedRankIds &&
-              score is number && score >= 0 && score <= 1 && gate.levelPlacementScore == score;
+              score is number && score >= 0 && score <= 1 && gate.levelPlacementScore == score &&
+              (result.status == 'completed' || (result.status == 'awaiting-decision' &&
+                result.get('placementVersion', 1) == 1 && approvedLegacyGateProjection(gate, id)));
+          }
+          function approvedLegacyGateProjection(gate, id) {
+            let previous = resource == null ? {} : resource.data;
+            return gate.diff(previous).affectedKeys().hasOnly(['worldId', 'rankId', 'gateId', 'status', 'journeyVersion',
+              'readyEvidenceCount', 'clearAttempts', 'clearedAt', 'clearedBy', 'levelPlacementAssessmentId',
+              'levelPlacementScore', 'placementClearedWithoutLoad', 'lastActivityAt']) &&
+              gate.clearedAt == request.time && gate.lastActivityAt == request.time &&
+              gate.readyEvidenceCount == previous.get('readyEvidenceCount', 0) &&
+              gate.clearAttempts == previous.get('clearAttempts', 0) && approvedLegacyLevelResume(id);
           }
           function validLegacyPlacementGate(gate, id, passed) {
             let result = getAfter(/databases/$(database)/documents/users/$(uid)/contentProgress/$(worldId)/placementSessions/$(id)).data;
