@@ -1441,7 +1441,7 @@ function loadFeatureScript(src, options = {}) {
 function loadLootLinguaAdminAccess() {
   if (window.LootLinguaAdminCloud) return Promise.resolve();
   if (adminAccessLoadPromise) return adminAccessLoadPromise;
-  adminAccessLoadPromise = loadFeatureScript('js/admin-cloud.js?v=admin-rank-count-1', { module: true }).catch((error) => {
+  adminAccessLoadPromise = loadFeatureScript('js/admin-cloud.js?v=admin-rank-rollout-2', { module: true }).catch((error) => {
     adminAccessLoadPromise = null;
     throw error;
   });
@@ -1454,7 +1454,7 @@ window.loadLootLinguaAdminFeature = function() {
   adminFeatureLoadPromise = (async () => {
     await loadLootLinguaAdminAccess();
     await loadFeatureScript('js/admin-word-import.js?v=20260729-1');
-    await loadFeatureScript('js/admin.js?v=admin-content-3');
+    await loadFeatureScript('js/admin.js?v=admin-rank-rollout-2');
     await loadFeatureScript('js/test-clock.js?v=20260729-2', { module: true });
   })().catch((error) => {
     adminFeatureLoadPromise = null;

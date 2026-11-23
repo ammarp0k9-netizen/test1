@@ -3805,9 +3805,13 @@
     } catch (error) {
       if (ui.modal !== modalState) return;
       setRankEditorPending(modalState, false);
+      const code = getErrorCode(error, 'admin/rank-save-failed');
+      const message = modalState.mode === 'create' && code === 'admin/permission-denied'
+        ? 'تعذّر إنشاء الرتبة. بياناتك لسه في المحرر. جرّب مرة ثانية بعد انتهاء التحديث، أو أعد تحميل الصفحة إذا استمر الخطأ.'
+        : 'تعذر حفظ الرتبة. بقيت بياناتك في المحرر:';
       renderFormIssues(modalState.errorBox, [
-        { path: 'cloud', code: getErrorCode(error, 'admin/rank-save-failed') }
-      ], 'تعذر حفظ الرتبة. بقيت بياناتك في المحرر:');
+        { path: 'cloud', code }
+      ], message);
     }
   }
 
