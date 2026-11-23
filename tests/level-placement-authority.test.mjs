@@ -5,8 +5,9 @@ import test from 'node:test';
 import { deleteApp, initializeApp } from 'firebase-admin/app';
 import { getFirestore } from 'firebase-admin/firestore';
 import { assertFails, assertSucceeds, initializeTestEnvironment } from '@firebase/rules-unit-testing';
-import { doc, getDoc, serverTimestamp, setDoc, updateDoc, writeBatch } from 'firebase/firestore';
+import { doc, getDoc, runTransaction, serverTimestamp, setDoc, updateDoc, writeBatch } from 'firebase/firestore';
 import { calculateLevelPlacementReceipt, issueLevelPlacementReceipt } from '../tools/level-placement-authority.mjs';
+import { buildPlacementCatalog } from '../tools/level-placement-catalog.mjs';
 
 const placement = globalThis.LootLinguaLevelPlacement;
 const schema = globalThis.LootLinguaContentSchema;
@@ -14,16 +15,21 @@ const emulator = /^127\.0\.0\.1:(\d+)$/.exec(process.env.FIRESTORE_EMULATOR_HOST
 const uid = 'placement-owner';
 const worldId = 'world';
 
-function fixture(pass) {
-  const rankBundles = ['A1', 'A2'].map(cefrLevel => {
-    const rankId = 'rank-' + cefrLevel;
-    const gateId = 'gate-' + cefrLevel;
+function fixture(pass, firstLevelRanks = 1) {
+  const levelRanks = [...Array.from({ length: firstLevelRanks }, (_, order) => ({ cefrLevel: 'A1', order })),
+    { cefrLevel: 'A2', order: 0 }];
+  const rankBundles = levelRanks.map(({ cefrLevel, order }) => {
+    const identifier = order ? cefrLevel + '-' + order : cefrLevel;
+    const rankId = 'rank-' + identifier;
+    const gateId = 'gate-' + identifier;
     const words = Array.from({ length: 4 }, (_, index) => {
-      const word = ['apple', 'orange', 'banana', 'pear'][index];
+      const base = ['apple', 'orange', 'banana', 'pear'][index];
+      const word = order ? base + ' ' + order : base;
       return { contentWordId: 'word-' + index, word, wordKey: schema.normalizeWordIdentity({ word }).wordKey,
-        translation: ['تفاحة', 'برتقالة', 'موزة', 'إجاصة'][index], status: 'published', order: index };
+        translation: ['تفاحة', 'برتقالة', 'موزة', 'إجاصة'][index] + (order ? ' ' + order : ''),
+        status: 'published', order: index };
     });
-    return { rank: { rankId, cefrLevel, status: 'published', version: 1, order: 0 },
+    return { rank: { rankId, cefrLevel, status: 'published', version: 1, order },
       gates: [{ gate: { gateId, status: 'published', order: 0 }, words }] };
   });
   const cefrLevel = 'A1';
@@ -122,5 +128,83 @@ test('a verified Level Placement receipt is owner-bound, database-protected, and
       await environment.cleanup();
       await deleteApp(admin);
     }
+  }
+});
+
+test('Firestore alone scores saved choices, rejects fabricated results, and resumes an interrupted proof', {
+  skip: !emulator, timeout: 60_000
+}, async () => {
+  const environment = await initializeTestEnvironment({
+    projectId: 'demo-placement-free-' + randomUUID().slice(0, 8),
+    firestore: { host: '127.0.0.1', port: Number(emulator[1]),
+      rules: readFileSync(new URL('../firestore.rules', import.meta.url), 'utf8') }
+  });
+  const source = readFileSync(new URL('../js/journey-cloud.js', import.meta.url), 'utf8');
+  const createVerifier = new Function('db', 'auth', 'doc', 'runTransaction', 'serverTimestamp',
+    'journeyRef', 'levelPlacementSessionRef', 'commitVerifiedLevelPlacement', 'reconcilePreviouslyAppliedPlacementOutcome',
+    source.slice(source.indexOf('function scorePlacementRank('), source.indexOf('async function applyPlacementOutcome('))
+      + '\nreturn { scorePlacementRank, buildScoredPlacementOutcome, verifyPlacementWithRules };');
+  try {
+    for (const pass of [false, true]) {
+      const account = pass ? 'passed-player' : 'failed-player';
+      const { session, journey, rankBundles } = fixture(pass, pass ? 6 : 1);
+      const catalog = buildPlacementCatalog(worldId, rankBundles);
+      const id = session.assessmentId;
+      const parent = `users/${account}/contentProgress/${worldId}`;
+      const sessionPath = `${parent}/levelPlacementSessions/${id}`;
+      const proofPath = `${parent}/levelPlacementProofs/${id}`;
+      const receiptPath = `${parent}/levelPlacementOutcomeReceipts/${id}`;
+      const catalogPath = `content_worlds/${worldId}/placementCatalog/current`;
+      await environment.withSecurityRulesDisabled(async context => {
+        const store = context.firestore();
+        await Promise.all([
+          setDoc(doc(store, `content_worlds/${worldId}`), { status: 'published' }),
+          setDoc(doc(store, catalogPath), catalog),
+          setDoc(doc(store, parent), journey),
+          setDoc(doc(store, sessionPath), { ...session, status: 'paused', passedLevel: !pass }),
+        ]);
+      });
+      const owner = environment.authenticatedContext(account).firestore();
+      const secondTab = environment.authenticatedContext(account).firestore();
+      const outsider = environment.authenticatedContext('outsider').firestore();
+      const reference = doc(owner, proofPath);
+      const savedSession = (await getDoc(doc(owner, sessionPath))).data();
+      const savedJourney = (await getDoc(doc(owner, parent))).data();
+      const start = { catalogId: catalog.id, answeredAt: savedSession.answersCompletedAt, rankCursor: 0,
+        answerCount: 0, correctCount: 0, passedRankIds: [], clearedGateIds: [], wordKeys: [], statistics: {} };
+      const commit = async (_user, _world, _id, receipt) => {
+        const batch = writeBatch(secondTab);
+        batch.update(doc(secondTab, sessionPath), { ...receipt.sessionResult,
+          assessedAt: serverTimestamp(), completedAt: serverTimestamp(), updatedAt: serverTimestamp() });
+        batch.update(doc(secondTab, parent), { ...receipt.journeyResult, updatedAt: serverTimestamp() });
+        await batch.commit();
+        return receipt.sessionResult;
+      };
+      const verifier = createVerifier(secondTab, { currentUser: { uid: account } }, doc, runTransaction, serverTimestamp,
+        (uid, world) => doc(secondTab, 'users', uid, 'contentProgress', world),
+        (uid, world, id) => doc(secondTab, 'users', uid, 'contentProgress', world, 'levelPlacementSessions', id),
+        commit, (_user, _world, _id, result) => result);
+      const step = verifier.scorePlacementRank(savedSession, catalog, start);
+      const forged = verifier.buildScoredPlacementOutcome(savedSession, savedJourney, step, catalog);
+      await assertFails(setDoc(doc(owner, catalogPath), { ...catalog, id: 'forged' }));
+      await assertFails(setDoc(doc(outsider, proofPath), start));
+      await assertFails(setDoc(doc(owner, receiptPath), { ...forged, approvedAt: serverTimestamp() }));
+      await assertSucceeds(setDoc(reference, start));
+      await assertFails(setDoc(reference, { ...step, correctCount: step.correctCount + 1 }));
+      await assertFails(setDoc(reference, { ...step, step: { ...step.step, indices: [0, 0, 0, 0] } }));
+      await assertSucceeds(setDoc(reference, step));
+      await assertFails(setDoc(doc(owner, receiptPath), {
+        ...forged, sessionResult: { ...forged.sessionResult, passedLevel: !pass }, approvedAt: serverTimestamp()
+      }));
+      const result = await assertSucceeds(verifier.verifyPlacementWithRules(
+        { uid: account }, worldId, id, doc(secondTab, receiptPath), catalog));
+      assert.equal(result.passedLevel, pass);
+      assert.equal(result.correctCount, pass ? 24 : 0);
+      assert.equal((await getDoc(doc(owner, parent))).data().activeGateId, pass ? 'gate-A2' : 'gate-A1');
+      await assertFails(commit(null, worldId, id, forged));
+      assert.equal((await getDoc(doc(owner, 'users/' + account + '/meta/profile'))).exists(), false);
+    }
+  } finally {
+    await environment.cleanup();
   }
 });

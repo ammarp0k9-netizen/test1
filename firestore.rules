@@ -52,6 +52,11 @@ service cloud.firestore {
         get(/databases/$(database)/documents/content_worlds/$(worldId)/ranks/$(rankId)/gates/$(gateId)).data.status == 'published';
     }
 
+    match /content_worlds/{worldId}/placementCatalog/current {
+      allow get: if signedIn() && publishedWorld(worldId);
+      allow write, list: if false;
+    }
+
     function gateContentPath(worldId, rankId, gateId) {
       return /databases/$(database)/documents/content_worlds/$(worldId)/ranks/$(rankId)/gates/$(gateId);
     }
@@ -1347,9 +1352,177 @@ service cloud.firestore {
         match /levelPlacementResumeReceipts/{assessmentId} {
           allow read, write: if false;
         }
+        function placementCatalog() {
+          return get(/databases/$(database)/documents/content_worlds/$(worldId)/placementCatalog/current).data;
+        }
+        function placementSession(id) {
+          return get(/databases/$(database)/documents/users/$(uid)/contentProgress/$(worldId)/levelPlacementSessions/$(id)).data;
+        }
+        function placementJourney() {
+          return get(/databases/$(database)/documents/users/$(uid)/contentProgress/$(worldId)).data;
+        }
+        function eligibleProofRanks(session, catalog, journey) {
+          let ranks = catalog.levels[session.cefrLevel];
+          let covered = journey.get('levelPlacementPassedRankIds', []).concat(journey.get('completedRankIds', []));
+          return session.assessmentMode == 'new-ranks'
+            ? session.cefrLevel in journey.get('passedCefrLevels', []) &&
+              session.orderedRankIds.toSet() == ranks.toSet().difference(covered.toSet())
+            : session.assessmentMode == 'full-level' && session.orderedRankIds == ranks;
+        }
+        function canProvePlacement(session, journey, assessmentId) {
+          return session.assessmentId == assessmentId && session.placementVersion == 2 &&
+            session.status in ['awaiting-decision', 'paused'] && !session.get('resultApplied', false) &&
+            session.answersCompletedAt is timestamp && journey.activeLevelPlacementAssessmentId == assessmentId &&
+            journey.activeLevelPlacementCefrLevel == session.cefrLevel &&
+            placementAnswersComplete(session, session.orderedQuestionIds.size()) &&
+            session.orderedQuestionIds.toSet().size() == session.answers.size() &&
+            session.orderedRankIds.size() > 0 && session.orderedRankIds.toSet().size() == session.orderedRankIds.size();
+        }
+        function validPlacementProofStart(data, assessmentId) {
+          let session = placementSession(assessmentId);
+          let journey = placementJourney();
+          let catalog = placementCatalog();
+          return canProvePlacement(session, journey, assessmentId) && eligibleProofRanks(session, catalog, journey) &&
+            data.keys().hasOnly(['catalogId', 'answeredAt', 'rankCursor', 'answerCount', 'correctCount',
+              'passedRankIds', 'clearedGateIds', 'wordKeys', 'statistics']) &&
+            data.catalogId == catalog.id && data.answeredAt == session.answersCompletedAt &&
+            data.rankCursor == 0 && data.answerCount == 0 && data.correctCount == 0 &&
+            data.passedRankIds == [] && data.clearedGateIds == [] && data.wordKeys == [] && data.statistics == {};
+        }
+        function placementProofAnswer(session, catalog, rank, step, index) {
+          return index >= step.indices.size() ? { 'valid': true, 'correct': 0, 'threshold': 0.0 } :
+            checkedPlacementAnswer(session, catalog, rank, step.indices[index], step.wordKeys[index]);
+        }
+        function checkedPlacementAnswer(session, catalog, rank, index, key) {
+          let answer = session.answers[index];
+          let question = catalog.questions[session.orderedQuestionIds[index]];
+          return {
+            'valid': answer.questionId == session.orderedQuestionIds[index] && question.rankId == rank &&
+              answer.rankId == rank && answer.gateId == question.gateId && answer.contentWordId == question.contentWordId &&
+              answer.wordKey == question.wordKey && key == question.wordKey,
+            'correct': answer.selectedQuestionId == answer.questionId ? 1 : 0,
+            'threshold': question.threshold
+          };
+        }
+        function validPlacementStatistics(stats, asked, correct, threshold) {
+          return stats.keys().hasOnly(['asked', 'correct', 'ratio', 'passThreshold', 'requiredCorrect', 'confidence', 'status']) &&
+            stats.asked == asked && stats.correct == correct && stats.requiredCorrect is int &&
+            stats.ratio == (asked == 0 ? 0 : correct * 1.0 / asked) &&
+            stats.passThreshold == (asked == 0 ? 0.75 : threshold / asked) &&
+            (asked == 0 ? stats.requiredCorrect == 1 :
+              stats.requiredCorrect >= threshold - 0.000000001 && stats.requiredCorrect - 1 < threshold - 0.000000001) &&
+            stats.confidence == (asked >= 4 ? 'high' : asked >= 3 ? 'medium' : 'low') &&
+            stats.status == (asked < 3 ? 'insufficient-sample' : correct >= stats.requiredCorrect ? 'passed' : 'failed');
+        }
+        function validPlacementProofStep(before, after, assessmentId) {
+          let session = placementSession(assessmentId);
+          let catalog = placementCatalog();
+          let rank = session.orderedRankIds[before.rankCursor];
+          let step = after.step;
+          let answers = [placementProofAnswer(session, catalog, rank, step, 0),
+            placementProofAnswer(session, catalog, rank, step, 1), placementProofAnswer(session, catalog, rank, step, 2),
+            placementProofAnswer(session, catalog, rank, step, 3), placementProofAnswer(session, catalog, rank, step, 4),
+            placementProofAnswer(session, catalog, rank, step, 5)];
+          let correct = answers[0].correct + answers[1].correct + answers[2].correct +
+            answers[3].correct + answers[4].correct + answers[5].correct;
+          let threshold = answers[0].threshold + answers[1].threshold + answers[2].threshold +
+            answers[3].threshold + answers[4].threshold + answers[5].threshold;
+          let stats = after.statistics[rank];
+          let passes = before.passedRankIds.size() == before.rankCursor && stats.status == 'passed';
+          return before.catalogId == catalog.id && before.answeredAt == session.answersCompletedAt &&
+            session.status in ['awaiting-decision', 'paused'] && !session.get('resultApplied', false) &&
+            (before.rankCursor == 0 ||
+              catalog.rankPositions[rank] > catalog.rankPositions[session.orderedRankIds[before.rankCursor - 1]]) &&
+            after.diff(before).affectedKeys().hasOnly(['rankCursor', 'answerCount', 'correctCount', 'passedRankIds',
+              'clearedGateIds', 'wordKeys', 'statistics', 'step']) &&
+            step.keys().hasOnly(['indices', 'wordKeys']) && step.indices is list && step.indices.size() <= 6 &&
+            step.indices.toSet().size() == step.indices.size() && step.wordKeys.size() == step.indices.size() &&
+            step.wordKeys.toSet().size() == step.wordKeys.size() && !before.wordKeys.hasAny(step.wordKeys) &&
+            answers[0].valid && answers[1].valid && answers[2].valid && answers[3].valid && answers[4].valid && answers[5].valid &&
+            after.rankCursor == before.rankCursor + 1 &&
+            after.answerCount == before.answerCount + step.indices.size() && after.correctCount == before.correctCount + correct &&
+            after.wordKeys == before.wordKeys.concat(step.wordKeys) &&
+            after.statistics.diff(before.statistics).affectedKeys().hasOnly([rank]) &&
+            validPlacementStatistics(stats, step.indices.size(), correct, threshold) &&
+            after.passedRankIds == (passes ? before.passedRankIds.concat([rank]) : before.passedRankIds) &&
+            after.clearedGateIds == (passes ? before.clearedGateIds.concat(catalog.ranks[rank]) : before.clearedGateIds);
+        }
+        match /levelPlacementProofs/{assessmentId} {
+          allow get: if isOwner(uid);
+          allow create: if isOwner(uid) && validPlacementProofStart(request.resource.data, assessmentId);
+          allow update: if isOwner(uid) && validPlacementProofStep(resource.data, request.resource.data, assessmentId);
+          allow delete: if isOwner(uid) && resource.data.catalogId != placementCatalog().id;
+        }
+        function placementSetEquals(values, expected) {
+          return values is list && values.toSet().size() == values.size() && values.toSet() == expected;
+        }
+        function placementDestination(session, proof, catalog) {
+          let count = proof.passedRankIds.size();
+          return count == session.orderedRankIds.size() ? catalog.next[session.cefrLevel] :
+            { 'rankId': session.orderedRankIds[count], 'gateId': catalog.ranks[session.orderedRankIds[count]][0], 'level': '' };
+        }
+        function matchesScoredLevelResult(result, session, proof, destination) {
+          let passed = proof.passedRankIds.size() == session.orderedRankIds.size();
+          let rank = destination.rankId;
+          let gate = destination.gateId;
+          return result.keys().hasOnly(['status', 'resultApplied', 'correctCount', 'passedLevel', 'passedRankIds',
+              'passedPrefixLength', 'perRankStats', 'recommendedStartRankId', 'recommendedStartGateId', 'nextCefrLevel',
+              'resultStartRankId', 'resultStartGateId', 'completedCurrentContent', 'resultUnlockedRankIds',
+              'resultUnlockedGateIds', 'resultClearedGateIds']) &&
+            result.status == 'completed' && result.resultApplied == true && result.correctCount == proof.correctCount &&
+            result.passedLevel == passed && result.passedRankIds == proof.passedRankIds &&
+            result.passedPrefixLength == proof.passedRankIds.size() && result.perRankStats == proof.statistics &&
+            result.recommendedStartRankId == (passed ? '' : rank) && result.recommendedStartGateId == (passed ? '' : gate) &&
+            result.nextCefrLevel == destination.level && result.resultStartRankId == rank && result.resultStartGateId == gate &&
+            result.completedCurrentContent == (rank == '' && gate == '') &&
+            placementSetEquals(result.resultUnlockedRankIds, proof.passedRankIds.toSet().union((rank == '' ? [] : [rank]).toSet())) &&
+            placementSetEquals(result.resultUnlockedGateIds, proof.clearedGateIds.toSet().union((gate == '' ? [] : [gate]).toSet())) &&
+            placementSetEquals(result.resultClearedGateIds, proof.clearedGateIds.toSet());
+        }
+        function matchesScoredJourneyResult(result, journey, session, grade) {
+          let level = session.cefrLevel;
+          let passed = journey.get('passedCefrLevels', []).toSet().union((grade.passedLevel ? [level] : []).toSet());
+          let partial = journey.get('partialCefrLevels', []).toSet()
+            .union((!grade.passedLevel && grade.passedPrefixLength > 0 ? [level] : []).toSet()).difference(passed);
+          return result.keys().hasOnly(['activeRankId', 'activeGateId', 'unlockedRankIds', 'unlockedGateIds',
+              'passedCefrLevels', 'partialCefrLevels', 'levelPlacementAssessmentIds', 'levelPlacementPassedRankIds',
+              'levelPlacementClearedGateIds', 'levelPlacementStatus', 'activeLevelPlacementAssessmentId',
+              'activeLevelPlacementCefrLevel', 'contentJourneyStatus']) &&
+            result.activeRankId == (grade.resultStartRankId == '' ? journey.activeRankId : grade.resultStartRankId) &&
+            result.activeGateId == (grade.resultStartGateId == '' ? journey.activeGateId : grade.resultStartGateId) &&
+            placementSetEquals(result.unlockedRankIds, journey.unlockedRankIds.toSet().union(grade.resultUnlockedRankIds.toSet())) &&
+            placementSetEquals(result.unlockedGateIds, journey.unlockedGateIds.toSet().union(grade.resultUnlockedGateIds.toSet())) &&
+            placementSetEquals(result.passedCefrLevels, passed) && placementSetEquals(result.partialCefrLevels, partial) &&
+            result.levelPlacementAssessmentIds.diff(journey.get('levelPlacementAssessmentIds', {})).affectedKeys().hasOnly([level]) &&
+            result.levelPlacementAssessmentIds[level] == session.assessmentId &&
+            placementSetEquals(result.levelPlacementPassedRankIds,
+              journey.get('levelPlacementPassedRankIds', []).toSet().union(grade.passedRankIds.toSet())) &&
+            placementSetEquals(result.levelPlacementClearedGateIds,
+              journey.get('levelPlacementClearedGateIds', []).toSet().union(grade.resultClearedGateIds.toSet())) &&
+            result.levelPlacementStatus == 'completed' && result.activeLevelPlacementAssessmentId == '' &&
+            result.activeLevelPlacementCefrLevel == '' &&
+            result.contentJourneyStatus == (grade.completedCurrentContent ? 'completed-current-content' : 'in-progress');
+        }
+        function validRulesPlacementReceipt(data, assessmentId) {
+          let session = placementSession(assessmentId);
+          let journey = placementJourney();
+          let catalog = placementCatalog();
+          let proof = get(/databases/$(database)/documents/users/$(uid)/contentProgress/$(worldId)/levelPlacementProofs/$(assessmentId)).data;
+          let destination = placementDestination(session, proof, catalog);
+          return data.keys().hasOnly(['sessionBefore', 'journeyBefore', 'sessionResult', 'journeyResult', 'worldCompletion', 'approvedAt']) &&
+            data.approvedAt == request.time && data.sessionBefore == session && data.journeyBefore == journey &&
+            canProvePlacement(session, journey, assessmentId) && eligibleProofRanks(session, catalog, journey) &&
+            proof.catalogId == catalog.id && proof.answeredAt == session.answersCompletedAt &&
+            proof.rankCursor == session.orderedRankIds.size() && proof.answerCount == session.answers.size() &&
+            matchesScoredLevelResult(data.sessionResult, session, proof, destination) &&
+            matchesScoredJourneyResult(data.journeyResult, journey, session, data.sessionResult) &&
+            data.worldCompletion == (data.sessionResult.completedCurrentContent && journey.get('worldCompletion', null) == null
+              ? catalog.worldCompletion : null);
+        }
         match /levelPlacementOutcomeReceipts/{assessmentId} {
           allow get: if isOwner(uid);
-          allow list, write: if false;
+          allow create, update: if isOwner(uid) && validRulesPlacementReceipt(request.resource.data, assessmentId);
+          allow list, delete: if false;
         }
         match /placementSessions/{assessmentId} {
           function placementFields() {

@@ -3977,6 +3977,10 @@ async function commitVerifiedLevelPlacement(user, world, assessment, receipt) {
     if (savedJourney.data()?.activeLevelPlacementAssessmentId !== assessment) {
       throw journeyCloudError('level-placement/session-mismatch', 'Placement session changed.');
     }
+    if (!receipt.sessionBefore.updatedAt?.isEqual(current.updatedAt) ||
+        !receipt.journeyBefore.updatedAt?.isEqual(savedJourney.data().updatedAt)) {
+      throw journeyCloudError('level-placement/receipt-stale', 'Placement approval needs to be refreshed.');
+    }
     const completion = receipt.worldCompletion
       ? { worldCompletion: { ...receipt.worldCompletion, completedAt: serverTimestamp() } } : {};
     transaction.update(sessionRef, { ...receipt.sessionResult,
@@ -3987,6 +3991,113 @@ async function commitVerifiedLevelPlacement(user, world, assessment, receipt) {
   });
   cache.levelPlacementSessions.set(`${world}/${assessment}`, session);
   return reconcilePreviouslyAppliedPlacementOutcome(user, world, assessment, session);
+}
+
+function scorePlacementRank(session, catalog, proof) {
+  const rank = session.orderedRankIds[proof.rankCursor];
+  const indices = session.answers.flatMap((answer, index) => answer.rankId === rank ? [index] : []);
+  const questions = indices.map(index => catalog.questions[session.orderedQuestionIds[index]]);
+  const wordKeys = questions.map(question => question.wordKey);
+  const asked = indices.length;
+  const correct = indices.filter(index => session.answers[index].selectedQuestionId === session.orderedQuestionIds[index]).length;
+  const threshold = questions.reduce((sum, question) => sum + question.threshold, 0);
+  const requiredCorrect = asked ? Math.ceil(threshold - 1e-9) : 1;
+  const stats = {
+    asked, correct, requiredCorrect,
+    ratio: asked ? correct / asked : 0,
+    passThreshold: asked ? threshold / asked : 0.75,
+    confidence: asked >= 4 ? 'high' : asked >= 3 ? 'medium' : 'low',
+    status: asked < 3 ? 'insufficient-sample' : correct >= requiredCorrect ? 'passed' : 'failed',
+  };
+  const passed = proof.passedRankIds.length === proof.rankCursor && stats.status === 'passed';
+  return {
+    ...proof,
+    step: { indices, wordKeys },
+    rankCursor: proof.rankCursor + 1,
+    answerCount: proof.answerCount + asked,
+    correctCount: proof.correctCount + correct,
+    passedRankIds: passed ? [...proof.passedRankIds, rank] : proof.passedRankIds,
+    clearedGateIds: passed ? [...proof.clearedGateIds, ...catalog.ranks[rank]] : proof.clearedGateIds,
+    wordKeys: [...proof.wordKeys, ...wordKeys],
+    statistics: { ...proof.statistics, [rank]: stats },
+  };
+}
+
+function buildScoredPlacementOutcome(session, journey, proof, catalog) {
+  const union = (values = [], added = []) => [...new Set([...values, ...added])];
+  const { cefrLevel, assessmentId } = session;
+  const passedPrefixLength = proof.passedRankIds.length;
+  const passedLevel = passedPrefixLength === session.orderedRankIds.length;
+  const recommendedRank = passedLevel ? '' : session.orderedRankIds[passedPrefixLength];
+  const recommendedGate = recommendedRank ? catalog.ranks[recommendedRank][0] : '';
+  const destination = passedLevel ? catalog.next[cefrLevel] : { rankId: recommendedRank, gateId: recommendedGate, level: '' };
+  const { rankId, gateId, level } = destination;
+  const completedCurrentContent = !rankId && !gateId;
+  const resultClearedGateIds = union(proof.clearedGateIds);
+  const resultUnlockedRankIds = union(proof.passedRankIds, rankId ? [rankId] : []);
+  const resultUnlockedGateIds = union(resultClearedGateIds, gateId ? [gateId] : []);
+  const passedCefrLevels = union(journey.passedCefrLevels, passedLevel ? [cefrLevel] : []).sort();
+  const partialCefrLevels = union(journey.partialCefrLevels, !passedLevel && passedPrefixLength > 0 ? [cefrLevel] : [])
+    .filter(partial => !passedCefrLevels.includes(partial));
+  return {
+    sessionBefore: session,
+    journeyBefore: journey,
+    sessionResult: {
+      status: 'completed', resultApplied: true, correctCount: proof.correctCount,
+      passedLevel, passedRankIds: proof.passedRankIds, passedPrefixLength, perRankStats: proof.statistics,
+      recommendedStartRankId: recommendedRank, recommendedStartGateId: recommendedGate,
+      nextCefrLevel: level, resultStartRankId: rankId, resultStartGateId: gateId, completedCurrentContent,
+      resultUnlockedRankIds, resultUnlockedGateIds, resultClearedGateIds,
+    },
+    journeyResult: {
+      activeRankId: rankId || journey.activeRankId,
+      activeGateId: gateId || journey.activeGateId,
+      unlockedRankIds: union(journey.unlockedRankIds, resultUnlockedRankIds),
+      unlockedGateIds: union(journey.unlockedGateIds, resultUnlockedGateIds),
+      passedCefrLevels, partialCefrLevels,
+      levelPlacementAssessmentIds: { ...journey.levelPlacementAssessmentIds, [cefrLevel]: assessmentId },
+      levelPlacementPassedRankIds: union(journey.levelPlacementPassedRankIds, proof.passedRankIds),
+      levelPlacementClearedGateIds: union(journey.levelPlacementClearedGateIds, resultClearedGateIds),
+      levelPlacementStatus: 'completed', activeLevelPlacementAssessmentId: '', activeLevelPlacementCefrLevel: '',
+      contentJourneyStatus: completedCurrentContent ? 'completed-current-content' : 'in-progress',
+    },
+    worldCompletion: completedCurrentContent && !journey.worldCompletion ? catalog.worldCompletion : null,
+  };
+}
+
+async function verifyPlacementWithRules(user, world, assessment, receiptRef, catalog) {
+  const sessionRef = levelPlacementSessionRef(user.uid, world, assessment);
+  const targetJourneyRef = journeyRef(user.uid, world);
+  const proofRef = doc(targetJourneyRef, 'levelPlacementProofs', assessment);
+  for (;;) {
+    const verified = await runTransaction(db, async transaction => {
+      const [savedSession, savedProof] = await Promise.all([transaction.get(sessionRef), transaction.get(proofRef)]);
+      const session = savedSession.data();
+      const proof = savedProof.data();
+      if (auth.currentUser?.uid !== user.uid || !session) {
+        throw journeyCloudError('level-placement/session-mismatch', 'Placement session changed.');
+      }
+      if (session.resultApplied) return { session };
+      if (proof?.catalogId && proof.catalogId !== catalog.id) {
+        transaction.delete(proofRef);
+      } else if (!proof) {
+        transaction.set(proofRef, {
+          catalogId: catalog.id, answeredAt: session.answersCompletedAt, rankCursor: 0,
+          answerCount: 0, correctCount: 0, passedRankIds: [], clearedGateIds: [], wordKeys: [], statistics: {},
+        });
+      } else if (proof.rankCursor < session.orderedRankIds.length) {
+        transaction.set(proofRef, scorePlacementRank(session, catalog, proof));
+      } else {
+        const journey = (await transaction.get(targetJourneyRef)).data();
+        const receipt = buildScoredPlacementOutcome(session, journey, proof, catalog);
+        transaction.set(receiptRef, { ...receipt, approvedAt: serverTimestamp() });
+        return { receipt };
+      }
+      return null;
+    });
+    if (verified?.session) return reconcilePreviouslyAppliedPlacementOutcome(user, world, assessment, verified.session);
+    if (verified?.receipt) return commitVerifiedLevelPlacement(user, world, assessment, verified.receipt);
+  }
 }
 
 async function applyPlacementOutcome(worldId, assessmentId) {
@@ -4014,8 +4125,18 @@ async function applyPlacementOutcome(worldId, assessmentId) {
   }
 
   if (session.placementVersion === 2) {
-    const proof = await getDoc(doc(journeyRef(user.uid, world), 'levelPlacementOutcomeReceipts', assessment));
-    if (proof.exists()) return commitVerifiedLevelPlacement(user, world, assessment, proof.data());
+    const receiptRef = doc(journeyRef(user.uid, world), 'levelPlacementOutcomeReceipts', assessment);
+    const proof = await getDoc(receiptRef);
+    if (proof.exists()) {
+      try {
+        return await commitVerifiedLevelPlacement(user, world, assessment, proof.data());
+      } catch (error) {
+        if (error.code !== 'level-placement/receipt-stale') throw error;
+      }
+    }
+    const catalog = await getDoc(doc(db, 'content_worlds', world, 'placementCatalog', 'current'));
+    if (catalog.exists()) return verifyPlacementWithRules(user, world, assessment, receiptRef, catalog.data());
+    throw journeyCloudError('level-placement/verification-unavailable', 'Saved answers are waiting for verification.');
   }
 
   const [journeyBeforeResult, publishedRanks] = await Promise.all([
