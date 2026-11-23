@@ -1740,7 +1740,8 @@ async function createRank(worldId, payload) {
       };
       transaction.set(reference, saved);
       transaction.update(worldReference, {
-        rankCount: nextRankCount,
+        rankCount: increment(1),
+        rankCountChangeRankId: rankId,
         updatedAt: serverTimestamp(),
         updatedBy: context.uid,
       });
@@ -1914,7 +1915,9 @@ function applySparkCounters(transaction, rows, changes, uid) {
   for (const { ref, deltas, fields } of paths.values()) {
     const current = storedSparkContent(rows, ref);
     const patch = { ...fields };
-    for (const [field, delta] of Object.entries(deltas)) if (delta) patch[field] = Math.max(0, current[field] + delta);
+    for (const [field, delta] of Object.entries(deltas)) {
+      if (delta) patch[field] = field === 'rankCount' ? increment(delta) : Math.max(0, current[field] + delta);
+    }
     if (Object.keys(patch).length) transaction.update(ref, { ...patch, updatedBy: uid, updatedAt: serverTimestamp() });
   }
 }
@@ -2166,7 +2169,8 @@ async function duplicateSparkHierarchy(context, settings, source, expectedVersio
     if (draft[marker] !== request.token.operationId) throw adminCloudError('admin/conflict', 'The copy reservation changed.');
     const counts = { wordCount, ...(refs.gate ? {} : { gateCount }) };
     transaction.update(target, { ...counts, [marker]: deleteField(), updatedAt: serverTimestamp() });
-    const changes = [[refs.world, { wordCount, gateCount, rankCount: refs.gate ? 0 : 1 }]];
+    const changes = [[refs.world, { wordCount, gateCount, rankCount: refs.gate ? 0 : 1 },
+      refs.gate ? {} : { rankCountChangeRankId: id }]];
     if (refs.gate) changes.push([refs.rank, { wordCount, gateCount }]);
     applySparkCounters(transaction, rows, changes, context.uid);
     const entity = { ...draft, ...counts };
@@ -2235,7 +2239,8 @@ async function deleteSparkHierarchy(context, settings, source, version) {
     const rows = await readSparkContent(transaction, sparkParentRefs(refs));
     sparkSourceRow(rows, refs, source, version, settings.confirmationTitle, true);
     const { gateCount, wordCount } = pending;
-    const changes = [[refs.world, { rankCount: refs.gate ? 0 : -1, gateCount: -gateCount, wordCount: -wordCount }]];
+    const changes = [[refs.world, { rankCount: refs.gate ? 0 : -1, gateCount: -gateCount, wordCount: -wordCount },
+      refs.gate ? {} : { rankCountChangeRankId: source.rankId }]];
     if (refs.gate) changes.push([refs.rank, { gateCount: -1, wordCount: -wordCount }]);
     applySparkCounters(transaction, rows, changes, context.uid);
     transaction.delete(root);
