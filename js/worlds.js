@@ -6340,7 +6340,6 @@ async function loadPublishedRouteData(route, options) {
         : 'جارٍ تحميل كلمات البوابة...'
   );
   try {
-    if (level === 'words' && await window.LootLinguaDictionaryPages?.requireComplete() === false) throw new Error('Dictionary data is unavailable.');
     if (generation !== publishedContentState.generation) return;
     const api = getPublishedContentApi();
     if (key === 'not-found') {

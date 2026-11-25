@@ -340,6 +340,10 @@
       [where('createdAt', '>=', ''), where('createdAt', '<=', '\uf8ff')],
       [where('createdAt', '>=', new Date(0)), where('createdAt', '<=', new Date('9999-12-31T23:59:59Z'))],
     ];
+    const pageSize = 80;
+    const headConstraints = chronological
+      ? dateBounds.map(bounds => [...bounds, orderBy('createdAt', direction), limit(pageSize)])
+      : [[orderBy('order', 'asc'), limit(pageSize)]];
     const headPages = new Map(), dateStreams = [], dateSeen = new Set();
     const stamp = item => { const value = item.data().createdAt; return value?.toMillis?.() ?? (Date.parse(value || '') || 0); };
     const dated = item => typeof item.createdAt === 'string' || typeof item.createdAt?.toMillis === 'function' || item.createdAt instanceof Date;
@@ -355,7 +359,7 @@
     };
     const store = window.LootLinguaDictionaryPages.activate({
       ownerId: listenerUid,
-      pageSize: 80,
+      pageSize,
       queryMode,
       async fetchPage(cursor, size, counts) {
         if (!current()) throw Object.assign(new Error('Dictionary owner changed.'), { code: 'dictionary/stale' });
@@ -363,8 +367,18 @@
         const phase = cursor?.phase || 'ordered';
         if (chronological && phase !== 'legacy') {
           if (!dateStreams.length) {
-            const heads = headPages.size === dateBounds.length ? { pages: dateBounds.map((_, index) => headPages.get(index)) } : await initialHead;
-            heads.pages.forEach((page, type) => dateStreams.push({ type, buffer: [...page.docs], last: page.docs.at(-1), done: page.size < size }));
+            let pages;
+            if (headPages.size === headConstraints.length) {
+              pages = headConstraints.map((_, index) => headPages.get(index));
+            } else if (useInitialHead) {
+              useInitialHead = false;
+              ({ pages } = await initialHead);
+            } else {
+              pages = await Promise.all(headConstraints.map(constraints => getDocs(query(reference, ...constraints))));
+            }
+            if (!current()) throw Object.assign(new Error('Dictionary owner changed.'), { code: 'dictionary/stale' });
+            if (pages.some(page => page.metadata.fromCache)) throw Object.assign(new Error('Dictionary offline.'), { code: 'dictionary/offline' });
+            pages.forEach((page, type) => dateStreams.push({ type, buffer: [...page.docs], last: page.docs.at(-1), done: page.size < size }));
           }
           const working = dateStreams.map(stream => ({ ...stream, buffer: [...stream.buffer] }));
           const seen = new Set(dateSeen);
@@ -476,7 +490,6 @@
     // entire dictionary, and only merges into the page cache for this owner.
     let firstHead = true;
     const initialWaitTimer = setTimeout(() => rejectHead(Object.assign(new Error('Dictionary connection timed out.'), { code: 'dictionary/offline' })), 10000);
-    const headConstraints = chronological ? dateBounds.map(bounds => [...bounds, orderBy('createdAt', direction), limit(80)]) : [[orderBy('order', 'asc'), limit(80)]];
     const stopHeads = headConstraints.map((constraints, type) => onSnapshot(query(reference, ...constraints), { includeMetadataChanges: true }, snapshot => {
       if (!current() || window.__suppressCloudWordsSnapshot) return;
       if (firstHead) {
