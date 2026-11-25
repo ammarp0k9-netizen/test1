@@ -20,7 +20,7 @@ const policy = root.LootLinguaNotificationPolicy;
 
 test('Journey facts calculate structural progress in the Journey scope', () => {
   const chestStart = notificationSources.indexOf('function chestFacts(now)');
-  const journeyStart = notificationSources.indexOf('async function journeyFacts()');
+  const journeyStart = notificationSources.indexOf('async function journeyFacts(');
   const collectStart = notificationSources.indexOf('async function collect(options = {})');
   assert.ok(chestStart >= 0 && journeyStart > chestStart && collectStart > journeyStart);
   const chestBlock = notificationSources.slice(chestStart, journeyStart);

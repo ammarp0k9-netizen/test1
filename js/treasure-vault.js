@@ -1,4 +1,4 @@
-import { applyProfileIntent, TREASURE_CAPACITY, TREASURE_TYPES, treasureChests, treasureSlots } from './profile-sync-policy.mjs?v=20261113-treasure-v1';
+import { applyProfileIntent, TREASURE_CAPACITY, TREASURE_TYPES, treasureChests, treasureSlots } from './profile-sync-policy.mjs?v=streak-days-1';
 
 const root = window;
 const guestKey = 'lootlingua:guest-treasure:v1';
@@ -49,6 +49,7 @@ async function commit(command) {
     const work = () => {
       if (!isCurrent()) return { reason: 'owner-changed' };
       const guest = finishGuestReward(readGuest());
+      if (command.type === 'treasure-open') root.checkAndUpdateStreak?.();
       const current = root.getLootlinguaProfilePayload();
       const next = applyProfileIntent({
         ...guest, motivationRewards: root.LootLinguaMotivation?.getGuestState?.(),

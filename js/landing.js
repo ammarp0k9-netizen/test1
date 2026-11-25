@@ -2,7 +2,7 @@ import { AUTH_MODES } from './auth-controller.js';
 import { createAuthSurface } from './auth-surface.js?v=saved-guest-1';
 import { createGuestJourneyAuth, isPermanentAccount } from './guest-journey-auth.js?v=saved-guest-1';
 import { firebaseDemoConfig, firebaseEmulatorSelected } from './firebase-emulator-mode.js';
-import { createSavedGuestFlow, useGoogleRedirect } from './saved-guest-flow.js?v=full-merge-1';
+import { createSavedGuestFlow, useGoogleRedirect } from './saved-guest-flow.js?v=streak-days-1';
 
 const FIREBASE_CONFIG = Object.freeze({
   apiKey: 'AIzaSyDQB5N4wxJw69-tb8suI2T2SfEfCpwFA2c',

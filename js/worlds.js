@@ -451,6 +451,7 @@ async function revealDailyLootReward(state, reward, operation = captureLootOpeni
   state.lastOpenAt = Date.now();
   state.lastOpenDay = todayStr();
   if (reward.type === 'freeze') {
+    window.checkAndUpdateStreak?.();
     saveStreakFreezeCount(getStreakFreezeCount() + (reward.freezes || 1));
     state.freezesEarned = (state.freezesEarned || 0) + (reward.freezes || 1);
   }

@@ -88,6 +88,7 @@
       titlesState: readJson('lootlinguaTitlesState', {}),
       streakFreezes: Number(localStorage.getItem('lootlinguaStreakFreezes')) || 0,
       freezeSaves: Number(localStorage.getItem('lootlinguaFreezeSaves')) || 0,
+      streakState: readJson('lootlinguaDailyStreakState', null),
       gameDictAdds: Number(localStorage.getItem('lootlinguaGameDictAdds')) || 0,
       perfectQuizzes: Number(localStorage.getItem('lootlinguaPerfectQuizzes')) || 0,
       extraChests: readJson('lootlinguaExtraChests', []),

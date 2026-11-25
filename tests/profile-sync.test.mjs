@@ -4,6 +4,7 @@ import test from 'node:test';
 import vm from 'node:vm';
 import { GUIDE_TOUR, guideStorageKey } from '../js/guide-coverage.mjs';
 import { applyProfileIntent, profileOperationId, profileStorageIntents, mergeOnboardingProgress, treasureSlots } from '../js/profile-sync-policy.mjs';
+import { needsStreakSettlement, streakCalendar, streakTimeZone } from '../js/daily-streak.mjs';
 
 const source = (await readFile(new URL('../js/profile-cloud.js', import.meta.url), 'utf8')).replace(/^import .*;\r?\n/gm, '');
 const clone = (value) => value === undefined ? undefined : structuredClone(value);
@@ -60,7 +61,7 @@ function client(db, options = {}) {
   const errors = [];
   const subscribers = [];
   const root = {
-    auth, __lootlinguaAuthGeneration: 1,
+    auth, __lootlinguaAuthGeneration: 1, announceDailyStreakFreeze: options.freezeNotice,
     __lootlinguaProfileSnapshot: { uid: 'A', exists: true, data: clone(db.profile()), readFailed: false },
     getLootlinguaProfilePayload: () => clone(local),
     resetLootlinguaProfileState: () => { local = {}; },
@@ -71,6 +72,7 @@ function client(db, options = {}) {
   vm.runInNewContext(source, {
     window: root, localStorage, sessionStorage: storage(), Date, Math, JSON,
     applyProfileIntent, profileOperationId, profileStorageIntents, mergeOnboardingProgress, GUIDE_TOUR, guideStorageKey, queueMicrotask,
+    needsStreakSettlement, streakCalendar, streakTimeZone,
     console: { error: (...args) => errors.push(args) },
     CustomEvent: class { constructor(type, init) { this.type = type; this.detail = init.detail; } },
     getApps: () => [{}], getFirestore: () => db, getAuth: () => auth, onAuthStateChanged() {},
@@ -317,8 +319,8 @@ test('old quest dates cannot replace newer claims; removed legacy extra chests c
   assert.deepEqual(db.profile().extraChests, []);
 });
 
-test('multiple absent days spend one freeze per day only when the entire gap is covered', async () => {
-  for (const [freezes, expectedBalance, expectedStreak, expectedSaves] of [[3, 1, 9, 2], [2, 0, 9, 2], [1, 1, 1, 0], [0, 0, 1, 0]]) {
+test('each protected day spends one freeze even when a later absence breaks the streak', async () => {
+  for (const [freezes, expectedBalance, expectedStreak, expectedSaves] of [[3, 1, 9, 2], [2, 0, 9, 2], [1, 0, 1, 1], [0, 0, 1, 0]]) {
     const db = database({ dailyStreak: 8, lastActivityDate: '2026-11-02', streakFreezes: freezes, freezeSaves: 0 });
     const a = client(db), b = client(db);
     await Promise.all([a, b].map(c => c.root.commitProfileIntent({ type: 'quiz-activity', eventId: 'same-session', day: '2026-11-05', answers: 4 })));
@@ -327,6 +329,51 @@ test('multiple absent days spend one freeze per day only when the entire gap is 
     assert.equal(db.profile().freezeSaves, expectedSaves);
     assert.equal(db.profile().activityMap['2026-11-05'], 4);
   }
+});
+
+test('account startup settles only ended days, with one charge and one notice across two devices', async () => {
+  const at = Date.parse('2026-11-24T21:20:00Z'); // Wednesday in Amman, Tuesday in UTC.
+  const notices = [];
+  const db = database({ dailyStreak: 7, maxStreak: 7, lastActivityDate: '2026-11-23', streakFreezes: 1,
+    streakState: { timeZone: 'Asia/Amman', settledThrough: '2026-11-23' } });
+  const a = client(db, { freezeNotice: used => notices.push(used) });
+  const b = client(db, { freezeNotice: used => notices.push(used) });
+  assert.equal(a.root.checkCloudDailyStreak(at - 86400000), undefined);
+  assert.equal(a.pending.length, 0);
+  assert.equal(db.controls.transactions, 0);
+  a.root.checkCloudDailyStreak(at);
+  a.root.checkCloudDailyStreak(at);
+  b.root.checkCloudDailyStreak(at);
+  assert.equal(a.pending.length, 1);
+  await Promise.all([a.root.flushProfileIntents(), b.root.flushProfileIntents()]);
+  assert.equal(db.profile().dailyStreak, 7);
+  assert.equal(db.profile().lastActivityDate, '2026-11-23');
+  assert.equal(db.profile().streakState.settledThrough, '2026-11-24');
+  assert.equal(db.profile().streakFreezes, 0);
+  assert.deepEqual(notices, [1]);
+  const transactions = db.controls.transactions;
+  assert.equal(a.root.checkCloudDailyStreak(at), undefined);
+  assert.equal(a.pending.length, 0);
+  assert.equal(db.controls.transactions, transactions);
+  a.root.recordCloudStreakLearningDay(at);
+  b.root.queueProfileIntent({ type: 'quiz-activity', day: '2026-11-24', eventId: 'same-learning-date', answers: 4, streakAt: at });
+  await Promise.all([a.root.flushProfileIntents(), b.root.flushProfileIntents()]);
+  assert.equal(db.profile().dailyStreak, 8);
+  assert.equal(db.profile().lastActivityDate, '2026-11-25');
+  assert.equal(db.profile().streakFreezes, 0);
+  assert.equal(db.profile().freezeSaves, 1);
+  assert.equal(a.root.recordCloudStreakLearningDay(at), true);
+  assert.equal(a.pending.length, 0);
+});
+
+test('a freeze from a new chest cannot protect an earlier unprotected day', async () => {
+  const db = database({ dailyStreak: 7, maxStreak: 10, lastActivityDate: '2026-11-23', streakFreezes: 0 });
+  const a = client(db);
+  await a.root.commitProfileIntent({ type: 'loot-open', eventId: 'late-freeze', day: '2026-11-25',
+    at: Date.parse('2026-11-25T12:00:00Z'), reward: { type: 'freeze', freezes: 1 } });
+  assert.equal(db.profile().dailyStreak, 0);
+  assert.equal(db.profile().maxStreak, 10);
+  assert.equal(db.profile().streakFreezes, 1);
 });
 
 test('pending unconfirmed credits are not projected as spendable balances or counted twice', async () => {

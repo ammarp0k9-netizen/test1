@@ -1884,6 +1884,7 @@ window.getLootlinguaProfilePayload = function() {
     dailyQuestState:  loadJSON(getDailyQuestStorageKey(dailyQuestDate), { claimed: {}, flags: {} }),
     streakFreezes:    loadInt('lootlinguaStreakFreezes', 0),
     freezeSaves:      loadInt('lootlinguaFreezeSaves', 0),
+    streakState:      loadJSON('lootlinguaDailyStreakState', null),
     gameDictAdds:     loadInt('lootlinguaGameDictAdds', 0),
     perfectQuizzes:   loadInt('lootlinguaPerfectQuizzes', 0),
     extraChests:      loadJSON('lootlinguaExtraChests', []),
@@ -1917,6 +1918,7 @@ window.resetLootlinguaProfileState = function(options = {}) {
     'lootlinguaActiveTitleId',
     'lootlinguaStreakFreezes',
     'lootlinguaFreezeSaves',
+    'lootlinguaDailyStreakState',
     'lootlinguaGameDictAdds',
     'lootlinguaPerfectQuizzes',
     'lootlinguaExtraChests',
@@ -2094,6 +2096,7 @@ window.mergeLootlinguaProfileFromCloud = function(d, options = {}) {
     if (typeof saveTitleState === 'function') saveTitleState(mergedTitles);
     else saveJSON('lootlinguaTitlesState', mergedTitles);
   }
+  if (d.streakState?.settledThrough) saveJSON('lootlinguaDailyStreakState', d.streakState);
   if (d.streakFreezes !== undefined) saveInt('lootlinguaStreakFreezes', Math.max(loadInt('lootlinguaStreakFreezes', 0), Number(d.streakFreezes) || 0));
   if (d.freezeSaves !== undefined) saveInt('lootlinguaFreezeSaves', Math.max(loadInt('lootlinguaFreezeSaves', 0), Number(d.freezeSaves) || 0));
   if (d.gameDictAdds !== undefined) saveInt('lootlinguaGameDictAdds', Math.max(loadInt('lootlinguaGameDictAdds', 0), Number(d.gameDictAdds) || 0));

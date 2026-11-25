@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 import vm from 'node:vm';
+import * as dailyStreakPolicy from '../js/daily-streak.mjs';
 
 process.env.TZ = 'Asia/Amman';
 
@@ -130,7 +131,7 @@ function completeTrustedStreakDay({ today, yesterday, streakCount, answeredCount
   const storage = memoryStorage();
   storage.setItem('activityMap', JSON.stringify(activityMap));
   const root = {
-    LootLinguaLocalTime: { previousLocalDateKey: () => yesterday },
+    LootLinguaDailyStreak: dailyStreakPolicy,
   };
   const context = vm.createContext({
     window: root,
@@ -155,11 +156,11 @@ function completeTrustedStreakDay({ today, yesterday, streakCount, answeredCount
     Math,
     JSON,
   });
-  const start = xpSource.indexOf('function checkAndUpdateStreak(options = {})');
+  const start = xpSource.indexOf('function localDailyStreakProfile()');
   const end = xpSource.indexOf('\nfunction renderStreak', start);
   assert.ok(start >= 0 && end > start);
   vm.runInContext(`let dailyStreak = ${Number(streakCount)}; let lastActivity = ${JSON.stringify(yesterday)};\n${xpSource.slice(start, end)}`, context);
-  vm.runInContext('checkAndUpdateStreak({ learningEvent: true });', context);
+  vm.runInContext('checkAndUpdateStreak({ learningEvent: true, at: ' + Date.parse(today + 'T12:00:00+03:00') + ' });', context);
   return vm.runInContext(`({
     dailyStreak,
     lastActivity,
@@ -635,7 +636,7 @@ test('static integration wires v3 store/cloud/runtime, contextual CTA, trusted g
   assert.match(journeyCloudSource, /unlockedByGateId/);
   assert.match(appSource, /function todayStr\(\) \{ return localDateKey\(new Date\(\)\); \}/);
   assert.doesNotMatch(appSource, /function todayStr\(\)[^{]*\{[^}]*toISOString/);
-  assert.match(xpSource, /previousLocalDateKey/);
+  assert.match(xpSource, /helper\.recordDailyStreak/);
   assert.match(worldsSource, /previousLocalDateKey/);
   assert.match(quizRuntimeSource, /lootlingua:trusted-quiz-completed/);
 });

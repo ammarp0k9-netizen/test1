@@ -370,7 +370,7 @@ function finishQuizRun() {
         if (typeof window.queueProfileIntent !== 'function') throw new Error('Profile sync is not ready.');
         window.queueProfileIntent({
           type: 'quiz-activity', eventId: `quiz:${activeQuizSession.id}`, day: todayStr(),
-          answers: commit.total, perfect: currentQuizMistakes === 0, advanceAfterFreeze: true, personalAt,
+          answers: commit.total, perfect: currentQuizMistakes === 0, advanceAfterFreeze: true, personalAt, streakAt: completedAt,
         });
       } catch (error) {
         console.warn('[QuizFinish] Activity sync deferred after learning commit.', error?.message || error);

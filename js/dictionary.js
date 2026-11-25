@@ -119,7 +119,7 @@ function renderStatsNumbersFromData() {
   const vals=Object.values(map).filter(v=>v>0);
   const s=(id,v)=>{const e=document.getElementById(id);if(e)e.textContent=v;};
   s('statTotal',   personalWords.length);
-  s('statStreak',  dailyStreak+' يوم');
+  s('statStreak', (window.getDailyStreakStatus?.().count ?? dailyStreak) + ' يوم');
   s('statStarred', personalWords.filter(w=>w.starred).length);
   s('statForgot',  personalWords.filter(w => getWordMasteryState(w).mastery_status === 'Mastered').length);
   s('statDays',    Object.keys(map).filter(k=>map[k]>0).length+' يوم');

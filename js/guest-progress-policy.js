@@ -1,5 +1,5 @@
 import { GUIDE_TOUR, mergeGuideCoverage } from './guide-coverage.mjs';
-import { applyProfileIntent } from './profile-sync-policy.mjs?v=20261114-runner-shop-1';
+import { applyProfileIntent } from './profile-sync-policy.mjs?v=streak-days-1';
 
 export const number = value => Number.isFinite(Number(value)) ? Math.max(0, Number(value)) : 0;
 export const time = value => number(value?.toMillis?.() ?? value);

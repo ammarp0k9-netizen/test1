@@ -17,12 +17,14 @@
   function store(uid, context, state, words, interaction = false) {
     try {
       const previous = read(uid, context);
-      const draft = contract.sameWords(previous?.state?.wordIds, state.wordIds)
-        ? contract.merge(previous.state, state) : state;
+      const sameWords = contract.sameWords(previous?.state?.wordIds, state.wordIds);
+      const draft = sameWords ? contract.merge(previous.state, state) : state;
       const checkpoint = contract.checkpointKey(draft);
       const unchanged = checkpoint === contract.checkpointKey(previous?.state);
       const activityAt = unchanged ? previous?.activityAt : interaction ? Date.now() : 0;
-      localStorage.setItem(storageKey(uid, context), JSON.stringify({ state: draft, words, activityAt }));
+      const streakAt = (sameWords && previous?.streakAt) || (interaction && contract.complete(draft) &&
+        !contract.complete(sameWords ? previous.state : null) ? Date.now() : 0);
+      localStorage.setItem(storageKey(uid, context), JSON.stringify({ state: draft, words, activityAt, streakAt }));
       return draft;
     } catch (_) { return null; }
   }
@@ -88,6 +90,16 @@
       if (owner() !== view.uid) return false;
       view.state = contract.merge(view.state, state);
       view.state = store(view.uid, view.context, view.state, view.words) || view.state;
+      const checkpoint = read(view.uid, view.context);
+      const streakAt = checkpoint?.streakAt || view.streakAt;
+      if (streakAt && contract.complete(state)) {
+        try {
+          if (root.recordCloudStreakLearningDay?.(streakAt)) {
+            if (checkpoint) localStorage.setItem(storageKey(view.uid, view.context), JSON.stringify({ ...checkpoint, streakAt: 0 }));
+            view.streakAt = 0;
+          }
+        } catch (error) { console.warn('[Streak] Lesson credit pending.', error?.code || error?.name); }
+      }
       observed.delete(key);
       dispatch(view.context, view.uid);
       return true;
@@ -106,6 +118,7 @@
   function update(view, state, interaction = false) {
     const saved = store(view.uid, view.context, state, view.words, interaction);
     view.localSaved = Boolean(saved);
+    if (!saved && interaction && !contract.complete(view.state) && contract.complete(state)) view.streakAt = Date.now();
     view.state = saved || state;
     void sync(view);
   }

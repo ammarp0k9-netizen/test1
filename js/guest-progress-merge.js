@@ -1,7 +1,7 @@
 import { GUIDE_TOUR, mergeGuideCoverage, readGuideCoverage } from './guide-coverage.mjs';
 import { createGuestDictionaryMerge } from './guest-dictionary-merge.js?v=full-merge-1';
 import { savedGuestError } from './saved-guest-session.js';
-import { legacyWordMastery, mergeCanonical, mergeJourney, mergeMastery, mergeProfile, number, pickGate, time, union } from './guest-progress-policy.js';
+import { legacyWordMastery, mergeCanonical, mergeJourney, mergeMastery, mergeProfile, number, pickGate, time, union } from './guest-progress-policy.js?v=streak-days-1';
 
 const duplicateReasons = new Set(['word_transition_new_learning', 'word_transition_learning_reviewing', 'word_mastered_first',
   'word_remastered', 'daily_chest_unlock', 'motivation_milestone']);

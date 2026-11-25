@@ -170,10 +170,11 @@
     }
 
     const today = localDateKey(now);
-    const minutesLeft = Math.max(0, (localDayEnd(now) - now) / 60000);
-    if (Number(facts.streak.count) > 1 && clean(facts.streak.lastActivityDate) !== today && minutesLeft <= 180 && minutesLeft >= 0) {
+    const streakDay = facts.streak.today || today;
+    const minutesLeft = facts.streak.minutesLeft ?? Math.max(0, (localDayEnd(now) - now) / 60000);
+    if (Number(facts.streak.count) > 1 && clean(facts.streak.lastActivityDate) !== streakDay && minutesLeft <= 180 && minutesLeft >= 0) {
       const slot = minutesLeft <= 60 && Number(facts.streak.count) >= 3 ? 'final' : 'early';
-      rules.push({ type: TYPE.STREAK_RISK, key: openKey(TYPE.STREAK_RISK, occurrence(TYPE.STREAK_RISK, today)), since: now, context: { slot }, immediateSlot: slot });
+      rules.push({ type: TYPE.STREAK_RISK, key: openKey(TYPE.STREAK_RISK, occurrence(TYPE.STREAK_RISK, streakDay)), since: now, context: { slot }, immediateSlot: slot });
     }
 
     if (reviewEligible) {

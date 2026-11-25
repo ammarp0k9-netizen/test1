@@ -4,10 +4,11 @@ import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import test from 'node:test';
 import vm from 'node:vm';
+import * as streakPolicy from '../js/daily-streak.mjs';
 
 const xp = await readFile(new URL('../js/xp.js', import.meta.url), 'utf8');
 const script = await readFile(new URL('../js/script.js', import.meta.url), 'utf8');
-const streak = xp.slice(xp.indexOf('function checkAndUpdateStreak(options = {})'), xp.indexOf('\nfunction renderStreak'));
+const streak = xp.slice(xp.indexOf('function localDailyStreakProfile()'), xp.indexOf('\nfunction renderStreak'));
 const dates = script.slice(script.indexOf('function localDateKey('), script.indexOf('function localDayBounds('));
 
 function run({ now = '2026-11-05T12:00:00', last = '2026-11-03', freezes = 3, helpers = true, learningEvent = true, repeats = 1 } = {}) {
@@ -22,7 +23,7 @@ function run({ now = '2026-11-05T12:00:00', last = '2026-11-03', freezes = 3, he
   ]);
   let saves = 0;
   const context = vm.createContext({
-    Date: FixedDate, window: {}, Math, JSON,
+    Date: FixedDate, window: { LootLinguaDailyStreak: streakPolicy }, Math, JSON,
     localStorage: { setItem: (key, value) => values.set(key, value) },
     loadInt: (key, fallback) => values.get(key) ?? fallback,
     saveInt: (key, value) => values.set(key, value),
@@ -71,7 +72,7 @@ if (process.env.LOOTLINGUA_STREAK_DST_CASE === '1') {
     assert.equal(result.freezes, 1);
     assert.equal(result.dailyStreak, 8);
     const insufficient = run({ now, last, freezes: 1 });
-    assert.equal(insufficient.freezes, 1);
+    assert.equal(insufficient.freezes, 0);
     assert.equal(insufficient.dailyStreak, 1);
   }
 } else {
@@ -99,14 +100,17 @@ if (process.env.LOOTLINGUA_STREAK_DST_CASE === '1') {
     }
   });
 
-  test('uncovered absences, future or invalid dates do not waste protection', () => {
-    for (const last of ['2026-10-31', '2026-10-05', '2025-11-05', '2026-11-06', 'invalid']) {
+  test('available freezes protect prior days before a break, and invalid dates start a new streak', () => {
+    for (const last of ['2026-10-31', '2026-10-05', '2025-11-05', 'invalid']) {
       const result = run({ last });
       assert.equal(result.dailyStreak, 1);
-      assert.equal(result.freezes, 3);
-      assert.equal(result.freezeSaves, 2);
+      assert.equal(result.freezes, last === 'invalid' ? 3 : 0);
+      assert.equal(result.freezeSaves, last === 'invalid' ? 2 : 5);
       assert.equal(result.storedDate, '2026-11-05');
     }
+    const future = run({ last: '2026-11-06' });
+    assert.equal(future.dailyStreak, 7);
+    assert.equal(future.freezes, 3);
   });
 
   test('each absent calendar day costs one freeze, and repeated learning today never spends twice', () => {
@@ -115,7 +119,7 @@ if (process.env.LOOTLINGUA_STREAK_DST_CASE === '1') {
       assert.equal(result.freezes, 0); assert.equal(result.freezeSaves, 4);
       assert.equal(result.dailyStreak, 8); assert.equal(result.storedDate, '2026-11-05');
       const insufficient = run({ last: '2026-11-02', freezes: 1, helpers });
-      assert.equal(insufficient.freezes, 1); assert.equal(insufficient.freezeSaves, 2);
+      assert.equal(insufficient.freezes, 0); assert.equal(insufficient.freezeSaves, 3);
       assert.equal(insufficient.dailyStreak, 1);
     }
   });
@@ -133,7 +137,7 @@ if (process.env.LOOTLINGUA_STREAK_DST_CASE === '1') {
     }
   });
 
-  test('no freeze or no prior activity starts a new streak; passive checks do not spend', () => {
+  test('passive checks settle missed dates without recording a learning day', () => {
     const noFreeze = run({ freezes: 0 });
     assert.equal(noFreeze.dailyStreak, 1);
     assert.equal(noFreeze.freezeSaves, 2);
@@ -142,8 +146,13 @@ if (process.env.LOOTLINGUA_STREAK_DST_CASE === '1') {
     assert.equal(first.freezes, 3);
     const passive = run({ learningEvent: false });
     assert.equal(passive.dailyStreak, 7);
-    assert.equal(passive.freezes, 3);
+    assert.equal(passive.freezes, 2);
+    assert.equal(passive.lastActivity, '2026-11-03');
     assert.equal(passive.saves, 0);
+    const expired = run({ learningEvent: false, freezes: 1, last: '2026-11-02', repeats: 2 });
+    assert.equal(expired.dailyStreak, 0);
+    assert.equal(expired.freezes, 0);
+    assert.equal(expired.freezeSaves, 3);
   });
 
   test('DST transitions cover a calendar gap of one day across both 47-hour and 49-hour spans', () => {

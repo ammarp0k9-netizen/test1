@@ -1,4 +1,5 @@
 import { GUIDE_TOUR, mergeGuideCoverage } from './guide-coverage.mjs';
+import { recordDailyStreak, settleDailyStreak, streakCalendar, streakTimeZone } from './daily-streak.mjs?v=streak-days-1';
 
 // Profile synchronization operations are not XP awards. XP remains owned by
 // the existing XP-event transactions; only a receipted guest import can seed it.
@@ -52,6 +53,7 @@ function treasureCommand(profile, intent, context, effects) {
     const policy = TREASURE_TYPES[chest.kind];
     if (!Number.isInteger(chest.xp) || chest.xp < policy.minXP || chest.xp > policy.maxXP ||
         ![0, 1].includes(chest.freezes)) return 'invalid-chest';
+    if (chest.freezes) updateStreak(profile, { ...intent, streakAt: intent.streakAt || now }, effects, false);
     profile.userXP = number(profile.userXP) + chest.xp;
     profile.streakFreezes = number(profile.streakFreezes) + chest.freezes;
     profile.extraChests = stored.filter(item => item.id !== chest.id);
@@ -139,6 +141,7 @@ export function mergeOnboardingProgress(tour, left, right) {
 }
 export function profileOperationId(intent) {
   if (intent.type === 'learning-day') return `learning-day:${intent.day}`;
+  if (intent.type === 'streak-check') return `streak-check:${intent.day}`;
   if (intent.eventId) return `${intent.type}:${intent.eventId}`;
   return null;
 }
@@ -148,19 +151,14 @@ export function previousCalendarDay(day, amount = 1) {
   date.setUTCDate(date.getUTCDate() - amount);
   return date.toISOString().slice(0, 10);
 }
-function learn(profile, day, advanceAfterFreeze = true) {
-  if (!Number.isFinite(calendarTime(day)) || day <= String(profile.lastActivityDate || '')) return false;
-  const last = profile.lastActivityDate || '';
-  const missed = Math.floor((calendarTime(day) - calendarTime(last)) / 86400000) - 1;
-  if (missed === 0) profile.dailyStreak = number(profile.dailyStreak) + 1;
-  else if (missed > 0 && Number.isFinite(missed) && number(profile.streakFreezes) >= missed) {
-    profile.streakFreezes = number(profile.streakFreezes) - missed;
-    profile.freezeSaves = number(profile.freezeSaves) + missed;
-    profile.dailyStreak = Math.max(1, number(profile.dailyStreak)) + (advanceAfterFreeze ? 1 : 0);
-  } else profile.dailyStreak = 1;
-  profile.lastActivityDate = day;
-  profile.maxStreak = Math.max(number(profile.maxStreak), profile.dailyStreak);
-  return true;
+function updateStreak(profile, intent, effects, learning) {
+  const timeZone = streakTimeZone(profile, intent.streakTimeZone);
+  const at = Number(intent.streakAt);
+  const day = Number.isSafeInteger(at) && at > 0 && at <= 8640000000000000 ? streakCalendar(at, timeZone).today : intent.day;
+  const used = learning
+    ? recordDailyStreak(profile, day, timeZone, intent.advanceAfterFreeze !== false)
+    : settleDailyStreak(profile, day, timeZone);
+  if (used) effects.streakFreezesUsed = used;
 }
 function quest(profile, day, patch) {
   if (!dayPattern.test(day || '')) return;
@@ -254,7 +252,8 @@ export function applyProfileIntent(remote, intent, context = {}) {
       profile[intent.field] = balance;
       break;
     }
-    case 'learning-day': learn(profile, intent.day, intent.advanceAfterFreeze !== false); break;
+    case 'streak-check': updateStreak(profile, intent, effects, false); break;
+    case 'learning-day': updateStreak(profile, intent, effects, true); break;
     case 'quiz-activity': {
       if (!dayPattern.test(intent.day || '') || !(number(intent.answers) > 0)) { reason = 'invalid-activity'; break; }
       if (number(intent.personalAt)) profile.lastPersonalTrustedQuizAt = Math.max(number(profile.lastPersonalTrustedQuizAt), number(intent.personalAt));
@@ -263,7 +262,7 @@ export function applyProfileIntent(remote, intent, context = {}) {
         profile.perfectQuizzes = number(profile.perfectQuizzes) + 1;
         quest(profile, intent.day, { flags: { perfectQuiz: true } });
       }
-      learn(profile, intent.day, intent.advanceAfterFreeze !== false);
+      updateStreak(profile, intent, effects, true);
       break;
     }
     case 'counter-delta':
@@ -298,7 +297,10 @@ export function applyProfileIntent(remote, intent, context = {}) {
       profile.quizExposureHistory = [...byId.values()].sort((a, b) => number(b.at) - number(a.at)).slice(0, 3);
       break;
     }
-    case 'loot-open': reason = lootOpen(profile, intent); break;
+    case 'loot-open':
+      if (intent.reward?.type === 'freeze') updateStreak(profile, { ...intent, streakAt: intent.at }, effects, false);
+      reason = lootOpen(profile, intent);
+      break;
     case 'loot-progress': {
       const loot = { ...(profile.dailyLootState || {}) };
       const lockId = number(loot.lockStartedAt) || number(loot.lastOpenAt);
@@ -344,6 +346,13 @@ export function applyProfileIntent(remote, intent, context = {}) {
       if (String(guest.lastActivityDate || '') > String(profile.lastActivityDate || '')) {
         profile.lastActivityDate = guest.lastActivityDate;
         profile.dailyStreak = number(guest.dailyStreak);
+        if (Number.isFinite(calendarTime(guest.lastActivityDate))) {
+          const settled = guest.streakState?.settledThrough;
+          profile.streakState = {
+            settledThrough: Number.isFinite(calendarTime(settled)) && settled > guest.lastActivityDate ? settled : guest.lastActivityDate,
+            timeZone: streakTimeZone(profile, guest.streakState?.timeZone),
+          };
+        }
       }
       for (const [day, amount] of Object.entries(guest.activityMap || {})) profile.activityMap = { ...(profile.activityMap || {}), [day]: Math.max(number(profile.activityMap?.[day]), number(amount)) };
       profile.addedGameWords = unique([...(profile.addedGameWords || []), ...(guest.addedGameWords || [])]);

@@ -7,6 +7,52 @@ const viewSource = readFileSync(new URL('../js/gate-lesson-view.js', import.meta
 const scriptSource = readFileSync(new URL('../js/script.js', import.meta.url), 'utf8');
 const guideSource = readFileSync(new URL('../js/smart-onboarding.js', import.meta.url), 'utf8');
 
+test('the lesson earns streak credit only after a new full checkpoint is confirmed', async () => {
+  const calls = [];
+  const local = new Map();
+  const partial = { wordIds: ['one', 'two'], completedWordIds: ['one'] };
+  const complete = { ...partial, completedWordIds: ['one', 'two'] };
+  const view = { uid: 'owner', context: { gateId: 'gate' }, state: partial, words: [] };
+  let rejectSave = false;
+  const root = {
+    auth: { currentUser: { uid: view.uid } },
+    LootLinguaJourneyCloud: { async saveGateLessonState(_context, state) {
+      if (rejectSave) throw Error('offline');
+      return state;
+    } },
+    recordCloudStreakLearningDay(at) { calls.push(at); return 'learning-day'; },
+    dispatchEvent() {},
+  };
+  const contract = {
+    keyFor: context => context.gateId,
+    sameWords: (a, b) => Array.isArray(a) && JSON.stringify(a) === JSON.stringify(b),
+    merge: (a, b) => a.completedWordIds.length >= b.completedWordIds.length ? a : b,
+    checkpointKey: state => JSON.stringify(state),
+    complete: state => Boolean(state && state.wordIds.length === state.completedWordIds.length),
+  };
+  const take = (from, to) => viewSource.slice(viewSource.indexOf(from), viewSource.indexOf(to));
+  const context = vm.createContext({
+    root, contract, Date, console, view, partial, complete,
+    localStorage: { getItem: key => local.get(key), setItem: (key, value) => local.set(key, value) },
+    setTimeout() {}, clearTimeout() {}, CustomEvent: class {},
+  });
+  vm.runInContext(take('  const tasks =', '  function status(') + take('  function dispatch(', '  function stopAudio('), context);
+  vm.runInContext('update(view, partial);', context);
+  assert.equal(await context.flush(view), true);
+  assert.deepEqual(calls, []);
+  rejectSave = true;
+  vm.runInContext('update(view, complete, true);', context);
+  assert.equal(await context.flush(view), false);
+  const pendingAt = JSON.parse([...local.values()][0]).streakAt;
+  assert.ok(pendingAt > 0);
+  assert.deepEqual(calls, []);
+  rejectSave = false;
+  assert.equal(await context.flush(view), true);
+  assert.equal(await context.flush(view), true);
+  assert.deepEqual(calls, [pendingAt]);
+  assert.equal(JSON.parse([...local.values()][0]).streakAt, 0);
+});
+
 class Element {
   constructor(tag) {
     this.tagName = tag;

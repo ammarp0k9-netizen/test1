@@ -4,7 +4,8 @@ import { getApps }  from "https://www.gstatic.com/firebasejs/10.12.0/firebase-ap
 import { getFirestore, doc, getDoc, runTransaction, onSnapshot } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
 import { getAuth, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js";
 import { GUIDE_TOUR, guideStorageKey } from './guide-coverage.mjs';
-import { applyProfileIntent, profileOperationId, profileStorageIntents, mergeOnboardingProgress } from './profile-sync-policy.mjs?v=20261114-runner-shop-1';
+import { applyProfileIntent, profileOperationId, profileStorageIntents, mergeOnboardingProgress } from './profile-sync-policy.mjs?v=streak-days-1';
+import { needsStreakSettlement, streakCalendar, streakTimeZone } from './daily-streak.mjs?v=streak-days-1';
 
 // استخدم التطبيق الموجود فقط بدون إعادة تعريف إذا كان معرف مسبقًا
 let profileApp  = getApps()[0];
@@ -128,8 +129,9 @@ function profileOutboxPrefix(uid) { return `lootlingua:profile-outbox:v1:${uid}:
 function botsOutboxPrefix(uid) { return `lootlingua:profile-outbox:bots-v1:${uid}:`; }
 function treasureOutboxPrefix(uid) { return `lootlingua:profile-outbox:treasure-v1:${uid}:`; }
 function runnerOutboxPrefix(uid) { return `lootlingua:profile-outbox:runner-v1:${uid}:`; }
+function streakOutboxPrefix(uid) { return `lootlingua:profile-outbox:streak-v1:${uid}:`; }
 function profileOutboxPrefixes(uid) {
-  return [profileOutboxPrefix(uid), botsOutboxPrefix(uid), treasureOutboxPrefix(uid), runnerOutboxPrefix(uid)];
+  return [profileOutboxPrefix(uid), botsOutboxPrefix(uid), treasureOutboxPrefix(uid), runnerOutboxPrefix(uid), streakOutboxPrefix(uid)];
 }
 function profileReceiptId(id) {
   const encoded = encodeURIComponent(id);
@@ -264,11 +266,14 @@ function queueProfileCommands(commands, options = {}) {
   // out of their queue so they cannot receipt a game command as unsupported.
   const hasRunnerPurchase = commands.some(command => command.type === 'runner-purchase' ||
     command.type === 'guest-import' && command.profile?.runnerUnlocks?.length);
-  const prefix = hasRunnerPurchase ? runnerOutboxPrefix(owner.uid)
+  const prefix = commands.some(command => command.type === 'streak-check' || command.streakAt)
+    ? streakOutboxPrefix(owner.uid)
+    : hasRunnerPurchase ? runnerOutboxPrefix(owner.uid)
     : commands.every(command => command.type.startsWith('treasure-') || command.type === 'guest-import' && command.profile?.extraChestState)
     ? treasureOutboxPrefix(owner.uid)
     : commands.every(command => command.type.startsWith('bots-')) ? botsOutboxPrefix(owner.uid) : profileOutboxPrefix(owner.uid);
   const key = `${prefix}${encodeURIComponent(id)}`;
+  if (localStorage.getItem(key) && options.skipQueued) return id;
   if (!localStorage.getItem(key)) {
     _profileOperationClock = Math.max(Date.now(), _profileOperationClock + 1);
     localStorage.setItem(key, JSON.stringify({ version: 1, uid: owner.uid, id, commands, createdAt: _profileOperationClock }));
@@ -283,6 +288,29 @@ window.queueProfileIntent = function(intent) {
   if (!intent || typeof intent !== 'object' || !intent.type) return null;
   return queueProfileCommands([JSON.parse(JSON.stringify(intent))]);
 };
+function currentStreakProfile() {
+  const owner = captureProfileOwner();
+  const snapshot = window.__lootlinguaProfileSnapshot;
+  return owner && snapshot?.uid === owner.uid && !snapshot.readFailed ? snapshot.data : null;
+}
+
+window.checkCloudDailyStreak = function(at = Date.now()) {
+  const profile = currentStreakProfile();
+  if (!profile) return;
+  const timeZone = streakTimeZone(profile);
+  const { today } = streakCalendar(at, timeZone);
+  if (!needsStreakSettlement(profile, today)) return;
+  return queueProfileCommands([{ type: 'streak-check', day: today, streakAt: at, streakTimeZone: timeZone }], { project: false, skipQueued: true });
+};
+
+window.recordCloudStreakLearningDay = function(at = Date.now()) {
+  const profile = currentStreakProfile();
+  const timeZone = streakTimeZone(profile);
+  const { today } = streakCalendar(at, timeZone);
+  if (profile?.lastActivityDate >= today) return true;
+  return queueProfileCommands([{ type: 'learning-day', day: today, streakAt: at, streakTimeZone: timeZone }], { project: false, skipQueued: true });
+};
+
 window.recordProfileStorageMutation = function(key, before, after) {
   if (window.__profileHydrating || !profileAuth.currentUser || !_profileLocalBaselines.has(profileAuth.currentUser.uid)) return;
   const commands = profileStorageIntents(key, before, after);
@@ -295,6 +323,7 @@ async function transactProfileOutbox(owner, options = {}) {
   const reference = doc(profileDb, 'users', owner.uid, 'meta', 'profile');
   const results = {};
   let persistedData = null;
+  let streakFreezesUsed = 0;
   while (current()) {
     const operations = readProfileOutbox(owner.uid).slice(0, 20);
     if (!operations.length) break;
@@ -315,6 +344,7 @@ async function transactProfileOutbox(owner, options = {}) {
       const original = snapshots[0].exists() ? snapshots[0].data() : {};
       let profile = original;
       const outcomes = {};
+      let committedFreezes = 0;
       const consumed = new Set(consumedIds.filter((_id, index) => snapshots[1 + operations.length + index].exists()));
       const confirmed = new Set(unlockIds.filter((_id, index) => snapshots[1 + operations.length + consumedIds.length + index].exists()));
       const newConsumed = new Set();
@@ -325,15 +355,18 @@ async function transactProfileOutbox(owner, options = {}) {
         }
         const before = profile;
         let applied = false, reason = '', reward;
+        let freezes = 0;
         for (const command of operation.commands) {
           const next = applyProfileIntent(profile, command, { consumedExtraIds: consumed, confirmedXP: confirmed.has(String(command.lockId)) });
           if (next.reason) { reason = next.reason; profile = before; break; }
           profile = next.profile;
           applied ||= next.applied;
           if (next.effects.reward) reward = next.effects.reward;
+          freezes += next.effects.streakFreezesUsed || 0;
           if (next.effects.consumedExtraId) { consumed.add(next.effects.consumedExtraId); newConsumed.add(next.effects.consumedExtraId); }
         }
         outcomes[operation.id] = { applied: !reason && applied, reason, ...(!reason && reward ? { reward } : {}) };
+        if (!reason && applied) committedFreezes += freezes;
         // Chest rewards are committed with the profile and acknowledged here.
         transaction.set(receiptRefs[index], { type: 'profile-sync-v1', operationId: operation.id, result: outcomes[operation.id], createdAt: new Date() });
       });
@@ -344,7 +377,7 @@ async function transactProfileOutbox(owner, options = {}) {
         transaction.set(reference, profile, { merge: true });
       }
       for (const id of newConsumed) transaction.set(doc(profileDb, 'users', owner.uid, 'meta', profileReceiptId(`extra-consumed:${id}`)), { type: 'profile-extra-consumed-v1', createdAt: new Date() });
-      return { profile, outcomes };
+      return { profile, outcomes, committedFreezes };
     });
     if (!current()) return { saved: false, reason: 'auth/identity-changed' };
     if (options.verify === true) {
@@ -355,6 +388,7 @@ async function transactProfileOutbox(owner, options = {}) {
       result.profile = verification.data();
     }
     persistedData = result.profile;
+    streakFreezesUsed += result.committedFreezes;
     Object.assign(results, result.outcomes);
     for (const operation of operations) localStorage.removeItem(operation.key);
     const known = window.__lootlinguaProfileSnapshot;
@@ -362,7 +396,7 @@ async function transactProfileOutbox(owner, options = {}) {
       window.__lootlinguaProfileSnapshot = { uid: owner.uid, exists: true, data: persistedData, readFailed: false };
     }
   }
-  return { saved: current(), profile: persistedData, results };
+  return { saved: current(), profile: persistedData, results, streakFreezesUsed };
 }
 window.flushProfileIntents = function(options = {}) {
   const owner = options.profileOwner || captureProfileOwner();
@@ -372,7 +406,10 @@ window.flushProfileIntents = function(options = {}) {
       compactPresentationIntents(owner);
       window.LootLinguaCloudBackoff?.assertAvailable();
       const outcome = await transactProfileOutbox(owner, options);
-      if (outcome.saved && outcome.profile) applyCanonicalProfile(outcome.profile, owner);
+      if (outcome.saved && outcome.profile) {
+        applyCanonicalProfile(outcome.profile, owner);
+        if (outcome.streakFreezesUsed) window.announceDailyStreakFreeze?.(outcome.streakFreezesUsed);
+      }
       if (outcome.saved && outcome.profile) { window.__lootlinguaLastProfileSaveFailure = null; window.LootLinguaCloudBackoff?.recovered(); }
       return outcome;
     } catch (error) {

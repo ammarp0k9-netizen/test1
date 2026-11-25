@@ -438,67 +438,75 @@ function showRankUp(rank) {
 }
 
 // ── Daily Streak ──────────────────────────────────────
-/**
- * يحسب يوم التعلّم بعد جلسة موثّقة. الاستدعاء دون learningEvent يعرض الحالة فقط.
- */
+function localDailyStreakProfile() {
+  return {
+    dailyStreak, lastActivityDate: lastActivity,
+    streakFreezes: loadInt('lootlinguaStreakFreezes', 0),
+    freezeSaves: loadInt('lootlinguaFreezeSaves', 0),
+    maxStreak: loadInt('lootlinguaMaxStreak', 0),
+    streakState: loadJSON('lootlinguaDailyStreakState', null),
+  };
+}
+
+window.getDailyStreakStatus = function(at = Date.now()) {
+  const helper = window.LootLinguaDailyStreak;
+  const snapshot = window.__lootlinguaProfileSnapshot;
+  const uid = window.auth?.currentUser?.uid;
+  const profile = uid && snapshot?.uid === uid && !snapshot.readFailed && snapshot.data
+    ? { ...snapshot.data } : localDailyStreakProfile();
+  const timeZone = helper?.streakTimeZone(profile);
+  const calendar = helper?.streakCalendar(at, timeZone);
+  if (calendar) helper.settleDailyStreak(profile, calendar.today, timeZone);
+  return {
+    ...calendar, count: Math.max(0, Number(profile.dailyStreak) || 0),
+    lastActivityDate: String(profile.lastActivityDate || ''),
+    freezeCount: Math.max(0, Number(profile.streakFreezes) || 0),
+  };
+};
+
+window.announceDailyStreakFreeze = function(count) {
+  showToast(`استخدمنا ${count} من رصيد التجميد لحماية أيام الغياب.`, 'success', 5600);
+};
+
 function checkAndUpdateStreak(options = {}) {
-  if (options.learningEvent !== true) {
-    renderStreak();
-    return;
-  }
+  const at = options.at || Date.now();
+  const learning = options.learningEvent === true;
   if (hasSignedInUser()) {
-    if (typeof window.queueProfileIntent !== 'function') return false;
-    return window.queueProfileIntent({ type: 'learning-day', day: todayStr(), advanceAfterFreeze: true });
+    renderStreak();
+    renderProfileModalStats();
+    return learning ? window.recordCloudStreakLearningDay?.(at) : window.checkCloudDailyStreak?.(at);
   }
-  const today     = todayStr();
-  const yesterday = window.LootLinguaLocalTime?.previousLocalDateKey?.(new Date()) ||
-    (() => { const date = new Date(); date.setDate(date.getDate() - 1); return localDateKey(date); })();
-
-  // A streak day now requires a completed verified learning session.
-  const map = loadJSON('activityMap', {});
-  if (!map[today]) map[today] = 0;
-  saveJSON('activityMap', map);
-
-  if (lastActivity === today) { renderStreak(); return; } // نفس اليوم
-
-  if (lastActivity === yesterday) {
-    dailyStreak++;
-    if (!isJsonImportBatchActive()) setTimeout(()=>showToast('Streak '+dailyStreak+' يوم!'), 1000);
-  } else if (lastActivity !== '') {
-    const freezes = typeof getStreakFreezeCount === 'function' ? getStreakFreezeCount() : loadInt('lootlinguaStreakFreezes', 0);
-    // Calendar keys describe local days; UTC noon measures their ordinal gap
-    // without depending on the 23/25-hour duration of a daylight-saving day.
-    const previous = new Date(`${lastActivity}T12:00:00Z`);
-    const gap = (new Date(`${today}T12:00:00Z`) - previous) / 86400000;
-    const missedDays = Number.isInteger(gap) && gap > 1 ? gap - 1 : 0;
-    if (missedDays > 0 && freezes >= missedDays && previous.toISOString().slice(0, 10) === lastActivity) {
-      if (typeof saveStreakFreezeCount === 'function') saveStreakFreezeCount(freezes - missedDays);
-      else saveInt('lootlinguaStreakFreezes', freezes - missedDays);
-      saveInt('lootlinguaFreezeSaves', loadInt('lootlinguaFreezeSaves', 0) + missedDays);
-      dailyStreak = Math.max(1, dailyStreak) + 1;
-      if (!isJsonImportBatchActive()) {
-        setTimeout(() => showToast(`استخدمنا ${missedDays} Freeze لحماية أيام الغياب، وزادت سلسلتك بيوم تعلّمك اليوم.`, 'success', 5600), 900);
-      }
-      if (typeof evaluateTitleUnlocks === 'function') evaluateTitleUnlocks(!isJsonImportBatchActive());
-    } else {
-      dailyStreak = 1;
+  const helper = window.LootLinguaDailyStreak;
+  if (!helper) { renderStreak(); return; }
+  const profile = localDailyStreakProfile();
+  const timeZone = helper.streakTimeZone(profile);
+  const { today } = helper.streakCalendar(at, timeZone);
+  if (learning || helper.needsStreakSettlement(profile, today)) {
+    const previousDay = profile.lastActivityDate;
+    const used = learning
+      ? helper.recordDailyStreak(profile, today, timeZone)
+      : helper.settleDailyStreak(profile, today, timeZone);
+    if (learning && profile.lastActivityDate === previousDay) { renderStreak(); return; }
+    dailyStreak = profile.dailyStreak;
+    lastActivity = profile.lastActivityDate;
+    saveInt('dailyStreak', dailyStreak);
+    localStorage.setItem('lastActivityDate', lastActivity);
+    saveInt('lootlinguaStreakFreezes', profile.streakFreezes);
+    saveInt('lootlinguaFreezeSaves', profile.freezeSaves);
+    saveInt('lootlinguaMaxStreak', profile.maxStreak);
+    saveJSON('lootlinguaDailyStreakState', profile.streakState);
+    if (learning && !isJsonImportBatchActive() && !used && dailyStreak > 1) {
+      const length = dailyStreak;
+      setTimeout(() => showToast('Streak ' + length + ' يوم!'), 1000);
     }
-  } else {
-    dailyStreak = 1; // أول استخدام
+    if (used && !isJsonImportBatchActive()) window.announceDailyStreakFreeze(used);
+    if (used && typeof evaluateTitleUnlocks === 'function') evaluateTitleUnlocks(!isJsonImportBatchActive());
   }
-
-  saveInt('dailyStreak', dailyStreak);
-  const maxS = loadInt('lootlinguaMaxStreak', 0);
-  if (dailyStreak > maxS) saveInt('lootlinguaMaxStreak', dailyStreak);
-  lastActivity = today;
-  localStorage.setItem('lastActivityDate', today);
-  requestProfileCloudSave();
   renderStreak();
   renderProfileModalStats();
 }
 
-function renderStreakFreezeStatus() {
-  const count = Math.max(0, Math.floor(typeof getStreakFreezeCount === 'function' ? getStreakFreezeCount() : loadInt('lootlinguaStreakFreezes', 0)));
+function renderStreakFreezeStatus(count = window.getDailyStreakStatus().freezeCount) {
   document.querySelectorAll('[data-streak-freeze-count]').forEach(node => { node.textContent = count > 0 ? `${count} فريز` : 'بدون فريز'; });
   document.querySelectorAll('[data-streak-freeze-status]').forEach(node => { node.classList.toggle('has-freezes', count > 0); });
   document.querySelectorAll('.streak-freeze-help').forEach(node => { node.setAttribute('aria-label', `شرح حماية الستريك بالفريز. رصيدك ${count} فريز`); });
@@ -517,17 +525,19 @@ window.showStreakFreezeHelp = function(event) {
 };
 
 function renderStreak() {
-  renderStreakFreezeStatus();
+  const streak = window.getDailyStreakStatus();
+  renderStreakFreezeStatus(streak.freezeCount);
   const el   = document.getElementById('streakCount');
   const ico  = document.getElementById('streakIcon');
   const wrap = document.getElementById('streakWrap');
   if (!el) return;
-  el.textContent = dailyStreak+' يوم';
-  if (dailyStreak>=30)      { if(ico)ico.innerHTML='<i class="fa-solid fa-bolt"></i>'; el.style.color='var(--accent)'; }
-  else if (dailyStreak>=14) { if(ico)ico.innerHTML='<i class="fa-solid fa-fire"></i>'; el.style.color='var(--accent2)'; }
-  else if (dailyStreak>=7)  { if(ico)ico.innerHTML='<i class="fa-solid fa-fire"></i>'; el.style.color='var(--star)'; }
-  else                      { if(ico)ico.innerHTML='<i class="fa-solid fa-fire"></i>'; el.style.color='var(--text-gray)'; }
-  if (wrap) wrap.className='streak-wrap'+(dailyStreak>=7?' streak-hot':'');
+  const count = streak.count;
+  el.textContent = count + ' يوم';
+  if (count >= 30)      { if (ico) ico.innerHTML = '<i class="fa-solid fa-bolt"></i>'; el.style.color = 'var(--accent)'; }
+  else if (count >= 14) { if (ico) ico.innerHTML = '<i class="fa-solid fa-fire"></i>'; el.style.color = 'var(--accent2)'; }
+  else if (count >= 7)  { if (ico) ico.innerHTML = '<i class="fa-solid fa-fire"></i>'; el.style.color = 'var(--star)'; }
+  else { if (ico) ico.innerHTML = '<i class="fa-solid fa-fire"></i>'; el.style.color = 'var(--text-gray)'; }
+  if (wrap) wrap.className = 'streak-wrap' + (count >= 7 ? ' streak-hot' : '');
 }
 
 // ── Daily Goal & Confetti ──────────────────────────────

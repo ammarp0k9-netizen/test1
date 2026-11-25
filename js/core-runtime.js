@@ -141,6 +141,12 @@ document.addEventListener('keydown', function(e) {
 // ═══════════════════════════════════════════════════════
 // Init
 // ═══════════════════════════════════════════════════════
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible' && (window._profileLoaded || !hasSignedInUser())) checkAndUpdateStreak();
+});
+window.addEventListener('focus', () => {
+  if (window._profileLoaded || !hasSignedInUser()) checkAndUpdateStreak();
+});
 window.onload = function() {
   if ('speechSynthesis' in window) {
     window.speechSynthesis.getVoices();
@@ -149,8 +155,6 @@ window.onload = function() {
   }
   // Gamification init
   bootstrapThemeNotificationKeysOnce();
-  // checkAndUpdateStreak يشتغل هنا فقط لو مش مسجل دخول
-  // لو مسجل دخول، يشتغل بعد loadProfileFromCloud (في index.html)
   loadTheme();
   renderXPBar();
   syncHeroAvatar();
@@ -161,11 +165,11 @@ window.onload = function() {
   updateDailyQuestsBadge();
   window.LootLinguaEntryExperienceController?.init();
   handleInitialRouting();
-  // استدعيها بعد تأخير 0 عشان تعطي Firebase فرصة
-  // لو المستخدم مش مسجل دخول، ستشتغل مباشرة
-  setTimeout(() => {
-    if (!window._profileLoaded) checkAndUpdateStreak();
-  }, 1200);
+  if (window.auth?.authStateReady) {
+    window.auth.authStateReady().then(() => {
+      if (!hasSignedInUser()) checkAndUpdateStreak();
+    }).catch(() => {});
+  } else if (!hasSignedInUser()) checkAndUpdateStreak();
   refreshFeatureUnlockUI();
 };
 
