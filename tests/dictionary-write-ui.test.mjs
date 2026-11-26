@@ -17,6 +17,7 @@ function button(id = '') {
 function harness({ guest = false, custom = false } = {}) {
   const nodes = { wordInput: { value: 'Apple' }, meaningInput: { value: 'تفاحة جديدة' }, exampleInput: { value: 'An apple.' }, categoryInput: { value: 'اسم' }, addBtn: button() };
   const star = button('w1'), calls = { saves: [], updates: [], events: [], notices: [], persists: 0, clears: 0, renders: 0 };
+  calls.finishedSearches = [];
   let saved = [], persistMode = '', save = async () => 'server-id', update = async () => true;
   const root = { auth: { currentUser: guest ? null : { uid: 'a' } }, __lootlinguaAuthGeneration: 1, words: [],
     dispatchEvent: event => calls.events.push(event),
@@ -50,6 +51,10 @@ function harness({ guest = false, custom = false } = {}) {
     render: () => calls.renders++, renderStarredWords: () => calls.renders++,
     clearInputs() { calls.clears++; for (const id of ['wordInput', 'meaningInput', 'exampleInput']) nodes[id].value = ''; },
     setAddFormExpanded() {},
+    restoreActiveAddFormDraft() { context.editId = null; },
+    renderDictionaryWordDetail() {},
+    getAddFormDraftScope: () => 'personal',
+    completeNormalSearch: (...args) => calls.finishedSearches.push(args),
   });
   vm.runInContext(section('async function saveActiveWordToCloud', 'async function deleteActiveWordFromCloud'), context);
   vm.runInContext(section('function isDictionaryWordHidden', 'function getActiveDictionaryMessageLabel'), context);
@@ -166,6 +171,7 @@ test('star acknowledgement updates data and aria; a rejected star is restored wi
 test('a null search-add response never falls back to a fake local success for a signed-in account', async () => {
   const h = harness(); h.setSave(async () => null);
   await h.context.addAiMeaningCore({ word: 'Apple', ar: 'تفاحة', pos: 'اسم', ex: '' }, button());
+  assert.deepEqual(h.calls.finishedSearches, []);
   assert.equal(h.root.words.length, 0); assert.equal(h.calls.persists, 0);
   assert.ok(h.calls.notices.every(notice => notice[1] !== 'success'));
 });
@@ -185,6 +191,7 @@ test('a failed guest suggestion rolls back the phantom word and remains retryabl
   h.setPersist('before'); await h.context.addAiMeaningCore(suggestion, btn);
   assert.equal(h.root.words.length, 0); assert.equal(h.stored().length, 0); assert.equal(btn.disabled, false);
   h.setPersist(''); await h.context.addAiMeaningCore(suggestion, btn);
+  assert.deepEqual(h.calls.finishedSearches, [['personal', suggestion.word]]);
   assert.equal(h.root.words.length, 1); assert.equal(h.stored().length, 1); assert.equal(btn.disabled, true);
 });
 

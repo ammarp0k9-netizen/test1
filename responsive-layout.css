@@ -1,0 +1,219 @@
+.dictionary-workspace, .dictionary-list-panel { display: contents; }
+.dictionary-detail, .dictionary-detail[hidden], #dictionaryCancelEdit[hidden] { display: none; }
+#dictionaryCancelEdit { margin-block: 6px; min-height: 36px; }
+
+.dictionary-resume-search {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+}
+.dictionary-resume-search .dictionary-search-recovery {
+  width: 100%;
+  margin: 0;
+  min-height: 36px;
+  text-align: start;
+  overflow-wrap: anywhere;
+}
+.dictionary-search-dismiss {
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface-bg);
+  color: var(--text-white);
+  font-family: inherit;
+  line-height: 1;
+  font-size: 1.25rem;
+  cursor: pointer;
+}
+.dictionary-search-dismiss:hover { background: var(--accent-soft); }
+
+.header-top { align-items: center; }
+.published-back-btn { min-height: 40px; border-radius: 9px; }
+.quiz-panel-header, #quizView .quiz-card-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 8px 12px;
+}
+.quiz-panel-header { margin-block-end: 12px; text-align: start; }
+.quiz-panel-header h3 { margin: 0; flex: 1; min-width: 12ch; }
+#quizView .quiz-available-count { text-align: start; margin-block-end: 16px; }
+#quizReturnToGate { display: flex; width: fit-content; }
+#quizReturnToGate[hidden] { display: none; }
+.quiz-settings-panel { padding-block-start: 22px; }
+#quizView :is(.quiz-exit-btn, .quiz-settings-back, .quiz-play-exit),
+.view-back-btn {
+  position: static;
+  flex: 0 0 40px;
+  inline-size: 40px;
+  block-size: 40px;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  background: var(--surface-bg);
+  color: var(--text-white);
+  box-shadow: none;
+}
+#quizView :is(.quiz-exit-btn, .quiz-settings-back, .quiz-play-exit):hover,
+.view-back-btn:hover {
+  background: var(--accent-soft);
+  color: var(--text-white);
+  border-color: var(--accent);
+  transform: none;
+}
+[dir="ltr"] :is(.quiz-exit-btn, .quiz-settings-back, .quiz-play-exit, .view-back-btn, #quizReturnToGate) > i { transform: scaleX(-1); }
+#quizView :is(.quiz-play-view, #quizViewCard) { padding-block-start: 0; }
+#quizView .quiz-card-meta { max-width: none; }
+#quizTimeAttackView .quiz-card-meta {
+  display: grid;
+  grid-template-columns: auto auto minmax(0, 1fr) auto;
+}
+#timeAttackHp { justify-self: center; }
+#quizView :is(.quiz-card-meta, .quiz-challenge-card, .quiz-mode-card) { overflow-wrap: anywhere; }
+#quizView :is(#timeAttackTimer, #timeAttackCounter, #quizCardCounter, #scrambleCounter) {
+  direction: ltr;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+@media (min-width: 769px) {
+  body:has(#worldsView:not([style*="none"]), #quizView:not([style*="none"]),
+    #personalControls:not([style*="none"])) {
+    --content-max: 1168px;
+  }
+  body:has(#worldsView:not([style*="none"]), #quizView:not([style*="none"]),
+    #personalControls:not([style*="none"])) .main-content { padding-inline: 24px !important; }
+  body:has(#personalControls:not([style*="none"])) { --content-max: 1060px; }
+  .sync-status-bar { max-width: min(var(--content-max), calc(100vw - 28px)); }
+  .worlds-hero { text-align: start; margin-block-end: 16px; }
+  #worldsView:not([style*="none"]):has(> .worlds-tabs:not([hidden])) {
+    display: grid !important;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: end;
+    gap: 18px 24px;
+  }
+  .main-content:has(#worldsView:not([style*="none"]) > .worlds-tabs:not([hidden])) > .page-header { display: none; }
+  #worldsView > .worlds-hero, #worldsView > .worlds-tabs { margin: 0; }
+  #worldsView > .worlds-tab-panel { grid-column: 1 / -1; }
+  .published-card-grid, .worlds-grid {
+    grid-template-columns: repeat(auto-fill, minmax(min(100%, 237px), 1fr));
+    gap: 16px;
+  }
+  .published-card, .world-card, .quiz-mode-card { min-width: 0; overflow-wrap: anywhere; }
+  .published-active-journey { padding: 15px 18px; gap: 14px; }
+  .published-active-journey-copy strong { font-size: .95rem; }
+  .published-content-view:has(> .published-card-grid) {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 16px;
+  }
+  .published-content-view:has(> .published-card-grid) > :is(.published-active-journey, .published-hub-intro) {
+    margin-block-end: 0;
+  }
+  .published-route-view:has(.published-level-section, .published-journey-rail, .published-word-toolbar) {
+    max-width: 940px;
+    margin-inline: auto;
+  }
+  .published-gate-quiz-card { width: min(100%, 680px); }
+  .quiz-view { justify-content: flex-start; min-height: auto; padding-block: 6px 16px; }
+  .quiz-modes-view { max-width: 100%; padding: clamp(20px, 2.4vw, 32px); }
+  .quiz-mode-group + .quiz-mode-group { margin-block-start: 20px; }
+  .quiz-modes-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); margin-top: 12px; }
+  .quiz-mode-card { text-align: start; min-height: 132px; }
+  .quiz-mode-group > p { max-width: 76ch; }
+  #quizView :is(.quiz-play-view, #quizViewCard) { width: 100%; max-width: 680px; }
+  #quizView #quizViewCard { max-width: 560px; }
+  #quizView #quizMatchingView { max-width: 760px; }
+  #quizViewCard :is(.card-container, .quiz-controls) { max-width: none; }
+  body.quiz-active .main-content { padding-top: clamp(24px, 5dvh, 48px) !important; }
+  body.quiz-active .main-content > .page-header { max-width: 680px; margin-inline: auto; }
+  #quizView .quiz-challenge-card { min-height: 242px; }
+  #quizView .quiz-card-bar { max-width: none; }
+  .gate-lesson-overlay { padding-block: clamp(14px, 3.5dvh, 42px); }
+  .gate-lesson { width: min(100%, 800px); }
+  .gate-lesson-workspace, .gate-lesson-footer { width: min(100%, 660px); justify-self: center; }
+}
+
+@media (min-width: 1000px) {
+  .published-content-view:has(> .published-card-grid):has(> .published-active-journey) {
+    grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr);
+  }
+  .published-content-view > .published-card-grid { grid-column: 1 / -1; }
+  .quiz-mode-group .quiz-mode-runner .runner-mode-preview {
+    width: min(100%, 186px);
+    height: auto;
+    aspect-ratio: 240 / 132;
+    margin-inline: 0;
+  }
+}
+
+@media (min-width: 940px) {
+  .dictionary-layout:has(#personalControls:not([style*="none"])) {
+    display: grid;
+    grid-template-columns: minmax(0, .96fr) minmax(0, 1.04fr);
+    align-items: start;
+    gap: clamp(18px, 2vw, 26px);
+  }
+  .dictionary-layout:has(#personalControls:not([style*="none"])) :is(.dictionary-workspace, .dictionary-list-panel) {
+    display: block;
+    min-width: 0;
+  }
+  .dictionary-workspace {
+    position: sticky;
+    top: calc(var(--legend-top-h) + max(24px, env(safe-area-inset-top)) + var(--sync-status-offset, 0px));
+    max-height: calc(100dvh - var(--legend-top-h) - 132px - var(--sync-status-offset, 0px));
+    overflow: auto;
+    scrollbar-width: thin;
+    padding: 1px 3px 8px;
+  }
+  .dictionary-workspace > #personalControls { margin-block: 0 12px; }
+  .dictionary-workspace:has(#personalControls:not([style*="none"]):not(.selection-hidden)) .dictionary-detail:not([hidden]) { display: block; margin-block: 0; overflow-wrap: anywhere; }
+  .dictionary-detail-header {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px 14px;
+    margin-block-end: 8px;
+  }
+  .dictionary-detail-header h2 { color: var(--text-white); margin: 0; font-size: clamp(1.35rem, 2.3vw, 1.85rem); }
+  .dictionary-detail-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; }
+  .dictionary-detail .meaning-text { margin-block: 0 8px; }
+  .dictionary-detail .word-card-details { display: grid; margin-block: 14px 0; }
+  .dictionary-detail .word-detail-row {
+    grid-template-columns: minmax(104px, max-content) minmax(0, 1fr);
+    justify-items: start;
+    align-items: baseline;
+    gap: 8px;
+    min-width: 0;
+  }
+  .dictionary-detail .word-detail-row > span { text-align: start; }
+  .dictionary-layout #list .word-card .word-card-details { display: none; }
+  .dictionary-layout .word-card.dictionary-detail-selected { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 8%, var(--card-bg)); }
+  .dictionary-list-panel .search-bar-row { margin-block-start: 0; }
+  .dictionary-detail :is(button, a):focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+}
+
+@media (max-height: 660px) {
+  .gate-lesson { --lesson-gap: 10px; }
+  .gate-lesson-header { padding-block: 8px 5px; }
+  .gate-lesson-meter { padding-block-end: 9px; }
+  .gate-lesson-stage { padding-block-start: 12px; scroll-padding-block: 12px; }
+  .gate-lesson-overlay { padding-block: 0; }
+  #quizView .quiz-challenge-card { min-height: 0; padding-block: 16px; gap: 12px; }
+  #quizViewCard .card-container { min-height: 240px; height: 46dvh; margin-block-end: 14px; }
+}
+
+@media (min-width: 769px) and (max-height: 660px) {
+  .gate-lesson-overlay { padding-block: 10px; }
+}
+
+@media (min-width: 940px) and (max-height: 420px) {
+  .dictionary-workspace { position: static; max-height: none; overflow: visible; }
+}

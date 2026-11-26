@@ -125,6 +125,78 @@ function renderWordCardDetails(w) {
   return content ? `<div class="example-box word-card-details">${content}</div>` : '';
 }
 
+const dictionaryDetailMedia = window.matchMedia('(min-width: 940px)');
+let dictionaryDetailSelection = null;
+let dictionaryDetailMarkup = '';
+
+function selectDictionaryWordDetail(id, { toggle = false, focus = false } = {}) {
+  if (!dictionaryDetailMedia.matches) return;
+  const scope = getAddFormDraftScope();
+  const key = String(id);
+  const selected = dictionaryDetailSelection;
+  dictionaryDetailSelection = toggle && selected?.scope === scope && selected.id === key ? null : { scope, id: key };
+  renderDictionaryWordDetail();
+  const title = document.getElementById('dictionaryDetailTitle');
+  if (title) {
+    const workspace = title.closest('.dictionary-workspace');
+    workspace.scrollTop = 0;
+    const headingBounds = title.getBoundingClientRect();
+    const workspaceBounds = workspace.getBoundingClientRect();
+    if (headingBounds.bottom > workspaceBounds.bottom) {
+      workspace.scrollTop = headingBounds.top - workspaceBounds.top - 12;
+    }
+    if (focus) title.focus({ preventScroll: true });
+  }
+}
+
+function renderDictionaryWordDetail(indexMap) {
+  const panel = document.getElementById('dictionaryWordDetail');
+  if (!panel) return;
+  const selection = dictionaryDetailSelection;
+  const showSelection = dictionaryDetailMedia.matches && isEditableDictionaryView() && !editId && !isBulkDeleteMode &&
+    selection?.scope === getAddFormDraftScope();
+  const word = showSelection && (indexMap
+    ? window.words[indexMap.get(selection.id)]
+    : window.words.find(item => String(item.id) === selection.id));
+  panel.hidden = !word;
+  const selectionId = word ? selection.id : null;
+  document.querySelectorAll('#list .word-card').forEach(card => {
+    const selected = card.dataset.id === selectionId;
+    card.classList.toggle('dictionary-detail-selected', selected);
+    card.setAttribute('aria-expanded', String(dictionaryDetailMedia.matches ? selected : card.classList.contains('show-example')));
+    if (dictionaryDetailMedia.matches) card.setAttribute('aria-controls', 'dictionaryWordDetail');
+    else card.removeAttribute('aria-controls');
+  });
+  if (!word) {
+    if (panel.firstElementChild) panel.replaceChildren();
+    dictionaryDetailMarkup = '';
+    return;
+  }
+  const id = escapeHtml(selectionId);
+  const markup = `
+    <header class="dictionary-detail-header">
+      <h2 id="dictionaryDetailTitle" dir="ltr" lang="en" tabindex="-1">${escapeHtml(word.word)}</h2>
+      <div class="dictionary-detail-actions">
+        <button type="button" class="icon-circle sound-btn" aria-label="نطق الكلمة" data-action="sound" data-id="${id}"><i class="fas fa-volume-up" aria-hidden="true"></i></button>
+        <button type="button" class="star-btn ${word.starred ? 'active' : ''}" aria-label="كلمة صعبة" aria-pressed="${Boolean(word.starred)}" data-action="star" data-id="${id}"><i class="fas fa-star" aria-hidden="true"></i></button>
+        <button type="button" class="icon-circle edit-btn" aria-label="تعديل الكلمة" data-action="edit" data-id="${id}"><i class="fas fa-edit" aria-hidden="true"></i></button>
+        <button type="button" class="icon-circle del-btn" aria-label="حذف الكلمة" data-action="delete" data-id="${id}"><i class="fas fa-trash-alt" aria-hidden="true"></i></button>
+      </div>
+    </header>
+    <p class="meaning-text" dir="auto">${escapeHtml(wordDetailText(word.meaning))}</p>
+    ${word.category ? `<span class="cat-tag tag-${safeClassToken(word.category)}">${escapeHtml(word.category)}</span>` : ''}
+    ${word.partOfSpeech ? `<span class="pos-tag" dir="auto">${escapeHtml(word.partOfSpeech)}</span>` : ''}
+    ${renderWordCardDetails(word)}
+  `;
+  if (dictionaryDetailMarkup === markup) return;
+  const focused = panel.contains(document.activeElement) ? document.activeElement.dataset.action : '';
+  panel.innerHTML = markup;
+  dictionaryDetailMarkup = markup;
+  if (focused) panel.querySelector(`[data-action="${focused}"]`)?.focus({ preventScroll: true });
+}
+
+dictionaryDetailMedia.addEventListener('change', () => renderDictionaryWordDetail());
+
 function renderWordCard(w, query, indexMap) {
   const ri   = indexMap?.get(String(w.id)) ?? window.words.findIndex(x => x.id === w.id);
   const drag = isReorderMode
@@ -346,6 +418,7 @@ function renderDictionaryWindow(options = {}) {
       list.dataset.emptyKey = snapshot.key;
     }
     wordVirtualState.total = 0;
+    renderDictionaryWordDetail(snapshot.indexMap);
     return;
   }
   delete list.dataset.emptyKey;
@@ -362,6 +435,7 @@ function renderDictionaryWindow(options = {}) {
   const range = snapshot.heights.range(Math.max(0, scrollY - listTop), window.innerHeight, 12);
   const displayWords = snapshot.filtered.slice(range.start, range.end);
   reconcileDictionaryCards(list, displayWords, snapshot, query, range.start, range.end);
+  renderDictionaryWordDetail(snapshot.indexMap);
   if (pages) {
     const buckets = [...new Set(displayWords.map(word => Math.floor(snapshot.indexMap.get(String(word.id)) / 80)))];
     const observed = query ? displayWords : buckets.slice(0, 2).flatMap(bucket => window.words.slice(bucket * 80, bucket * 80 + 80));
@@ -427,10 +501,11 @@ document.addEventListener('DOMContentLoaded', () => {
   list.addEventListener('keydown', (event) => {
     if ((event.key !== 'Enter' && event.key !== ' ') || !event.target.matches('.word-card')) return;
     event.preventDefault();
-    handleLiClick(Number(event.target.dataset.index), event.target);
+    handleLiClick(Number(event.target.dataset.index), event.target, { focusDetail: true });
   });
 
-  list.addEventListener('click', (e) => {
+  document.querySelector('.dictionary-layout')?.addEventListener('click', (e) => {
+    if (!list.contains(e.target) && !e.target.closest('#dictionaryWordDetail')) return;
     const target = e.target.closest('[data-action]');
     if (!target) return;
 

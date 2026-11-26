@@ -483,6 +483,8 @@ function writeAddFormDraftToDom(draft = {}) {
 
 function resetAddFormEditState() {
   editId = null;
+  const cancel = document.getElementById('dictionaryCancelEdit');
+  if (cancel) cancel.hidden = true;
   const btn = document.getElementById('addBtn');
   if (!btn) return;
   btn.disabled = false;
@@ -491,7 +493,7 @@ function resetAddFormEditState() {
 }
 
 window.saveActiveAddFormDraft = function() {
-  if (window.__restoringAddFormDraft || !isEditableDictionaryView()) return;
+  if (editId || window.__restoringAddFormDraft || !isEditableDictionaryView()) return;
   writeDictionaryDraft(addFormDrafts, DICTIONARY_DRAFT_PREFIX, getAddFormDraftScope(), readAddFormDraftFromDom());
 };
 
@@ -501,10 +503,17 @@ function restoreActiveAddFormDraft() {
   restoreNormalSearch(scope);
 }
 
+window.cancelDictionaryEdit = function() {
+  if (!editId) return;
+  restoreActiveAddFormDraft();
+  renderDictionaryWordDetail();
+  document.getElementById('wordInput')?.focus({ preventScroll: true });
+};
+
 function resetActiveAddFormDraft() {
   const scope = getAddFormDraftScope();
   writeDictionaryDraft(addFormDrafts, DICTIONARY_DRAFT_PREFIX, scope, null);
-  writeDictionaryDraft(normalSearchRecords, DICTIONARY_SEARCH_PREFIX, scope, null);
+  clearNormalSearch(scope);
 }
 
 function initAddFormDraftTracking() {
@@ -666,6 +675,11 @@ window.addWord = async function() {
       detail: { id: savedWord.id, owner: context.owner, scope: context.worldId ? 'custom-world' : 'personal' },
     }));
     if (!isDictionaryWriteContextCurrent(context) || !sameDraft()) return true;
+    if (editingId) {
+      restoreActiveAddFormDraft();
+      renderDictionaryWordDetail();
+      return true;
+    }
     editId = null;
     btn.innerHTML = 'إضافة للقاموس <i class="fa-solid fa-floppy-disk"></i>';
     btn.style.background = '';
@@ -703,16 +717,26 @@ window.editWord = function(id, event) {
   suppressStrayQuizUi();
   // Editable dictionaries share the same inputs. Non-editable views go back to personal.
   if (!isEditableDictionaryView()) loadPersonalDictionary();
+  window.saveActiveAddFormDraft();
+  editId = id;
+  const cancel = document.getElementById('dictionaryCancelEdit');
+  if (cancel) cancel.hidden = false;
   document.getElementById('wordInput').value     = item.word;
   document.getElementById('meaningInput').value  = item.meaning;
   document.getElementById('exampleInput').value  = item.example || '';
   setCategoryDropdownValue(item.category || 'عام');
   setAddFormExpanded(true);
-  editId = id;
+  selectDictionaryWordDetail(id);
+  renderNormalSearch(getAddFormDraftScope());
   const btn = document.getElementById('addBtn');
   btn.innerHTML = 'تحديث الكلمة <i class="fa-solid fa-floppy-disk"></i>';
   btn.style.background = 'var(--accent)';
-  window.scrollTo({ top: 0, behavior: 'smooth' });
+  if (dictionaryDetailMedia.matches) {
+    document.querySelector('.dictionary-workspace')?.scrollTo({ top: 0 });
+    document.getElementById('wordInput')?.focus({ preventScroll: true });
+  } else {
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  }
 };
 
 // ═══════════════════════════════════════════════════════
@@ -1114,8 +1138,13 @@ window.toggleStar = async function(id, event) {
   if (pending.has(key)) return false;
   pending.set(key, true);
   const previous = Boolean(word.starred), next = !previous;
-  const btn = event?.target?.closest?.('.star-btn') || [...document.querySelectorAll('[data-action="star"]')].find(button => String(button.dataset.id) === String(id));
-  const paint = value => { btn?.classList.toggle('active', value); btn?.setAttribute('aria-pressed', String(value)); };
+  const buttons = [...document.querySelectorAll('[data-action="star"]')].filter(button => String(button.dataset.id) === String(id));
+  const btn = event?.target?.closest?.('.star-btn') || buttons[0];
+  if (btn && !buttons.includes(btn)) buttons.push(btn);
+  const paint = value => buttons.forEach(button => {
+    button.classList.toggle('active', value);
+    button.setAttribute('aria-pressed', String(value));
+  });
   if (btn) { btn.disabled = true; btn.setAttribute('aria-busy', 'true'); }
   paint(next);
   let persisted = false, updatedWord = null;
@@ -1462,6 +1491,7 @@ window.submitSuggestionFromUI = async function(wordEnc, arEnc, gameEnc, ev) {
 
 async function addAiMeaningCore({ word, ar, pos, ex, game }, btn) {
   const context = captureDictionaryWriteContext();
+  const searchScope = getAddFormDraftScope();
   const sync = window.LootLinguaDictionarySync;
   if (!sync?.unavailable() && await window.LootLinguaDictionaryPages?.requireComplete({ personal: !context.worldId }) === false) {
     if (!sync?.unavailable()) return;
@@ -1549,6 +1579,7 @@ async function addAiMeaningCore({ word, ar, pos, ex, game }, btn) {
       pushNotification(`تمت الإضافة إلى ${getActiveDictionaryMessageLabel()}!`, 'success');
       added = true;
     }
+    if (added) completeNormalSearch(searchScope, word);
     if (added && btn) {
       btn.disabled = true;
       btn.innerHTML = '<i class="fa-solid fa-check" aria-hidden="true"></i><span>تمت الإضافة</span>';
@@ -1563,6 +1594,7 @@ async function addAiMeaningCore({ word, ar, pos, ex, game }, btn) {
       if (!guestPersisted) window.words = window.words.filter(item => item !== guestWord);
     }
     if (cloudAccepted || guestPersisted) {
+      completeNormalSearch(searchScope, word);
       pushNotification('حُفظت الكلمة في حسابك، لكن تعذّر تحديث العرض المحلي بالكامل.', 'warning');
       if (btn) { btn.disabled = true; btn.classList.add('sug-added'); btn.innerHTML = '<i class="fa-solid fa-check" aria-hidden="true"></i><span>تمت الإضافة</span>'; }
       return;
@@ -1795,6 +1827,22 @@ function writeNormalSearch(scope, record) {
   writeDictionaryDraft(normalSearchRecords, DICTIONARY_SEARCH_PREFIX, scope, record);
 }
 
+function clearNormalSearch(scope) {
+  normalSearchRequests.delete(scope);
+  writeNormalSearch(scope, null);
+}
+
+function completeNormalSearch(scope, word) {
+  if (normalSearchRecord(scope)?.word !== word) return;
+  clearNormalSearch(scope);
+  if (isEditableDictionaryView() && getAddFormDraftScope() === scope && !editId &&
+      document.getElementById('wordInput')?.value.trim() === word &&
+      !document.getElementById('meaningInput')?.value.trim()) {
+    clearInputs();
+  }
+  renderNormalSearch(scope);
+}
+
 const slowSearchFacts = [
   'النجمة تجمع الكلمات التي تريد الرجوع إليها في صفحة الكلمات الصعبة.',
   'يمكنك نسخ الكلمة إلى عالم خاص وإبقاؤها في قاموسك الشخصي.',
@@ -1812,32 +1860,50 @@ function renderNormalSearch(scope) {
   const word = input.value.trim();
   const record = normalSearchRecord(scope);
   const locked = isGuestSearchLocked('normal');
-  const pending = record?.status === 'pending';
+  const pending = !editId && record?.status === 'pending';
   const matches = word === record?.word;
   const heading = document.getElementById('suggestionsHeading');
-  if (heading) heading.hidden = !(matches && record.status === 'success' && !record.hidden && !record.selected);
-  button.disabled = locked || pending;
+  if (heading) heading.hidden = !(!editId && matches && record.status === 'success' && !record.hidden && !record.selected);
+  button.disabled = Boolean(editId) || locked || pending;
   button.setAttribute('aria-busy', String(pending));
   button.textContent = pending ? 'جارٍ البحث…' : 'ابحث عن معنى';
   list.replaceChildren();
   box.style.display = 'none';
   clearGamerSuggestionsUI();
+  if (editId) return;
 
-  function addAction(label, callback) {
+  function addAction(label, callback, container = list) {
     const action = document.createElement('button');
     action.type = 'button';
     action.className = 'entry-secondary dictionary-search-recovery';
     action.textContent = label;
     action.addEventListener('click', callback);
-    list.append(action);
+    container.append(action);
   }
 
   if (record && !matches && ['success', 'pending', 'interrupted'].includes(record.status)) {
-    box.style.display = 'block';
+    const recovery = document.createElement('div');
+    recovery.className = 'dictionary-resume-search';
     addAction(`العودة إلى البحث عن «${record.word}»`, () => {
+      if (record.status === 'success') writeNormalSearch(scope, { ...record, selected: false, hidden: false });
       input.value = record.word;
       input.dispatchEvent(new Event('input', { bubbles: true }));
+      input.focus();
+    }, recovery);
+    const dismiss = document.createElement('button');
+    dismiss.type = 'button';
+    dismiss.className = 'dictionary-search-dismiss';
+    dismiss.setAttribute('aria-label', 'إلغاء البحث السابق');
+    dismiss.textContent = '×';
+    dismiss.addEventListener('click', () => {
+      if (normalSearchRecord(scope) !== record) return;
+      clearNormalSearch(scope);
+      renderNormalSearch(scope);
+      input.focus();
     });
+    recovery.append(dismiss);
+    list.append(recovery);
+    box.style.display = 'block';
     return;
   }
   if (matches && record.selected && record.status === 'success' && !document.getElementById('meaningInput')?.value.trim()) {
@@ -1919,7 +1985,8 @@ async function runNormalSearch(scope, record, recover = false) {
   const generation = Number(window.__lootlinguaAuthGeneration) || 0;
   const sameOwner = () => generation === (Number(window.__lootlinguaAuthGeneration) || 0);
   const pending = { ...record, startedAt: record.startedAt || Date.now(), selected: false, status: 'pending' };
-  normalSearchRequests.set(scope, generation);
+  const request = { generation };
+  normalSearchRequests.set(scope, request);
   writeNormalSearch(scope, pending);
   renderNormalSearch(scope);
   let result;
@@ -1928,13 +1995,13 @@ async function runNormalSearch(scope, record, recover = false) {
     for (let attempt = 0; record.requestId && attempt < 30 &&
       (result.pending || (recover && result.missing && attempt < 2)); attempt += 1) {
       await new Promise((resolve) => setTimeout(resolve, 4500));
-      if (!sameOwner()) return;
+      if (!sameOwner() || normalSearchRequests.get(scope) !== request) return;
       result = await fetchAiMeaningsWithCache(record.word, 'normal', { requestId: record.requestId, recover: true });
     }
   } catch (error) {
     result = { status: recover ? 'interrupted' : error.code === 403 ? 'blocked' : 'error' };
   } finally {
-    if (normalSearchRequests.get(scope) === generation) normalSearchRequests.delete(scope);
+    if (normalSearchRequests.get(scope) === request) normalSearchRequests.delete(scope);
     if (sameOwner() && normalSearchRecord(scope) === pending) {
       const data = result?.data || [];
       const status = result?.status || (result?.pending || result?.missing ? 'interrupted' : data.length ? 'success' : 'empty');
@@ -1947,13 +2014,14 @@ async function runNormalSearch(scope, record, recover = false) {
 function restoreNormalSearch(scope) {
   const record = normalSearchRecord(scope);
   const generation = Number(window.__lootlinguaAuthGeneration) || 0;
-  if (record?.status === 'pending' && normalSearchRequests.get(scope) !== generation) {
+  if (record?.status === 'pending' && normalSearchRequests.get(scope)?.generation !== generation) {
     normalSearchRequests.delete(scope);
-    if (record.requestId && !isAiUserLoggedIn()) {
+    if (record.requestId && !isAiUserLoggedIn() &&
+        document.getElementById('wordInput')?.value.trim() === record.word) {
       void runNormalSearch(scope, record, true);
       return;
     }
-    writeNormalSearch(scope, { ...record, status: 'error' });
+    writeNormalSearch(scope, { ...record, status: 'interrupted' });
   }
   renderNormalSearch(scope);
 }
@@ -1973,7 +2041,7 @@ window.getPersonalDictionarySearchDraft = () => {
 
 window.fetchSuggestions = async function() {
   const popover = window.LootLinguaPopover;
-  if (popover?.isReadingAction?.(document.getElementById('searchBtn'))) return;
+  if (editId || popover?.isReadingAction?.(document.getElementById('searchBtn'))) return;
   const word = document.getElementById('wordInput')?.value.trim();
   if (!word) { showToast('اكتب الكلمة أولاً!'); return; }
   const scope = getAddFormDraftScope();
@@ -2450,7 +2518,7 @@ function drop(ev, dropIndex) {
   render();
 }
 
-function handleLiClick(index, el) {
+function handleLiClick(index, el, { focusDetail = false } = {}) {
   if (isReorderMode) {
     const word = window.words[index];
     if (!word) return;
@@ -2468,6 +2536,10 @@ function handleLiClick(index, el) {
   } else {
     const word = window.words[index];
     if (word) {
+      if (dictionaryDetailMedia.matches) {
+        selectDictionaryWordDetail(word.id, { toggle: true, focus: focusDetail });
+        return;
+      }
       word.expanded = !word.expanded;
       if (word.expanded) window.ensureWordCardDetails?.(word, el);
       // Expansion is transient UI state; preserve the virtual window and scroll position.

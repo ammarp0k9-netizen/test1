@@ -66,6 +66,8 @@ test('opening one card among 180 words only updates that card and preserves scro
   const context = vm.createContext({
     window: { words, scrollY: 912 },
     isReorderMode: false,
+    dictionaryDetailMedia: { matches: false },
+    selectDictionaryWordDetail: (id, options) => calls.push(['desktop', id, options.toggle]),
     persistDictionary() {
       throw new Error('full persistence must not run for expansion');
     },
@@ -80,6 +82,13 @@ test('opening one card among 180 words only updates that card and preserves scro
     ['toggle', 'show-example', true],
     ['attribute', 'aria-expanded', 'true'],
   ]);
+  assert.equal(context.window.scrollY, 912);
+
+  calls.length = 0;
+  context.dictionaryDetailMedia.matches = true;
+  vm.runInContext('handleLiClick(156, element);', context);
+  assert.deepEqual(calls, [['desktop', 'word-156', true]]);
+  assert.equal(words[156].expanded, false);
   assert.equal(context.window.scrollY, 912);
 });
 

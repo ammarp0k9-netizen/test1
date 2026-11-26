@@ -93,6 +93,7 @@
   <link rel="stylesheet" href="motivation.css?v=20261106-motivation-1">
   <link rel="stylesheet" href="glass-theme.css?v=20261106-materials-1">
   <link rel="stylesheet" href="saved-guest.css?v=full-merge-1">
+  <link rel="stylesheet" href="responsive-layout.css?v=1">
 </head>
 <body class="legend-dock-visible">
 
@@ -223,6 +224,8 @@
   </button>
 
   <!-- بطاقة الإضافة (تُخفى عند قواميس الألعاب) -->
+  <div class="dictionary-layout">
+  <div class="dictionary-workspace">
   <div class="card-box" id="personalControls">
     <div id="normalSearchZone" class="search-zone" data-search-type="normal">
       <div class="search-zone-inner dictionary-search-row">
@@ -240,6 +243,7 @@
       <i class="fa-solid fa-chevron-down" aria-hidden="true"></i>
       <span class="sr-only">إظهار الحقول الإضافية</span>
     </button>
+    <button type="button" id="dictionaryCancelEdit" class="entry-secondary" onclick="cancelDictionaryEdit()" hidden>إلغاء التعديل</button>
     <div id="suggestionsBox">
       <p id="suggestionsHeading" style="font-size:13px; color:var(--accent); font-weight:bold; margin:0; padding:10px 14px 4px;">اختر المعنى الأنسب</p>
       <div id="suggestionsList"></div>
@@ -265,6 +269,10 @@
       </div>
     </div>
   </div>
+
+  <section id="dictionaryWordDetail" class="card-box dictionary-detail" aria-labelledby="dictionaryDetailTitle" hidden></section>
+  </div>
+  <div class="dictionary-list-panel">
 
   <!-- ── مربع بحث الكلمات الصعبة (مخفي افتراضياً) ── -->
   <div id="starredSearchBar" class="game-search-bar" style="display:none;">
@@ -346,6 +354,8 @@
   </div>
 
   <ul id="list"></ul>
+  </div>
+  </div>
 
   <!-- ══ QUIZ FULL-PAGE VIEW (مخفي افتراضياً) ══ -->
   <div id="quizView" class="quiz-view" style="display:none;">
@@ -354,12 +364,14 @@
       <div><strong data-sync-title></strong><span data-sync-copy></span></div>
     </aside>
     <button type="button" class="published-action-btn" data-quiz-result-exit onclick="leaveQueuedQuizResult()" hidden>متابعة التعلّم</button>
-    <button type="button" class="quiz-exit-btn btn-icon-tip" data-tip="رجوع للقاموس" onclick="requestQuizExit('personal')"><i class="fas fa-arrow-right"></i></button>
     <!-- ══تجربة اضافة درجات صعوبة الإختبارات ══ --> 
 
     <!-- Quiz Modes -->
     <div id="quizViewSetup" class="quiz-view-setup quiz-modes-view">
-      <h3><i class="fa-solid fa-brain" aria-hidden="true"></i> اختر كيف تراجع كلماتك</h3>
+      <header class="quiz-panel-header">
+        <button type="button" class="quiz-exit-btn btn-icon-tip" data-tip="رجوع للقاموس" aria-label="العودة إلى القاموس" onclick="requestQuizExit('personal')"><i class="fas fa-arrow-right" aria-hidden="true"></i></button>
+        <h3><i class="fa-solid fa-brain" aria-hidden="true"></i> اختر كيف تراجع كلماتك</h3>
+      </header>
       <button type="button" id="quizReturnToGate" class="published-action-btn" onclick="returnToQuizGate()" hidden><i class="fa-solid fa-arrow-right" aria-hidden="true"></i> العودة إلى البوابة</button>
       <p class="quiz-available-count" id="quizAvailableCount">الكلمات المتاحة: 0</p>
       <p id="quizPracticeLock" class="gate-runner-review-lock" hidden></p>
@@ -414,8 +426,10 @@
 
     <!-- Quiz Settings -->
     <div id="quizSettingsPanel" class="quiz-view-setup quiz-settings-panel" style="display:none;">
-      <button type="button" class="quiz-settings-back" onclick="showQuizModes()"><i class="fa-solid fa-arrow-right" aria-hidden="true"></i></button>
-      <h3 id="quizSettingsTitle">إعدادات الاختبار</h3>
+      <header class="quiz-panel-header">
+        <button type="button" class="quiz-settings-back" aria-label="العودة إلى أوضاع الاختبار" onclick="showQuizModes()"><i class="fa-solid fa-arrow-right" aria-hidden="true"></i></button>
+        <h3 id="quizSettingsTitle">إعدادات الاختبار</h3>
+      </header>
       <p id="quizSettingsDesc">اضبط التحدي قبل ما تبدأ.</p>
       <div id="runnerSetupBrief" class="runner-setup-brief" hidden>
         <span>٣ مسارات</span><span>↑ قفز · ↓ انزلاق</span><span>♥ ٣ فرص</span>
@@ -469,8 +483,8 @@
     </div>
     <!-- Quiz Flashcard -->
     <div id="quizViewCard" style="display:none;">
-      <button type="button" class="quiz-play-exit btn-icon-tip" data-tip="خروج" onclick="requestQuizExit()"><i class="fa-solid fa-arrow-right" aria-hidden="true"></i></button>
       <div class="quiz-card-meta">
+        <button type="button" class="quiz-play-exit btn-icon-tip" data-tip="خروج" aria-label="الخروج من الاختبار" onclick="requestQuizExit()"><i class="fa-solid fa-arrow-right" aria-hidden="true"></i></button>
         <span id="quizCardCounter">1 / 10</span>
       </div>
       <div class="quiz-card-bar"><div id="quizCardProgress"></div></div>
@@ -497,8 +511,8 @@
     </div>
     <!-- Quiz Time Attack -->
     <div id="quizTimeAttackView" class="quiz-play-view" style="display:none;">
-      <button type="button" class="quiz-play-exit btn-icon-tip" data-tip="خروج" onclick="requestQuizExit()"><i class="fa-solid fa-arrow-right" aria-hidden="true"></i></button>
       <div class="quiz-card-meta">
+        <button type="button" class="quiz-play-exit btn-icon-tip" data-tip="خروج" aria-label="الخروج من الاختبار" onclick="requestQuizExit()"><i class="fa-solid fa-arrow-right" aria-hidden="true"></i></button>
         <span id="timeAttackCounter">1 / 10</span>
         <span id="timeAttackHp" class="time-attack-hp" aria-live="polite"></span>
         <span id="timeAttackTimer">15s</span>
@@ -512,8 +526,8 @@
     </div>
     <!-- Quiz Scramble -->
     <div id="quizScrambleView" class="quiz-play-view" style="display:none;">
-      <button type="button" class="quiz-play-exit btn-icon-tip" data-tip="خروج" onclick="requestQuizExit()"><i class="fa-solid fa-arrow-right" aria-hidden="true"></i></button>
       <div class="quiz-card-meta">
+        <button type="button" class="quiz-play-exit btn-icon-tip" data-tip="خروج" aria-label="الخروج من الاختبار" onclick="requestQuizExit()"><i class="fa-solid fa-arrow-right" aria-hidden="true"></i></button>
         <span id="scrambleCounter">1 / 10</span>
       </div>
       <div class="quiz-card-bar"><div id="scrambleProgress"></div></div>
@@ -527,8 +541,8 @@
     </div>
     <!-- Quiz Matching -->
     <div id="quizMatchingView" class="quiz-play-view quiz-matching-view" style="display:none;">
-      <button type="button" class="quiz-play-exit btn-icon-tip" data-tip="خروج" onclick="requestQuizExit()"><i class="fa-solid fa-arrow-right" aria-hidden="true"></i></button>
       <div class="quiz-card-meta">
+        <button type="button" class="quiz-play-exit btn-icon-tip" data-tip="خروج" aria-label="الخروج من الاختبار" onclick="requestQuizExit()"><i class="fa-solid fa-arrow-right" aria-hidden="true"></i></button>
         <span id="matchingCounter">المجموعة 1 / 1</span>
         <span id="matchingScoreHint">اربط كل كلمة بمعناها</span>
       </div>
@@ -1309,13 +1323,13 @@
 <script type="module" src="js/daily-streak.mjs?v=streak-days-1"></script>
 <script src="js/xp.js?v=reliable-sync-2"></script>
 <script src="js/xp-batch.js?v=20261105-integrity-1"></script>
-<script src="js/dictionary.js?v=reliable-sync-2"></script>
+<script src="js/dictionary.js?v=reliable-sync-2-responsive-1"></script>
 <script src="js/gate-game-migration.js?v=20261007-1"></script>
 <script src="js/gate-runner.js?v=quiz-classification-1"></script>
 <script src="js/loot-bots.js?v=20261113-automatic-performance"></script>
 <script src="js/worlds.js?v=reliable-sync-2"></script>
 <script src="js/dictionary-window.js?v=20261105-render-1"></script>
-<script src="js/dictionary-render.js?v=20261107-word-visibility-1"></script>
+<script src="js/dictionary-render.js?v=responsive-1"></script>
 <script src="js/srs.js?v=reliable-sync-2"></script>
 <script src="js/popover-overrides.js?v=20260817-1"></script>
 <script src="js/quiz.js?v=reliable-sync-2"></script>
