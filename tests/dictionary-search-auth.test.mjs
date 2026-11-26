@@ -79,3 +79,34 @@ test('a response finishing after an auth change cannot consume trials or publish
   await Promise.resolve(); await Promise.resolve(); h.switchOwner('b'); gate.resolve();
   await assert.rejects(pending, { code: 401 }); assert.equal(h.calls.cacheWrites, 0); assert.deepEqual(h.calls.guestUsed, []);
 });
+
+test('dismissing a search restored from storage removes the pending record', () => {
+  const records = new Map([['search:personal', JSON.stringify({ word: 'journey', status: 'success' })]]);
+  function element() {
+    return {
+      children: [], style: {}, isConnected: true,
+      append(child) { this.children.push(child); },
+      replaceChildren() { this.children = []; },
+      setAttribute() {},
+      addEventListener(_event, callback) { this.click = callback; },
+      focus() {},
+    };
+  }
+  const nodes = Object.fromEntries(['wordInput', 'searchBtn', 'suggestionsBox', 'suggestionsList'].map(id => [id, element()]));
+  nodes.wordInput.value = 'harbor';
+  const context = vm.createContext({
+    document: { getElementById: id => nodes[id], createElement: element },
+    localStorage: { getItem: key => records.get(key), removeItem: key => records.delete(key) },
+    normalSearchRecords: new Map(), normalSearchRequests: new Map(), DICTIONARY_SEARCH_PREFIX: 'search:',
+    editId: null, getAddFormDraftScope: () => 'personal', isEditableDictionaryView: () => true,
+    isGuestSearchLocked: () => false, clearGamerSuggestionsUI() {},
+  });
+  vm.runInContext(source.slice(source.indexOf('function readDictionaryDraft('), source.indexOf('function readAddFormDraftFromDom(')) +
+    source.slice(source.indexOf('function normalSearchRecord('), source.indexOf('async function runNormalSearch(')), context);
+  context.renderNormalSearch('personal');
+  const dismiss = nodes.suggestionsList.children[0].children[1];
+  assert.equal(dismiss.textContent, '×');
+  dismiss.click();
+  assert.equal(records.has('search:personal'), false);
+  assert.equal(nodes.suggestionsBox.style.display, 'none');
+});

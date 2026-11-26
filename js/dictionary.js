@@ -1896,7 +1896,7 @@ function renderNormalSearch(scope) {
     dismiss.setAttribute('aria-label', 'إلغاء البحث السابق');
     dismiss.textContent = '×';
     dismiss.addEventListener('click', () => {
-      if (normalSearchRecord(scope) !== record) return;
+      if (!dismiss.isConnected || getAddFormDraftScope() !== scope) return;
       clearNormalSearch(scope);
       renderNormalSearch(scope);
       input.focus();
