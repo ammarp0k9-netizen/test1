@@ -567,7 +567,7 @@
         const resumed = await consumePendingJourneyIntent();
         const route = typeof parseAppRoute === 'function' ? parseAppRoute() : null;
         const explicitRoute = route && (route.kind !== 'view' || route.key !== 'personal');
-        if (!resumed && !explicitRoute && token === runtime.bootToken) {
+        if (!resumed && !explicitRoute && token === runtime.bootToken && !root.isDictionarySelectionActive?.()) {
           if (signals.resumableQuiz) root.loadQuizView?.();
           else if (signals.activeJourney?.worldId) {
             await root.resumePublishedLearning?.(signals.activeJourney.worldId);
@@ -1256,7 +1256,8 @@
 
   async function consumePendingJourneyIntent(options) {
     const user = runtime.user || root.auth?.currentUser;
-    if (!user || runtime.intentConsuming || (runtime.opened && !options?.allowWhileOpen)) return false;
+    const canResume = () => options?.explicitDiscovery || !root.isDictionarySelectionActive?.();
+    if (!user || runtime.intentConsuming || !canResume() || (runtime.opened && !options?.allowWhileOpen)) return false;
     const candidates = pendingIntentCandidates(user);
     if (!candidates.accountRaw && !candidates.guestRaw) return false;
     const selection = api().resolvePendingIntentCandidate(
@@ -1299,7 +1300,7 @@
     const mirrorGuestCandidate = selection.guestValid;
 
     const run = async () => {
-      if (runtime.intentConsuming) return false;
+      if (runtime.intentConsuming || !canResume()) return false;
       runtime.intentConsuming = true;
       const lease = api().sanitizePendingIntent({
         ...intent,
@@ -1314,10 +1315,13 @@
         if (!published?.getPublishedWorld || !actions?.resumePendingIntent) {
           throw Object.assign(new Error('Journey entry is not ready.'), { retryable: true });
         }
+        const world = await published.getPublishedWorld(intent.worldId);
+        if (!canResume()) {
+          throw Object.assign(new Error('Dictionary selection is active.'), { retryable: true });
+        }
         if (intent.returnTo && root.history?.replaceState) {
           try { root.history.replaceState(root.history.state, '', intent.returnTo); } catch (_) {}
         }
-        const world = await published.getPublishedWorld(intent.worldId);
         if (!world) {
           const cancelled = api().sanitizePendingIntent({
             ...intent,

@@ -1653,7 +1653,10 @@ async function resumePendingJourneyIntent(intent, world) {
   const previousError = publishedContentState.journeyError;
   if (currentView !== 'worlds' || publishedContentState.tab !== 'published' ||
       publishedContentState.route?.params?.worldId !== world.worldId) {
-    await window.openPublishedWorld(world.worldId);
+    const opening = window.openPublishedWorld(world.worldId);
+    const navigation = window.__dictionaryNavigationGeneration;
+    await opening;
+    if (currentView !== 'worlds' || navigation !== window.__dictionaryNavigationGeneration) return { restored: false };
   }
   let result;
   if (action === 'start-journey') result = await startOrResumePublishedJourney(world);
@@ -1787,6 +1790,7 @@ async function openPublishedJourneyDestination(worldId, options) {
     force: options?.force === true,
     resumePausedLevelPlacement: options?.resumePausedLevelPlacement === true,
   });
+  if (options?.isCurrent?.() === false) return null;
   const destinationWorldId = String(destination.worldId || worldId || '');
   publishedContentState.activeJourneyDestination = destination;
   if (destination.type === 'level-placement') {
@@ -1798,6 +1802,7 @@ async function openPublishedJourneyDestination(worldId, options) {
         destinationWorldId,
         destination.session.assessmentId
       );
+      if (options?.isCurrent?.() === false) return null;
       publishedContentState.levelPlacementBundle = bundle;
       publishedContentState.journey = bundle.journey;
       publishedContentState.activeJourney = bundle.journey;
@@ -1805,6 +1810,7 @@ async function openPublishedJourneyDestination(worldId, options) {
       renderPublishedLevelPlacementResult(bundle);
       return { ...destination, applied: true, bundle };
     } catch (error) {
+      if (options?.isCurrent?.() === false) return null;
       const journeyError = setPublishedJourneyError(
         error,
         'apply-level-placement-result',
@@ -1895,6 +1901,7 @@ async function startOrResumePublishedJourney(world) {
     await openPublishedJourneyDestination(resumed.worldId, {
       resumePausedLevelPlacement: !continuingWithoutTest,
       guidePlacement: continuingWithoutTest,
+      isCurrent: () => generation === window.__dictionaryNavigationGeneration && owner === window.auth?.currentUser?.uid,
     });
     return resumed;
   } catch (error) {
@@ -6801,8 +6808,14 @@ window.resumePublishedGateLesson = async function({ worldId, rankId, gateId }, e
 };
 
 window.resumePublishedLearning = async function(worldId) {
-  await window.loadWorldsView();
-  return openPublishedJourneyDestination(worldId, { resumePausedLevelPlacement: true });
+  const loading = window.loadWorldsView();
+  const navigation = window.__dictionaryNavigationGeneration;
+  const owner = window.auth?.currentUser?.uid;
+  const isCurrent = () => currentView === 'worlds' && navigation === window.__dictionaryNavigationGeneration &&
+    owner === window.auth?.currentUser?.uid;
+  await loading;
+  if (!isCurrent()) return false;
+  return openPublishedJourneyDestination(worldId, { resumePausedLevelPlacement: true, isCurrent });
 };
 
 window.addEventListener('lootlingua:gate-lesson-changed', async ({ detail }) => {

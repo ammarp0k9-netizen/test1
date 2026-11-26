@@ -625,6 +625,8 @@ window.enterSelectionMode = function(id) {
   render();
 };
 
+window.isDictionarySelectionActive = () => isBulkDeleteMode && isEditableDictionaryView();
+
 window.exitBulkDeleteMode = function(options = {}) {
   window.closeWorldManageFlow?.({ force: true });
   window.cancelDictionarySelectAll?.();

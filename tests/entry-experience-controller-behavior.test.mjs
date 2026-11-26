@@ -507,6 +507,7 @@ async function createHarness(options = {}) {
     words: clone(options.words || []),
     auth: { currentUser: initialUser },
     navigator: {},
+    isDictionarySelectionActive: () => options.dictionarySelectionActive === true,
     crypto: { randomUUID: () => `operation-${Math.random().toString(36).slice(2)}` },
     prepareGuestMigrationForUser: async () => 'none',
     loadActiveQuizSessionFromCloud: async () => clone(options.quizSession || null),
@@ -1057,6 +1058,25 @@ test('matrix: an account with a real active Journey gets the short truthful retu
   assert.deepEqual(harness.calls.resumedWorlds, ['world-active']);
   assert.equal(harness.calls.previewReads, 0);
   assert.equal(harness.calls.entrySaves.length, 0);
+});
+
+test('startup leaves an active dictionary selection in place when a journey is available', async () => {
+  const user = freshUser('dictionary-selection-active');
+  const harness = await createHarness({
+    user,
+    profileExists: true,
+    profile: { userXP: 10 },
+    dictionarySelectionActive: true,
+    activeJourney: {
+      worldId: 'world-active', activeRankId: 'rank-a1', activeGateId: 'gate-a1-1', status: 'active',
+    },
+    hasJourneyProgress: true,
+    journeyDestination: { type: 'gate', reason: 'started' },
+  });
+  assert.equal(harness.controller.getPresentation().classification, 'returning-with-progress');
+  assert.equal(harness.controller.isActive(), false);
+  assert.deepEqual(harness.calls.resumedWorlds, []);
+  assert.equal(harness.calls.resumeIntents.length, 0);
 });
 
 test('matrix: a completed-only World gets the terminal shortcut with no fake Journey preview', async () => {
