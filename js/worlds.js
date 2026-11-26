@@ -7617,27 +7617,33 @@ window.confirmDeleteCustomWorld = async function(action) {
   const worldId = pendingDeleteWorldId;
   if (!worldId) return;
   const uid = window.auth?.currentUser?.uid;
+  const generation = Number(window.__lootlinguaAuthGeneration) || 0;
+  const current = () => uid === window.auth?.currentUser?.uid && generation === (Number(window.__lootlinguaAuthGeneration) || 0);
+  const worldWords = window.isActiveCustomWorld?.(worldId)
+    ? [...window.words]
+    : readCustomWorldWordsFromStorage(worldId, uid);
+  const candidate = customWorlds.find(world => String(world.id) === String(worldId));
+  const defer = () => {
+    if (!uid || !current() || !queueCustomWorldRemoval(candidate, worldWords.map(word => word.id), action)) return false;
+    customWorlds = customWorlds.filter(world => String(world.id) !== String(worldId));
+    hideModal('deleteWorldModal');
+    pendingDeleteWorldId = null;
+    renderCustomWorldCards();
+    if (window.isActiveCustomWorld?.(worldId)) loadWorldsView();
+    return true;
+  };
   try {
-    const worldWords = window.isActiveCustomWorld?.(worldId)
-      ? [...window.words]
-      : readCustomWorldWordsFromStorage(worldId, uid);
-    const candidate = customWorlds.find(world => String(world.id) === String(worldId));
-    if (uid && window.LootLinguaCloudBackoff?.reason?.() && queueCustomWorldRemoval(candidate, worldWords.map(word => word.id), action)) {
-      customWorlds = customWorlds.filter(world => String(world.id) !== String(worldId));
-      hideModal('deleteWorldModal');
-      pendingDeleteWorldId = null;
-      renderCustomWorldCards();
-      if (window.isActiveCustomWorld?.(worldId)) loadWorldsView();
-      return;
-    }
+    if (uid && window.LootLinguaCloudBackoff?.reason?.() && defer()) return;
     let skippedDuplicates = [];
     if (action === 'move' && worldWords.length) {
       const { movable, skipped } = splitWordsByExistingInTarget('personal', worldWords);
       skippedDuplicates = skipped;
       if (movable.length) await saveWordsToTarget('personal', movable.map(makeCopiedWord));
     }
-    if (window.auth?.currentUser && window.deleteCustomWorldFromCloud) {
-      const deleted = await window.deleteCustomWorldFromCloud(worldId, { action });
+    if (!current()) return;
+    if (uid && window.deleteCustomWorldFromCloud) {
+      const deleted = await window.deleteCustomWorldFromCloud(worldId, { action, propagate: true });
+      if (!current()) return;
       if (!deleted) throw new Error('delete-world-cloud-failed');
     }
     customWorlds = customWorlds.filter(world => String(world.id) !== String(worldId));
@@ -7651,6 +7657,10 @@ window.confirmDeleteCustomWorld = async function(action) {
     if (skippedDuplicates.length) showSkippedDuplicateWordsNotice(skippedDuplicates, 'personal');
     else showToast(action === 'move' ? 'تم نقل كل الكلمات وحذف العالم' : 'تم حذف العالم', 'success');
   } catch (err) {
+    if (!current()) return;
+    if (window.LootLinguaCloudBackoff?.classify(err).temporary) {
+      try { if (defer()) return; } catch (storageError) { console.warn('deleteCustomWorld local:', storageError?.code); }
+    }
     console.warn('deleteCustomWorld:', err);
     showToast('ما قدرنا نحذف العالم سحابياً الآن. لم يتم حذف بياناته.', 'danger', 5200);
   }
