@@ -38,6 +38,37 @@ test('quota, service interruption, local connectivity and rejection are distinct
   assert.throws(() => api.assertAvailable(), { code: 'offline' });
 });
 
+test('the sync banner waits for confirmation and keeps its green state after ordinary background work', () => {
+  const h = runtime();
+  const makeNode = () => ({ hidden: false, style: { setProperty() {} }, dataset: {}, offsetHeight: 35,
+    getBoundingClientRect: () => ({ width: 360, bottom: 60 }), getClientRects: () => [{}], setAttribute() {}, addEventListener() {} });
+  const bar = makeNode();
+  const dialog = new Map();
+  bar.querySelector = key => { if (!dialog.has(key)) dialog.set(key, makeNode()); return dialog.get(key); };
+  const header = makeNode();
+  h.root.sessionStorage = storage();
+  h.context.document = { body: makeNode(), documentElement: { lang: 'ar', clientWidth: 400 },
+    getElementById: id => id === 'syncStatusBar' ? bar : header };
+  let pending = 1;
+  h.root.LootLinguaOperations.setSyncSource('test', () => ({ pending }));
+  h.root.navigator.onLine = false;
+  vm.runInContext(read('sync-status.js'), h.context);
+  assert.equal(bar.dataset.state, 'pending');
+  assert.equal(bar.querySelector('button').hidden, true);
+  h.root.navigator.onLine = true;
+  h.root.LootLinguaOperations.syncNotify();
+  assert.equal(bar.dataset.state, 'active');
+  pending = 0;
+  h.root.LootLinguaOperations.syncNotify();
+  assert.equal(bar.dataset.state, 'success');
+  pending = 1;
+  h.root.LootLinguaOperations.syncNotify();
+  assert.equal(bar.dataset.state, 'active');
+  pending = 0;
+  h.root.LootLinguaOperations.syncNotify();
+  assert.equal(bar.dataset.state, 'success');
+});
+
 test('pending changes survive reopening and account changes; rejection blocks only its own dependent lane', async () => {
   const h = runtime();
   h.root.navigator.onLine = false;

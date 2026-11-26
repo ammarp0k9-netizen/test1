@@ -10,6 +10,14 @@
   let owner = '';
   let awaiting = false;
   let done = false;
+  const phaseKey = uid => 'lootlingua:sync-banner:v1:' + encodeURIComponent(uid);
+  function rememberPhase() {
+    if (!owner) return;
+    try {
+      if (awaiting || done) root.sessionStorage?.setItem(phaseKey(owner), awaiting ? 'waiting' : 'done');
+      else root.sessionStorage?.removeItem(phaseKey(owner));
+    } catch (_) {}
+  }
   const arabic = () => !document.documentElement.lang?.toLowerCase().startsWith('en');
   const labels = {
     ar: {
@@ -57,13 +65,21 @@
 
   function render() {
     const uid = root.auth?.currentUser?.uid || '';
-    if (uid !== owner) { owner = uid; awaiting = false; done = false; }
+    if (uid !== owner) {
+      owner = uid; awaiting = false; done = false;
+      try {
+        const previous = owner && root.sessionStorage?.getItem(phaseKey(owner));
+        awaiting = previous === 'waiting';
+        done = previous === 'done';
+      } catch (_) {}
+    }
     const status = root.LootLinguaOperations?.syncStatus(uid);
     const text = labels[arabic() ? 'ar' : 'en'];
     let kind = '', heading = '', message = '';
     const unavailable = root.LootLinguaCloudBackoff?.reason() || status?.reason;
-    if (status?.pending) { awaiting ||= Boolean(unavailable); done = false; }
-    else if (awaiting && !status?.localFailure && !status?.rejected && !status?.active && uid) { done = true; awaiting = false; }
+    if (status?.pending && unavailable) { awaiting = true; done = false; }
+    else if (awaiting && !status?.pending && !status?.localFailure && !status?.rejected && !status?.active && uid) { done = true; awaiting = false; }
+    rememberPhase();
     if (status?.localFailure) {
       kind = 'error'; heading = text.fail; message = text.failCopy;
     } else if (status?.rejected) {
@@ -95,7 +111,7 @@
     icon.className = 'fa-solid ' + ({ error: 'fa-triangle-exclamation', active: 'fa-rotate', success: 'fa-circle-check' }[kind] || 'fa-cloud');
     layout();
   }
-  close.addEventListener('click', () => { done = false; render(); });
+  close.addEventListener('click', () => { done = false; rememberPhase(); render(); });
   for (const event of ['lootlingua:sync-state', 'lootlingua:auth-state', 'lootlingua:cloud-capacity-change', 'online', 'offline']) {
     root.addEventListener(event, render);
   }
