@@ -6920,7 +6920,6 @@ window.openCustomWorldModal = function(options = {}) {
   if (window.LootLinguaGuidedFirstJourney?.shouldAllowSurface?.('custom-worlds') === false) return;
   pendingCustomWorldModalMode = options.mode || 'create';
   pendingCustomWorldEditId = options.worldId || null;
-  pendingWorldManageCreateAction = options.afterCreateAction || null;
   const world = pendingCustomWorldEditId
     ? customWorlds.find(item => String(item.id) === String(pendingCustomWorldEditId))
     : null;
@@ -6945,14 +6944,24 @@ window.openCustomWorldModal = function(options = {}) {
     );
   }
   setEmojiPickerValue(world?.emoji || '📘');
-  showModal('customWorldModal');
+  if (options.worldManage && worldManageFlow) {
+    worldManageFlow.phase = 'create';
+    renderWorldManageFlow();
+  } else {
+    showModal('customWorldModal', { onEscape: window.closeCustomWorldModal });
+  }
   if (!world && !options.levelPlacementAssessmentId) window.dispatchEvent(new CustomEvent('lootlingua:custom-world-form-opened'));
   setTimeout(() => nameInput?.focus(), 60);
 };
 
 window.closeCustomWorldModal = function() {
-  hideModal('customWorldModal');
-  pendingWorldManageCreateAction = null;
+  if (document.getElementById('customWorldSaveBtn')?.disabled) return;
+  if (worldManageFlow?.phase === 'create') {
+    worldManageFlow.phase = 'targets';
+    renderWorldManageFlow();
+  } else {
+    hideModal('customWorldModal');
+  }
 };
 
 window.saveCustomWorldFromModal = async function() {
@@ -6960,6 +6969,8 @@ window.saveCustomWorldFromModal = async function() {
   const descInput = document.getElementById('customWorldDescInput');
   const emojiInput = document.getElementById('customWorldEmojiInput');
   const saveBtn = document.getElementById('customWorldSaveBtn');
+  if (saveBtn?.disabled) return;
+  const transfer = worldManageFlow?.phase === 'create' ? worldManageFlow : null;
   const name = String(nameInput?.value || '').trim();
   if (!name) {
     showToast('اسم العالم مطلوب');
@@ -7023,12 +7034,20 @@ window.saveCustomWorldFromModal = async function() {
       scheduleCustomWorldSync();
     }
   }
-  if (existing) {
-    customWorlds = customWorlds.map(world => String(world.id) === String(existing.id) ? next : world);
-  } else {
-    customWorlds = dedupeCustomWorlds([...customWorlds, next]);
+  const nextWorlds = existing
+    ? customWorlds.map(world => String(world.id) === String(existing.id) ? next : world)
+    : dedupeCustomWorlds([...customWorlds, next]);
+  try {
+    writeCustomWorldsToStorage(nextWorlds, uid);
+  } catch (error) {
+    if (saveBtn) saveBtn.disabled = false;
+    if (!signedIn || !cloudSaved) {
+      showToast('تعذّر حفظ العالم على الجهاز. تحقق من مساحة التخزين وحاول مجددًا.', 'danger');
+      return;
+    }
+    console.warn('[LootLingua customWorlds] Local cache was not updated.', error);
   }
-  writeCustomWorldsToStorage(customWorlds, uid);
+  customWorlds = nextWorlds;
   console.info('[LootLingua customWorlds] local state saved', {
     uid: uid || 'guest',
     worldId: next.id,
@@ -7038,14 +7057,14 @@ window.saveCustomWorldFromModal = async function() {
   });
   renderCustomWorldCards();
   if (saveBtn) saveBtn.disabled = false;
-  hideModal('customWorldModal');
-  window.dispatchEvent(new CustomEvent('lootlingua:custom-world-saved', { detail: { worldId: next.id } }));
-  if (pendingWorldManageCreateAction) {
-    const action = pendingWorldManageCreateAction;
-    pendingWorldManageCreateAction = null;
-    await window.applyWorldManageToTarget(next.id, action);
-    return;
+  if (transfer && transfer === worldManageFlow) {
+    transfer.targetId = String(next.id);
+    transfer.phase = 'choice';
+    renderWorldManageFlow();
+  } else if (!transfer) {
+    hideModal('customWorldModal');
   }
+  window.dispatchEvent(new CustomEvent('lootlingua:custom-world-saved', { detail: { worldId: next.id } }));
   if (isCustomWorldView() && String(activeCustomWorldId) === String(next.id)) updateCustomWorldHeader();
   if (!signedIn || cloudSaved === true) {
     showToast(existing ? 'تم تعديل العالم' : 'تم إنشاء العالم', 'success');
@@ -7111,8 +7130,9 @@ window.loadCustomWorld = function(worldId) {
 };
 
 function getSelectedWordsForWorldManage() {
+  const wordsById = new Map(window.words.map(word => [String(word.id), word]));
   return [...bulkSelectedWordIds]
-    .map(id => window.words.find(word => String(word.id) === String(id)))
+    .map(id => wordsById.get(String(id)))
     .filter(Boolean);
 }
 
@@ -7191,11 +7211,10 @@ function renderWorldManageTargets() {
   const wrap = document.getElementById('worldManageTargets');
   const summary = document.getElementById('worldManageSummary');
   if (!wrap) return;
-  const selectedCount = bulkSelectedWordIds.size;
-  if (summary) summary.textContent = `الكلمات المحددة: ${selectedCount}`;
+  if (summary) summary.textContent = `الكلمات المحددة: ${bulkSelectedWordIds.size}`;
   const targets = getWorldManageTargets();
-  const targetHtml = targets.map(target => `
-    <button type="button" class="world-manage-target" data-world-target="${escapeHtml(String(target.id))}" onclick="selectWorldManageTarget('${escapeHtml(String(target.id))}')">
+  const targetHtml = targets.filter(target => target.id !== 'personal' || worldManageFlow?.mode !== 'copy').map(target => `
+    <button type="button" class="world-manage-target${String(target.id) === worldManageFlow?.targetId ? ' is-selected' : ''}" data-world-target="${escapeHtml(String(target.id))}">
       <span>${escapeHtml(target.emoji)}</span>
       <strong>${escapeHtml(target.label)}</strong>
       <small>${escapeHtml(target.desc)}</small>
@@ -7203,60 +7222,159 @@ function renderWorldManageTargets() {
   `).join('');
   wrap.innerHTML = `
     ${targetHtml || '<p class="world-manage-empty">لا يوجد عوالم خاصة بعد.</p>'}
-    <button type="button" class="world-manage-target world-manage-add" onclick="openCustomWorldModal({ afterCreateAction: '${pendingWorldManageAction}' })">
-      <span>+</span>
+    <button type="button" class="world-manage-target world-manage-add" data-world-manage-new>
+      <span aria-hidden="true">+</span><strong>إنشاء عالم جديد</strong>
     </button>
   `;
 }
 
-window.openWorldManageModal = function() {
-  if (!isEditableDictionaryView()) return;
-  if (!bulkSelectedWordIds.size) {
-    window.enterSelectionMode();
-  }
-  if (!bulkSelectedWordIds.size) return;
-  pendingWorldManageAction = '';
-  renderWorldManageTargets();
-  showModal('worldManageModal');
+let worldManageFlow = null;
+let worldManageSurface = null;
+const WORLD_MANAGE_SURFACES = {
+  targets: ['worldManageModal', 'worldManageTitle'],
+  choice: ['worldManageChoiceModal', 'worldManageChoiceTitle'],
+  create: ['customWorldModal', 'customWorldModalTitle'],
 };
 
-let pendingWorldManageTargetId = '';
+function renderWorldManageFlow() {
+  const host = document.getElementById('dictionaryWorldManage');
+  const phase = worldManageFlow?.phase;
+  const [id, titleId] = WORLD_MANAGE_SURFACES[phase] || [];
+  const inline = Boolean(id && dictionaryDetailMedia.matches);
+  const previous = worldManageSurface;
+  const changed = previous?.id !== id || previous?.inline !== inline;
+  if (previous && changed) {
+    if (previous.inline) document.getElementById(previous.id).append(previous.content);
+    else hideModal(previous.id);
+  }
+  if (host) host.hidden = !inline;
+  if (!id) { worldManageSurface = null; return; }
+  const title = document.getElementById(titleId);
+  const content = title.closest('.modal-content');
+  if (phase === 'targets') {
+    title.textContent = worldManageFlow.mode === 'move' ? 'النقل إلى عالم' :
+      worldManageFlow.mode === 'copy' ? 'النسخ إلى عالم' : 'اختر العالم';
+    renderWorldManageTargets();
+  } else if (phase === 'choice') {
+    const { targetId, mode } = worldManageFlow;
+    title.textContent = mode === 'move' || targetId === 'personal' ? 'تأكيد النقل' :
+      mode === 'copy' ? 'تأكيد النسخ' : 'كيف تريد إضافة الكلمات إلى هذا العالم؟';
+    document.getElementById('worldManageChoiceTarget').textContent = getTargetDictionaryLabel(targetId);
+    content.querySelectorAll('[data-world-manage-action]').forEach(button => {
+      const action = button.dataset.worldManageAction;
+      button.hidden = (targetId === 'personal' && action !== 'move') || Boolean(mode && mode !== action);
+      button.querySelector('strong').textContent = action === 'move'
+        ? (mode || targetId === 'personal' ? 'تأكيد النقل' : 'نقل') : (mode ? 'تأكيد النسخ' : 'نسخ');
+      button.querySelector('small').textContent = action === 'copy'
+        ? 'تبقى الكلمات في مكانها الحالي وتُضاف أيضًا إلى الوجهة.'
+        : isCustomWorldView() ? 'تنتقل الكلمات من هذا العالم إلى الوجهة، ويبقى تقدمها محفوظًا.'
+          : 'تختفي الكلمات من قاموسك الشخصي واختباراته، وتبقى داخل العالم المختار.';
+    });
+  }
+  worldManageSurface = { id, inline, content };
+  if (changed) {
+    if (inline) {
+      host.append(content);
+      const focus = phase === 'create' ? document.getElementById('customWorldNameInput') : title;
+      focus?.focus();
+    } else {
+      const onEscape = phase === 'create' ? window.closeCustomWorldModal :
+        phase === 'choice' ? window.closeWorldManageChoiceModal : window.closeWorldManageFlow;
+      showModal(id, { onEscape: () => onEscape() });
+    }
+  }
+  window.updateWorldManageSelection();
+}
+
+window.updateWorldManageSelection = function() {
+  if (!worldManageFlow) return;
+  const count = bulkSelectedWordIds.size;
+  const busy = Boolean(worldManageOperationPromise);
+  worldManageSurface?.content.setAttribute('aria-busy', String(busy));
+  const summary = document.getElementById('worldManageSummary');
+  const target = document.getElementById('worldManageChoiceTarget');
+  if (summary) summary.textContent = `الكلمات المحددة: ${count}`;
+  if (target && worldManageFlow.phase === 'choice') {
+    const destination = getTargetDictionaryLabel(worldManageFlow.targetId);
+    target.textContent = worldManageSurface?.inline ? destination : `${destination} · ${count} محددة`;
+  }
+  document.querySelectorAll('[data-world-manage-action], #worldManageTargets button').forEach(button => {
+    button.disabled = !count || busy;
+  });
+};
+
+window.openWorldManageModal = function(mode = '') {
+  if (!isEditableDictionaryView() || !bulkSelectedWordIds.size || window.isWorldManageBusy()) return;
+  worldManageFlow?.status?.clear();
+  worldManageFlow = { mode, targetId: '', phase: 'targets', context: captureDictionaryWriteContext() };
+  renderWorldManageFlow();
+};
+
+window.closeWorldManageFlow = function({ force = false } = {}) {
+  if (!worldManageFlow || (!force && window.isWorldManageBusy())) return;
+  worldManageFlow.status?.clear();
+  worldManageFlow = null;
+  renderWorldManageFlow();
+};
 
 window.selectWorldManageTarget = function(targetId) {
-  pendingWorldManageTargetId = String(targetId || '');
-  if (!pendingWorldManageTargetId) return;
-  if (pendingWorldManageTargetId === 'personal') {
-    window.applyWorldManageToTarget('personal', 'move');
-    return;
-  }
-  const target = document.getElementById('worldManageChoiceTarget');
-  if (target) target.textContent = getTargetDictionaryLabel(pendingWorldManageTargetId);
-  hideModal('worldManageModal');
-  showModal('worldManageChoiceModal');
+  if (!worldManageFlow || window.isWorldManageBusy() ||
+      !getWorldManageTargets().some(target => String(target.id) === String(targetId))) return;
+  worldManageFlow.targetId = String(targetId);
+  worldManageFlow.phase = 'choice';
+  renderWorldManageFlow();
 };
 
 window.closeWorldManageChoiceModal = function() {
-  hideModal('worldManageChoiceModal');
-  pendingWorldManageTargetId = '';
+  if (!worldManageFlow || window.isWorldManageBusy()) return;
+  worldManageFlow.status?.clear();
+  worldManageFlow.status = null;
+  worldManageFlow.phase = 'targets';
+  renderWorldManageFlow();
 };
 
 window.confirmWorldManageChoice = function(action) {
-  const targetId = pendingWorldManageTargetId;
-  if (!targetId) return;
-  pendingWorldManageAction = action === 'copy' ? 'copy' : 'move';
-  return window.applyWorldManageToTarget(targetId, pendingWorldManageAction);
+  const { targetId, mode, phase } = worldManageFlow || {};
+  if (phase !== 'choice' || !targetId || (mode && mode !== action) || (targetId === 'personal' && action !== 'move')) return;
+  return window.applyWorldManageToTarget(targetId, action);
 };
+
+document.addEventListener('DOMContentLoaded', () => {
+  dictionaryDetailMedia.addEventListener('change', () => {
+    if (worldManageFlow) renderWorldManageFlow();
+  });
+  document.getElementById('worldManageTargets')?.addEventListener('click', event => {
+    const button = event.target.closest('button');
+    if (!button || window.isWorldManageBusy()) return;
+    if (button.hasAttribute('data-world-manage-new')) window.openCustomWorldModal({ worldManage: true });
+    else window.selectWorldManageTarget(button.dataset.worldTarget);
+  });
+});
+window.addEventListener('lootlingua:auth-state', () => {
+  if (worldManageFlow && !isDictionaryWriteContextCurrent(worldManageFlow.context)) {
+    window.exitSelectionMode({ renderView: false });
+  }
+});
 
 async function saveWordsToTarget(targetId, wordsToAdd, options = {}) {
   if (!wordsToAdd.length) return [];
   const uid = window.auth?.currentUser?.uid;
   const signedIn = Boolean(window.auth?.currentUser);
+  async function upload(saveWord) {
+    for (let offset = 0; offset < wordsToAdd.length; offset += 12) {
+      if (options.isCurrent?.() === false) throw new Error('stale-transfer');
+      const results = await Promise.allSettled(wordsToAdd.slice(offset, offset + 12).map(saveWord));
+      const failure = results.find(result => result.status === 'rejected');
+      if (failure) throw failure.reason;
+    }
+    if (options.isCurrent?.() === false) throw new Error('stale-transfer');
+  }
   if (targetId === 'personal') {
     const currentPersonal = isCustomWorldView()
       ? readWordsFromStorage('normal', uid)
       : window.words;
     if (signedIn && window.saveWordToCloud) {
-      await Promise.all(wordsToAdd.map(async (word) => {
+      await upload(async (word) => {
         const realId = await window.saveWordToCloud(
           word.word,
           word.category || 'عام',
@@ -7271,7 +7389,7 @@ async function saveWordsToTarget(targetId, wordsToAdd, options = {}) {
         );
         if (!realId) throw new Error('target-personal-upload-failed');
         word.id = realId;
-      }));
+      });
     }
     const movedPrivateKeys = new Set(wordsToAdd
       .filter((word) => word.removePrivateWorldId)
@@ -7313,14 +7431,14 @@ async function saveWordsToTarget(targetId, wordsToAdd, options = {}) {
     ? window.words
     : readCustomWorldWordsFromStorage(targetId, uid);
   if (signedIn && window.saveCustomWorldWordToCloud) {
-    await Promise.all(wordsToAdd.map(async (word) => {
+    await upload(async (word) => {
       const realId = await window.saveCustomWorldWordToCloud(targetId, {
         ...word,
         operationId: options.operationId,
       }, { propagate: true });
       if (!realId) throw new Error('target-world-upload-failed');
       word.id = realId;
-    }));
+    });
   } else {
     wordsToAdd.forEach((word) => {
       const key = getWorldManageWordKey(word);
@@ -7361,15 +7479,33 @@ function showSkippedDuplicateWordsNotice(skipped, targetId = 'personal', operati
 }
 
 let worldManageOperationPromise = null;
+window.isWorldManageBusy = () => Boolean(worldManageOperationPromise ||
+  (worldManageFlow?.phase === 'create' && document.getElementById('customWorldSaveBtn')?.disabled));
 
-window.applyWorldManageToTarget = async function(targetId, action = pendingWorldManageAction) {
+window.applyWorldManageToTarget = async function(targetId, action = 'move') {
   if (worldManageOperationPromise) return worldManageOperationPromise;
   const selected = getSelectedWordsForWorldManage();
-  if (!selected.length) return Promise.resolve(false);
+  if (!selected.length) return false;
+  if (!getWorldManageTargets().some(target => String(target.id) === String(targetId))) {
+    showToast('هذه الوجهة غير متاحة الآن. اختر عالمًا آخر.', 'warning');
+    window.closeWorldManageChoiceModal();
+    return false;
+  }
+  const flow = worldManageFlow;
+  const context = captureDictionaryWriteContext();
+  const navigation = window.__dictionaryNavigationGeneration;
+  const isCurrent = () => isDictionaryWriteContextCurrent(context) &&
+    window.__dictionaryNavigationGeneration === navigation;
+  const owner = window.auth?.currentUser?.uid;
   const mode = action === 'copy' ? 'copy' : 'move';
-  const sourceCustomWorldId = isCustomWorldView() ? String(activeCustomWorldId) : '';
+  const sourceCustomWorldId = context.worldId;
   const operationId = getWorldManageOperationId(targetId, mode, selected);
   const sync = window.LootLinguaDictionarySync;
+  const finishSelection = () => {
+    if (!isCurrent()) return;
+    window.exitSelectionMode({ renderView: false });
+    render();
+  };
   const defer = () => {
     const target = targetId === 'personal' ? '' : String(targetId);
     try {
@@ -7382,48 +7518,35 @@ window.applyWorldManageToTarget = async function(targetId, action = pendingWorld
       showToast('تعذّر حفظ كل عمليات النقل على الجهاز. راجع حالة المزامنة.', 'danger', 5200);
       return false;
     }
-    hideModal('worldManageModal');
-    hideModal('worldManageChoiceModal');
-    window.exitSelectionMode({ renderView: false });
-    if (isEditableDictionaryView()) render();
+    finishSelection();
     return true;
   };
-  const owner = window.auth?.currentUser?.uid;
-  const currentOwner = () => owner && owner === window.auth?.currentUser?.uid;
-  if (owner && sync?.unavailable()) return defer();
-  if (await window.LootLinguaDictionaryPages?.requireComplete() === false) {
-    return currentOwner() && sync?.unavailable() ? defer() : false;
-  }
-  if (owner && !currentOwner()) return false;
   const operationScope = `world-manage:${operationId}`;
-  const wrap = document.getElementById('worldManageTargets');
-  const buttons = [...document.querySelectorAll('#worldManageTargets .world-manage-target')];
-  const targetButton = wrap?.querySelector(`[data-world-target="${cssEscapeValue(String(targetId))}"]`);
-  buttons.forEach((button) => {
-    button.disabled = true;
-    button.setAttribute('aria-busy', String(button === targetButton));
-  });
-  const operationUi = window.LootLinguaOperations?.beginStatus({
-    scope: operationScope,
-    host: wrap,
-    buttons: targetButton ? [targetButton] : [],
-    buttonBusyLabel: 'جارٍ النقل...',
-    loadingMessage: 'جارٍ نقل الكلمات...',
-    longWaitMessage: 'تستغرق المزامنة وقتًا أطول من المعتاد، ولم نكرر العملية.',
-  });
-  const trace = window.LootLinguaOperations?.startTrace('world-manage-words', {
-    mode,
-    source: sourceCustomWorldId ? 'private-world' : 'personal',
-    target: targetId === 'personal' ? 'personal' : 'private-world',
-    wordCount: selected.length,
-  });
 
   const task = async () => {
+    if (!isCurrent()) return false;
+    if (owner && sync?.unavailable()) return defer();
+    if (mode === 'move' && !sourceCustomWorldId && await window.LootLinguaDictionaryPages?.requireComplete() === false) {
+      return isCurrent() && owner && sync?.unavailable() ? defer() : false;
+    }
+    if (!isCurrent()) return false;
+    const operationUi = window.LootLinguaOperations?.beginStatus({
+      scope: operationScope,
+      host: document.getElementById('worldManageChoiceTarget')?.parentElement,
+      loadingMessage: mode === 'copy' ? 'جارٍ نسخ الكلمات…' : 'جارٍ نقل الكلمات…',
+      longWaitMessage: 'تستغرق المزامنة وقتًا أطول من المعتاد، ولم نكرر العملية.',
+    });
+    if (flow) flow.status = operationUi;
+    const trace = window.LootLinguaOperations?.startTrace('world-manage-words', {
+      mode,
+      source: sourceCustomWorldId ? 'private-world' : 'personal',
+      target: targetId === 'personal' ? 'personal' : 'private-world',
+      wordCount: selected.length,
+    });
     let failed = false;
     try {
       trace?.stage('validation-complete');
-    const movable = selected;
-    const skipped = [];
+      const movable = selected;
       const removeSourceMembership = mode === 'move' &&
         sourceCustomWorldId &&
         String(targetId) !== sourceCustomWorldId;
@@ -7438,7 +7561,7 @@ window.applyWorldManageToTarget = async function(targetId, action = pendingWorld
         removePrivateWorldId: removeSourceMembership ? sourceCustomWorldId : '',
         removePrivateMembershipId: removeSourceMembership ? String(word.id) : '',
       }));
-      await saveWordsToTarget(targetId, copiedWords, { operationId });
+      await saveWordsToTarget(targetId, copiedWords, { operationId, isCurrent });
       trace?.stage(
         removeSourceMembership ? 'memberships-moved-atomically' : 'target-memberships-saved',
         { saved: copiedWords.length }
@@ -7446,11 +7569,11 @@ window.applyWorldManageToTarget = async function(targetId, action = pendingWorld
 
       if (removeSourceMembership) {
         const movedIds = new Set(movable.map((word) => String(word.id)));
-        const sourceWords = readCustomWorldWordsFromStorage(sourceCustomWorldId)
+        const sourceWords = readCustomWorldWordsFromStorage(sourceCustomWorldId, owner)
           .filter((word) => !movedIds.has(String(word.id)));
         reindexWordOrder(sourceWords);
-        writeCustomWorldWordsToStorage(sourceCustomWorldId, sourceWords);
-        if (isCustomWorldView() && String(activeCustomWorldId) === sourceCustomWorldId) {
+        writeCustomWorldWordsToStorage(sourceCustomWorldId, sourceWords, owner);
+        if (isCurrent()) {
           window.words = sourceWords;
         }
         trace?.stage('source-membership-removed', { removed: movable.length });
@@ -7459,29 +7582,19 @@ window.applyWorldManageToTarget = async function(targetId, action = pendingWorld
       const movedFromPersonal = mode === 'move' && !sourceCustomWorldId && targetId !== 'personal';
       if (movedFromPersonal) {
         const movedKeys = new Set(movable.map(getWorldManageWordKey));
-        const personalWords = readWordsFromStorage('normal').map((word) =>
+        const personalWords = readWordsFromStorage('normal', owner).map((word) =>
           movedKeys.has(getWorldManageWordKey(word))
             ? { ...word, personalDictionaryState: 'moved-to-private-world' }
             : word
         );
-        writeWordsToStorage(personalWords, 'normal');
-        if (currentView === 'personal') window.words = personalWords;
+        writeWordsToStorage(personalWords, 'normal', owner);
+        if (isCurrent()) window.words = personalWords;
         renderLimit = 20;
-        render();
-        trace?.count('rerenderCount');
       }
 
-      hideModal('worldManageModal');
-      hideModal('worldManageChoiceModal');
-      window.exitSelectionMode({ renderView: false });
-      if (removeSourceMembership) {
-        renderLimit = 20;
-        render();
-        trace?.count('rerenderCount');
-      }
-    if (skipped.length) showSkippedDuplicateWordsNotice(skipped, targetId, operationId);
       operationUi?.complete('اكتملت مزامنة الكلمات.');
       operationUi?.clear();
+      finishSelection();
       const linkedFromPersonal = !sourceCustomWorldId && targetId !== 'personal';
       const targetName = getTargetDictionaryLabel(targetId);
       showToast(
@@ -7502,42 +7615,47 @@ window.applyWorldManageToTarget = async function(targetId, action = pendingWorld
       trace?.stage('ui-complete');
       return true;
     } catch (err) {
-      if (currentOwner() && sync?.temporary(err)) {
+      if (!isCurrent()) { operationUi?.clear(); return false; }
+      if (owner && sync?.temporary(err)) {
         operationUi?.clear();
         return defer();
       }
       failed = true;
-    console.warn('worldManage:', err);
+      console.warn('worldManage:', err);
       operationUi?.fail(
         'تعذر إكمال المزامنة. الكلمات الناجحة لن تتكرر عند إعادة المحاولة.',
-        () => setTimeout(() => window.applyWorldManageToTarget(targetId, mode), 0)
+        () => setTimeout(() => {
+          if (isCurrent() && flow === worldManageFlow && bulkSelectedWordIds.size === selected.length &&
+              selected.every(word => bulkSelectedWordIds.has(String(word.id)))) {
+            void window.applyWorldManageToTarget(targetId, mode);
+          } else {
+            operationUi?.clear();
+          }
+        }, 0)
       );
-    showToast(
-      'ما قدرنا نكمل العملية سحابياً. الكلمات بقيت في مكانها.',
-      'danger',
-      5200,
-      {
-        importance: 'action-required',
-        operationId,
-        dedupeKey: `${operationId}:failure`,
-      }
-    );
+      showToast(
+        'تعذّر إكمال العملية. يمكنك متابعة المحاولة للكلمات المتبقية.',
+        'danger',
+        5200,
+        {
+          importance: 'action-required',
+          operationId,
+          dedupeKey: `${operationId}:failure`,
+        }
+      );
       trace?.warn(err?.code || err?.message || 'world-manage-failed');
       return false;
     } finally {
-      buttons.forEach((button) => {
-        button.disabled = false;
-        button.setAttribute('aria-busy', 'false');
-      });
       trace?.end({ failed });
     }
   };
 
   const runner = window.LootLinguaOperations?.runExclusive || ((scope, callback) => callback());
-  worldManageOperationPromise = runner(operationScope, task);
-  worldManageOperationPromise.finally(() => {
+  worldManageOperationPromise = Promise.resolve().then(() => runner(operationScope, task)).finally(() => {
     worldManageOperationPromise = null;
+    updateBulkDeleteBar();
   });
+  updateBulkDeleteBar();
   return worldManageOperationPromise;
 };
 

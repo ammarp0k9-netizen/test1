@@ -93,7 +93,7 @@
   <link rel="stylesheet" href="motivation.css?v=20261106-motivation-1">
   <link rel="stylesheet" href="glass-theme.css?v=20261106-materials-1">
   <link rel="stylesheet" href="saved-guest.css?v=full-merge-1">
-  <link rel="stylesheet" href="responsive-layout.css?v=1">
+  <link rel="stylesheet" href="responsive-layout.css?v=2">
 </head>
 <body class="legend-dock-visible">
 
@@ -271,6 +271,33 @@
   </div>
 
   <section id="dictionaryWordDetail" class="card-box dictionary-detail" aria-labelledby="dictionaryDetailTitle" hidden></section>
+  <section id="dictionaryQuickStats" class="card-box dictionary-quick-stats" aria-labelledby="dictionaryQuickStatsTitle" hidden>
+    <h2 id="dictionaryQuickStatsTitle">إحصائيات سريعة</h2>
+    <dl>
+      <div><dt><i class="fa-solid fa-book" aria-hidden="true"></i> كلمة محفوظة</dt><dd id="dictionaryStatWords">—</dd></div>
+      <div><dt><i class="fa-solid fa-fire" aria-hidden="true"></i> أكبر سلسلة</dt><dd id="dictionaryStatStreak">—</dd></div>
+    </dl>
+  </section>
+  <section id="selectionActionBar" class="selection-action-bar" aria-labelledby="dictionarySelectionTitle" hidden>
+    <header class="dictionary-selection-heading">
+      <h2 id="dictionarySelectionTitle">إدارة الكلمات المحددة</h2>
+      <span id="dictionarySelectionCount" role="status" aria-atomic="true"></span>
+    </header>
+    <p id="dictionarySelectionOutside" hidden></p>
+    <div class="dictionary-selection-actions">
+      <button type="button" id="dictionarySelectAllBtn" onclick="selectAllDictionaryResults()">تحديد الكل</button>
+      <button type="button" id="dictionaryClearSelectionBtn" onclick="clearDictionarySelection()">إلغاء تحديد الكل</button>
+      <button type="button" data-selection-required onclick="confirmBulkDeleteSelection()">حذف</button>
+      <button type="button" id="selectionReorderBtn" onclick="toggleReorderMode()">ترتيب يدوي</button>
+      <button type="button" class="selection-reorder-step" data-selection-required onclick="moveSelectedWordsByStep(-1)" hidden>أعلى</button>
+      <button type="button" class="selection-reorder-step" data-selection-required onclick="moveSelectedWordsByStep(1)" hidden>أسفل</button>
+      <button type="button" class="dictionary-manage-mobile" data-selection-required onclick="openWorldManageModal()">إدارة العالم</button>
+      <button type="button" class="dictionary-manage-desktop" data-selection-required onclick="openWorldManageModal('move')">نقل إلى عالم</button>
+      <button type="button" class="dictionary-manage-desktop" data-selection-required onclick="openWorldManageModal('copy')">نسخ إلى عالم</button>
+      <button type="button" onclick="exitSelectionMode()">إلغاء</button>
+    </div>
+    <div id="dictionaryWorldManage" hidden></div>
+  </section>
   </div>
   <div class="dictionary-list-panel">
 
@@ -335,15 +362,6 @@
       </div>
     </div>
     <button id="selectionModeBtn" class="btn-text-tool selection-mode-entry" type="button" onclick="enterSelectionMode()" data-tip="تحديد">تحديد</button>
-  </div>
-
-  <div id="selectionActionBar" class="selection-action-bar" hidden>
-    <button type="button" onclick="confirmBulkDeleteSelection()">حذف</button>
-    <button type="button" id="selectionReorderBtn" onclick="toggleReorderMode()">ترتيب يدوي</button>
-    <button type="button" class="selection-reorder-step" onclick="moveSelectedWordsByStep(-1)" hidden>أعلى</button>
-    <button type="button" class="selection-reorder-step" onclick="moveSelectedWordsByStep(1)" hidden>أسفل</button>
-    <button type="button" onclick="openWorldManageModal()">إدارة العالم</button>
-    <button type="button" onclick="exitSelectionMode()">إلغاء</button>
   </div>
 
   <div id="bulkDeleteBar" class="bulk-delete-bar" hidden>
@@ -1035,8 +1053,8 @@
     <div class="modal-icon custom-world-icon"><span id="customWorldModalIcon">+</span></div>
     <h2 id="customWorldModalTitle">إنشاء عالم جديد</h2>
     <div class="custom-world-form">
-      <input type="text" id="customWorldNameInput" maxlength="40" placeholder="اسم العالم" autocomplete="off">
-      <textarea id="customWorldDescInput" maxlength="140" placeholder="وصف العالم (اختياري)" rows="3"></textarea>
+      <input type="text" id="customWorldNameInput" maxlength="40" placeholder="اسم العالم" aria-label="اسم العالم" autocomplete="off">
+      <textarea id="customWorldDescInput" maxlength="140" placeholder="وصف العالم (اختياري)" aria-label="وصف العالم (اختياري)" rows="3"></textarea>
       <input type="hidden" id="customWorldEmojiInput" value="📘">
       <div class="emoji-picker" id="customWorldEmojiPicker" aria-label="اختيار رمز العالم">
         <button type="button" data-emoji="📘">📘</button>
@@ -1057,10 +1075,11 @@
 </div>
 
 <!-- ══ MODAL: إدارة العالم للكلمات المحددة ══ -->
-<div id="worldManageModal" class="custom-modal world-manage-modal" role="dialog" aria-modal="true" aria-labelledby="worldManageTitle" onclick="if (event.target === this) hideModal('worldManageModal')">
+<div id="worldManageModal" class="custom-modal world-manage-modal" role="dialog" aria-modal="true" aria-labelledby="worldManageTitle" onclick="if (event.target === this) closeWorldManageFlow()">
   <div class="modal-content world-manage-content" onclick="event.stopPropagation()">
+    <button type="button" class="modal-close-btn" onclick="closeWorldManageFlow()" aria-label="إغلاق اختيار الوجهة"><i class="fa-solid fa-xmark" aria-hidden="true"></i></button>
     <div class="modal-icon"><i class="fa-solid fa-layer-group" aria-hidden="true"></i></div>
-    <h2 id="worldManageTitle">اختر العالم</h2>
+    <h2 id="worldManageTitle" tabindex="-1">اختر العالم</h2>
     <p id="worldManageSummary">اختر الوجهة التي تريد إضافة الكلمات إليها.</p>
     <div id="worldManageTargets" class="world-manage-targets"></div>
   </div>
@@ -1070,18 +1089,18 @@
   <div class="modal-content world-manage-content" onclick="event.stopPropagation()">
     <button type="button" class="modal-close-btn" onclick="closeWorldManageChoiceModal()" aria-label="إغلاق"><i class="fa-solid fa-xmark" aria-hidden="true"></i></button>
     <div class="modal-icon"><i class="fa-solid fa-arrow-right-arrow-left" aria-hidden="true"></i></div>
-    <h2 id="worldManageChoiceTitle">كيف تريد إضافة الكلمات إلى هذا العالم؟</h2>
+    <h2 id="worldManageChoiceTitle" tabindex="-1">كيف تريد إضافة الكلمات إلى هذا العالم؟</h2>
     <p id="worldManageChoiceTarget"></p>
     <div class="world-manage-choice-list">
-      <button type="button" class="world-manage-choice" onclick="confirmWorldManageChoice('move')">
+      <button type="button" class="world-manage-choice" data-world-manage-action="move" onclick="confirmWorldManageChoice('move')">
         <i class="fa-solid fa-arrow-right-arrow-left" aria-hidden="true"></i>
         <span><strong>نقل</strong><small>تختفي من قاموسك الشخصي واختباراته، وتبقى داخل العالم المختار.</small></span>
       </button>
-      <button type="button" class="world-manage-choice" onclick="confirmWorldManageChoice('copy')">
+      <button type="button" class="world-manage-choice" data-world-manage-action="copy" onclick="confirmWorldManageChoice('copy')">
         <i class="fa-regular fa-copy" aria-hidden="true"></i>
         <span><strong>نسخ</strong><small>تبقى في قاموسك الشخصي وتُضاف أيضًا إلى العالم المختار.</small></span>
       </button>
-      <button type="button" class="btn-cancel" onclick="closeWorldManageChoiceModal()">إلغاء</button>
+      <button type="button" class="btn-cancel" onclick="closeWorldManageChoiceModal()">رجوع للوجهات</button>
     </div>
   </div>
 </div>
@@ -1303,7 +1322,7 @@
   <script src="js/test-clock-contract.js?v=20260729-2"></script>
   <script src="js/dictionary-pages.js?v=reliable-sync-2"></script>
   <script src="js/modal-focus.js?v=guide-sections-2"></script>
-  <script data-startup-critical src="js/core.js?v=20261114-smart-onboarding"></script>
+  <script data-startup-critical src="js/core.js?v=dictionary-polish-1"></script>
 <script src="js/operation-runtime.js?v=reliable-sync-2"></script>
 <script src="js/sync-status.js?v=reliable-sync-2"></script>
 <script src="js/dictionary-sync.js?v=reliable-sync-2"></script>
@@ -1319,17 +1338,17 @@
 <script src="js/placement.js?v=20260720-1"></script>
 <script src="js/level-placement.js?v=20260728-1"></script>
 <script src="js/word-list-data.js?v=20261106-admin-fixes-1"></script>
-<script data-startup-critical src="js/script.js?v=streak-days-1"></script>
+<script data-startup-critical src="js/script.js?v=dictionary-polish-1"></script>
 <script type="module" src="js/daily-streak.mjs?v=streak-days-1"></script>
 <script src="js/xp.js?v=reliable-sync-2"></script>
 <script src="js/xp-batch.js?v=20261105-integrity-1"></script>
-<script src="js/dictionary.js?v=reliable-sync-2-responsive-2"></script>
+<script src="js/dictionary.js?v=dictionary-polish-1"></script>
 <script src="js/gate-game-migration.js?v=20261007-1"></script>
 <script src="js/gate-runner.js?v=quiz-classification-1"></script>
 <script src="js/loot-bots.js?v=20261113-automatic-performance"></script>
-<script src="js/worlds.js?v=reliable-sync-2"></script>
+<script src="js/worlds.js?v=dictionary-polish-1"></script>
 <script src="js/dictionary-window.js?v=20261105-render-1"></script>
-<script src="js/dictionary-render.js?v=responsive-1"></script>
+<script src="js/dictionary-render.js?v=dictionary-polish-1"></script>
 <script src="js/srs.js?v=reliable-sync-2"></script>
 <script src="js/popover-overrides.js?v=20260817-1"></script>
 <script src="js/quiz.js?v=reliable-sync-2"></script>

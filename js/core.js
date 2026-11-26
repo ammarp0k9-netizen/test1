@@ -1067,10 +1067,16 @@ document.addEventListener('keydown', (e) => {
 });
 
 function renderProfileModalStats() {
-  const wordsEl = document.getElementById('profileStatWords');
-  const streakEl = document.getElementById('profileStatStreak');
-  if (wordsEl) wordsEl.textContent = getDictionaryWordCount();
-  if (streakEl) streakEl.textContent = loadInt('lootlinguaMaxStreak', dailyStreak) + ' يوم';
+  const words = getDictionaryWordCount();
+  const streak = loadInt('lootlinguaMaxStreak', dailyStreak) + ' يوم';
+  for (const id of ['profileStatWords', 'dictionaryStatWords']) {
+    const field = document.getElementById(id);
+    if (field) field.textContent = words;
+  }
+  for (const id of ['profileStatStreak', 'dictionaryStatStreak']) {
+    const field = document.getElementById(id);
+    if (field) field.textContent = streak;
+  }
 }
 
 // ═══════════════════════════════════════════════════════

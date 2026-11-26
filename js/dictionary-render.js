@@ -20,6 +20,7 @@ let dictionaryResizeObserver = null;
 let dictionaryMeasureFrame = null;
 let dictionaryRenderWidth = 0;
 let dictionaryFullDataRequest = null;
+let dictionarySelectAllRequest = null;
 let dictionaryDraggedCard = null;
 window.releaseDictionaryDraggedCard = function() {
   if (dictionaryDraggedCard?.classList.contains('dictionary-drag-parked')) dictionaryDraggedCard.remove();
@@ -34,11 +35,89 @@ window.invalidateDictionaryRender = function() { dictionaryRenderRevision += 1; 
 window.addEventListener('lootlingua:learning-data-changed', window.invalidateDictionaryRender);
 window.addEventListener('lootlingua:auth-state', () => {
   window.cancelDictionaryFullDataRequest();
+  window.cancelDictionarySelectAll?.();
   window.releaseDictionaryDraggedCard();
   dictionaryListCache = null;
   dictionaryMeasurements.clear();
   dictionaryRenderRevision += 1;
 });
+
+function readDictionaryListControls() {
+  return {
+    query: document.getElementById('searchInput')?.value.toLowerCase().trim() || '',
+    searchType: document.getElementById('searchFilter')?.value || 'all',
+  };
+}
+
+window.cancelDictionarySelectAll = function() {
+  dictionarySelectAllRequest?.controller.abort();
+  dictionarySelectAllRequest = null;
+};
+
+window.isDictionarySelectionLoading = () => Boolean(dictionarySelectAllRequest);
+
+window.updateDictionarySelectAllUi = function() {
+  const select = document.getElementById('dictionarySelectAllBtn');
+  const clear = document.getElementById('dictionaryClearSelectionBtn');
+  if (!select || !clear) return;
+  const filtered = Boolean(readDictionaryListControls().query || currentFilter !== 'all');
+  const busy = Boolean(dictionarySelectAllRequest);
+  const managing = Boolean(window.isWorldManageBusy?.());
+  select.textContent = busy ? 'جارٍ تجهيز النتائج…' : filtered ? 'تحديد كل النتائج' : 'تحديد الكل';
+  select.disabled = busy || managing;
+  select.setAttribute('aria-busy', String(busy));
+  clear.disabled = managing || (!bulkSelectedWordIds.size && !busy);
+  const outside = document.getElementById('dictionarySelectionOutside');
+  if (outside) {
+    let count = 0;
+    if (filtered && dictionaryListCache) {
+      for (const id of bulkSelectedWordIds) if (!dictionaryListCache.filteredIndex.has(id)) count++;
+    }
+    outside.hidden = !count;
+    if (count) outside.textContent = `${count} من التحديد خارج النتائج الحالية`;
+  }
+};
+
+window.clearDictionarySelection = function() {
+  if (!isBulkDeleteMode || window.isWorldManageBusy?.()) return;
+  window.cancelDictionarySelectAll();
+  bulkSelectedWordIds.clear();
+  syncSelectedIndicesFromBulkSelection();
+  syncBulkSelectionInDom();
+};
+
+window.selectAllDictionaryResults = async function() {
+  if (!isBulkDeleteMode || !isEditableDictionaryView() || dictionarySelectAllRequest || window.isWorldManageBusy?.()) return;
+  const { query, searchType } = readDictionaryListControls();
+  const snapshot = getDictionaryListSnapshot(query, searchType);
+  const request = { key: snapshot.key, controller: new AbortController() };
+  const pages = isCustomWorldView() ? null : window.LootLinguaDictionaryPages?.current();
+  const navigation = window.__dictionaryNavigationGeneration;
+  dictionarySelectAllRequest = request;
+  updateBulkDeleteBar();
+  try {
+    if (pages && !pages.state().complete) await pages.ensureComplete({ signal: request.controller.signal });
+    if (dictionarySelectAllRequest !== request || window.__dictionaryNavigationGeneration !== navigation ||
+        !isBulkDeleteMode || !isEditableDictionaryView() || (pages && window.LootLinguaDictionaryPages?.current() !== pages)) return;
+    const controls = readDictionaryListControls();
+    const complete = getDictionaryListSnapshot(controls.query, controls.searchType);
+    if (complete.key !== request.key || !complete.filtered.length) {
+      if (complete.key === request.key) showToast('ما في كلمات مطابقة للتحديد.');
+      return;
+    }
+    bulkSelectedWordIds.clear();
+    complete.filtered.forEach(word => bulkSelectedWordIds.add(String(word.id)));
+    syncSelectedIndicesFromBulkSelection();
+    syncBulkSelectionInDom();
+  } catch (error) {
+    if (dictionarySelectAllRequest === request && error?.name !== 'AbortError' && error?.code !== 'dictionary/stale') {
+      showToast('تعذّر تحميل كل النتائج. بقي تحديدك الحالي، ويمكنك إعادة المحاولة.', 'warning');
+    }
+  } finally {
+    if (dictionarySelectAllRequest === request) dictionarySelectAllRequest = null;
+    updateBulkDeleteBar();
+  }
+};
 
 function getDictionaryListSnapshot(query, searchType) {
   const scope = getStorageUserId() + ':' + getActiveDictionaryStorageScope();
@@ -175,10 +254,12 @@ function renderDictionaryWordDetail(indexMap) {
   const id = escapeHtml(selectionId);
   const markup = `
     <header class="dictionary-detail-header">
-      <h2 id="dictionaryDetailTitle" dir="ltr" lang="en" tabindex="-1">${escapeHtml(word.word)}</h2>
+      <div class="dictionary-detail-word">
+        <button type="button" class="star-btn ${word.starred ? 'active' : ''}" aria-label="كلمة صعبة" aria-pressed="${Boolean(word.starred)}" data-action="star" data-id="${id}"><i class="fas fa-star" aria-hidden="true"></i></button>
+        <h2 id="dictionaryDetailTitle" dir="ltr" lang="en" tabindex="-1">${escapeHtml(word.word)}</h2>
+      </div>
       <div class="dictionary-detail-actions">
         <button type="button" class="icon-circle sound-btn" aria-label="نطق الكلمة" data-action="sound" data-id="${id}"><i class="fas fa-volume-up" aria-hidden="true"></i></button>
-        <button type="button" class="star-btn ${word.starred ? 'active' : ''}" aria-label="كلمة صعبة" aria-pressed="${Boolean(word.starred)}" data-action="star" data-id="${id}"><i class="fas fa-star" aria-hidden="true"></i></button>
         <button type="button" class="icon-circle edit-btn" aria-label="تعديل الكلمة" data-action="edit" data-id="${id}"><i class="fas fa-edit" aria-hidden="true"></i></button>
         <button type="button" class="icon-circle del-btn" aria-label="حذف الكلمة" data-action="delete" data-id="${id}"><i class="fas fa-trash-alt" aria-hidden="true"></i></button>
       </div>
@@ -203,7 +284,7 @@ function renderWordCard(w, query, indexMap) {
     ? `draggable="true" ondragstart="drag(event,${ri})" ondragover="allowDrop(event)" ondrop="drop(event,${ri})"`
     : '';
   const cls = ['word-card', isReorderMode ? 'reorder-mode-li' : '',
-               selectedIndices.includes(ri) ? 'selected-for-move' : '',
+               isReorderMode && selectedIndices.includes(ri) ? 'selected-for-move' : '',
                isBulkDeleteMode && bulkSelectedWordIds.has(String(w.id)) ? 'bulk-selected' : '',
                w.expanded ? 'show-example' : '']
     .filter(Boolean).join(' ');
@@ -233,10 +314,11 @@ function renderWordCard(w, query, indexMap) {
         </div>
         ${w.expanded ? renderWordCardDetails(w) : ''}
       </div>
-      ${isReorderMode
-        ? '<span style="font-size:20px;color:var(--text-gray);padding:0 8px;flex-shrink:0;">☰</span>'
-        : isBulkDeleteMode
-          ? `<span class="selection-state">${bulkSelectedWordIds.has(String(w.id)) ? 'محدد' : 'تحديد'}</span>`
+      ${isBulkDeleteMode
+          ? `<span class="dictionary-row-selection">
+              ${isReorderMode ? '<i class="fa-solid fa-grip-lines" aria-hidden="true"></i>' : ''}
+              <span class="selection-state" role="img" aria-label="${bulkSelectedWordIds.has(String(w.id)) ? 'محددة' : 'غير محددة'}"><i class="fa-solid fa-check" aria-hidden="true"></i></span>
+            </span>`
         : `<div class="actions">
              <button class="icon-circle sound-btn" aria-label="نطق الكلمة" data-tip="نطق" data-action="sound" data-id="${safeId}"><i class="fas fa-volume-up" aria-hidden="true"></i></button>
              ${returnToPersonalAction}
@@ -385,7 +467,7 @@ function renderDictionaryWindow(options = {}) {
   const search = document.getElementById('searchInput');
   const list = document.getElementById('list');
   if (!search || !list) return;
-  const query = search.value.toLowerCase().trim();
+  const { query, searchType } = readDictionaryListControls();
   const pages = isCustomWorldView() ? null : window.LootLinguaDictionaryPages?.current();
   const serverSorted = pages?.state().queryMode === dictionarySortMode && ['auto', 'newest', 'oldest'].includes(dictionarySortMode);
   const fullDataKey = pages && (query || currentFilter !== 'all' || dictionarySortMode !== 'auto' && !serverSorted)
@@ -398,8 +480,9 @@ function renderDictionaryWindow(options = {}) {
       if (dictionaryFullDataRequest === request) dictionaryFullDataRequest = null;
     });
   }
-  const searchType = document.getElementById('searchFilter')?.value || 'all';
   const snapshot = getDictionaryListSnapshot(query, searchType);
+  if (dictionarySelectAllRequest?.key && dictionarySelectAllRequest.key !== snapshot.key) window.cancelDictionarySelectAll();
+  if (isBulkDeleteMode) window.updateDictionarySelectAllUi();
   const listWasCleared = !list.querySelector('.word-card, .virtual-list-spacer');
   if (listWasCleared) dictionaryResizeObserver?.disconnect();
   list.classList.add('dictionary-windowed');
@@ -447,6 +530,9 @@ function renderDictionaryWindow(options = {}) {
 
 function render(options = {}) {
   updateDictionaryPageStatus();
+  const stats = document.getElementById('dictionaryQuickStats');
+  if (stats) stats.hidden = currentView !== 'personal';
+  if (currentView === 'personal') renderProfileModalStats();
   const run = () => renderDictionaryWindow(options);
   return typeof window.withWordMasterySnapshot === 'function' ? window.withWordMasterySnapshot(run) : run();
 }
@@ -501,7 +587,8 @@ document.addEventListener('DOMContentLoaded', () => {
   list.addEventListener('keydown', (event) => {
     if ((event.key !== 'Enter' && event.key !== ' ') || !event.target.matches('.word-card')) return;
     event.preventDefault();
-    handleLiClick(Number(event.target.dataset.index), event.target, { focusDetail: true });
+    if (isBulkDeleteMode) toggleBulkWordSelection(event.target.dataset.id);
+    else handleLiClick(Number(event.target.dataset.index), event.target, { focusDetail: true });
   });
 
   document.querySelector('.dictionary-layout')?.addEventListener('click', (e) => {
@@ -590,6 +677,7 @@ function updateDictionaryPageStatus() {
 }
 window.addEventListener('lootlingua:dictionary-page-state', () => {
   updateDictionaryPageStatus();
+  if (currentView === 'personal') renderProfileModalStats();
   scheduleDictionaryPageCheck();
   if (currentView === 'personal') {
     const empty = document.querySelector('#list .dictionary-empty');

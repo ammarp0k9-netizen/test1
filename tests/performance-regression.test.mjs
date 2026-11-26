@@ -139,8 +139,8 @@ test('word move has an immediate UI guard and data-level deterministic identity'
     worldsSource.indexOf('window.openDeleteCustomWorldModal')
   );
   assert.match(block, /if \(worldManageOperationPromise\) return worldManageOperationPromise/);
-  assert.match(block, /button\.disabled = true/);
-  assert.match(block, /aria-busy/);
+  assert.match(block, /worldManageOperationPromise = Promise\.resolve\(\)\.then\(\(\) => runner\(operationScope, task\)\)/);
+  assert.match(worldsSource, /button\.disabled = !count \|\| busy/);
   assert.match(block, /runExclusive/);
   assert.match(worldsSource, /function getWorldManageOperationId[\s\S]*map\(getWorldManageWordKey\)/);
   assert.match(block, /removePrivateWorldId:[\s\S]*memberships-moved-atomically/);

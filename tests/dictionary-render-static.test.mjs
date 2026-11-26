@@ -99,13 +99,45 @@ test('Entry no longer attaches a game-dictionary search guide to the personal di
 
 test('private-world rendering does not treat a false boolean as a personal page store', () => {
   const start = renderSource.indexOf('function renderDictionaryWindow');
-  const prefix = renderSource.slice(start, renderSource.indexOf('  const searchType =', start));
+  const prefix = renderSource.slice(start, renderSource.indexOf('  const snapshot =', start));
   vm.runInNewContext('let dictionaryFullDataRequest=null;' + prefix + '}renderDictionaryWindow()', {
     window: { cancelDictionaryFullDataRequest() {}, LootLinguaDictionaryPages: { current() { throw Error('Private view must not use personal pagination'); } } },
     document: { getElementById: () => ({ value: '' }) },
+    readDictionaryListControls: () => ({ query: '', searchType: 'all' }),
     isEditableDictionaryView: () => true, isCustomWorldView: () => true,
     dictionarySortMode: 'newest', dictionarySortCategory: 'all', currentFilter: 'all',
   });
+});
+
+test('select all waits for every page and applies only the matching words from the same scope', async () => {
+  const source = renderSource.slice(renderSource.indexOf('window.cancelDictionarySelectAll ='),
+    renderSource.indexOf('function getDictionaryListSnapshot'));
+  for (const switchFilter of [false, true]) {
+    let finish;
+    let requested = 0;
+    const ready = new Promise(resolve => { finish = resolve; });
+    const selected = new Set(['outside']);
+    const controls = { query: 'alpha', searchType: 'word' };
+    let filtered = [{ id: 'early' }];
+    const pages = { state: () => ({ complete: false }), ensureComplete() { requested++; return ready; } };
+    const context = {
+      window: { LootLinguaDictionaryPages: { current: () => pages } },
+      bulkSelectedWordIds: selected, dictionarySelectAllRequest: null, AbortController,
+      isBulkDeleteMode: true, isCustomWorldView: () => false, isEditableDictionaryView: () => true,
+      readDictionaryListControls: () => ({ ...controls }),
+      getDictionaryListSnapshot: query => ({ key: query, filtered }),
+      updateBulkDeleteBar() {}, syncSelectedIndicesFromBulkSelection() {}, syncBulkSelectionInDom() {},
+    };
+    vm.runInNewContext(source, context);
+    const pending = context.window.selectAllDictionaryResults();
+    assert.deepEqual([...selected], ['outside']);
+    filtered = [{ id: 'early' }, { id: 'later-page' }];
+    if (switchFilter) controls.query = 'beta';
+    finish();
+    await pending;
+    assert.equal(requested, 1);
+    assert.deepEqual([...selected], switchFilter ? ['outside'] : ['early', 'later-page']);
+  }
 });
 
 test('page-status events stay harmless in private worlds and other views while personal pages load', () => {

@@ -249,8 +249,6 @@ let customWorlds     = readCustomWorldsFromStorage();
 let activeCustomWorldId = null;
 let pendingCustomWorldModalMode = 'create';
 let pendingCustomWorldEditId = null;
-let pendingWorldManageAction = 'move';
-let pendingWorldManageCreateAction = null;
 let pendingDeleteWorldId = null;
 let renderLimit      = 20;  // عدد الكلمات التي تظهر في البداية
 const WORD_RENDER_FAST_MODE = true;
@@ -557,17 +555,25 @@ function updateBulkDeleteBar() {
     bar.hidden = !isBulkDeleteMode;
     bar.dataset.count = String(count);
   }
+  const countLabel = document.getElementById('dictionarySelectionCount');
+  const countText = `${count} محددة`;
+  if (countLabel && countLabel.textContent !== countText) countLabel.textContent = countText;
+  const busy = Boolean(window.isWorldManageBusy?.() || window.isDictionarySelectionLoading?.());
+  bar?.querySelectorAll('[data-selection-required]').forEach(button => { button.disabled = !count || busy; });
+  if (reorderBtn) reorderBtn.disabled = busy || (!count && !isReorderMode);
   if (reorderBtn) reorderBtn.textContent = isReorderMode ? 'حفظ الترتيب' : 'ترتيب يدوي';
   document.querySelectorAll('.selection-reorder-step').forEach(btn => {
     btn.hidden = !isBulkDeleteMode || !isReorderMode;
   });
   document.body.classList.toggle('selection-mode-active', isBulkDeleteMode);
   const searchBar = document.querySelector('.search-bar-row');
-  if (searchBar) searchBar.style.display = isBulkDeleteMode ? 'none' : (isEditableDictionaryView() ? '' : 'none');
+  if (searchBar) searchBar.style.display = isEditableDictionaryView() ? '' : 'none';
   const personalControls = document.getElementById('personalControls');
   if (personalControls && isEditableDictionaryView()) {
     personalControls.classList.toggle('selection-hidden', isBulkDeleteMode);
   }
+  window.updateDictionarySelectAllUi?.();
+  window.updateWorldManageSelection?.();
 }
 
 function syncBulkSelectionInDom(id) {
@@ -579,8 +585,9 @@ function syncBulkSelectionInDom(id) {
     if (!cardId) return;
     const selected = bulkSelectedWordIds.has(String(cardId));
     card.classList.toggle('bulk-selected', selected);
+    card.classList.toggle('selected-for-move', isReorderMode && selected);
     const state = card.querySelector('.selection-state');
-    if (state) state.textContent = selected ? 'محدد' : 'تحديد';
+    if (state) state.setAttribute('aria-label', selected ? 'محددة' : 'غير محددة');
   });
   updateBulkDeleteBar();
 }
@@ -619,6 +626,8 @@ window.enterSelectionMode = function(id) {
 };
 
 window.exitBulkDeleteMode = function(options = {}) {
+  window.closeWorldManageFlow?.({ force: true });
+  window.cancelDictionarySelectAll?.();
   if (isReorderMode) isReorderMode = false;
   isBulkDeleteMode = false;
   bulkSelectedWordIds.clear();
@@ -631,14 +640,10 @@ window.exitBulkDeleteMode = function(options = {}) {
 window.exitSelectionMode = window.exitBulkDeleteMode;
 
 function toggleBulkWordSelection(id) {
-  if (!id) return;
+  if (!id || window.isWorldManageBusy?.()) return;
   const key = String(id);
   if (bulkSelectedWordIds.has(key)) bulkSelectedWordIds.delete(key);
   else bulkSelectedWordIds.add(key);
-  if (!bulkSelectedWordIds.size) {
-    window.exitBulkDeleteMode();
-    return;
-  }
   syncBulkSelectionInDom(key);
   syncSelectedIndicesFromBulkSelection();
 }
@@ -1599,7 +1604,7 @@ function getModalFocusableElements(modal) {
   )].filter((element) => !element.hidden && getComputedStyle(element).display !== 'none');
 }
 
-function showModal(id) {
+function showModal(id, { onEscape = () => hideModal(id) } = {}) {
   const modal = document.getElementById(id);
   if (!modal) return;
   if (activeModalFocusContext?.modal && activeModalFocusContext.modal !== modal) {
@@ -1632,7 +1637,7 @@ function showModal(id) {
   modal.setAttribute('aria-modal', 'true');
   // Register nested confirmations so the profile dialog releases their
   // inert state and focus can enter the confirmation buttons.
-  window.LootLinguaModalFocus?.open(modal, { dialog: modal.querySelector('.modal-content') || modal, onEscape: () => hideModal(id) });
+  window.LootLinguaModalFocus?.open(modal, { dialog: modal.querySelector('.modal-content') || modal, onEscape });
   if (!modal.hasAttribute('tabindex')) modal.tabIndex = -1;
   requestAnimationFrame(() => {
     const focusable = getModalFocusableElements(modal);
@@ -2693,6 +2698,7 @@ function beginViewSwitch() {
   window.cancelPendingStatsPanel?.();
   window.releaseDictionaryDraggedCard?.();
   window.cancelDictionaryFullDataRequest?.();
+  if (isBulkDeleteMode) window.exitBulkDeleteMode({ renderView: false });
   window.watchPersonalDictionaryRows?.([]);
   window.__dictionaryNavigationGeneration = (window.__dictionaryNavigationGeneration || 0) + 1;
   window.dispatchEvent(new CustomEvent('lootlingua:dictionary-navigation'));

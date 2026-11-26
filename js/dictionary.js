@@ -875,12 +875,20 @@ async function confirmDeleteWords(ids, {
   privateDisposition = '',
   privateDispositionIds = [],
 } = {}) {
-  const uniqueIds = [...new Set((Array.isArray(ids) ? ids : [ids]).map(String).filter(Boolean))];
-  const wordsToDelete = uniqueIds
-    .map(id => window.words.find(w => String(w.id) === id))
-    .filter(Boolean);
+  const wordsById = new Map(window.words.map(word => [String(word.id), word]));
+  const uniqueIds = [...new Set((Array.isArray(ids) ? ids : [ids]).map(String))].filter(id => wordsById.has(id));
+  const wordsToDelete = uniqueIds.map(id => wordsById.get(id));
   if (!wordsToDelete.length) return;
   const context = captureDictionaryWriteContext();
+  const sameOwner = () => context.owner === (window.auth?.currentUser?.uid || 'guest') &&
+    context.generation === (Number(window.__lootlinguaAuthGeneration) || 0);
+  const gather = async (items, work) => {
+    const results = [];
+    for (let offset = 0; offset < items.length && sameOwner(); offset += 12) {
+      results.push(...await Promise.all(items.slice(offset, offset + 12).map(work)));
+    }
+    return results;
+  };
   const dictionarySync = window.LootLinguaDictionarySync;
   let deferPersonal = Boolean(dictionarySync?.unavailable() && !context.worldId && context.owner !== 'guest');
 
@@ -899,7 +907,7 @@ async function confirmDeleteWords(ids, {
   let deferPrivate = Boolean(deleteCustomWorldId && hasSignedInUser() && dictionarySync?.unavailable());
   if (deleteCustomWorldId && hasSignedInUser()) {
     try {
-      const impacts = await Promise.all(wordsToDelete.map(async word => {
+      const impacts = await gather(wordsToDelete, async word => {
         const wordId = String(word.id);
         if (dispositionIdSet.has(wordId)) return null;
         const pending = dictionarySync?.pendingPrivateRemoval(context.owner, deleteCustomWorldId, wordId);
@@ -909,7 +917,7 @@ async function confirmDeleteWords(ids, {
         }
         if (deferPrivate || wordId.startsWith('pending-word-')) return null;
         return { wordId, ...(await window.getPrivateWorldRemovalImpact?.(deleteCustomWorldId, word)) };
-      }));
+      });
       if (!isDictionaryWriteContextCurrent(context)) return;
       for (const impact of impacts.filter(Boolean)) privateImpactById.set(impact.wordId, impact);
       const requiringDisposition = impacts.filter(impact => impact?.requiresDisposition);
@@ -929,9 +937,9 @@ async function confirmDeleteWords(ids, {
   }
   if (!deleteCustomWorldId && hasSignedInUser() && !deferPersonal) {
     try {
-      const summaries = await Promise.all(wordsToDelete.map((word) =>
+      const summaries = await gather(wordsToDelete, (word) =>
         window.getUserWordSourceSummary?.(word) || Promise.resolve({ hasJourneySource: false })
-      ));
+      );
       summaries.forEach((summary, index) => {
         sourceSummaryById.set(String(wordsToDelete[index].id), summary);
         if (summary?.hasJourneySource) {
@@ -947,6 +955,7 @@ async function confirmDeleteWords(ids, {
       }
     }
   }
+  if (!isDictionaryWriteContextCurrent(context)) return;
   const journeyLinkedCount = [...actionById.values()].filter((action) => action === 'hide').length;
   configureDeleteModal(wordsToDelete, journeyLinkedCount);
   if (deferPrivate) {
@@ -956,20 +965,19 @@ async function confirmDeleteWords(ids, {
 
   document.getElementById('deleteConfirmBtn').onclick = async function() {
     hideModal('deleteModal');
-    uniqueIds.forEach((id) => {
-      const li = document.querySelector(`[data-id="${cssEscapeValue(id)}"]`)?.closest('.word-card');
-      if (li) {
-        li.style.transition = 'all 0.28s cubic-bezier(0.4, 0, 0.2, 1)';
-        li.style.transform = 'scale(0.96) translateY(8px)';
-        li.style.opacity = '0';
-      }
+    const selection = new Set(uniqueIds);
+    document.querySelectorAll('#list .word-card').forEach(li => {
+      if (!selection.has(li.dataset.id)) return;
+      li.style.transition = 'all 0.28s cubic-bezier(0.4, 0, 0.2, 1)';
+      li.style.transform = 'scale(0.96) translateY(8px)';
+      li.style.opacity = '0';
     });
 
     setTimeout(async () => {
       if (!isDictionaryWriteContextCurrent(context)) return;
-      const results = await Promise.all(uniqueIds.map(async (id) => {
+      const results = await gather(uniqueIds, async (id) => {
         const action = actionById.get(id) || 'delete';
-        const word = wordsToDelete.find((item) => String(item.id) === id);
+        const word = wordsById.get(id);
         const disposition = dispositionIdSet.has(id) ? privateDisposition : '';
         const queueRemoval = () => {
           if (deleteCustomWorldId) dictionarySync.removePrivate(context.owner, deleteCustomWorldId, word, disposition);
@@ -1015,7 +1023,8 @@ async function confirmDeleteWords(ids, {
           }, error);
           return { id, action, ok: false, error };
         }
-      }));
+      });
+      if (!sameOwner()) return;
       const failed = results.filter((result) => !result.ok);
       if (failed.length) {
         failed.forEach(({ id }) => {
@@ -1026,7 +1035,7 @@ async function confirmDeleteWords(ids, {
           }
         });
         const failureDetails = failed.map(({ id, error }) => {
-          const word = wordsToDelete.find((item) => String(item.id) === String(id));
+          const word = wordsById.get(String(id));
           const code = String(error?.code || '');
           const reason = code.includes('permission')
             ? 'لا توجد صلاحية كافية'
@@ -1056,7 +1065,6 @@ async function confirmDeleteWords(ids, {
       const hideSet = new Set(successful
         .filter((result) => result.action === 'hide')
         .map((result) => result.id));
-      if (context.owner !== (window.auth?.currentUser?.uid || 'guest') || context.generation !== (Number(window.__lootlinguaAuthGeneration) || 0)) return;
       const stillInDeleteScope = getActiveDictionaryStorageScope() === deleteScopeKey;
       if (stillInDeleteScope) {
         window.words = window.words
@@ -1078,7 +1086,7 @@ async function confirmDeleteWords(ids, {
       pendingDeleteId = null;
       document.querySelector('#deleteModal .xp-delete-warn')?.remove();
       resetDeleteModalCopy();
-      if (fromBulk || isBulkDeleteMode) window.exitBulkDeleteMode();
+      if (stillInDeleteScope && (fromBulk || isBulkDeleteMode)) window.exitBulkDeleteMode();
       if (typeof reconcileEmptyGuestSessionState === 'function') reconcileEmptyGuestSessionState();
       if (currentView === 'starred') renderStarredWords();
       else if (stillInDeleteScope) render();
