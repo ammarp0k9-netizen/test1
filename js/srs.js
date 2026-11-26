@@ -315,7 +315,8 @@ function applyMasteryUpdatesAcrossLocalCopies(masteryUpdates, options = {}) {
 
 window.applyQuizLearningBatch = async function(transitionEntries = [], options = {}) {
   const entries = Array.isArray(transitionEntries) ? transitionEntries : [];
-  const uid = window.auth?.currentUser?.uid;
+  const uid = options.ownerId || window.auth?.currentUser?.uid;
+  if (uid && window.auth?.currentUser?.uid !== uid) throw Object.assign(new Error('The quiz account changed.'), { code: 'auth/identity-changed' });
   const ownerId = getStorageUserId(uid);
   const trace = options.trace;
   const masteryStore = readSharedWordMasteryStore(uid);
@@ -329,6 +330,7 @@ window.applyQuizLearningBatch = async function(transitionEntries = [], options =
   entries.forEach(({ word, result, update }) => {
     const wordKey = getWordMasteryKey(word);
     if (!wordKey || !word?.id || !update?.state) return;
+    if (update.alreadyApplied && toQuizTimestamp(update.state.last_quizzed_at) > Number(result?.answeredAt)) return;
     const previous = masteryUpdates.get(wordKey) || masteryStore[wordKey];
     const state = mergePermanentWordMasteryState(previous, update.state);
     masteryUpdates.set(wordKey, state);
@@ -390,6 +392,7 @@ window.applyQuizLearningBatch = async function(transitionEntries = [], options =
     });
     cloud = await window.commitQuizLearningBatchToCloud({
       ownerId: uid,
+      sessionId: options.sessionId,
       masteryEntries: Object.fromEntries(masteryUpdates),
       personalWords: local.personalCloudWords.map((word) => ({ id: word.id, data: word })),
       customWords,
@@ -529,11 +532,11 @@ function recordQuizExposureSession(sessionId, words, options = {}) {
   const history = readQuizExposureHistory().filter(entry => String(entry?.sessionId) !== String(sessionId));
   writeQuizExposureHistory([{
     sessionId: String(sessionId),
-    at: Date.now(),
+    at: Number(options.at) || Date.now(),
     mode,
     wordKeys,
     wordExposures,
-  }, ...history].slice(0, 3));
+  }, ...history].sort((a, b) => b.at - a.at).slice(0, 3));
   if (!hasSignedInUser()) markGuestDataDirty();
   requestProfileCloudSave();
 }

@@ -131,6 +131,7 @@ test('a verified legacy gate quiz resumes its checkpoint or submits its saved re
     h.root.__pendingQuizResumeSession = saved;
     Object.assign(h.scope, {
       activeQuizSession: null,
+      isVerifiedQuizMode: () => true,
       applyStoredQuizSession: value => { calls.applied++; h.scope.activeQuizSession = value; return true; },
       hideQuizResumePrompt() {}, hideQuizPlayPanels() {}, setQuizImmersive() {},
       finishQuizRun: () => { calls.submitted++; return 'submitted'; },

@@ -5239,7 +5239,7 @@ function installQuizEvidenceBeforeRewardHook() {
     return;
   }
   const wrapped = async function evidenceFirstQuizReward(entries, sessionId, options = {}) {
-    const context = window.getActiveVerifiedQuizCommitContext?.(sessionId);
+    const context = options.commitContext || window.getActiveVerifiedQuizCommitContext?.(sessionId);
     if (!window.auth?.currentUser || !context) {
       return original.apply(this, arguments);
     }
@@ -5260,6 +5260,7 @@ function installQuizEvidenceBeforeRewardHook() {
       officialReviewGate: context.officialReviewGate || null,
       officialReviewDueWordKeys: context.officialReviewDueWordKeys || [],
     });
+    options.checkOwner?.();
     options.trace?.stage('evidence-write-end', evidence);
     options.trace?.stage('xp-journey-start');
     const reward = await original.apply(this, arguments);

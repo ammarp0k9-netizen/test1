@@ -23,7 +23,7 @@ function harness({ states = [fresh()], correct = states.map(() => true), officia
   let saves = 0, retries = 0;
   const root = {
     auth: { currentUser: { uid: 'account' } },
-    queueProfileIntent() {},
+    queueProfileIntent() { return 'activity'; },
     LootLinguaJourneyCloud: projection || { async projectQuizEvidenceReadiness(summary) { return summary; } },
     LootLinguaOperations: {
       nextPaint: async () => {},
@@ -66,6 +66,12 @@ function harness({ states = [fresh()], correct = states.map(() => true), officia
       });
       return { awards, pendingCount: pending, evidence: evidence || { recorded: 0, duplicate: 0 } };
     },
+    quizDraftWordCount: session => session.words.length,
+    toQuizTimestamp: value => Number(value) || 0,
+    verifiedQuizCommitContext: session => ({ source: session.source }),
+    localDateKey: () => day,
+    serializeActiveQuizSession: () => ctx.activeQuizSession && ({ ...ctx.activeQuizSession, quizIndex: ctx.quizIndex,
+      quizSessionResults: ctx.quizSessionResults, currentQuizMistakes: ctx.currentQuizMistakes }),
     isVerifiedQuizMode: mode => mode === 'matching', hasSignedInUser: () => true,
     showToast: (text, type, _duration, options) => toasts.push({ text, type, options }),
     retryPendingXPEvents: () => { retries++; },

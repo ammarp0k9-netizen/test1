@@ -7,6 +7,7 @@
   const title = bar.querySelector('[data-sync-title]');
   const copy = bar.querySelector('[data-sync-copy]');
   const close = bar.querySelector('button');
+  const quizBar = document.getElementById('quizSyncStatus');
   let owner = '';
   let awaiting = false;
   let done = false;
@@ -27,14 +28,15 @@
       active: 'جارٍ مزامنة بياناتك وتقدمك...', activeCopy: 'يمكنك متابعة استخدام الموقع.',
       success: 'تمت مزامنة بياناتك وتقدمك بنجاح.', fail: 'تعذّر الحفظ على هذا الجهاز.',
       failCopy: 'تحقّق من مساحة التخزين أو إعدادات المتصفح، ثم أعد المحاولة.',
-      rejected: 'تعذّر اعتماد بعض التغييرات.',
+      rejected: 'تعذّر اعتماد بعض التغييرات.', choice: 'إزالة الكلمة تحتاج اختيارك.',
+      choiceCopy: 'افتح العالم الخاص واضغط حذف بجانب الكلمة لاختيار مصيرها.',
       denied: 'رفض الخادم الصلاحية لهذه العملية. تحقّق من حسابك.',
       invalid: 'لم تعد البيانات صالحة لهذا الإجراء. افتح العنصر وأعد المحاولة.',
       unexpected: 'راجع العملية في قسمها. ستتابع المزامنة للتغييرات المستقلة.', close: 'إغلاق حالة المزامنة',
       scopes: { dictionary: 'القاموس', 'custom-worlds': 'عالم خاص', 'custom-world-remove': 'حذف عالم خاص',
-        'gate-lesson': 'حفظ الدرس', 'level-placement': 'إجابات التقييم', 'quiz-draft': 'مسودة الاختبار',
+        'gate-lesson': 'حفظ الدرس', 'level-placement': 'إجابات التقييم', 'quiz-draft': 'مسودة الاختبار', 'quiz-result': 'نتيجة الاختبار',
         entry: 'الأونبوردنج', profile: 'الملف الشخصي', notifications: 'الإشعارات' },
-      actions: { add: 'إضافة كلمة', edit: 'تعديل كلمة', remove: 'إزالة كلمة', transfer: 'نسخ أو نقل كلمة' },
+      actions: { add: 'إضافة كلمة', edit: 'تعديل كلمة', remove: 'إزالة كلمة', 'remove-private': 'إزالة كلمة من عالم خاص', transfer: 'نسخ أو نقل كلمة' },
     },
     en: {
       waiting: 'Your progress is saved on this device.', quota: 'Changes will sync automatically when the quota resets.',
@@ -43,13 +45,14 @@
       active: 'Syncing your data and progress…', activeCopy: 'You can keep using the site.',
       success: 'Your data and progress are synced.', fail: 'Could not save to this device.',
       failCopy: 'Check your browser storage settings or available space, then try again.',
-      rejected: 'Some changes could not be confirmed.', denied: 'The server denied permission. Check your account.',
+      rejected: 'Some changes could not be confirmed.', choice: 'Choose how to remove this word.',
+      choiceCopy: 'Open the private world and select Delete next to the word to see the choices.', denied: 'The server denied permission. Check your account.',
       invalid: 'The data is no longer valid for this action. Open the item and try again.',
       unexpected: 'Review the action in its section. Other changes will keep syncing.', close: 'Dismiss sync status',
       scopes: { dictionary: 'Dictionary', 'custom-worlds': 'Private world', 'custom-world-remove': 'Private world removal',
-        'gate-lesson': 'Lesson checkpoint', 'level-placement': 'Assessment answers', 'quiz-draft': 'Quiz checkpoint',
+        'gate-lesson': 'Lesson checkpoint', 'level-placement': 'Assessment answers', 'quiz-draft': 'Quiz checkpoint', 'quiz-result': 'Quiz result',
         entry: 'Onboarding', profile: 'Profile', notifications: 'Notifications' },
-      actions: { add: 'Add a word', edit: 'Edit a word', remove: 'Remove a word', transfer: 'Copy or move a word' },
+      actions: { add: 'Add a word', edit: 'Edit a word', remove: 'Remove a word', 'remove-private': 'Remove a private world word', transfer: 'Copy or move a word' },
     },
   };
 
@@ -61,6 +64,31 @@
       bar.style.width = Math.min(Math.round(bounds.width), Math.max(0, document.documentElement.clientWidth - 20)) + 'px';
     }
     document.body.style.setProperty('--sync-status-offset', visible ? `${bar.offsetHeight + 6}px` : '0px');
+  }
+
+  function presentation(status, unavailable, text) {
+    let kind = '', heading = '', message = '';
+    if (status?.localFailure) {
+      kind = 'error'; heading = text.fail; message = text.failCopy;
+    } else if (status?.rejected) {
+      const rejection = status.rejections?.[0];
+      const reason = rejection?.reason;
+      kind = 'error'; heading = text.rejected;
+      if (reason === 'private-disposition') heading = text.choice;
+      message = reason === 'private-disposition' ? text.choiceCopy
+        : ['permission-denied', 'unauthenticated'].includes(reason) ? text.denied
+        : ['invalid-argument', 'failed-precondition', 'not-found'].includes(reason) ? text.invalid : text.unexpected;
+      const description = text.actions[rejection?.type] || text.scopes[rejection?.scope];
+      if (description) message = description + (rejection.name ? ` «${rejection.name}»` : '') + '. ' + message;
+    } else if (status?.pending) {
+      const reason = unavailable;
+      if (!reason) {
+        kind = 'active'; heading = text.active; message = text.activeCopy;
+      } else {
+        kind = 'pending'; heading = text.waiting; message = text[reason] || text.service;
+      }
+    }
+    return { kind, heading, message };
   }
 
   function render() {
@@ -80,24 +108,8 @@
     if (status?.pending && unavailable) { awaiting = true; done = false; }
     else if (awaiting && !status?.pending && !status?.localFailure && !status?.rejected && !status?.active && uid) { done = true; awaiting = false; }
     rememberPhase();
-    if (status?.localFailure) {
-      kind = 'error'; heading = text.fail; message = text.failCopy;
-    } else if (status?.rejected) {
-      const rejection = status.rejections?.[0];
-      const reason = rejection?.reason;
-      kind = 'error'; heading = text.rejected;
-      message = ['permission-denied', 'unauthenticated'].includes(reason) ? text.denied
-        : ['invalid-argument', 'failed-precondition', 'not-found'].includes(reason) ? text.invalid : text.unexpected;
-      const description = text.actions[rejection?.type] || text.scopes[rejection?.scope];
-      if (description) message = description + (rejection.name ? ` «${rejection.name}»` : '') + '. ' + message;
-    } else if (status?.pending) {
-      const reason = unavailable;
-      if (!reason) {
-        kind = 'active'; heading = text.active; message = text.activeCopy;
-      } else {
-        kind = 'pending'; heading = text.waiting; message = text[reason] || text.service;
-      }
-    } else if (done) {
+    ({ kind, heading, message } = presentation(status, unavailable, text));
+    if (!kind && done) {
       kind = 'success'; heading = text.success;
     }
     bar.hidden = !kind;
@@ -109,10 +121,25 @@
     close.hidden = kind !== 'success';
     close.setAttribute('aria-label', text.close);
     icon.className = 'fa-solid ' + ({ error: 'fa-triangle-exclamation', active: 'fa-rotate', success: 'fa-circle-check' }[kind] || 'fa-cloud');
+    if (quizBar) {
+      const quizActive = document.body.classList?.contains('quiz-active');
+      const assessment = root.LootLinguaOperations?.syncStatus(uid, ['quiz-result', 'quiz-draft', 'quiz-checkpoint', 'level-placement']);
+      const state = presentation(assessment, root.LootLinguaCloudBackoff?.reason() || assessment?.reason, text);
+      quizBar.hidden = !quizActive || !state.kind;
+      quizBar.dataset.state = state.kind;
+      quizBar.dir = bar.dir;
+      quizBar.querySelector('i').className = 'fa-solid ' + ({ error: 'fa-triangle-exclamation', active: 'fa-rotate' }[state.kind] || 'fa-cloud');
+      quizBar.querySelector('[data-sync-title]').textContent = state.heading;
+      const quizCopy = quizBar.querySelector('[data-sync-copy]');
+      quizCopy.textContent = state.message;
+      quizCopy.hidden = !state.message;
+      const exit = document.querySelector?.('[data-quiz-result-exit]');
+      if (exit) exit.textContent = arabic() ? 'متابعة التعلّم' : 'Keep learning';
+    }
     layout();
   }
   close.addEventListener('click', () => { done = false; rememberPhase(); render(); });
-  for (const event of ['lootlingua:sync-state', 'lootlingua:auth-state', 'lootlingua:cloud-capacity-change', 'online', 'offline']) {
+  for (const event of ['lootlingua:sync-state', 'lootlingua:quiz-mode-changed', 'lootlingua:auth-state', 'lootlingua:cloud-capacity-change', 'online', 'offline']) {
     root.addEventListener(event, render);
   }
   root.addEventListener('resize', layout);

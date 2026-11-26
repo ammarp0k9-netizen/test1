@@ -48,7 +48,7 @@ test('the sync banner waits for confirmation and keeps its green state after ord
   const header = makeNode();
   h.root.sessionStorage = storage();
   h.context.document = { body: makeNode(), documentElement: { lang: 'ar', clientWidth: 400 },
-    getElementById: id => id === 'syncStatusBar' ? bar : header };
+    getElementById: id => id === 'syncStatusBar' ? bar : id === 'legendTopBar' ? header : null };
   let pending = 1;
   h.root.LootLinguaOperations.setSyncSource('test', () => ({ pending }));
   h.root.navigator.onLine = false;

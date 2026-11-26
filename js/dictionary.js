@@ -257,7 +257,7 @@ function clearInputs() {
 async function saveActiveWordToCloud(word) {
   if (isCustomWorldView()) {
     return window.saveCustomWorldWordToCloud
-      ? await window.saveCustomWorldWordToCloud(activeCustomWorldId, word)
+      ? await window.saveCustomWorldWordToCloud(activeCustomWorldId, word, { propagate: true })
       : null;
   }
   return window.saveWordToCloud
@@ -340,14 +340,29 @@ async function restoreExistingDictionaryWord(existingWord, incomingWord, sourceT
   let result = null;
   if (hasSignedInUser()) {
     if (!window.upsertUserWordWithSource) throw new Error('Dictionary restoration unavailable.');
-    result = await window.upsertUserWordWithSource({
-      word: { ...incomingWord, id: existingWord.id },
-      existingWordId: existingWord.id,
-      source: { type: sourceType },
-      restoreHidden: true,
-      personalDictionaryState: 'active',
-      operationId: `${sourceType}:restore`,
-    });
+    const sync = window.LootLinguaDictionarySync;
+    let deferred = sync?.unavailable();
+    try {
+      if (!deferred) {
+        result = await window.upsertUserWordWithSource({
+          word: { ...incomingWord, id: existingWord.id },
+          existingWordId: existingWord.id,
+          source: { type: sourceType },
+          restoreHidden: true,
+          personalDictionaryState: 'active',
+          operationId: `${sourceType}:restore`,
+        });
+      }
+    } catch (error) {
+      if (!sync?.temporary(error) || !isDictionaryWriteContextCurrent(context)) throw error;
+      deferred = true;
+    }
+    if (deferred && isDictionaryWriteContextCurrent(context)) {
+      const word = { ...existingWord, meaning: existingWord.meaning || incomingWord.meaning,
+        example: existingWord.example || incomingWord.example, category: existingWord.category || incomingWord.category };
+      sync.restoreWord(word, sourceType);
+      result = { wordId: existingWord.id, pending: true };
+    }
     if (!isDictionaryWriteContextCurrent(context)) throw Object.assign(new Error('Dictionary context changed.'), { code: 'dictionary/context-changed' });
     if (!result?.wordId || result.failed) throw new Error('Dictionary restoration was not acknowledged.');
   } else {
@@ -372,7 +387,7 @@ async function restoreExistingDictionaryWord(existingWord, incomingWord, sourceT
         : (incomingWord.category || word.category || 'عام'),
     }
     : word);
-  try { persistDictionary(); }
+  try { if (!result.pending) persistDictionary(); }
   catch (error) {
     if (context.owner === 'guest') {
       const stored = readWordsFromStorage('normal', 'guest');
@@ -583,7 +598,8 @@ window.addWord = async function() {
     btn.setAttribute('aria-busy', 'true');
     btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin" aria-hidden="true"></i> جارٍ الحفظ…';
     const sync = window.LootLinguaDictionarySync;
-    if (!editingId && !sync?.unavailable() && await window.LootLinguaDictionaryPages?.requireComplete({ personal: !context.worldId }) === false) return false;
+    if (!editingId && !sync?.unavailable() && await window.LootLinguaDictionaryPages?.requireComplete({ personal: !context.worldId }) === false &&
+        !sync?.unavailable()) return false;
     if (!isDictionaryWriteContextCurrent(context) || !sameDraft()) return false;
     if (editingId) {
       const existing = window.words.find(word => String(word.id) === String(editingId));
@@ -608,6 +624,7 @@ window.addWord = async function() {
       if (existing && !context.worldId) {
         const restored = await restoreExistingDictionaryWord(existing, { word: w, meaning: m, example: ex, category: c }, 'manual');
         if (!restored || !isDictionaryWriteContextCurrent(context)) return false;
+        pendingCloud = restored.pending === true;
         savedWord = window.words.find(word => String(word.id) === String(existing.id));
       } else {
         const newWord = applyKnownSharedMastery({ id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`, word: w, meaning: m, example: ex, category: c, starred: false, forgetCount: 0, xpValue: 0, order: 0, createdAt: new Date().toISOString() });
@@ -855,27 +872,35 @@ async function confirmDeleteWords(ids, {
   const sourceSummaryById = new Map();
   const privateImpactById = new Map();
   const dispositionIdSet = new Set(privateDispositionIds.map(String));
+  let deferPrivate = Boolean(deleteCustomWorldId && hasSignedInUser() && dictionarySync?.unavailable());
   if (deleteCustomWorldId && hasSignedInUser()) {
     try {
-      const impacts = await Promise.all(wordsToDelete.map(async (word) => ({
-        wordId: String(word.id),
-        ...(await window.getPrivateWorldRemovalImpact?.(deleteCustomWorldId, word)),
-      })));
-      impacts.forEach((impact) => privateImpactById.set(impact.wordId, impact));
-      const requiringDisposition = impacts.filter((impact) => impact.requiresDisposition);
-      if (!privateDisposition && requiringDisposition.length) {
-        showPrivateMembershipDisposition(
-          wordsToDelete,
-          requiringDisposition,
-          uniqueIds,
-          fromBulk
-        );
+      const impacts = await Promise.all(wordsToDelete.map(async word => {
+        const wordId = String(word.id);
+        if (dispositionIdSet.has(wordId)) return null;
+        const pending = dictionarySync?.pendingPrivateRemoval(context.owner, deleteCustomWorldId, wordId);
+        if (pending?.reason === 'private-disposition') {
+          deferPrivate = true;
+          return { wordId, requiresDisposition: true, ...pending.rejectionData };
+        }
+        if (deferPrivate || wordId.startsWith('pending-word-')) return null;
+        return { wordId, ...(await window.getPrivateWorldRemovalImpact?.(deleteCustomWorldId, word)) };
+      }));
+      if (!isDictionaryWriteContextCurrent(context)) return;
+      for (const impact of impacts.filter(Boolean)) privateImpactById.set(impact.wordId, impact);
+      const requiringDisposition = impacts.filter(impact => impact?.requiresDisposition);
+      if (requiringDisposition.length) {
+        showPrivateMembershipDisposition(wordsToDelete, requiringDisposition, uniqueIds, fromBulk);
         return;
       }
     } catch (error) {
-      showToast('تعذر التحقق من عضوية الكلمات. لم نغيّر هذا العالم.', 'danger', 5200);
-      pendingDeleteId = null;
-      return;
+      if (!isDictionaryWriteContextCurrent(context)) return;
+      if (dictionarySync?.temporary(error)) deferPrivate = true;
+      else {
+        showToast('تعذر التحقق من عضوية الكلمات. لم نغيّر هذا العالم.', 'danger', 5200);
+        pendingDeleteId = null;
+        return;
+      }
     }
   }
   if (!deleteCustomWorldId && hasSignedInUser() && !deferPersonal) {
@@ -900,6 +925,10 @@ async function confirmDeleteWords(ids, {
   }
   const journeyLinkedCount = [...actionById.values()].filter((action) => action === 'hide').length;
   configureDeleteModal(wordsToDelete, journeyLinkedCount);
+  if (deferPrivate) {
+    const copy = document.querySelector('#deleteModal .modal-content p');
+    if (copy) copy.textContent = 'سنحفظ طلب الإزالة على هذا الجهاز. إذا احتاجت الكلمة اختيارًا إضافيًا، ستظهر مجددًا لتحدّد مصيرها.';
+  }
 
   document.getElementById('deleteConfirmBtn').onclick = async function() {
     hideModal('deleteModal');
@@ -917,10 +946,17 @@ async function confirmDeleteWords(ids, {
       const results = await Promise.all(uniqueIds.map(async (id) => {
         const action = actionById.get(id) || 'delete';
         const word = wordsToDelete.find((item) => String(item.id) === id);
+        const disposition = dispositionIdSet.has(id) ? privateDisposition : '';
+        const queueRemoval = () => {
+          if (deleteCustomWorldId) dictionarySync.removePrivate(context.owner, deleteCustomWorldId, word, disposition);
+          else dictionarySync.enqueue('remove', '', word);
+          return { id, action: 'delete', ok: true, pending: true };
+        };
         try {
+          if (deleteCustomWorldId && dictionarySync && (deferPrivate || id.startsWith('pending-word-') ||
+              dictionarySync.pendingPrivateRemoval(context.owner, deleteCustomWorldId, id))) return queueRemoval();
           if (deferPersonal || (!deleteCustomWorldId && id.startsWith('pending-word-') && dictionarySync)) {
-            dictionarySync.enqueue('remove', '', word);
-            return { id, action: 'delete', ok: true, pending: true };
+            return queueRemoval();
           }
           if (action === 'hide' && typeof window.hideUserWordFromDictionary !== 'function') {
             const unavailable = new Error('Dictionary visibility service is unavailable.');
@@ -936,13 +972,15 @@ async function confirmDeleteWords(ids, {
               sourceSummaryById.get(id),
               deleteCustomWorldId ? {
                 impact: privateImpactById.get(id),
-                disposition: dispositionIdSet.has(id) ? privateDisposition : '',
+                disposition,
+                propagate: true,
               } : {}
             );
-          return { id, action, ok: action === 'hide' ? Boolean(result) : result === true };
+          return { id, action, ok: action === 'hide' || deleteCustomWorldId ? Boolean(result) : result === true };
         } catch (error) {
-          if (!deleteCustomWorldId && dictionarySync?.temporary(error) && isDictionaryWriteContextCurrent(context)) {
-            try { dictionarySync.enqueue('remove', '', word); return { id, action: 'delete', ok: true, pending: true }; }
+          if (dictionarySync && isDictionaryWriteContextCurrent(context) &&
+              (dictionarySync.temporary(error) || error?.code === 'word-lifecycle/disposition-required')) {
+            try { return queueRemoval(); }
             catch (failure) { return { id, action, ok: false, error: failure }; }
           }
           console.error('[Dictionary] word removal operation failed.', {
@@ -1004,8 +1042,9 @@ async function confirmDeleteWords(ids, {
             : word);
         if (!successful.some(result => result.pending)) persistDictionary();
       } else if (deleteCustomWorldId) {
+        const confirmed = new Set(successful.filter(result => !result.pending).map(result => result.id));
         const stored = readCustomWorldWordsFromStorage(deleteCustomWorldId)
-          .filter(w => !deleteSet.has(String(w.id)));
+          .filter(w => !confirmed.has(String(w.id)));
         writeCustomWorldWordsToStorage(deleteCustomWorldId, reindexWordOrder(stored));
       } else {
         const stored = readWordsFromStorage('normal')
@@ -1020,7 +1059,7 @@ async function confirmDeleteWords(ids, {
       if (currentView === 'starred') renderStarredWords();
       else if (stillInDeleteScope) render();
       refreshFeatureUnlockUI();
-      if (!failed.length) {
+      if (!failed.length && !successful.some(result => result.pending)) {
         if (successful.length === 1 && successful[0].action === 'hide') {
           const word = wordsToDelete[0];
           showToast(`أُخفيت كلمة ”${word.word || word.text}“ من قائمة قاموسك. ستظل تظهر في المراجعات والاختبارات.`, 'success', 5200);
@@ -1423,7 +1462,11 @@ window.submitSuggestionFromUI = async function(wordEnc, arEnc, gameEnc, ev) {
 
 async function addAiMeaningCore({ word, ar, pos, ex, game }, btn) {
   const context = captureDictionaryWriteContext();
-  if (await window.LootLinguaDictionaryPages?.requireComplete({ personal: !context.worldId }) === false || !isDictionaryWriteContextCurrent(context)) return;
+  const sync = window.LootLinguaDictionarySync;
+  if (!sync?.unavailable() && await window.LootLinguaDictionaryPages?.requireComplete({ personal: !context.worldId }) === false) {
+    if (!sync?.unavailable()) return;
+  }
+  if (!isDictionaryWriteContextCurrent(context)) return;
   if (!word || !ar) {
     pushNotification('بيانات ناقصة للإضافة', 'warning');
     return;
@@ -1451,7 +1494,7 @@ async function addAiMeaningCore({ word, ar, pos, ex, game }, btn) {
 
   try {
     if (existingWord && isDictionaryWordHidden(existingWord) && !isCustomWorldView()) {
-      await restoreExistingDictionaryWord(existingWord, {
+      const restored = await restoreExistingDictionaryWord(existingWord, {
         word,
         meaning: ar,
         example: ex || '',
@@ -1460,30 +1503,38 @@ async function addAiMeaningCore({ word, ar, pos, ex, game }, btn) {
       if (!isDictionaryWriteContextCurrent(context)) return;
       cloudAccepted = context.owner !== 'guest';
       if (isEditableDictionaryView()) render();
-      pushNotification(`تمت استعادة كلمة ”${word}“. كانت مرتبطة برحلة تعليمية، وتقدمها السابق محفوظ.`, 'success');
+      if (!restored?.pending) pushNotification(`تمت استعادة كلمة ”${word}“. تقدمها السابق محفوظ.`, 'success');
       added = true;
     } else if (window.auth?.currentUser) {
       const tempWord = applyKnownSharedMastery({ id: Date.now().toString(), word, meaning: ar, example: ex || '', category, starred: false, forgetCount: 0, xpValue: xpGain, createdAt: new Date().toISOString() });
-      const realId = isCustomWorldView()
-        ? await saveActiveWordToCloud(tempWord)
-        : await window.saveWordToCloud?.(
+      let realId;
+      let deferred = sync?.unavailable();
+      try {
+        if (!deferred) realId = isCustomWorldView()
+          ? await saveActiveWordToCloud(tempWord)
+          : await window.saveWordToCloud?.(
           tempWord.word,
           tempWord.category,
           tempWord.meaning,
           tempWord.example,
           tempWord.order ?? 0,
           { ...tempWord, lifecycleSource: { type: 'dictionary-search' } }
-        );
+          );
+      } catch (error) {
+        if (!sync?.temporary(error) || !isDictionaryWriteContextCurrent(context)) throw error;
+        deferred = true;
+      }
       if (!isDictionaryWriteContextCurrent(context)) return;
+      if (deferred) realId = sync.enqueue('add', context.worldId, tempWord, undefined, 'dictionary-search').id;
       if (typeof realId === 'string' && realId.trim()) {
         cloudAccepted = true;
         if (!window.words.some(item => String(item.id) === realId)) window.words.unshift(applyKnownSharedMastery({
           id: realId, word, meaning: ar, example: ex || '', category,
           starred: false, forgetCount: 0, xpValue: xpGain, createdAt: tempWord.createdAt,
         }));
-        persistDictionary();
+        if (!deferred) persistDictionary();
         if (isEditableDictionaryView()) render();
-        pushNotification(`تمت الإضافة إلى ${getActiveDictionaryMessageLabel()}!`, 'success');
+        if (!deferred) pushNotification(`تمت الإضافة إلى ${getActiveDictionaryMessageLabel()}!`, 'success');
         added = true;
       } else {
         throw new Error('Dictionary write was not acknowledged.');
@@ -2591,22 +2642,29 @@ function mergeImportedWords(importedWords) {
   return toAdd;
 }
 
-async function uploadImportedWordsToCloud(words) {
-  const result = { uploaded: 0, failed: 0 };
-  if (!window.auth?.currentUser || !words.length) return result;
+async function uploadImportedWordsToCloud(words, context = captureDictionaryWriteContext()) {
+  const result = { uploaded: 0, pending: 0, failed: 0 };
+  if (context.owner === 'guest' || !words.length) return result;
+  const sync = window.LootLinguaDictionarySync;
+  let deferred = sync?.unavailable();
   for (const item of words) {
+    if (!isDictionaryWriteContextCurrent(context)) break;
     try {
-      const realId = await saveActiveWordToCloud(item);
-      if (!realId) {
-        result.failed++;
-        continue;
+      let realId;
+      try { if (!deferred) realId = await saveActiveWordToCloud(item); }
+      catch (error) {
+        if (!sync?.temporary(error)) throw error;
+        deferred = true;
       }
+      if (!isDictionaryWriteContextCurrent(context)) break;
+      if (deferred) realId = sync.enqueue('add', context.worldId, item).id;
+      if (!realId) throw new Error('Dictionary import was not acknowledged.');
       item.id = realId;
-      const idx = window.words.findIndex((w) => normalizeWord(w.word) === normalizeWord(item.word));
-      if (idx >= 0) window.words[idx].id = realId;
-      result.uploaded++;
-    } catch (err) {
-      console.warn('import upload:', err);
+      if (deferred) result.pending++;
+      else result.uploaded++;
+    } catch (error) {
+      console.warn('import upload:', error?.code || error?.name);
+      window.words = window.words.filter(word => word !== item);
       result.failed++;
     }
   }
@@ -2619,6 +2677,7 @@ function finalizeJsonImport(ctx, uploadResult) {
   const totalXp = ctx.totalXp || 0;
   const uploaded = uploadResult?.uploaded || 0;
   const failed = uploadResult?.failed || 0;
+  const pending = uploadResult?.pending || 0;
 
   evaluateTitleUnlocks(false);
   window.__suppressUnlockNotices = true;
@@ -2634,9 +2693,10 @@ function finalizeJsonImport(ctx, uploadResult) {
   let toastParts = [`تم استيراد ${added} كلمة`];
   if (skipped > 0) toastParts.push(`تجاوزنا ${skipped} مكررة`);
   if (uploaded > 0) toastParts.push(`رُفع ${uploaded} إلى السحابة`);
-  if (failed > 0) toastParts.push(`تعذر رفع ${failed} وبقيت محفوظة محليًا`);
+  if (pending > 0) toastParts.push(`حُفظت ${pending} على الجهاز بانتظار المزامنة`);
+  if (failed > 0) toastParts.push(`تعذّر حفظ ${failed} كلمة. يمكنك إعادة استيرادها`);
   if (totalXp > 0) toastParts.push(`+${totalXp} XP`);
-  showToast(toastParts.join(' — '), failed > 0 ? 'warning' : 'success', 5600, {
+  showToast(toastParts.join(' — '), failed > 0 ? 'warning' : pending ? 'info' : 'success', 5600, {
     importance: 'multi-result',
     partialFailure: failed > 0,
     resultCount: added + skipped,
@@ -2697,7 +2757,12 @@ window.exportData = async function() {
 window.importData = async function(event) {
   const file = event.target.files?.[0];
   if (!file) return;
-  if (await window.LootLinguaDictionaryPages?.requireComplete({ personal: !isCustomWorldView() }) === false) return;
+  const context = captureDictionaryWriteContext();
+  const sync = window.LootLinguaDictionarySync;
+  if (!sync?.unavailable() && await window.LootLinguaDictionaryPages?.requireComplete({ personal: !context.worldId }) === false) {
+    if (!sync?.unavailable()) return;
+  }
+  if (!isDictionaryWriteContextCurrent(context)) return;
   event.target.value = '';
 
   if (!rateLimit('jsonImport', 5, 60000)) {
@@ -2721,6 +2786,7 @@ window.importData = async function(event) {
     return;
   }
 
+  if (!isDictionaryWriteContextCurrent(context)) return;
   const toAdd = mergeImportedWords(importedWords);
   if (!toAdd.length) {
     showToast('ما في كلمات جديدة — إما كلها موجودة عندك أو مكررة بالملف.');
@@ -2751,9 +2817,9 @@ window.importData = async function(event) {
   try {
     window.words = [...toAdd, ...window.words];
 
-    const uploadResult = await uploadImportedWordsToCloud(toAdd);
-
-    persistDictionary();
+    const uploadResult = await uploadImportedWordsToCloud(toAdd, context);
+    if (!isDictionaryWriteContextCurrent(context)) return;
+    if (!uploadResult.pending) persistDictionary();
     renderLimit = 20;
     render();
 
@@ -2765,6 +2831,7 @@ window.importData = async function(event) {
   } finally {
     window.__jsonImportBatchActive = false;
     window.__suppressUnlockNotices = false;
+    window.__suppressCloudWordsSnapshot = false;
   }
 };
 

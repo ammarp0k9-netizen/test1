@@ -35,7 +35,7 @@ test('gap review starts a verified quiz from only the requested word keys', () =
   assert.match(block, /words: reviewWords/);
   assert.match(block, /gate-gap:/);
   assert.doesNotMatch(block, /activeGateId|unlockedGateIds|updateGateProgress/);
-  assert.match(runtime, /Array\.isArray\(activeQuizSession\.words\)/);
+  assert.match(runtime, /Array\.isArray\(session\.words\)/);
   const commitBlock = runtime.slice(
     runtime.indexOf('async function commitVerifiedQuizResults'),
     runtime.indexOf('function markRemember')

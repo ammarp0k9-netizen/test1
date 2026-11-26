@@ -10,7 +10,7 @@
   import {
     getFirestore, connectFirestoreEmulator, collection, addDoc, query,
     orderBy, deleteDoc, doc, updateDoc, onSnapshot, serverTimestamp,
-    getDoc, setDoc, getDocs, runTransaction, writeBatch,
+    getDoc, setDoc, getDocs, getDocFromServer, getDocsFromServer, runTransaction, writeBatch,
     limit, startAfter, documentId, where, getCountFromServer
   } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
   import { publicLandingPath, runLogoutSequence } from './logout-flow.js?v=20261106-session-1';
@@ -584,7 +584,22 @@
   window.addEventListener?.('lootlingua:dictionary-outbox-confirmed', event => {
     const { item, result } = event.detail || {};
     if (item?.owner !== auth.currentUser?.uid || !result?.wordId) return;
-    if (item.payload.worldId) return;
+    if (result.removedFrom && result.originalId) {
+      const rows = readCustomWorldWordsFromStorage(result.removedFrom, item.owner).filter(word => String(word.id) !== result.originalId);
+      writeCustomWorldWordsToStorage(result.removedFrom, rows, item.owner);
+    }
+    if (item.payload.worldId && !result.restored) {
+      const worldId = item.payload.worldId;
+      const rows = readCustomWorldWordsFromStorage(worldId, item.owner);
+      if (result.removed) {
+        writeCustomWorldWordsToStorage(worldId, rows.filter(word => String(word.id) !== result.wordId), item.owner);
+      } else if (item.type === 'add' || item.type === 'transfer') {
+        if (!rows.some(word => String(word.id) === result.wordId)) {
+          writeCustomWorldWordsToStorage(worldId, [{ ...result.word, id: result.wordId }, ...rows], item.owner);
+        }
+      }
+      return;
+    }
     const favorites = window.__lootlinguaStarredViewSource;
     if (favorites?.owner === item.owner && favorites.words) {
       if (result.removed || result.hidden || item.payload.patch?.starred === false) favorites.words.delete(result.wordId);
@@ -602,13 +617,15 @@
       const patch = item.payload.patch;
       store.merge([{ ...(prior || item.payload.word), ...patch, id: result.wordId,
         ...(Object.hasOwn(patch, 'meaning') ? { translation: patch.meaning } : {}) }]);
-    } else if (!prior) store.merge([{ ...result.word, id: result.wordId }]);
+    } else if (result.restored || item.type === 'transfer' || !prior) store.merge([{ ...prior, ...result.word, id: result.wordId }]);
   });
   window.addEventListener?.('lootlingua:dictionary-outbox', event => {
     const user = auth.currentUser;
     if (!user || event.detail?.owner !== user.uid) return;
     const store = window.LootLinguaDictionaryPages?.current(user.uid);
     if (store) window.applyCloudWordsFromSnapshot?.(store.words(), { paged: true, fromOfflineCache: store.state().offline });
+    const worldId = window.getActiveCustomWorldId?.();
+    if (worldId) window.applyCustomWorldWordsFromSnapshot?.(worldId, readCustomWorldWordsFromStorage(worldId, user.uid), { fromCache: true });
   });
 
   const starredReads = new Map();
@@ -1398,14 +1415,18 @@
         sourceSummary: lifecycle.summarizeSources([]),
       };
     }
-    const canonicalSnapshot = await getDoc(doc(db, 'users', user.uid, 'contentWords', wordKey));
+    window.LootLinguaCloudBackoff?.assertAvailable?.();
+    const canonicalRef = doc(db, 'users', user.uid, 'contentWords', wordKey);
+    const canonicalSnapshot = await getDocFromServer(canonicalRef);
     const canonical = canonicalSnapshot.exists() ? canonicalSnapshot.data() : {};
     const legacyWordId = String(canonical.legacyWordId || '');
     const [legacySnapshot, sourceSummary] = await Promise.all([
       legacyWordId
-        ? getDoc(doc(db, 'users', user.uid, 'words', legacyWordId))
+        ? getDocFromServer(doc(db, 'users', user.uid, 'words', legacyWordId))
         : Promise.resolve(null),
-      getUserWordSourceSummary(wordKey),
+      canonicalSnapshot.exists() ? getDocsFromServer(collection(canonicalRef, 'sources')).then(snapshot =>
+        lifecycle.summarizeSources(snapshot.docs.map(item => ({ sourceId: item.id, ...item.data() }))))
+        : Promise.resolve(lifecycle.summarizeSources([])),
     ]);
     const personalDictionaryState = lifecycle.getPersonalDictionaryState(
       legacySnapshot?.exists() ? legacySnapshot.data() : wordOrKey
@@ -1422,6 +1443,8 @@
       requiresDisposition:
         personalDictionaryState === 'moved-to-private-world' && privateWorldCount <= 1,
       sourceSummary,
+      canonicalSourceCount: Number(canonical.sourceCount) || 0,
+      canonicalUpdatedAt: canonical.updatedAt?.toMillis?.() || 0,
       removingWorldId: String(worldId || ''),
     };
   }
@@ -1482,48 +1505,62 @@
         trace?.count('firestoreReads', 3);
         const canonical = canonicalSnapshot.exists() ? canonicalSnapshot.data() : null;
         const legacyWordId = String(canonical?.legacyWordId || '');
+        if (!membershipSnapshot.exists() && !sourceSnapshot.exists()) return { removed: true, sourceRemoved: false };
+        if (legacyWordId !== impact.legacyWordId || (Number(canonical?.sourceCount) || 0) !== impact.canonicalSourceCount ||
+            (canonical?.updatedAt?.toMillis?.() || 0) !== impact.canonicalUpdatedAt) {
+          throw wordLifecycleError('failed-precondition', 'Word membership changed on another device.');
+        }
         const legacyRef = legacyWordId
           ? doc(db, 'users', user.uid, 'words', legacyWordId)
           : null;
         const legacySnapshot = legacyRef ? await transaction.get(legacyRef) : null;
         if (legacyRef) trace?.count('firestoreReads');
 
+        if (auth.currentUser?.uid !== user.uid) throw wordLifecycleError('auth/identity-changed', 'The account changed.');
+        const isMoved = legacySnapshot?.exists() &&
+          lifecycle.getPersonalDictionaryState(legacySnapshot.data()) === 'moved-to-private-world';
+        if (isMoved && impact.privateWorldCount <= 1 && !disposition) {
+          const error = wordLifecycleError('word-lifecycle/disposition-required', 'Choose what should happen to the word.');
+          error.impact = { ...impact, requiresDisposition: true };
+          throw error;
+        }
         if (membershipSnapshot.exists()) {
           transaction.delete(membershipRef);
           trace?.count('firestoreWrites');
         }
         const sourceRemoved = sourceSnapshot.exists();
-        const sourceCount = Math.max(
-          0,
-          (Number(canonical?.sourceCount) || 0) - (sourceRemoved ? 1 : 0)
-        );
+        const deletePersonal = disposition === 'delete' && impact.privateWorldCount <= 1 && legacySnapshot?.exists();
+        let sourceCount = Math.max(0, (Number(canonical?.sourceCount) || 0) - (sourceRemoved ? 1 : 0));
         if (sourceRemoved) {
           transaction.delete(sourceRef);
           trace?.count('firestoreWrites');
-          if (canonicalSnapshot.exists()) {
-            transaction.update(canonicalRef, {
-              sourceCount,
-              updatedAt: serverTimestamp(),
-            });
+        }
+        if (deletePersonal) {
+          for (const existingSource of impact.sourceSummary.sources) {
+            if (existingSource.sourceId === source.sourceId) continue;
+            transaction.delete(doc(canonicalRef, 'sources', existingSource.sourceId));
             trace?.count('firestoreWrites');
           }
+          sourceCount = 0;
         }
-        if (
-          disposition === 'return-personal' &&
-          legacySnapshot?.exists() &&
-          lifecycle.getPersonalDictionaryState(legacySnapshot.data()) !== 'active'
-        ) {
-          transaction.update(legacyRef, { personalDictionaryState: 'active' });
+        if ((sourceRemoved || deletePersonal) && canonicalSnapshot.exists()) {
+          transaction.update(canonicalRef, { sourceCount, updatedAt: serverTimestamp() });
           trace?.count('firestoreWrites');
         }
-        const deleteOrphanedLegacy = Boolean(
-          legacySnapshot?.exists() &&
-          legacySnapshot.data()?.hiddenFromDictionary === true &&
-          sourceCount === 0
-        );
+        const deleteOrphanedLegacy = Boolean(legacySnapshot?.exists() && disposition !== 'return-personal' &&
+          (deletePersonal || (disposition !== 'keep-hidden' && legacySnapshot.data()?.hiddenFromDictionary === true && sourceCount === 0)));
         if (deleteOrphanedLegacy) {
           transaction.delete(legacyRef);
           trace?.count('firestoreWrites');
+        } else if (disposition === 'return-personal' && legacySnapshot?.exists()) {
+          const data = legacySnapshot.data();
+          const patch = {};
+          if (lifecycle.getPersonalDictionaryState(data) !== 'active') patch.personalDictionaryState = 'active';
+          if (data.hiddenFromDictionary === true) Object.assign(patch, { hiddenFromDictionary: false, hiddenFromDictionaryAt: null });
+          if (Object.keys(patch).length) {
+            transaction.update(legacyRef, patch);
+            trace?.count('firestoreWrites');
+          }
         }
         return {
           removed: membershipSnapshot.exists(),
@@ -1785,6 +1822,11 @@
     return update;
   }
 
+  function quizLearningTimestamp(state) {
+    const value = state.last_quizzed_at || state.lastQuizzedAt;
+    return value?.toMillis?.() || Number(value) || Date.parse(value || '') || 0;
+  }
+
   window.commitQuizLearningBatchToCloud = async function(payload = {}) {
     const user = auth.currentUser;
     const ownerId = String(payload.ownerId || '');
@@ -1827,20 +1869,41 @@
         if (auth.currentUser?.uid !== ownerId) {
           return { saved: false, stale: true, firestoreWrites };
         }
-        const batch = writeBatch(db);
         const chunk = wordOperations.slice(offset, offset + maxWordWritesPerBatch);
-        if (firstBatch && hasMastery) {
-          batch.set(doc(db, 'users', ownerId, 'meta', 'word_mastery'), {
-            entries: masteryEntries,
-            updatedAt: new Date(),
-          }, { merge: true });
-          firestoreWrites += 1;
+        const masteryRef = doc(db, 'users', ownerId, 'meta', 'word_mastery');
+        if (payload.sessionId && (chunk.length || (firstBatch && hasMastery))) {
+          firestoreWrites += await runTransaction(db, async transaction => {
+            const [savedMastery, ...copies] = await Promise.all([
+              firstBatch && hasMastery ? transaction.get(masteryRef) : Promise.resolve(null),
+              ...chunk.map(operation => transaction.get(operation.ref)),
+            ]);
+            if (auth.currentUser?.uid !== ownerId) throw wordLifecycleError('auth/identity-changed', 'The account changed.');
+            let writes = 0;
+            if (savedMastery) {
+              const previous = savedMastery.data()?.entries || {};
+              const entries = Object.fromEntries(Object.entries(masteryEntries).filter(([key, state]) =>
+                !previous[key] || quizLearningTimestamp(previous[key]) < quizLearningTimestamp(state)));
+              if (Object.keys(entries).length) {
+                transaction.set(masteryRef, { entries, updatedAt: new Date() }, { merge: true });
+                writes++;
+              }
+            }
+            chunk.forEach((operation, index) => {
+              if (!copies[index].exists() || quizLearningTimestamp(copies[index].data()) >= quizLearningTimestamp(operation.data)) return;
+              transaction.update(operation.ref, operation.data);
+              writes++;
+            });
+            return writes;
+          });
+        } else if (chunk.length || (firstBatch && hasMastery)) {
+          const batch = writeBatch(db);
+          if (firstBatch && hasMastery) {
+            batch.set(masteryRef, { entries: masteryEntries, updatedAt: new Date() }, { merge: true });
+            firestoreWrites++;
+          }
+          chunk.forEach(operation => { batch.update(operation.ref, operation.data); firestoreWrites++; });
+          await batch.commit();
         }
-        chunk.forEach((operation) => {
-          batch.update(operation.ref, operation.data);
-          firestoreWrites += 1;
-        });
-        if (chunk.length || (firstBatch && hasMastery)) await batch.commit();
         offset += chunk.length;
         firstBatch = false;
       } while (offset < wordOperations.length);
@@ -2032,7 +2095,7 @@
       if (typeof window.isActiveCustomWorld !== 'function' || !window.isActiveCustomWorld(listenerWorldId)) return;
       const cloudWords = snapshot.docs.map(mapWordDoc);
       if (typeof window.applyCustomWorldWordsFromSnapshot === 'function') {
-        window.applyCustomWorldWordsFromSnapshot(listenerWorldId, cloudWords);
+        window.applyCustomWorldWordsFromSnapshot(listenerWorldId, cloudWords, { fromCache: snapshot.metadata.fromCache });
       }
     }, (error) => {
       console.warn("listenCustomWorldWordsFromCloud:", error.code || error.message, error);
@@ -2152,17 +2215,6 @@
           item.data(),
           { impact, disposition }
         );
-        if (options.action !== 'move' && disposition === 'delete' && impact.legacyWordId) {
-          const remainingSources = (impact.sourceSummary?.sources || []).filter((source) => !(
-            source.addedFrom === 'private-world' &&
-            String(source.customWorldId || '') === String(worldId)
-          ));
-          await deletePersonalUserWord(
-            impact.legacyWordId,
-            item.data(),
-            wordLifecycleApi().summarizeSources(remainingSources)
-          );
-        }
       };
       if (options.base) {
         for (const item of snap.docs) await remove(item);
@@ -2185,7 +2237,7 @@
     }
   };
 
-  window.saveCustomWorldWordToCloud = async function(worldId, word = {}) {
+  window.saveCustomWorldWordToCloud = async function(worldId, word = {}, options = {}) {
     const user = auth.currentUser;
     if (!user || !worldId) return null;
     try {
@@ -2193,7 +2245,7 @@
         word,
         source: { type: 'private-world', customWorldId: String(worldId) },
         privateWorldMembership: true,
-        restoreHidden: false,
+        restoreHidden: options.restoreHidden === true,
         hiddenOnCreate: true,
         personalDictionaryState: word.personalDictionaryState || 'moved-to-private-world',
         operationId: word.operationId || `private-world:${String(worldId)}`,
@@ -2202,6 +2254,7 @@
       });
       return result.membershipWordId || null;
     } catch (e) {
+      if (options.propagate) throw e;
       console.error("saveCustomWorldWordToCloud:", e);
       return null;
     }
@@ -2330,28 +2383,13 @@
   };
 
   window.deleteCustomWorldWordFromCloud = async function(worldId, id, word, options = {}) {
-    const user = auth.currentUser;
-    if (!user || !worldId || !id) return false;
+    if (!auth.currentUser || !worldId || !id) return false;
     try {
-      const impact = options.impact || await getPrivateWorldRemovalImpact(worldId, word || {});
-      await removePrivateWorldMembership(String(worldId), String(id), word || {}, {
-        impact,
-        disposition: options.disposition,
-      });
-      if (options.disposition === 'delete' && impact.legacyWordId) {
-        const remainingSources = (impact.sourceSummary?.sources || []).filter((source) => !(
-          source.addedFrom === 'private-world' &&
-          String(source.customWorldId || '') === String(worldId)
-        ));
-        await deletePersonalUserWord(
-          impact.legacyWordId,
-          word || impact.wordKey,
-          wordLifecycleApi().summarizeSources(remainingSources)
-        );
-      }
-      return true;
-    } catch (e) {
-      console.error("deleteCustomWorldWordFromCloud:", e);
+      const result = await removePrivateWorldMembership(String(worldId), String(id), word || {}, options);
+      return options.propagate ? result : true;
+    } catch (error) {
+      if (options.propagate) throw error;
+      console.error('deleteCustomWorldWordFromCloud:', error);
       return false;
     }
   };
@@ -2398,11 +2436,6 @@
     try { return JSON.parse(localStorage.getItem(quizDraftKey(uid)) || 'null'); }
     catch (_) { return null; }
   };
-  window.LootLinguaOperations?.setSyncSource?.('quiz-result', uid => {
-    const session = readQuizDraft(uid)?.session;
-    const total = session?.runtimeWords?.length || session?.words?.length || 0;
-    return { pending: total > 0 && Number(session.quizIndex) === total && session.quizSessionResults?.length ? 1 : 0 };
-  });
   const quizDraftOutbox = window.LootLinguaOperations?.createOutbox?.('quiz-draft', async (item, current) => {
     const draft = readQuizDraft(item.owner);
     if (!draft?.revision) throw Object.assign(new Error('The local quiz checkpoint is missing.'), { code: 'sync/local-storage' });
@@ -2429,6 +2462,7 @@
     const user = auth.currentUser;
     if (!user || !quizDraftOutbox) return false;
     const existing = readQuizDraft(user.uid);
+    if (!session && expectedId && existing?.session && existing.session.id !== expectedId) return true;
     const removedId = expectedId || existing?.session?.id || existing?.removedId;
     if (!session && !removedId) return false;
     if (existing && JSON.stringify(existing.session) === JSON.stringify(session) && (session || removedId === existing.removedId)) return true;
@@ -2444,6 +2478,28 @@
       throw error;
     }
   };
+  window.clearCompletedQuizCheckpoint = async function(sessionId, owner) {
+    if (auth.currentUser?.uid !== owner) return;
+    const reference = doc(db, 'users', owner, 'meta', 'active_quiz_session');
+    await runTransaction(db, async transaction => {
+      const snapshot = await transaction.get(reference);
+      if (auth.currentUser?.uid !== owner) throw wordLifecycleError('auth/identity-changed', 'The account changed.');
+      if (snapshot.data()?.id === sessionId) transaction.delete(reference);
+    });
+    if (auth.currentUser?.uid === owner && readQuizDraft(owner)?.session?.id === sessionId) {
+      window.stageActiveQuizCheckpoint(null, sessionId);
+    }
+  };
+  window.addEventListener('lootlingua:auth-state', () => {
+    const owner = auth.currentUser?.uid;
+    if (!owner) return;
+    const session = readQuizDraft(owner)?.session;
+    if (session) {
+      try { window.queueCompletedQuizResult?.(session); }
+      catch (error) { console.error('[Quiz] Could not queue a saved result.', error?.name); }
+    }
+  });
+
   window.hasLocalQuizCheckpoint = function(sessionId) {
     const uid = auth.currentUser?.uid;
     return Boolean(uid && sessionId && readQuizDraft(uid)?.session?.id === sessionId);
@@ -2472,6 +2528,7 @@
     if (!user) return null;
     const local = readQuizDraft(user.uid);
     if (local && !local.confirmed) return local.session;
+    if (local?.session && window.isQuizResultQueued?.(user.uid, local.session.id)) return null;
     try {
       window.LootLinguaCloudBackoff?.assertAvailable();
       const snap = await getDoc(doc(db, "users", user.uid, "meta", "active_quiz_session"));

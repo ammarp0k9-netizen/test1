@@ -866,7 +866,60 @@ browserScenario: try {
   assert.equal(await run('document.body.classList.contains("gate-lesson-active")'), false);
   await waitFor('.published-gate-practice-cta');
   console.log('Browser milestone: lesson finished and persisted');
-  if (guidanceAudit) {
+  if (process.env.LESSON_RELIABILITY_REOPEN === '1') {
+    const review = 'button[data-onboarding-gate-review="due"]';
+    await click(review);
+    await click('#publishedGateQuizPicker .is-matching');
+    await waitFor('#matchingWords .matching-option');
+    const sessionId = await run('activeQuizSession.id');
+    assert.equal(await run('Boolean(activeQuizSession.officialReviewGate)'), true);
+    await cdp('Page.addScriptToEvaluateOnNewDocument', { source: "if (sessionStorage.getItem('test-lesson-offline') === '1') Object.defineProperty(navigator, 'onLine', { configurable: true, get: () => false });" });
+    await run("sessionStorage.setItem('test-lesson-offline', '1'); Object.defineProperty(navigator, 'onLine', {configurable:true, get:()=>false}); window.dispatchEvent(new Event('offline')); true");
+    await run(`(() => {
+      for (let i = 0; i < 8 && quizFinishState === 'answering' && matchingQuizState; i++) {
+        const board = quizCore.currentMatchingBoard(matchingQuizState);
+        for (const id of board.wordIds) {
+          selectMatchingWord(matchingEncodedId(id));
+          selectMatchingMeaning(matchingEncodedId(id));
+        }
+        document.getElementById('matchingCheckButton').click();
+        document.getElementById('matchingCheckButton').click();
+      }
+      return true;
+    })()`);
+    assert.equal(await run("document.getElementById('quizSyncStatus').dataset.state"), 'pending');
+    assert.equal(await run(`window.isQuizResultQueued(window.auth.currentUser.uid, "${sessionId}")`), true);
+    await env.withSecurityRulesDisabled(async context => {
+      assert.equal((await getDoc(doc(context.firestore(), 'users', uid, 'quizEvidenceSessions', sessionId))).exists(), false);
+    });
+    await cdp('Page.navigate', { url: base + '/app/dictionary?firebaseEmulator=1' });
+    await until(() => run(`window.auth?.currentUser?.uid === "${uid}" && window.isQuizResultQueued?.("${uid}", "${sessionId}")`), 'pending result on dictionary after reload');
+    assert.equal(await run("document.getElementById('quizResumeModal').classList.contains('show')"), false);
+    await run(`(() => {
+      sessionStorage.removeItem('test-lesson-offline');
+      delete navigator.onLine;
+      window.dispatchEvent(new Event('online'));
+      Object.defineProperty(navigator, 'onLine', {configurable:true, get:()=>false});
+      window.dispatchEvent(new Event('offline'));
+      return true;
+    })()`);
+    assert.equal(await run(`window.isQuizResultQueued("${uid}", "${sessionId}")`), true);
+    await run("delete navigator.onLine; window.dispatchEvent(new Event('online')); true");
+    await until(() => run(`!window.isQuizResultQueued("${uid}", "${sessionId}")`), 'automatic review save', 45000);
+    let receipt;
+    await env.withSecurityRulesDisabled(async context => {
+      const db = context.firestore();
+      const evidence = (await getDoc(doc(db, 'users', uid, 'quizEvidenceSessions', sessionId))).data();
+      const progress = (await getDoc(doc(db, 'users', uid, 'contentProgress', worldId, 'ranks', rankId, 'gates', gateId))).data();
+      receipt = { count: evidence.correctCount, receipt: progress.runnerReviewCompletedSessionId, status: progress.status };
+    });
+    assert.equal(receipt.count, count);
+    assert.equal(receipt.receipt, sessionId);
+    assert.ok(['learning', 'ready', 'cleared'].includes(receipt.status));
+    checks.automaticReopenedOfficialReview = receipt;
+    console.log('Browser milestone: official result automatically committed after reload and repeated interruption', JSON.stringify(receipt));
+  }
+  if (guidanceAudit && process.env.LESSON_RELIABILITY_REOPEN !== '1') {
     const review = 'button[data-onboarding-gate-review="due"]';
     const reviewLayout = await until(() => run(`(() => {
       const hint = document.getElementById('contextualOnboardingCoach');

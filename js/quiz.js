@@ -146,6 +146,7 @@ function saveActiveQuizSession() {
 async function loadStoredActiveQuizSession() {
   if (hasSignedInUser() && typeof window.loadActiveQuizSessionFromCloud === 'function') {
     const cloudSession = await window.loadActiveQuizSessionFromCloud();
+    if (isQuizResultAwaitingSave(cloudSession) && window.queueCompletedQuizResult?.(cloudSession)) return null;
     if (cloudSession) return cloudSession;
     const uid = window.auth?.currentUser?.uid;
     const backupKey = uid ? `lootlingua:migrated-quiz-draft:${uid}` : '';
@@ -165,8 +166,10 @@ function quizDraftWordCount(session) {
 }
 
 function isQuizResultAwaitingSave(session) {
-  return Number(session.quizIndex) === quizDraftWordCount(session) &&
-    Array.isArray(session.quizSessionResults) && session.quizSessionResults.length > 0;
+  return Boolean(session && isVerifiedQuizMode(session.mode) && session.words?.length &&
+    (Number(session.quizIndex) >= quizDraftWordCount(session) ||
+      (session.mode === 'timeAttack' && session.timeAttackHp === 0)) &&
+    Array.isArray(session.quizSessionResults) && session.quizSessionResults.length > 0);
 }
 
 function isResumableQuizSession(session) {
@@ -585,7 +588,8 @@ function getQuizSourceLoadKey(ownerId, scope) {
 function readQuizSourceRawWords(scope = currentQuizSource, ownerId = getQuizSourceOwnerId()) {
   const source = quizCore.parseSourceScope(scope);
   if (source.sourceType === 'private-world') {
-    return readCustomWorldWordsFromStorage(source.sourceId, ownerId);
+    const rows = readCustomWorldWordsFromStorage(source.sourceId, ownerId);
+    return window.LootLinguaDictionarySync?.project(rows, ownerId, source.sourceId, true) || rows;
   }
   return readWordsFromStorage('normal', ownerId);
 }
@@ -855,24 +859,21 @@ function toQuizTimestamp(value) {
   return Number.isFinite(parsed) ? parsed : 0;
 }
 
-window.getActiveVerifiedQuizCommitContext = function(sessionId) {
-  const requestedSessionId = String(sessionId || '');
-  if (
-    !requestedSessionId ||
-    !activeQuizSession ||
-    !isVerifiedQuizMode(activeQuizSession.mode) ||
-    String(activeQuizSession.id || '') !== requestedSessionId
-  ) {
-    return null;
-  }
+function verifiedQuizCommitContext(session) {
+  const lesson = window.LootLinguaGateLesson;
   return {
-    sessionId: requestedSessionId,
-    mode: activeQuizSession.mode,
-    source: activeQuizSession.source || currentQuizSource,
-    gateContext: window.LootLinguaGateLesson?.gateContext(activeQuizSession),
-    officialReviewGate: activeQuizSession.officialReviewGate || null,
-    officialReviewDueWordKeys: Array.isArray(activeQuizSession.officialReviewDueWordKeys) ? activeQuizSession.officialReviewDueWordKeys : [],
+    sessionId: String(session.id),
+    mode: session.mode,
+    source: session.source || 'personal',
+    gateContext: lesson?.gateContext(session) || lesson?.gateContext(session.officialReviewGate),
+    officialReviewGate: session.officialReviewGate || null,
+    officialReviewDueWordKeys: Array.isArray(session.officialReviewDueWordKeys) ? session.officialReviewDueWordKeys : [],
   };
+}
+
+window.getActiveVerifiedQuizCommitContext = function(sessionId) {
+  if (!sessionId || activeQuizSession?.id !== sessionId || !isVerifiedQuizMode(activeQuizSession.mode)) return null;
+  return verifiedQuizCommitContext(activeQuizSession);
 };
 
 function getQuizDueInfo(word, state, now) {

@@ -7083,7 +7083,9 @@ window.loadCustomWorld = function(worldId) {
   viewBackTarget = 'worlds';
   currentFilter = 'all';
   loadDictionarySortPrefs();
-  window.words = applyStoredWordOrder(readCustomWorldWordsFromStorage(activeCustomWorldId));
+  const privateRows = readCustomWorldWordsFromStorage(activeCustomWorldId);
+  const owner = window.auth?.currentUser?.uid;
+  window.words = applyStoredWordOrder(window.LootLinguaDictionarySync?.project(privateRows, owner, activeCustomWorldId, true) || privateRows);
   if (dictionarySortMode !== 'auto') window.words = sortDictionaryWords(window.words);
   renderLimit = 20;
   setTreasureMode(false);
@@ -7315,7 +7317,7 @@ async function saveWordsToTarget(targetId, wordsToAdd, options = {}) {
       const realId = await window.saveCustomWorldWordToCloud(targetId, {
         ...word,
         operationId: options.operationId,
-      });
+      }, { propagate: true });
       if (!realId) throw new Error('target-world-upload-failed');
       word.id = realId;
     }));
@@ -7368,7 +7370,7 @@ window.applyWorldManageToTarget = async function(targetId, action = pendingWorld
   const sourceCustomWorldId = isCustomWorldView() ? String(activeCustomWorldId) : '';
   const operationId = getWorldManageOperationId(targetId, mode, selected);
   const sync = window.LootLinguaDictionarySync;
-  if (window.auth?.currentUser && sync?.unavailable()) {
+  const defer = () => {
     const target = targetId === 'personal' ? '' : String(targetId);
     try {
       for (const word of selected) sync.transfer(sourceCustomWorldId, target, {
@@ -7383,9 +7385,16 @@ window.applyWorldManageToTarget = async function(targetId, action = pendingWorld
     hideModal('worldManageModal');
     hideModal('worldManageChoiceModal');
     window.exitSelectionMode({ renderView: false });
+    if (isEditableDictionaryView()) render();
     return true;
+  };
+  const owner = window.auth?.currentUser?.uid;
+  const currentOwner = () => owner && owner === window.auth?.currentUser?.uid;
+  if (owner && sync?.unavailable()) return defer();
+  if (await window.LootLinguaDictionaryPages?.requireComplete() === false) {
+    return currentOwner() && sync?.unavailable() ? defer() : false;
   }
-  if (await window.LootLinguaDictionaryPages?.requireComplete() === false) return false;
+  if (owner && !currentOwner()) return false;
   const operationScope = `world-manage:${operationId}`;
   const wrap = document.getElementById('worldManageTargets');
   const buttons = [...document.querySelectorAll('#worldManageTargets .world-manage-target')];
@@ -7493,6 +7502,10 @@ window.applyWorldManageToTarget = async function(targetId, action = pendingWorld
       trace?.stage('ui-complete');
       return true;
     } catch (err) {
+      if (currentOwner() && sync?.temporary(err)) {
+        operationUi?.clear();
+        return defer();
+      }
       failed = true;
     console.warn('worldManage:', err);
       operationUi?.fail(
@@ -7547,13 +7560,22 @@ window.returnPrivateWordToPersonalDictionary = function(wordId, event) {
       loadingMessage: 'جارٍ إعادة الكلمة إلى قاموسك...',
       longWaitMessage: 'يستغرق الحفظ وقتًا أطول من المعتاد.',
     });
+    const owner = window.auth?.currentUser?.uid;
+    const sync = window.LootLinguaDictionarySync;
+    const defer = () => {
+      sync.restorePersonal(worldId, word, scope);
+      ui?.clear();
+      return true;
+    };
     try {
-      if (window.auth?.currentUser && window.saveCustomWorldWordToCloud) {
+      if (owner && sync && (sync.unavailable() || String(word.id).startsWith('pending-word-'))) return defer();
+      if (owner && window.saveCustomWorldWordToCloud) {
         const saved = await window.saveCustomWorldWordToCloud(worldId, {
           ...word,
           personalDictionaryState: 'active',
           operationId: scope,
-        });
+        }, { propagate: true, restoreHidden: true });
+        if (window.auth?.currentUser?.uid !== owner) return false;
         if (!saved) throw new Error('return-personal-save-failed');
       }
       const personal = readWordsFromStorage('normal');
@@ -7572,6 +7594,9 @@ window.returnPrivateWordToPersonalDictionary = function(wordId, event) {
       showToast('عادت الكلمة إلى قاموسك الشخصي وبقيت في هذا العالم.', 'success', 4200);
       return true;
     } catch (error) {
+      if (owner && owner === window.auth?.currentUser?.uid && sync?.temporary(error)) {
+        try { return defer(); } catch (_) {}
+      }
       ui?.fail('تعذر إعادة الكلمة الآن.', () => window.returnPrivateWordToPersonalDictionary(wordId));
       showToast('تعذر إعادة الكلمة إلى القاموس الشخصي.', 'danger', 4200);
       return false;

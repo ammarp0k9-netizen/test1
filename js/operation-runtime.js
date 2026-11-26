@@ -17,10 +17,11 @@
   const getOwner = () => root.auth?.currentUser?.uid || '';
   const syncEvent = () => root.dispatchEvent?.(new CustomEvent('lootlingua:sync-state'));
 
-  function syncStatus(owner = getOwner()) {
+  function syncStatus(owner = getOwner(), scopes) {
     const status = { pending: 0, rejected: 0, active: false, localFailure: false, reason: '', rejections: [] };
     if (!owner) return status;
     for (const [scope, read] of syncSources) {
+      if (scopes && !scopes.includes(scope)) continue;
       let pending;
       try { pending = read(owner) || {}; }
       catch (_) { status.localFailure = true; continue; }
@@ -32,7 +33,8 @@
       status.active ||= Boolean(source.active);
       status.reason ||= source.reason || '';
     }
-    status.localFailure ||= [...syncFailures.keys()].some(key => key.startsWith(owner + ':'));
+    status.localFailure ||= [...syncFailures.keys()].some(key =>
+      key.startsWith(owner + ':') && (!scopes || scopes.includes(key.slice(owner.length + 1))));
     return status;
   }
 
@@ -89,6 +91,17 @@
       schedule();
       return item;
     }
+    function retryRejected(id, payload) {
+      const owner = getOwner();
+      const item = owner && list(owner).find(entry => entry.id === id && entry.rejected);
+      if (!item) return false;
+      const { rejected, reason, code, rejectionData, ...pending } = item;
+      write({ ...pending, payload });
+      config.onChange?.(owner);
+      schedule();
+      return true;
+    }
+
     function schedule(delay = 400) {
       clearTimeout(timer);
       timer = null;
@@ -132,7 +145,7 @@
                 break;
               }
               blocked.add(item.lane);
-              write({ ...item, rejected: true, reason: failure.reason || 'unexpected', code: String(error?.code || '') });
+              write({ ...item, rejected: true, reason: config.rejectionReason?.(error) || failure.reason || 'unexpected', code: String(error?.code || ''), rejectionData: config.rejectionData?.(error) });
               config.onChange?.(owner);
             }
           }
@@ -169,7 +182,7 @@
       const owner = getOwner();
       if (owner && event.key?.startsWith(uidPrefix(owner))) { config.onChange?.(owner); syncEvent(); schedule(); }
     });
-    return { enqueue, flush, list, schedule };
+    return { enqueue, flush, list, schedule, retryRejected };
   }
 
   root.__lootlinguaPerformanceReport = report;

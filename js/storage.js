@@ -712,6 +712,8 @@ function getActiveCustomWorld() {
   return customWorlds.find(world => String(world.id) === String(activeCustomWorldId)) || null;
 }
 
+window.getActiveCustomWorldId = () => isCustomWorldView() ? String(activeCustomWorldId) : '';
+
 window.isActiveCustomWorld = function(worldId) {
   return isCustomWorldView() && String(activeCustomWorldId) === String(worldId);
 };
@@ -779,9 +781,9 @@ window.applyCustomWorldsFromCloud = function(worlds, meta = {}) {
   retryPendingCustomWorlds('worlds-snapshot');
 };
 
-window.applyCustomWorldWordsFromSnapshot = function(worldId, cloudWords) {
+window.applyCustomWorldWordsFromSnapshot = function(worldId, cloudWords, meta = {}) {
   const uid = window.auth?.currentUser?.uid;
-  const projected = window.LootLinguaDictionarySync?.project(cloudWords, uid, worldId) || cloudWords;
+  const projected = window.LootLinguaDictionarySync?.project(cloudWords, uid, worldId, meta.fromCache === true) || cloudWords;
   if (!window.isActiveCustomWorld(worldId)) {
     writeCustomWorldWordsToStorage(worldId, applyStoredWordOrder(cloudWords), window.auth?.currentUser?.uid);
     return;

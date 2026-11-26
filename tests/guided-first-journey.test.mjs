@@ -339,7 +339,7 @@ test('the public-world journey stays separate from feature eligibility', () => {
   assert.match(worldsSource, /\bloadQuizView\(\)/);
   assert.match(quizSource, /journeyWorldId: input\.worldId/);
   assert.match(quizSource, /journeyGateId: input\.gateId/);
-  assert.match(quizRuntimeSource, /activeQuizSession\?\.journeyWorldId/);
+  assert.match(quizRuntimeSource, /session\?\.journeyWorldId/);
   assert.match(quizRuntimeSource, /worldId: detailWorldId/);
   assert.match(controllerSource, /eventWorldId !== runtime\.state\.worldId/);
   assert.match(controllerSource, /eventGateId !== runtime\.state\.gateId/);

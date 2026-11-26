@@ -285,6 +285,9 @@ function createCommitHarness(mode = 'matching', correctness = Array(10).fill(tru
       return reward;
     },
     getWordMasteryKey(word) { return String(word.word).toLowerCase(); },
+    getWordMasteryState: () => ({}),
+    toQuizTimestamp: value => Number(value) || 0,
+    verifiedQuizCommitContext: session => ({ source: session.source || 'personal' }),
     showXPBadge() {},
     pushNotification() {},
     recordChestMasteredWords() {},
@@ -306,7 +309,8 @@ function createCommitHarness(mode = 'matching', correctness = Array(10).fill(tru
 for (const mode of ['matching', 'timeAttack', 'scramble']) {
   test(`${mode} verified result commits rewards, Evidence, and learning exactly once`, async () => {
     const harness = createCommitHarness(mode);
-    const result = await harness.context.commitVerifiedQuizResults();
+    const result = await harness.context.commitVerifiedQuizResults(
+      harness.context.activeQuizSession, harness.context.quizSessionResults, { owner: 'uid-a' });
     assert.equal(result.correctCount, 10);
     assert.equal(result.total, 10);
     assert.equal(result.xp, 20);
@@ -320,7 +324,8 @@ for (const mode of ['matching', 'timeAttack', 'scramble']) {
 test('Matching errors retain the verified correct count and do not become correct during commit', async () => {
   const correctness = [true, false, true, false, true, true, true, true, true, true];
   const harness = createCommitHarness('matching', correctness);
-  const result = await harness.context.commitVerifiedQuizResults();
+  const result = await harness.context.commitVerifiedQuizResults(
+      harness.context.activeQuizSession, harness.context.quizSessionResults, { owner: 'uid-a' });
   assert.equal(result.correctCount, 8);
   assert.equal(result.total, 10);
   assert.equal(result.xp, 16);
@@ -334,7 +339,8 @@ test('notification feedback failure after a Matching commit does not hide or rep
     error.code = 'permission-denied';
     throw error;
   };
-  const result = await harness.context.commitVerifiedQuizResults();
+  const result = await harness.context.commitVerifiedQuizResults(
+      harness.context.activeQuizSession, harness.context.quizSessionResults, { owner: 'uid-a' });
   assert.equal(result.correctCount, 10);
   assert.equal(result.total, 10);
   assert.equal(result.xp, 20);
@@ -502,7 +508,14 @@ function createFinishHarness({ fail = false, pending = false, notificationPermis
     quizSessionResults: [],
     hasStartedAnswering: true,
     isVerifiedQuizMode() { return true; },
-    async commitVerifiedQuizResults(_trace, onStage) {
+    quizDraftWordCount: session => session.words.length,
+    isQuizResultAwaitingSave: () => true,
+    serializeActiveQuizSession() {
+      return { ...context.activeQuizSession, words: context.currentQuizWords, quizIndex: context.quizIndex, currentQuizMistakes: 0 };
+    },
+    verifiedQuizCommitContext: () => ({}),
+    localDateKey: () => '2026-11-05',
+    async commitVerifiedQuizResults(_session, _results, { onStage }) {
       commits += 1;
       learningStats.xpTransitions += 1;
       learningStats.evidenceWrites += 1;

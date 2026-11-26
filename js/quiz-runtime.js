@@ -1,15 +1,22 @@
 let quizResultMasteryBaseline = null;
 
-async function commitVerifiedQuizResults(trace, onStage) {
-  if (!activeQuizSession || !isVerifiedQuizMode(activeQuizSession.mode)) return { xp: 0, masteredCount: 0, correctCount: 0, total: 0 };
-  if (window.auth?.currentUser) window.LootLinguaCloudBackoff?.assertAvailable?.();
+async function commitVerifiedQuizResults(session, results, { trace, onStage, owner, current = () => true } = {}) {
+  if (!session || !isVerifiedQuizMode(session.mode)) return { xp: 0, masteredCount: 0, correctCount: 0, total: 0 };
+  const ownerId = owner || 'guest';
+  const checkOwner = () => {
+    if (!current() || ownerId !== (window.auth?.currentUser?.uid || 'guest')) {
+      throw Object.assign(new Error('The quiz account changed.'), { code: 'auth/identity-changed' });
+    }
+  };
+  checkOwner();
+  if (owner) window.LootLinguaCloudBackoff?.assertAvailable?.();
   window.LootLinguaOperations?.diagnostic?.('commitVerifiedQuizResults', {
-    ownerId: window.auth?.currentUser?.uid || 'guest',
-    sessionId: String(activeQuizSession.id || ''),
-    mode: String(activeQuizSession.mode || ''),
+    ownerId,
+    sessionId: String(session.id || ''),
+    mode: String(session.mode || ''),
   });
   const byWord = new Map();
-  quizSessionResults.forEach(result => {
+  results.forEach(result => {
     const key = String(result.wordId);
     const existing = byWord.get(key);
     byWord.set(key, {
@@ -27,17 +34,22 @@ async function commitVerifiedQuizResults(trace, onStage) {
   const advancedWords = [];
   const transitionEntries = [];
 
-  if (window.LootLinguaGateLesson?.hasGateIntent(activeQuizSession) &&
-      !await canOpenGateQuiz(activeQuizSession, true)) throw new Error('lesson/incomplete');
+  const commitContext = verifiedQuizCommitContext(session);
+  if (window.LootLinguaGateLesson?.hasGateIntent(session)) {
+    if (!commitContext.gateContext) throw Object.assign(new Error('The quiz gate is missing.'), { code: 'failed-precondition' });
+    const access = await window.LootLinguaJourneyCloud.getGateLessonAccess(commitContext.gateContext, { session });
+    checkOwner();
+    if (!access.confirmed) throw Object.assign(new Error('Gate access is awaiting confirmation.'), { code: 'unavailable' });
+    if (!access.allowed) throw Object.assign(new Error('Complete the gate lesson before submitting the quiz.'), { code: 'failed-precondition' });
+  }
 
   // Commit against the immutable candidate snapshot captured when this session
   // started. Re-resolving here could apply an old answer to a newly selected
   // source (or to another account after an auth switch).
-  const sourceWords = Array.isArray(activeQuizSession.words)
-    ? activeQuizSession.words
+  const sourceWords = Array.isArray(session.words)
+    ? session.words
     : [];
-  const sessionId = activeQuizSession.id;
-  const ownerId = window.auth?.currentUser?.uid || 'guest';
+  const sessionId = session.id;
   if (quizResultMasteryBaseline?.sessionId !== sessionId || quizResultMasteryBaseline?.ownerId !== ownerId) {
     quizResultMasteryBaseline = { ownerId, sessionId, statuses: new Map() };
   }
@@ -52,7 +64,11 @@ async function commitVerifiedQuizResults(trace, onStage) {
     if (!result || committedWordIds.has(wordId)) continue;
     committedWordIds.add(wordId);
     if (result.correct) correctCount++;
-    const update = computeSrsUpdate(word, result.correct, sessionId, result.answeredAt || Date.now());
+    const known = getWordMasteryState(word);
+    const alreadyApplied = toQuizTimestamp(known.last_quizzed_at) >= result.answeredAt;
+    const update = alreadyApplied
+      ? { state: known, previousStatus: known.mastery_status, nextStatus: known.mastery_status, alreadyApplied }
+      : computeSrsUpdate(word, result.correct, sessionId, result.answeredAt);
     const wordKey = getWordMasteryKey(word);
     if (wordKey) {
       if (!originalStatuses.has(wordKey)) originalStatuses.set(wordKey, update.previousStatus);
@@ -63,13 +79,14 @@ async function commitVerifiedQuizResults(trace, onStage) {
   trace?.stage('srs-calculated', { transitionCount: transitionEntries.length });
   onStage?.('applying-rewards');
   const batch = typeof awardWordTransitionXPBatch === 'function'
-    ? await awardWordTransitionXPBatch(transitionEntries, activeQuizSession.id, { trace })
+    ? await awardWordTransitionXPBatch(transitionEntries, session.id, { trace, commitContext, checkOwner })
     : {
       awards: await Promise.all(transitionEntries.map((entry) =>
-        awardWordTransitionXP(entry.word, entry.update, activeQuizSession.id)
+        awardWordTransitionXP(entry.word, entry.update, session.id)
       )),
       pendingCount: 0,
     };
+  checkOwner();
   trace?.stage('xp-committed', {
     eventCount: batch.awards.filter((amount) => amount > 0).length,
     pendingCount: batch.pendingCount || 0,
@@ -93,18 +110,21 @@ async function commitVerifiedQuizResults(trace, onStage) {
 
     if (typeof window.applyQuizLearningBatch === 'function') {
       await window.applyQuizLearningBatch(transitionEntries, {
-        source: activeQuizSession.source || currentQuizSource,
+        source: commitContext.source,
+        ownerId: owner,
+        sessionId,
         trace,
       });
     } else {
       transitionEntries.forEach(({ word, result, update }) => {
+        if (update.alreadyApplied) return;
         const forgetCount = result.correct
           ? Math.max((word.forgetCount || 0) - 1, 0)
           : (word.forgetCount || 0) + 1;
         updateQuizWordInSource(
           word.id,
           { ...word, ...update.state, forgetCount },
-          word.quizSource || activeQuizSession.source || currentQuizSource
+          word.quizSource || commitContext.source
         );
       });
     }
@@ -116,18 +136,17 @@ async function commitVerifiedQuizResults(trace, onStage) {
     ) {
       trace?.stage('evidence-write-start', { fallback: true, entryCount: transitionEntries.length });
       evidence = await window.LootLinguaJourneyCloud.recordQuizEvidenceBatch({
-        sessionId: activeQuizSession.id,
-        mode: activeQuizSession.mode,
-        source: activeQuizSession.source || currentQuizSource,
+        sessionId: session.id,
+        mode: session.mode,
+        source: commitContext.source,
         completed: true,
         entries: transitionEntries,
         projectReadiness: false,
-        gateContext: window.getActiveVerifiedQuizCommitContext?.(activeQuizSession.id)?.gateContext,
-        officialReviewGate: window.getActiveVerifiedQuizCommitContext?.(activeQuizSession.id)?.officialReviewGate || null,
-        officialReviewDueWordKeys: window.getActiveVerifiedQuizCommitContext?.(activeQuizSession.id)?.officialReviewDueWordKeys || [],
+        ...commitContext,
       });
       trace?.stage('evidence-write-end', { ...evidence, fallback: true });
     }
+    checkOwner();
     evidence ||= { recorded: 0, duplicate: 0, ineligible: transitionEntries.length, readinessError: null };
     if (
       window.auth?.currentUser &&
@@ -135,6 +154,7 @@ async function commitVerifiedQuizResults(trace, onStage) {
     ) {
       trace?.stage('journey-projection-start');
       evidence = await window.LootLinguaJourneyCloud.projectQuizEvidenceReadiness(evidence);
+      checkOwner();
       trace?.stage('journey-projection-end', evidence);
     }
     trace?.stage('evidence-committed', evidence);
@@ -156,6 +176,7 @@ async function commitVerifiedQuizResults(trace, onStage) {
     if (before >= 0 && SRS_STATUSES.indexOf(state.mastery_status) > before) promotedCount++;
   }
 
+  checkOwner();
   if (xp > 0) {
     showXPBadge(xp, null, false);
     if (advancedWords.length > 0) {
@@ -201,7 +222,7 @@ function markRemember() {
 const QUIZ_FINISH_TRANSITIONS = Object.freeze({
   answering: ['final-answer-locked'],
   'final-answer-locked': ['saving-result'],
-  'saving-result': ['applying-rewards', 'committing-learning', 'completed', 'save-failed'],
+  'saving-result': ['applying-rewards', 'committing-learning', 'completed', 'save-partial-failure', 'save-failed'],
   'applying-rewards': ['committing-learning', 'save-partial-failure', 'save-failed'],
   'committing-learning': ['completed', 'save-partial-failure', 'save-failed'],
   'save-partial-failure': ['completed', 'saving-result'],
@@ -269,6 +290,8 @@ function resetQuizFinishState() {
   quizFinishUi?.clear();
   quizFinishUi = null;
   quizFinishState = 'answering';
+  const exit = document.querySelector?.('[data-quiz-result-exit]');
+  if (exit) exit.hidden = true;
   quizFinishPromise = null;
 }
 
@@ -329,12 +352,119 @@ function formatVerifiedQuizResult(commit, accuracy, session) {
   return parts.join(' ');
 }
 
+function recordVerifiedQuizCompletion(session, commit) {
+  if (Number(session.quizIndex) < quizDraftWordCount(session) || commit.total <= 0) return;
+  const sessionSource = String(session?.source || '');
+  const completedAt = session.resultCompletedAt || Date.now();
+  const personalAt = sessionSource === 'personal' && !session.journeyGateId ? completedAt : 0;
+  if (personalAt) window.rememberLastPersonalTrustedQuizAt?.(personalAt);
+  if (hasSignedInUser()) {
+    if (typeof window.queueProfileIntent !== 'function') {
+      throw Object.assign(new Error('Profile sync is not ready.'), { code: 'unavailable' });
+    }
+    const activity = window.queueProfileIntent({
+      type: 'quiz-activity', eventId: 'quiz:' + session.id, day: localDateKey(new Date(completedAt)),
+      answers: commit.total, perfect: Number(session.currentQuizMistakes) === 0,
+      advanceAfterFreeze: true, personalAt, streakAt: completedAt,
+    });
+    if (!activity) throw Object.assign(new Error('Profile sync is not ready.'), { code: 'unavailable' });
+  } else {
+    incrementDailyCountBy(commit.total);
+    checkAndUpdateStreak({ learningEvent: true });
+  }
+  const officialGate = session?.officialReviewGate || null;
+  const commitContext = verifiedQuizCommitContext(session);
+  const resolvedGate = officialGate || commitContext?.officialReviewGate || null;
+  let detailWorldId = String(session?.journeyWorldId || resolvedGate?.worldId || '');
+  let detailRankId = String(session?.journeyRankId || resolvedGate?.rankId || '');
+  let detailGateId = String(session?.journeyGateId || resolvedGate?.gateId || '');
+  if ((!detailWorldId || !detailGateId) && sessionSource.startsWith('journey:')) {
+    // "journey:worldId~rankId~gateId" — split on '~' to get the three parts.
+    const parts = sessionSource.slice('journey:'.length).split('~');
+    if (parts.length >= 3) {
+      detailWorldId = detailWorldId || parts[0];
+      detailRankId = detailRankId || parts[1];
+      detailGateId = detailGateId || parts[2];
+    }
+  }
+  dispatchTrustedQuizCompletedSafely({
+    sessionId: String(session?.id || ''),
+    completedAt,
+    correctCount: Number(commit.correctCount) || 0,
+    promotedCount: Number(commit.promotedCount) || 0,
+    ownerId: commit.ownerId,
+    total: Number(commit.total) || 0,
+    source: sessionSource,
+    journeyContext: Boolean(session?.journeyWorldId && session?.journeyGateId),
+    officialReviewGate: resolvedGate,
+    officialReviewCommitted: commit.evidence?.officialReviewCommitted === true,
+    worldId: detailWorldId,
+    rankId: detailRankId,
+    gateId: detailGateId,
+  });
+  if (commit.correctCount / commit.total >= 0.9) recordHighAccuracyVerifiedQuiz(session.id);
+}
+
+const quizResultWaiters = new Map();
+const quizResultOutbox = window.LootLinguaOperations?.createOutbox?.('quiz-result', async (item, current) => {
+  const { session } = item.payload;
+  if (!window.LootLinguaJourneyCloud?.recordQuizEvidenceBatch || !window.clearCompletedQuizCheckpoint) {
+    throw Object.assign(new Error('Quiz sync is starting.'), { code: 'unavailable' });
+  }
+  const commit = await commitVerifiedQuizResults(session, session.quizSessionResults, { owner: item.owner, current });
+  if (!current()) return;
+  if (commit.evidence?.readinessError) throw commit.evidence.readinessError;
+  if (Number(session.quizIndex) >= quizDraftWordCount(session)) {
+    recordQuizExposureSession(session.id, session.runtimeWords || session.words, { mode: 'verified', at: session.resultCompletedAt });
+    recordVerifiedQuizCompletion(session, commit);
+  }
+  await window.clearCompletedQuizCheckpoint(session.id, item.owner);
+  return commit;
+}, {
+  onConfirmed(item, commit) {
+    const waiter = quizResultWaiters.get(item.owner + ':' + item.id);
+    waiter?.resolve(commit);
+  },
+  onChange(owner) {
+    for (const item of quizResultOutbox.list(owner)) {
+      if (!item.rejected) continue;
+      quizResultWaiters.get(owner + ':' + item.id)?.reject(Object.assign(new Error('Quiz result could not be confirmed.'), {
+        code: item.code || 'failed-precondition',
+      }));
+    }
+  },
+});
+
+function queueCompletedQuizResult(session) {
+  if (!quizResultOutbox || !session?.id || !window.auth?.currentUser?.uid || !isQuizResultAwaitingSave(session)) return null;
+  return quizResultOutbox.enqueue('complete-quiz', {
+    session: { ...session, resultCompletedAt: session.resultCompletedAt || Math.max(0, ...session.quizSessionResults.map(result => Number(result.answeredAt) || 0)) || Date.now() },
+  }, { id: session.id, lane: session.id });
+}
+window.queueCompletedQuizResult = queueCompletedQuizResult;
+quizResultOutbox?.schedule();
+window.isQuizResultQueued = (owner, sessionId) => Boolean(quizResultOutbox?.list(owner).some(item => item.id === sessionId));
+
+function waitForQueuedQuizResult(item) {
+  const key = item.owner + ':' + item.id;
+  if (item.rejected) return Promise.reject(Object.assign(new Error('Quiz result could not be confirmed.'), { code: item.code }));
+  return waitForQuizCommit(new Promise((resolve, reject) => {
+    quizResultWaiters.set(key, { resolve, reject });
+    void quizResultOutbox.flush();
+  })).finally(() => quizResultWaiters.delete(key));
+}
+
 function finishQuizRun() {
   window.LootLinguaOperations?.diagnostic?.('finishQuizRun', {
     ownerId: window.auth?.currentUser?.uid || 'guest',
     coalesced: Boolean(quizFinishPromise),
   });
   if (quizFinishPromise) return quizFinishPromise;
+  const session = serializeActiveQuizSession();
+  const owner = window.auth?.currentUser?.uid || '';
+  let queued;
+  let queueFailure;
+  try { queued = queueCompletedQuizResult(session); } catch (error) { queueFailure = error; }
   const retrying = quizFinishState === 'save-failed';
   setQuizFinishState(retrying ? 'saving-result' : 'final-answer-locked');
   stopTimeAttackTimer();
@@ -346,115 +476,65 @@ function finishQuizRun() {
 
   quizFinishPromise = (async () => {
     await (window.LootLinguaOperations?.nextPaint?.() || Promise.resolve());
+    if (session && activeQuizSession?.id !== session.id) return null;
     setQuizFinishState('saving-result');
-    const verified = activeQuizSession && isVerifiedQuizMode(activeQuizSession.mode);
+    if (queueFailure) throw queueFailure;
+    const verified = session && isVerifiedQuizMode(session.mode);
+    if (queued) showQueuedQuizResultStatus();
     const commit = verified
-      ? await waitForQuizCommit(commitVerifiedQuizResults(trace, (stage) => setQuizFinishState(stage)))
+      ? queued
+        ? await waitForQueuedQuizResult(queued)
+        : await waitForQuizCommit(commitVerifiedQuizResults(session, session.quizSessionResults, {
+          owner, trace, onStage: stage => setQuizFinishState(stage),
+        }))
       : { xp: 0, correctCount: currentQuizWords.length - currentQuizMistakes, total: currentQuizWords.length };
-  const accuracy = commit.total > 0 ? commit.correctCount / commit.total : 0;
-  const fullyCompleted = verified && quizIndex >= currentQuizWords.length;
-  const exposureCompleted = currentQuizWords.length > 0 &&
-    (verified ? quizIndex >= currentQuizWords.length : quizIndex >= currentQuizWords.length - 1);
-  if (exposureCompleted) {
-    recordQuizExposureSession(currentQuizExposureSessionId || activeQuizSession?.id, currentQuizWords, {
-      mode: currentQuizExposureMode,
-      outcomes: flashcardSessionOutcomes,
-    });
-  }
-  if (fullyCompleted && commit.total > 0) {
-    const sessionSource = String(activeQuizSession?.source || '');
-    const completedAt = Date.now();
-    const personalAt = sessionSource === 'personal' && !activeQuizSession.journeyGateId ? completedAt : 0;
-    if (personalAt) window.rememberLastPersonalTrustedQuizAt?.(personalAt);
-    if (hasSignedInUser()) {
-      try {
-        if (typeof window.queueProfileIntent !== 'function') throw new Error('Profile sync is not ready.');
-        window.queueProfileIntent({
-          type: 'quiz-activity', eventId: `quiz:${activeQuizSession.id}`, day: todayStr(),
-          answers: commit.total, perfect: currentQuizMistakes === 0, advanceAfterFreeze: true, personalAt, streakAt: completedAt,
-        });
-      } catch (error) {
-        console.warn('[QuizFinish] Activity sync deferred after learning commit.', error?.message || error);
-        showToast('حُفظ تعلّم الكلمات، لكن تعذّر تجهيز مزامنة نشاط اليوم. أبقِ الصفحة مفتوحة وحاول مجددًا.', 'warning', 5500);
-      }
-    } else {
-      incrementDailyCountBy(commit.total);
-      checkAndUpdateStreak({ learningEvent: true });
-    }
-    // Capture gate context from the session BEFORE activeQuizSession is cleared
-    // below. The guided-first-journey controller needs worldId and gateId to
-    // validate that the finished quiz actually belongs to the onboarding gate.
-    //
-    // Gate quizzes carry the exact hierarchy on the verified session. Prefer it
-    // over officialReviewGate/source parsing: officialReviewGate is only present
-    // when SRS review words are due, and the journey: source string was already
-    // sanitized when the session started.
-    const officialGate = activeQuizSession?.officialReviewGate || null;
-    const commitContext = window.getActiveVerifiedQuizCommitContext?.(activeQuizSession?.id);
-    const resolvedGate = officialGate || commitContext?.officialReviewGate || null;
-    let detailWorldId = String(activeQuizSession?.journeyWorldId || resolvedGate?.worldId || '');
-    let detailRankId = String(activeQuizSession?.journeyRankId || resolvedGate?.rankId || '');
-    let detailGateId = String(activeQuizSession?.journeyGateId || resolvedGate?.gateId || '');
-    if ((!detailWorldId || !detailGateId) && sessionSource.startsWith('journey:')) {
-      // "journey:worldId~rankId~gateId" — split on '~' to get the three parts.
-      const parts = sessionSource.slice('journey:'.length).split('~');
-      if (parts.length >= 3) {
-        detailWorldId = detailWorldId || parts[0];
-        detailRankId = detailRankId || parts[1];
-        detailGateId = detailGateId || parts[2];
-      }
-    }
-    dispatchTrustedQuizCompletedSafely({
-      sessionId: String(activeQuizSession?.id || ''),
-      completedAt,
-      correctCount: Number(commit.correctCount) || 0,
-      promotedCount: Number(commit.promotedCount) || 0,
-      ownerId: commit.ownerId,
-      total: Number(commit.total) || 0,
-      source: sessionSource,
-      journeyContext: Boolean(activeQuizSession?.journeyWorldId && activeQuizSession?.journeyGateId),
-      officialReviewGate: resolvedGate,
-      officialReviewCommitted: commit.evidence?.officialReviewCommitted === true,
-      worldId: detailWorldId,
-      rankId: detailRankId,
-      gateId: detailGateId,
-    });
-  }
-  if (fullyCompleted && accuracy >= 0.9) recordHighAccuracyVerifiedQuiz(activeQuizSession.id);
-  if (fullyCompleted && currentQuizMistakes === 0 && currentQuizWords.length > 0 && !hasSignedInUser()) {
-    saveInt('lootlinguaPerfectQuizzes', loadInt('lootlinguaPerfectQuizzes', 0) + 1);
-    if (!hasSignedInUser()) markGuestDataDirty();
-    markDailyQuestFlag('perfectQuiz');
-    if (typeof evaluateTitleUnlocks === 'function') evaluateTitleUnlocks(true);
-    requestProfileCloudSave();
-  }
-  const resultMessage = verified
-    ? formatVerifiedQuizResult(commit, accuracy, activeQuizSession)
-    : 'أكملت التدريب ببطاقات الذاكرة. ما بيرفع الإتقان أو جاهزية البوابة.';
-  if (verified) {
-    trace?.stage('primary-result-ready', { accuracy });
-    if (commit.pendingRewards > 0) {
-      setQuizFinishState('save-partial-failure', {
-        message: resultMessage,
-        retry: () => retryPendingXPEvents(),
+    if ((session && activeQuizSession?.id !== session.id) ||
+        owner !== (window.auth?.currentUser?.uid || '')) return commit;
+    const accuracy = commit.total > 0 ? commit.correctCount / commit.total : 0;
+    const fullyCompleted = verified && quizIndex >= currentQuizWords.length;
+    const exposureCompleted = currentQuizWords.length > 0 &&
+      (verified ? quizIndex >= currentQuizWords.length : quizIndex >= currentQuizWords.length - 1);
+    if (exposureCompleted && !queued) {
+      recordQuizExposureSession(currentQuizExposureSessionId || activeQuizSession?.id, currentQuizWords, {
+        mode: currentQuizExposureMode,
+        outcomes: flashcardSessionOutcomes,
       });
+    }
+    if (fullyCompleted && !queued) recordVerifiedQuizCompletion(session, commit);
+    if (fullyCompleted && currentQuizMistakes === 0 && currentQuizWords.length > 0 && !hasSignedInUser()) {
+      saveInt('lootlinguaPerfectQuizzes', loadInt('lootlinguaPerfectQuizzes', 0) + 1);
+      if (!hasSignedInUser()) markGuestDataDirty();
+      markDailyQuestFlag('perfectQuiz');
+      if (typeof evaluateTitleUnlocks === 'function') evaluateTitleUnlocks(true);
+      requestProfileCloudSave();
+    }
+    const resultMessage = verified
+      ? formatVerifiedQuizResult(commit, accuracy, activeQuizSession)
+      : 'أكملت التدريب ببطاقات الذاكرة. ما بيرفع الإتقان أو جاهزية البوابة.';
+    if (verified) {
+      trace?.stage('primary-result-ready', { accuracy });
+      if (commit.pendingRewards > 0) {
+        setQuizFinishState('save-partial-failure', {
+          message: resultMessage,
+          retry: () => retryPendingXPEvents(),
+        });
+      } else {
+        setQuizFinishState('completed', { message: resultMessage });
+      }
+      playQuizCompletionSound();
+      trace?.stage('audio-started');
+      if (accuracy >= 0.9 || commit.xp > 0) launchConfetti();
     } else {
       setQuizFinishState('completed', { message: resultMessage });
     }
-    playQuizCompletionSound();
-    trace?.stage('audio-started');
-    if (accuracy >= 0.9 || commit.xp > 0) launchConfetti();
-  } else {
-    setQuizFinishState('completed', { message: resultMessage });
-  }
-  clearActiveQuizSessionStorage();
-  activeQuizSession = null;
-  currentQuizExposureSessionId = '';
-  currentQuizExposureMode = '';
-  flashcardSessionOutcomes = new Map();
-  quizSessionResults = [];
-  matchingQuizState = null;
-  hasStartedAnswering = false;
+    if (!queued) clearActiveQuizSessionStorage();
+    activeQuizSession = null;
+    currentQuizExposureSessionId = '';
+    currentQuizExposureMode = '';
+    flashcardSessionOutcomes = new Map();
+    quizSessionResults = [];
+    matchingQuizState = null;
+    hasStartedAnswering = false;
     showToast(resultMessage, commit.pendingRewards > 0 ? 'warning' : 'success', 4600, {
       wrap: true,
     });
@@ -475,39 +555,42 @@ function finishQuizRun() {
     return commit;
   })().catch((error) => {
     trace?.warn(error?.code || error?.message || 'quiz-finish-failed').end({ failed: true });
+    if ((session && activeQuizSession?.id !== session.id) ||
+        owner !== (window.auth?.currentUser?.uid || '')) return null;
     quizFinishPromise = null;
     const backoff = window.LootLinguaCloudBackoff;
     const failure = backoff?.classify?.(error);
     const retained = window.hasLocalQuizCheckpoint?.(activeQuizSession?.id);
-    quizRetrySessionId = retained && failure?.temporary ? activeQuizSession?.id : '';
-    if (quizRetrySessionId) backoff.pause(error);
+    if (failure?.temporary) backoff.pause(error);
     setQuizFinishState('save-failed', {
-      message: retained && failure?.temporary ? 'إجاباتك محفوظة على الجهاز، والنتيجة بانتظار الاعتماد.'
+      message: (queued && !quizResultOutbox.list(owner).some(item => item.id === queued.id && item.rejected)) || (retained && failure?.temporary) ? 'إجاباتك محفوظة على الجهاز، والنتيجة بانتظار الاعتماد.'
         : retained ? 'تعذّر اعتماد النتيجة. بقيت الإجابات على الجهاز.'
           : 'تعذّر اعتماد النتيجة. أبقِ الصفحة مفتوحة وأعد المحاولة.',
-      retry: () => finishQuizRun(),
+      retry: () => {
+        if (queued) quizResultOutbox.retryRejected(queued.id, queued.payload);
+        return finishQuizRun();
+      },
     });
-    if (quizRetrySessionId) scheduleQuizResultRetry();
+    if (queued) showQueuedQuizResultStatus();
     return null;
   });
   return quizFinishPromise;
 }
 
-let quizResultRetry;
-let quizRetrySessionId = '';
-function scheduleQuizResultRetry() {
-  clearTimeout(quizResultRetry);
-  if (!activeQuizSession || activeQuizSession.id !== quizRetrySessionId || quizFinishState !== 'save-failed' || window.navigator?.onLine === false) return;
-  const sessionId = activeQuizSession.id;
-  const uid = window.auth?.currentUser?.uid;
-  quizResultRetry = setTimeout(() => {
-    if (activeQuizSession?.id !== sessionId || window.auth?.currentUser?.uid !== uid || quizFinishState !== 'save-failed') return;
-    if (window.LootLinguaCloudBackoff?.reason?.()) { scheduleQuizResultRetry(); return; }
-    void finishQuizRun();
-  }, Math.max(2500, window.LootLinguaCloudBackoff?.remaining?.() || 0));
+function showQueuedQuizResultStatus() {
+  const host = document.getElementById('quizView');
+  const exit = host?.querySelector?.('[data-quiz-result-exit]');
+  if (exit) exit.hidden = false;
 }
-window.addEventListener?.('online', scheduleQuizResultRetry);
-window.addEventListener?.('lootlingua:cloud-capacity-change', scheduleQuizResultRetry);
+
+window.leaveQueuedQuizResult = function() {
+  const session = activeQuizSession;
+  const owner = window.auth?.currentUser?.uid;
+  if (!session || !owner || !window.isQuizResultQueued(owner, session.id)) return;
+  resetQuizFinishState();
+  resetRuntimeQuizState();
+  closeQuiz();
+};
 
 function markForgot() {
   currentStreak = 0;

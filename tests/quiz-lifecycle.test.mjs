@@ -26,7 +26,7 @@ test('hiddenFromDictionary is not a quiz exclusion', () => {
 test('verified commit uses frozen session words and includes Matching', async () => {
   const runtime = await readFile(new URL('../js/quiz-runtime.js', import.meta.url), 'utf8');
   const commitBlock = runtime.slice(runtime.indexOf('async function commitVerifiedQuizResults'), runtime.indexOf('function markRemember'));
-  assert.match(commitBlock, /Array\.isArray\(activeQuizSession\.words\)/);
+  assert.match(commitBlock, /Array\.isArray\(session\.words\)/);
   assert.doesNotMatch(commitBlock, /getQuizSourceWords\(/);
   assert.match(quiz, /mode === 'timeAttack' \|\| mode === 'scramble' \|\| mode === 'matching'/);
   assert.match(quiz, /sourceType: sourceInfo\.sourceType/);
