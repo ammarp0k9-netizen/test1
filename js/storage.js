@@ -494,8 +494,20 @@ function readPendingCustomWorldsFromStorage(uid) {
 }
 
 function writePendingCustomWorldsToStorage(worlds = [], uid) {
-  localStorage.setItem(getPendingCustomWorldsStorageKey(uid), JSON.stringify(Array.isArray(worlds) ? worlds : []));
+  try {
+    localStorage.setItem(getPendingCustomWorldsStorageKey(uid), JSON.stringify(Array.isArray(worlds) ? worlds : []));
+    window.LootLinguaOperations?.syncStorageFailure?.(getStorageUserId(uid), 'custom-worlds', false);
+  } catch (error) {
+    window.LootLinguaOperations?.syncStorageFailure?.(getStorageUserId(uid), 'custom-worlds', true);
+    throw error;
+  }
 }
+window.LootLinguaOperations?.setSyncSource?.('custom-worlds', uid => {
+  const worlds = readPendingCustomWorldsFromStorage(uid);
+  const rejected = worlds.filter(world => world.syncStatus === 'rejected');
+  return { pending: worlds.length - rejected.length, rejected: rejected.length,
+    rejections: rejected.map(world => ({ scope: 'custom-worlds', reason: world.lastSyncError })) };
+});
 
 function upsertPendingCustomWorld(world, error, uid) {
   if (!world?.id) return;
@@ -516,17 +528,55 @@ function clearPendingCustomWorld(worldId, uid) {
   writePendingCustomWorldsToStorage(pending, uid);
 }
 
+const removalWorldOutbox = window.LootLinguaOperations?.createOutbox?.('custom-world-remove', async item => {
+  if (typeof window.deleteCustomWorldFromCloud !== 'function') throw Object.assign(new Error('World storage is starting.'), { code: 'unavailable' });
+  const { worldId, action, base, wordIds } = item.payload;
+  const ok = await window.deleteCustomWorldFromCloud(worldId, { action, base, wordIds, propagate: true });
+  if (ok !== true) throw Object.assign(new Error('World removal was not confirmed.'), { code: 'failed-precondition' });
+}, {
+  onConfirmed(item) {
+    const { worldId } = item.payload;
+    clearPendingCustomWorld(worldId, item.owner);
+    removeCustomWorldWordsFromStorage(worldId, item.owner);
+    const remaining = readCustomWorldsFromStorage(item.owner).filter(world => String(world.id) !== String(worldId));
+    writeCustomWorldsToStorage(remaining, item.owner);
+  },
+});
+function isWorldRemovalPending(worldId, owner) {
+  return Boolean(removalWorldOutbox?.list(owner).some(item => !item.rejected && item.payload.worldId === String(worldId)));
+}
+window.isCustomWorldPendingSync = (worldId, owner) => readPendingCustomWorldsFromStorage(owner).some(world =>
+  String(world.id) === String(worldId) && world.syncStatus !== 'rejected' && !isWorldRemovalPending(worldId, owner));
+
+function queueCustomWorldRemoval(world, wordIds, action) {
+  if (!removalWorldOutbox || !world?.id) return false;
+  const worldId = String(world.id);
+  const base = { name: world.name, description: world.description, emoji: world.emoji };
+  removalWorldOutbox.enqueue('remove-world', { worldId, base, wordIds: [...new Set(wordIds.map(String))], action }, {
+    id: `${worldId}:${action}`, lane: worldId,
+  });
+  return true;
+}
+
 function mergeCloudAndPendingCustomWorlds(cloudWorlds = [], uid, options = {}) {
   const cloud = dedupeCustomWorlds(cloudWorlds);
-  const cloudIds = new Set(cloud.map(world => String(world.id)));
+  const worlds = new Map(cloud.map(world => [String(world.id), world]));
   const pending = readPendingCustomWorldsFromStorage(uid);
   const canConfirmSynced = options.confirmedServer === true;
-  const remainingPending = pending.filter(world => !cloudIds.has(String(world.id)) || !canConfirmSynced);
-  const unresolvedPending = pending.filter(world => !cloudIds.has(String(world.id)));
+  const remainingPending = pending.filter(world => {
+    const confirmed = worlds.get(String(world.id));
+    return !canConfirmSynced || !confirmed || !['name', 'description', 'emoji'].every(field => String(world[field] || '') === String(confirmed[field] || ''));
+  });
   if (remainingPending.length !== pending.length) {
     writePendingCustomWorldsToStorage(remainingPending, uid);
   }
-  return dedupeCustomWorlds([...cloud, ...unresolvedPending]).sort((a, b) => {
+  for (const world of remainingPending) {
+    if (world.syncStatus !== 'rejected') worlds.set(String(world.id), world);
+  }
+  for (const item of removalWorldOutbox?.list(getStorageUserId(uid)) || []) {
+    if (!item.rejected) worlds.delete(String(item.payload.worldId));
+  }
+  return [...worlds.values()].sort((a, b) => {
     const at = Date.parse(a.createdAt || '') || 0;
     const bt = Date.parse(b.createdAt || '') || 0;
     return at - bt;
@@ -534,29 +584,71 @@ function mergeCloudAndPendingCustomWorlds(cloudWorlds = [], uid, options = {}) {
 }
 
 let pendingCustomWorldRetryInFlight = false;
+let customWorldSyncTimer;
+function scheduleCustomWorldSync() {
+  clearTimeout(customWorldSyncTimer);
+  const user = window.auth?.currentUser;
+  if (!user || window.navigator?.onLine === false || !readPendingCustomWorldsFromStorage(user.uid).some(world => world.syncStatus !== 'rejected' && !isWorldRemovalPending(world.id, user.uid))) return;
+  customWorldSyncTimer = setTimeout(() => retryPendingCustomWorlds('scheduled'), Math.max(1000, window.LootLinguaCloudBackoff?.remaining() || 0));
+}
 async function retryPendingCustomWorlds(reason = 'manual') {
   const user = window.auth?.currentUser;
   if (!user || pendingCustomWorldRetryInFlight || typeof window.saveCustomWorldToCloud !== 'function') return;
-  const pending = readPendingCustomWorldsFromStorage(user.uid);
+  if (window.LootLinguaCloudBackoff?.reason?.()) { scheduleCustomWorldSync(); return; }
+  const pending = readPendingCustomWorldsFromStorage(user.uid).filter(world => world.syncStatus !== 'rejected' && !isWorldRemovalPending(world.id, user.uid));
   if (!pending.length) return;
   pendingCustomWorldRetryInFlight = true;
-  console.info('[LootLingua customWorlds] retry pending worlds', { reason, uid: user.uid, count: pending.length });
+  const generation = Number(window.__lootlinguaAuthGeneration) || 0;
+  const current = () => user.uid === window.auth?.currentUser?.uid && (Number(window.__lootlinguaAuthGeneration) || 0) === generation;
+  const ops = window.LootLinguaOperations;
+  const work = async lock => {
+    if (!lock || !current()) return;
+    ops?.syncActivity?.(user.uid, 'custom-worlds', { active: true });
   try {
     for (const world of pending) {
-      const ok = await window.saveCustomWorldToCloud(world);
-      if (ok === true) clearPendingCustomWorld(world.id, user.uid);
-      else upsertPendingCustomWorld(world, window.__lastCustomWorldSaveError || 'retry-failed', user.uid);
+      if (!current()) return;
+      if (isWorldRemovalPending(world.id, user.uid)) continue;
+      const latest = () => readPendingCustomWorldsFromStorage(user.uid).find(item => item.id === world.id);
+      if (latest()?.pendingAt !== world.pendingAt) continue;
+      try {
+        await window.LootLinguaCloudBackoff?.assertAvailable?.();
+        const ok = await window.saveCustomWorldToCloud(world, { reconcile: true, propagate: true });
+        if (current() && ok === true && latest()?.pendingAt === world.pendingAt) clearPendingCustomWorld(world.id, user.uid);
+      } catch (error) {
+        const backoff = window.LootLinguaCloudBackoff;
+        const failure = backoff?.classify?.(error);
+        if (failure?.temporary) { backoff.pause(error); scheduleCustomWorldSync(); break; }
+        if (current() && latest()?.pendingAt === world.pendingAt) {
+          const pending = readPendingCustomWorldsFromStorage(user.uid).map(row => row === world || row.id === world.id
+            ? { ...row, syncStatus: 'rejected', lastSyncError: failure?.reason || 'unexpected' } : row);
+          writePendingCustomWorldsToStorage(pending, user.uid);
+        }
+      }
     }
+    if (!current()) return;
     const merged = mergeCloudAndPendingCustomWorlds(customWorlds, user.uid);
     customWorlds = merged;
     writeCustomWorldsToStorage(customWorlds, user.uid);
     renderCustomWorldCards();
   } finally {
-    pendingCustomWorldRetryInFlight = false;
+    ops?.syncActivity?.(user.uid, 'custom-worlds', {});
   }
+  };
+  try {
+    if (window.navigator?.locks) await window.navigator.locks.request('lootlingua:custom-worlds:' + user.uid, { ifAvailable: true }, work);
+    else await work(true);
+  } finally { pendingCustomWorldRetryInFlight = false; }
 }
 window.retryPendingCustomWorlds = retryPendingCustomWorlds;
 window.addEventListener('online', () => retryPendingCustomWorlds('online'));
+window.addEventListener('lootlingua:cloud-capacity-change', scheduleCustomWorldSync);
+window.addEventListener('storage', event => {
+  const uid = window.auth?.currentUser?.uid;
+  if (uid && event.key === getPendingCustomWorldsStorageKey(uid)) {
+    window.LootLinguaOperations?.syncNotify?.();
+    scheduleCustomWorldSync();
+  }
+});
 
 function getCustomWorldWordsStorageKey(worldId, uid) {
   return `${WORDS_CUSTOM_PREFIX}${getStorageUserId(uid)}_${String(worldId || '')}`;
@@ -688,18 +780,20 @@ window.applyCustomWorldsFromCloud = function(worlds, meta = {}) {
 };
 
 window.applyCustomWorldWordsFromSnapshot = function(worldId, cloudWords) {
+  const uid = window.auth?.currentUser?.uid;
+  const projected = window.LootLinguaDictionarySync?.project(cloudWords, uid, worldId) || cloudWords;
   if (!window.isActiveCustomWorld(worldId)) {
     writeCustomWorldWordsToStorage(worldId, applyStoredWordOrder(cloudWords), window.auth?.currentUser?.uid);
     return;
   }
   loadDictionarySortPrefs();
   const prev = Array.isArray(window.words) ? window.words : [];
-  let normalized = applyStoredWordOrder(cloudWords);
+  let normalized = applyStoredWordOrder(projected);
   if (dictionarySortMode !== 'auto') {
     normalized = sortDictionaryWords(normalized);
   }
   window.words = normalized;
-  writeCustomWorldWordsToStorage(worldId, normalized, window.auth?.currentUser?.uid);
+  writeCustomWorldWordsToStorage(worldId, projected === cloudWords ? normalized : applyStoredWordOrder(cloudWords), uid);
   const needsFullRender = wordsSnapshotNeedsFullRender(prev, normalized) || isReorderMode || isBulkDeleteMode;
   if (needsFullRender) {
     renderLimit = 20;

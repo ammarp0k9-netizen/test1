@@ -121,15 +121,45 @@ const _profilePreferenceSaves = new Map();
 const _profileTaskQueues = new Map();
 let _profileSnapshotUnsubscribe = null;
 let _profileRetryTimer = null;
+let _profileReadRetryTimer = null;
 let _profileOperationSequence = 0;
 let _profileOperationClock = 0;
 const _profileLocalBaselines = new Map();
+const profilePreviewKey = uid => 'lootlingua:profile-preview:v1:' + encodeURIComponent(uid);
+
+function rememberConfirmedProfile(uid, data) {
+  try {
+    if (!data) { localStorage.removeItem(profilePreviewKey(uid)); return; }
+    const value = JSON.stringify({ data, at: Date.now() });
+    if (value.length <= 350000) localStorage.setItem(profilePreviewKey(uid), value);
+  } catch (_) {}
+}
+
+function readProfilePreview(uid) {
+  try {
+    const cached = JSON.parse(localStorage.getItem(profilePreviewKey(uid)) || 'null');
+    return cached?.data && Date.now() - cached.at < 7 * 86400000 ? cached.data : null;
+  } catch (_) { return null; }
+}
+
+function scheduleProfileReadRecovery(user, delay = 10000) {
+  clearTimeout(_profileReadRetryTimer);
+  if (!user?.uid || window.navigator?.onLine === false) return;
+  const owner = captureProfileOwner(user);
+  if (!owner) return;
+  _profileReadRetryTimer = setTimeout(() => {
+    if (!isProfileOwnerCurrent(owner) || !window.__lootlinguaProfileSnapshot?.readFailed) return;
+    if (window.LootLinguaCloudBackoff?.reason?.()) { scheduleProfileReadRecovery(user); return; }
+    void window.loadProfileFromCloud(user, { profileOwner: owner });
+  }, Math.max(delay, window.LootLinguaCloudBackoff?.remaining() || 0));
+}
 
 function profileOutboxPrefix(uid) { return `lootlingua:profile-outbox:v1:${uid}:`; }
 function botsOutboxPrefix(uid) { return `lootlingua:profile-outbox:bots-v1:${uid}:`; }
 function treasureOutboxPrefix(uid) { return `lootlingua:profile-outbox:treasure-v1:${uid}:`; }
 function runnerOutboxPrefix(uid) { return `lootlingua:profile-outbox:runner-v1:${uid}:`; }
 function streakOutboxPrefix(uid) { return `lootlingua:profile-outbox:streak-v1:${uid}:`; }
+function rejectedProfilePrefix(uid) { return `lootlingua:profile-rejected:v1:${uid}:`; }
 function profileOutboxPrefixes(uid) {
   return [profileOutboxPrefix(uid), botsOutboxPrefix(uid), treasureOutboxPrefix(uid), runnerOutboxPrefix(uid), streakOutboxPrefix(uid)];
 }
@@ -138,19 +168,27 @@ function profileReceiptId(id) {
   if (encoded.length > 1200) throw new Error('Profile operation identifier is too long');
   return `xp_event_profile_sync_v1_${encoded}`;
 }
-function readProfileOutbox(uid) {
+function readProfileOutbox(uid, includeRejected = false) {
   const prefixes = profileOutboxPrefixes(uid);
+  if (includeRejected) prefixes.push(rejectedProfilePrefix(uid));
   const operations = [];
   for (let index = 0; index < localStorage.length; index++) {
     const key = localStorage.key(index);
     if (!key || !prefixes.some(prefix => key.startsWith(prefix))) continue;
     try {
       const operation = JSON.parse(localStorage.getItem(key));
-      if (operation?.version === 1 && operation.uid === uid && operation.id && Array.isArray(operation.commands)) operations.push({ ...operation, key });
+      if (operation?.version === 1 && operation.uid === uid && operation.id && Array.isArray(operation.commands) &&
+          (includeRejected || !operation.rejected)) operations.push({ ...operation, key });
     } catch (_) {}
   }
   return operations.sort((a, b) => a.createdAt - b.createdAt || a.id.localeCompare(b.id));
 }
+window.LootLinguaOperations?.setSyncSource?.('profile', uid => {
+  const items = readProfileOutbox(uid, true);
+  const rejected = items.filter(item => item.rejected);
+  return { pending: items.length - rejected.length, rejected: rejected.length,
+    rejections: rejected.map(item => ({ scope: 'profile', type: item.commands[0]?.type, reason: item.rejected })) };
+});
 function enqueueProfileTask(owner, task) {
   const key = JSON.stringify([owner?.uid, owner?.generation, owner?.epoch]);
   const previous = _profileTaskQueues.get(key) || Promise.resolve();
@@ -276,7 +314,13 @@ function queueProfileCommands(commands, options = {}) {
   if (localStorage.getItem(key) && options.skipQueued) return id;
   if (!localStorage.getItem(key)) {
     _profileOperationClock = Math.max(Date.now(), _profileOperationClock + 1);
-    localStorage.setItem(key, JSON.stringify({ version: 1, uid: owner.uid, id, commands, createdAt: _profileOperationClock }));
+    try {
+      localStorage.setItem(key, JSON.stringify({ version: 1, uid: owner.uid, id, commands, createdAt: _profileOperationClock }));
+      window.LootLinguaOperations?.syncStorageFailure?.(owner.uid, 'profile', false);
+    } catch (error) {
+      window.LootLinguaOperations?.syncStorageFailure?.(owner.uid, 'profile', true);
+      throw error;
+    }
   }
   if (options.project !== false && window.__lootlinguaProfileSnapshot?.uid === owner.uid) {
     applyCanonicalProfile(window.__lootlinguaProfileSnapshot.data, owner);
@@ -390,7 +434,14 @@ async function transactProfileOutbox(owner, options = {}) {
     persistedData = result.profile;
     streakFreezesUsed += result.committedFreezes;
     Object.assign(results, result.outcomes);
-    for (const operation of operations) localStorage.removeItem(operation.key);
+    for (const operation of operations) {
+      const failure = result.outcomes[operation.id]?.reason;
+      if (failure && window.LootLinguaOperations) {
+        const { key, ...stored } = operation;
+        localStorage.setItem(rejectedProfilePrefix(owner.uid) + encodeURIComponent(operation.id), JSON.stringify({ ...stored, rejected: failure }));
+        localStorage.removeItem(key);
+      } else localStorage.removeItem(operation.key);
+    }
     const known = window.__lootlinguaProfileSnapshot;
     if (known?.uid !== owner.uid || Number(known.data?._syncRevision || 0) <= Number(persistedData?._syncRevision || 0)) {
       window.__lootlinguaProfileSnapshot = { uid: owner.uid, exists: true, data: persistedData, readFailed: false };
@@ -402,27 +453,40 @@ window.flushProfileIntents = function(options = {}) {
   const owner = options.profileOwner || captureProfileOwner();
   if (!isProfileOwnerCurrent(owner)) return Promise.resolve({ saved: false, reason: 'auth/identity-changed' });
   const work = async () => {
+    if (!readProfileOutbox(owner.uid).length) return { saved: true, profile: null, results: {} };
+    const operations = window.LootLinguaOperations;
+    let reason, rejected;
+    operations?.syncActivity?.(owner.uid, 'profile', { active: true });
     try {
       compactPresentationIntents(owner);
       window.LootLinguaCloudBackoff?.assertAvailable();
       const outcome = await transactProfileOutbox(owner, options);
       if (outcome.saved && outcome.profile) {
         applyCanonicalProfile(outcome.profile, owner);
+        rememberConfirmedProfile(owner.uid, outcome.profile);
         if (outcome.streakFreezesUsed) window.announceDailyStreakFreeze?.(outcome.streakFreezesUsed);
       }
       if (outcome.saved && outcome.profile) { window.__lootlinguaLastProfileSaveFailure = null; window.LootLinguaCloudBackoff?.recovered(); }
       return outcome;
     } catch (error) {
       if (isProfileOwnerCurrent(owner)) {
-        reportProfileSaveFailure(error, `users/${owner.uid}/meta/profile`, 'transaction-sync', {});
+        const failure = window.LootLinguaCloudBackoff?.classify(error);
+        if (!failure?.temporary) reportProfileSaveFailure(error, `users/${owner.uid}/meta/profile`, 'transaction-sync', {});
+        reason = failure?.reason;
+        if (failure?.temporary === false) rejected = failure.reason;
         clearTimeout(_profileRetryTimer);
         const quotaDelay = window.LootLinguaCloudBackoff?.pause(error) || (error?.code === 'resource-exhausted' ? 60000 : 0);
-        _profileRetryTimer = setTimeout(() => window.flushProfileIntents?.(), Math.max(5000, quotaDelay));
+        if (failure?.temporary !== false && reason !== 'offline') {
+          _profileRetryTimer = setTimeout(() => window.flushProfileIntents?.(), Math.max(5000, quotaDelay));
+        }
       }
-      return { saved: false, reason: error?.code || 'profile/sync-failed' };
-    }
+      return { saved: false, deferred: Boolean(reason && !rejected), reason: error?.code || 'profile/sync-failed' };
+    } finally { operations?.syncActivity?.(owner.uid, 'profile', { reason, failure: rejected }); }
   };
-  return options.insideProfileTask ? work() : enqueueProfileTask(owner, work);
+  const locked = () => window.navigator?.locks
+    ? window.navigator.locks.request('lootlingua:profile-flush:' + owner.uid, () => isProfileOwnerCurrent(owner) ? work() : { saved: false, reason: 'auth/identity-changed' })
+    : work();
+  return options.insideProfileTask ? locked() : enqueueProfileTask(owner, locked);
 };
 window.commitProfileIntent = async function(intent) {
   const owner = captureProfileOwner();
@@ -438,11 +502,21 @@ window.commitProfileIntent = async function(intent) {
   }
   return { ...outcome, ...result, operationId: id };
 };
-window.addEventListener?.('online', () => window.flushProfileIntents?.());
+window.hasPendingProfileIntent = function(type) {
+  const uid = profileAuth.currentUser?.uid;
+  return Boolean(uid && readProfileOutbox(uid).some(item => item.commands.some(command => command.type === type)));
+};
+window.addEventListener?.('online', () => {
+  window.flushProfileIntents?.();
+  if (window.__lootlinguaProfileSnapshot?.readFailed) scheduleProfileReadRecovery(profileAuth.currentUser, 150);
+});
 window.addEventListener?.('storage', (event) => {
   const uid = profileAuth.currentUser?.uid || '';
   if (event.key?.startsWith('lootlingua:profile-outbox:') &&
-      profileOutboxPrefixes(uid).some(prefix => event.key.startsWith(prefix))) scheduleProfileFlush();
+      profileOutboxPrefixes(uid).some(prefix => event.key.startsWith(prefix))) {
+    window.LootLinguaOperations?.syncNotify?.();
+    scheduleProfileFlush();
+  }
 });
 
 function captureProfileOwner(user = profileAuth.currentUser) {
@@ -625,11 +699,14 @@ window.loadProfileFromCloud = async function(user, options = {}) {
       if (!isCurrent()) return abandoned();
     }
     if (!isCurrent()) return abandoned();
+    window.LootLinguaCloudBackoff?.assertAvailable?.();
     const snap = await getDoc(doc(profileDb, "users", user.uid, "meta", "profile"));
     if (!isCurrent()) return abandoned();
+    if (snap.metadata?.fromCache) throw Object.assign(new Error('A server profile is not available.'), { code: 'unavailable' });
     profileReadCompleted = true;
     outcome.loaded = true;
     const cloudData = snap.exists() ? snap.data() : null;
+    rememberConfirmedProfile(user.uid, cloudData);
     window.__lootlinguaProfileSnapshot = {
       uid: user.uid,
       exists: snap.exists(),
@@ -741,6 +818,7 @@ window.loadProfileFromCloud = async function(user, options = {}) {
       const known = window.__lootlinguaProfileSnapshot;
       if (known?.uid === owner.uid && Number(known.data?._syncRevision || 0) > Number(data?._syncRevision || 0)) return;
       window.__lootlinguaProfileSnapshot = { uid: owner.uid, exists: true, data, readFailed: false };
+      rememberConfirmedProfile(owner.uid, data);
       applyCanonicalProfile(data, owner);
     }, (error) => {
       if (isCurrent()) console.error('loadProfile: live synchronization unavailable', error);
@@ -748,23 +826,31 @@ window.loadProfileFromCloud = async function(user, options = {}) {
     if (readProfileOutbox(owner.uid).length) scheduleProfileFlush();
   } catch (e) {
     if (!isCurrent()) return abandoned();
+    const backoff = window.LootLinguaCloudBackoff;
+    const temporary = backoff?.classify?.(e).temporary;
     if (!profileReadCompleted) {
+      const cached = temporary ? readProfilePreview(owner.uid) : null;
       window.__lootlinguaProfileSnapshot = {
         uid: user?.uid || '',
         exists: false,
-        data: null,
+        data: cached,
         readFailed: true,
       };
       window.dispatchEvent(new CustomEvent('lootlingua:profile-snapshot', {
         detail: window.__lootlinguaProfileSnapshot,
       }));
+      if (cached && isCurrent()) {
+        applyCanonicalProfile(cached, owner);
+        outcome.loaded = true;
+      }
+      if (temporary) { backoff.pause(e); scheduleProfileReadRecovery(user); }
     }
     if (accepted?.profile && options.requirePendingProfileCommit &&
         typeof window.resetLootlinguaProfileState === 'function') {
       window.resetLootlinguaProfileState({ clearDisplayName: true, resetTheme: true });
       if (isCurrent()) window.mergeLootlinguaProfileFromCloud?.(accepted.profile);
     }
-    console.error("loadProfile:", { code: e?.code, message: e?.message }, e);
+    if (!temporary) console.error("loadProfile:", { code: e?.code, message: e?.message }, e);
   }
   finally {
     if (isCurrent()) {
@@ -794,6 +880,7 @@ onAuthStateChanged(profileAuth, (user) => {
   _profileSnapshotUnsubscribe?.();
   _profileSnapshotUnsubscribe = null;
   clearTimeout(_profileRetryTimer);
+  clearTimeout(_profileReadRetryTimer);
   _profileRetryTimer = null;
   window.__applyingCloudProfile = false;
   window._profileLoaded = false;

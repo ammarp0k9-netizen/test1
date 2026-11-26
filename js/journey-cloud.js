@@ -33,12 +33,85 @@ const cache = {
   journeys: new Map(),
   gateProgress: new Map(),
   rankGateProgress: new Map(),
-  gateWords: new Map(),
   placementSessions: new Map(),
   levelPlacementSessions: new Map(),
   gateClearAttempts: new Map(),
 };
 const levelPlacementStartRequests = new Map();
+const progressReads = new Map();
+const OWNER_PROGRESS_PREFIX = 'lootlingua:journey-preview:v1:';
+const savedOwnerProgressKey = (uid, path) => OWNER_PROGRESS_PREFIX + encodeURIComponent(uid) + ':' + JSON.stringify(path);
+function rememberOwnerProgress(uid, key, value, snapshot) {
+  if (snapshot.metadata?.fromCache || snapshot.metadata?.hasPendingWrites) return;
+  const storage = window.localStorage;
+  const itemKey = savedOwnerProgressKey(uid, key);
+  try {
+    const text = JSON.stringify({ value, at: Date.now() });
+    if (!storage || text.length > 80000) return;
+    const ownerPrefix = OWNER_PROGRESS_PREFIX + encodeURIComponent(uid) + ':';
+    const keys = Array.from({ length: storage.length }, (_, index) => storage.key(index))
+      .filter(key => key?.startsWith(ownerPrefix) && key !== itemKey);
+    const older = keys.map(key => {
+      const stored = storage.getItem(key) || '';
+      return { key, size: stored.length, at: JSON.parse(stored || '{}').at || 0 };
+    }).sort((a, b) => b.at - a.at);
+    let size = text.length;
+    for (const row of older) {
+      size += row.size;
+      if (size > 512000) storage.removeItem(row.key);
+    }
+    storage.setItem(itemKey, text);
+  } catch (_) { /* This cache does not acknowledge private changes. */ }
+}
+
+function readOwnerProgress(uid, key) {
+  if (auth?.currentUser?.uid !== uid) return undefined;
+  try {
+    const entry = JSON.parse(window.localStorage?.getItem(savedOwnerProgressKey(uid, key)) || 'null');
+    if (entry && Date.now() - entry.at < 7 * 86400000) return entry.value;
+  } catch (_) {}
+  return undefined;
+}
+
+function cachedJourneyForLearning(worldId) {
+  const uid = auth?.currentUser?.uid;
+  return uid ? readOwnerProgress(uid, ['journey', String(worldId || '')]) || null : null;
+}
+
+async function readProgressSnapshot(uid, path, work, reduce, options) {
+  try {
+    const snapshot = await shareProgressRead(uid, path, work);
+    if (snapshot.metadata?.fromCache) throw journeyCloudError('unavailable', 'A server snapshot is required.');
+    const value = reduce(snapshot);
+    rememberOwnerProgress(uid, path, value, snapshot);
+    return value;
+  } catch (error) {
+    if (!options?.force && window.LootLinguaCloudBackoff?.classify?.(error).temporary) {
+      window.LootLinguaCloudBackoff.pause(error);
+      const saved = readOwnerProgress(uid, path);
+      if (saved !== undefined) return saved;
+    }
+    throw error;
+  }
+}
+
+function shareProgressRead(uid, scope, work) {
+  const generation = Number(window.__lootlinguaAuthGeneration) || 0;
+  const key = JSON.stringify([uid, generation, scope]);
+  if (progressReads.has(key)) return progressReads.get(key);
+  const promise = Promise.resolve().then(() => {
+    window.LootLinguaCloudBackoff?.assertAvailable();
+    return work();
+  }).then(result => {
+    if (auth?.currentUser?.uid !== uid || (Number(window.__lootlinguaAuthGeneration) || 0) !== generation) throw journeyCloudError('journey/auth-changed');
+    return result;
+  }).catch(error => {
+    window.LootLinguaCloudBackoff?.pause(error);
+    throw error;
+  }).finally(() => { if (progressReads.get(key) === promise) progressReads.delete(key); });
+  progressReads.set(key, promise);
+  return promise;
+}
 const GATE_NOTIFICATION_FACTS_MAX_AGE_MS = 60_000;
 let gateNotificationFacts = null;
 
@@ -193,7 +266,7 @@ function resetCache(uid) {
   cache.journeys.clear();
   cache.gateProgress.clear();
   cache.rankGateProgress.clear();
-  cache.gateWords.clear();
+  progressReads.clear();
   cache.placementSessions.clear();
   cache.levelPlacementSessions.clear();
   cache.gateClearAttempts.clear();
@@ -320,22 +393,22 @@ async function getJourney(worldId, options) {
   const user = requireUser();
   const id = core().cleanId(worldId, 'World');
   if (!options?.force && cache.journeys.has(id)) return cache.journeys.get(id);
-  const snapshot = await getDoc(journeyRef(user.uid, id));
-  const value = record(snapshot, 'worldId');
-  cache.journeys.set(id, value);
+  const value = await readProgressSnapshot(user.uid, ['journey', id], () => getDoc(journeyRef(user.uid, id)),
+    snapshot => record(snapshot, 'worldId'), options);
+  if (!window.LootLinguaCloudBackoff?.reason?.()) cache.journeys.set(id, value);
   return value;
 }
 
 async function getPointedJourney(options) {
   const user = requireUser();
-  const pointer = await getDoc(activeJourneyRef(user.uid));
+  const pointer = await shareProgressRead(user.uid, 'active-pointer', () => getDoc(activeJourneyRef(user.uid)));
   const worldId = pointer.exists() ? String(pointer.data()?.worldId || '') : '';
   return worldId ? getJourney(worldId, options) : null;
 }
 
 async function listJourneyRecords(options) {
   const user = requireUser();
-  const snapshot = await getDocs(collection(db, 'users', user.uid, 'contentProgress'));
+  const snapshot = await shareProgressRead(user.uid, 'journey-list', () => getDocs(collection(db, 'users', user.uid, 'contentProgress')));
   const journeys = snapshot.docs.map((item) => ({
     ...(item.data() || {}),
     worldId: item.id,
@@ -434,9 +507,9 @@ async function getGateProgress(worldId, rankId, gateId, options) {
   if (!options?.force && cache.gateProgress.has(key)) {
     return cache.gateProgress.get(key);
   }
-  const snapshot = await getDoc(gateProgressRef(user.uid, worldId, rankId, gateId));
-  const value = record(snapshot, 'gateId');
-  cache.gateProgress.set(key, value);
+  const value = await readProgressSnapshot(user.uid, ['gate-progress', key], () => getDoc(gateProgressRef(user.uid, worldId, rankId, gateId)),
+    snapshot => record(snapshot, 'gateId'), options);
+  if (!window.LootLinguaCloudBackoff?.reason?.()) cache.gateProgress.set(key, value);
   return value;
 }
 
@@ -446,11 +519,13 @@ async function listRankGateProgress(worldId, rankId, options) {
   if (!options?.force && cache.rankGateProgress.has(key)) {
     return new Map(cache.rankGateProgress.get(key));
   }
-  const snapshot = await getDocs(gateProgressCollection(user.uid, worldId, rankId));
-  const values = new Map(snapshot.docs.map((item) => [
+  const result = await readProgressSnapshot(user.uid, ['rank-progress', key], () => getDocs(gateProgressCollection(user.uid, worldId, rankId)),
+    snapshot => snapshot.docs.map(item => [
     item.id,
     { ...(item.data() || {}), gateId: item.id },
-  ]));
+  ]), options);
+  const values = new Map(result);
+  if (window.LootLinguaCloudBackoff?.reason?.()) return values;
   cache.rankGateProgress.set(key, values);
   values.forEach((value, gateId) => {
     cache.gateProgress.set(gateCacheKey(worldId, rankId, gateId), value);
@@ -459,13 +534,13 @@ async function listRankGateProgress(worldId, rankId, options) {
 }
 
 function timestampMillis(value) {
-  return Math.max(0, Number(value?.toMillis?.() ?? value) || 0);
+  return Math.max(0, Number(value?.toMillis?.() ?? (Number.isFinite(value?.seconds) ? value.seconds * 1000 : value)) || 0);
 }
 
 async function listLevelPlacementSessions(worldId, options) {
   const user = requireUser();
   const world = core().cleanId(worldId, 'World');
-  const snapshot = await getDocs(levelPlacementSessionsCollection(user.uid, world));
+  const snapshot = await shareProgressRead(user.uid, ['placement-history', world], () => getDocs(levelPlacementSessionsCollection(user.uid, world)));
   return snapshot.docs.map((item) => ({
     ...(item.data() || {}),
     assessmentId: item.id,
@@ -1058,13 +1133,9 @@ async function linkPublishedWord(uid, word, personalIndex, operationId, options)
 }
 
 async function listAllGateWords(worldId, rankId, gateId, options) {
-  const key = gateCacheKey(worldId, rankId, gateId);
-  if (!options?.force && cache.gateWords.has(key)) {
-    return cache.gateWords.get(key).slice();
-  }
   let words;
   try {
-    words = await contentApi().listAllPublishedGateWords(worldId, rankId, gateId);
+    words = await contentApi().listAllPublishedGateWords(worldId, rankId, gateId, { requireFresh: options?.force === true });
   } catch (error) {
     throw journeyOperationError(error, 'read-all-published-gate-words', {
       worldId: String(worldId),
@@ -1072,7 +1143,6 @@ async function listAllGateWords(worldId, rankId, gateId, options) {
       gateId: String(gateId),
     });
   }
-  cache.gateWords.set(key, words.slice());
   return words;
 }
 
@@ -1981,18 +2051,26 @@ async function finalizeGateClearAttempt(worldId, rankId, gateId, attemptId) {
   return committed;
 }
 
-async function answerGateClearQuestion(worldId, rankId, gateId, attemptId, selectedContentWordId) {
+async function answerGateClearQuestion(worldId, rankId, gateId, attemptId, selectedContentWordId, options = {}) {
   const user = requireUser();
   const attemptRef = gateClearAttemptRef(user.uid, worldId, attemptId);
-  const persisted = await getGateClearAttempt(worldId, attemptId, { force: true });
-  if (persisted?.status === 'submitting') {
-    return finalizeResumedGateClearAttempt(worldId, rankId, gateId, attemptId, persisted);
-  }
+  window.LootLinguaCloudBackoff?.assertAvailable?.();
   let nextSession = null;
   await runTransaction(db, async (transaction) => {
     const snapshot = await transaction.get(attemptRef);
+    if (auth.currentUser?.uid !== user.uid) throw journeyCloudError('journey/auth-changed');
     if (!snapshot.exists()) throw journeyCloudError('gate-clear/not-found', 'Gate Clear attempt was not found.');
     const current = { ...(snapshot.data() || {}), attemptId: snapshot.id };
+    const expectedIndex = options.expectedIndex;
+    if (Number.isSafeInteger(expectedIndex) && Number(current.currentQuestionIndex) !== expectedIndex) {
+      const saved = current.answers?.[expectedIndex];
+      if (!saved || String(saved.selectedContentWordId) !== String(selectedContentWordId)) {
+        throw journeyCloudError('failed-precondition', 'This answer conflicts with the saved assessment.');
+      }
+      nextSession = current;
+      return;
+    }
+    if (current.status === 'submitting') { nextSession = current; return; }
     nextSession = gateClearCore().answerSession(current, selectedContentWordId);
     transaction.update(attemptRef, {
       answers: nextSession.answers,
@@ -3179,13 +3257,23 @@ async function finalizePlacementResult(worldId, assessmentId) {
   return result;
 }
 
-async function answerPlacementQuestion(worldId, assessmentId, selectedContentWordId) {
+async function answerPlacementQuestion(worldId, assessmentId, selectedContentWordId, options = {}) {
   const user = requireUser();
+  window.LootLinguaCloudBackoff?.assertAvailable?.();
   const id = core().cleanId(worldId, 'World');
   const assessment = placementCore().cleanId(assessmentId, 'Assessment');
   const before = await getPlacementSession(id, assessment, { force: true });
   if (!before) {
     throw journeyCloudError('placement/not-active', 'Placement session was not found.');
+  }
+  const expectedIndex = options.expectedIndex;
+  const answerMatches = session => String(session.answers?.[expectedIndex]?.selectedContentWordId || '') === String(selectedContentWordId);
+  if (Number.isSafeInteger(expectedIndex) && Number(before.currentQuestionIndex) !== expectedIndex) {
+    if (!answerMatches(before)) throw journeyCloudError('failed-precondition', 'This answer conflicts with saved Placement progress.');
+    if (before.status === 'active') {
+      const journey = await getJourney(id, { force: true });
+      return { completed: false, correct: before.answers[expectedIndex].correct, bundle: await makePlacementBundle(journey, before) };
+    }
   }
   if (before.status === 'submitting' || before.status === 'completed') {
     return finalizePlacementResult(id, assessment);
@@ -3202,6 +3290,10 @@ async function answerPlacementQuestion(worldId, assessmentId, selectedContentWor
       ]);
       const journey = journeySnapshot.data() || {};
       const session = sessionSnapshot.data() || {};
+      if (Number.isSafeInteger(expectedIndex) && Number(session.currentQuestionIndex) !== expectedIndex) {
+        if (!answerMatches(session)) throw journeyCloudError('failed-precondition', 'This answer conflicts with saved Placement progress.');
+        return;
+      }
       if (
         !journeySnapshot.exists() ||
         !sessionSnapshot.exists() ||
@@ -4512,7 +4604,110 @@ async function applyLevelPlacementResult(worldId, assessmentId) {
   return applyPlacementOutcome(worldId, assessmentId);
 }
 
-async function answerLevelPlacementQuestion(worldId, assessmentId, selectedQuestionId) {
+const placementCheckpointKey = (uid, world) => 'lootlingua:level-placement-draft:v1:' + encodeURIComponent(uid) + ':' + encodeURIComponent(world);
+const placementAnswerOutbox = window.LootLinguaOperations?.createOutbox?.('level-placement', item => {
+  const { world, rank, gate, assessment, selected, expectedIndex } = item.payload;
+  if (item.type === 'gate-clear-answer') return answerGateClearQuestion(world, rank, gate, assessment, selected, { expectedIndex });
+  if (item.type === 'legacy-placement-answer') return answerPlacementQuestion(world, assessment, selected, { expectedIndex });
+  return answerLevelPlacementQuestion(world, assessment, selected, { expectedIndex });
+}, {
+  onConfirmed(item, bundle) {
+    queueMicrotask(() => {
+      if (placementAnswerOutbox.list(item.owner).some(other => other.lane === item.lane && !other.rejected)) return;
+      const name = item.type === 'gate-clear-answer' ? 'lootlingua:gate-clear-synchronized'
+        : item.type === 'legacy-placement-answer' ? 'lootlingua:legacy-placement-synchronized' : 'lootlingua:level-placement-synchronized';
+      window.dispatchEvent(new CustomEvent(name, { detail: { owner: item.owner, bundle, ...item.payload } }));
+    });
+  },
+});
+
+function readPendingLevelPlacement(world) {
+  const uid = auth?.currentUser?.uid;
+  if (!uid || !world || !placementAnswerOutbox) return null;
+  try {
+    const saved = JSON.parse(localStorage.getItem(placementCheckpointKey(uid, world)) || 'null');
+    const items = placementAnswerOutbox.list(uid).filter(item => item.lane === saved?.session?.assessmentId);
+    if (!items.length || items.some(item => item.rejected)) return null;
+    return saved;
+  } catch (_) { return null; }
+}
+
+function stageLevelPlacementAnswer(bundle, selected) {
+  const user = requireUser();
+  if (!placementAnswerOutbox) throw journeyCloudError('level-placement/unavailable');
+  const session = bundle.session;
+  const world = bundle.journey.worldId;
+  const assessment = session.assessmentId;
+  const expectedIndex = Number(session.currentQuestionIndex);
+  const reducer = levelPlacementCore();
+  const answered = reducer.answerSession(session, selected);
+  const next = answered.currentQuestionIndex === answered.orderedQuestionIds.length ? reducer.finalizeRound(answered) : answered;
+  const draft = { ...bundle, session: next, pendingCloud: true };
+  storeAssessmentAnswer(user.uid, world, draft, 'answer', { world, assessment, selected, expectedIndex }, assessment);
+  return draft;
+}
+
+function storeAssessmentAnswer(uid, storageScope, draft, type, payload, lane) {
+  try {
+    const id = `${type}:${payload.world}:${payload.assessment}:${payload.expectedIndex}`;
+    const prior = placementAnswerOutbox.list(uid).find(item => item.id === id);
+    if (prior && String(prior.payload.selected) !== String(payload.selected)) throw journeyCloudError('failed-precondition', 'This question already has a saved answer.');
+    localStorage.setItem(placementCheckpointKey(uid, storageScope), JSON.stringify(draft));
+    placementAnswerOutbox.enqueue(type, payload, {
+      id, lane,
+    });
+    window.LootLinguaOperations?.syncStorageFailure?.(uid, 'assessment-draft', false);
+  } catch (error) {
+    if (error?.code !== 'failed-precondition') window.LootLinguaOperations?.syncStorageFailure?.(uid, 'assessment-draft', true);
+    throw error;
+  }
+}
+
+function stageGateClearAnswer(world, rank, gate, bundle, selected) {
+  const user = requireUser();
+  if (!placementAnswerOutbox || !Array.isArray(bundle.words)) throw journeyCloudError('gate-clear/unavailable');
+  const answer = gateClearCore().answerSession(bundle.attempt, selected);
+  const assessment = bundle.attempt.attemptId;
+  const draft = { ...bundle, attempt: answer, question: gateClearCore().buildQuestion(answer, bundle.words), pendingCloud: true };
+  storeAssessmentAnswer(user.uid, `gate:${world}:${rank}:${gate}`, draft, 'gate-clear-answer',
+    { world, rank, gate, assessment, selected, expectedIndex: Number(bundle.attempt.currentQuestionIndex) }, `gate:${assessment}`);
+  return draft;
+}
+
+function readPendingGateClear(world, rank, gate) {
+  const uid = auth?.currentUser?.uid;
+  if (!uid || !placementAnswerOutbox) return null;
+  try {
+    const bundle = JSON.parse(localStorage.getItem(placementCheckpointKey(uid, `gate:${world}:${rank}:${gate}`)) || 'null');
+    const pending = placementAnswerOutbox.list(uid).filter(item => item.lane === `gate:${bundle?.attempt?.attemptId}`);
+    return pending.length && !pending.some(item => item.rejected) ? bundle : null;
+  } catch (_) { return null; }
+}
+
+function stageLegacyPlacementAnswer(bundle, selected) {
+  const user = requireUser();
+  if (!placementAnswerOutbox || !Array.isArray(bundle.words)) throw journeyCloudError('placement/unavailable');
+  const { worldId: world } = bundle.journey;
+  const { assessmentId: assessment } = bundle.session;
+  const answer = placementCore().answerSession(bundle.session, selected);
+  if (answer.currentQuestionIndex === answer.totalQuestions) answer.status = 'submitting';
+  const draft = { ...bundle, session: answer, pendingCloud: true };
+  storeAssessmentAnswer(user.uid, `legacy:${world}`, draft, 'legacy-placement-answer',
+    { world, assessment, selected, expectedIndex: Number(bundle.session.currentQuestionIndex) }, `legacy:${assessment}`);
+  return draft;
+}
+
+function readPendingLegacyPlacement(world) {
+  const uid = auth?.currentUser?.uid;
+  if (!uid || !world || !placementAnswerOutbox) return null;
+  try {
+    const bundle = JSON.parse(localStorage.getItem(placementCheckpointKey(uid, `legacy:${world}`)) || 'null');
+    const pending = placementAnswerOutbox.list(uid).filter(item => item.lane === `legacy:${bundle?.session?.assessmentId}`);
+    return pending.length && !pending.some(item => item.rejected) ? bundle : null;
+  } catch (_) { return null; }
+}
+
+async function answerLevelPlacementQuestion(worldId, assessmentId, selectedQuestionId, options = {}) {
   const user = requireUser();
   const world = core().cleanId(worldId, 'World');
   const assessment = levelPlacementCore().cleanId(assessmentId, 'Assessment');
@@ -4524,6 +4719,7 @@ async function answerLevelPlacementQuestion(worldId, assessmentId, selectedQuest
   let resumesSavedOutcome = false;
   const trace = window.LootLinguaOperations?.startTrace('level-placement-answer');
   try {
+    window.LootLinguaCloudBackoff?.assertAvailable();
     await runTransaction(db, async (transaction) => {
       const [journeySnapshot, sessionSnapshot] = await Promise.all([
         transaction.get(journeyReference),
@@ -4536,6 +4732,17 @@ async function answerLevelPlacementQuestion(worldId, assessmentId, selectedQuest
         Number(session.currentQuestionIndex) === (session.orderedQuestionIds || []).length &&
         (session.answers || []).length === (session.orderedQuestionIds || []).length;
       const savedFinalAnswer = (session.answers || []).at(-1);
+      const expectedIndex = options.expectedIndex;
+      if (Number.isSafeInteger(expectedIndex) && Number(session.currentQuestionIndex) !== expectedIndex) {
+        const existing = session.answers?.[expectedIndex];
+        if (!existing || String(existing.selectedQuestionId) !== String(selectedQuestionId)) {
+          throw journeyCloudError('failed-precondition', 'This answer conflicts with an answer already saved in the assessment.');
+        }
+        savedJourney = { ...journey, worldId: world };
+        savedSession = { ...session, assessmentId: assessment, worldId: world };
+        resumesSavedOutcome = answersComplete && ['awaiting-decision', 'paused', 'completed'].includes(session.status);
+        return;
+      }
       if (
         sessionSnapshot.exists() &&
         answersComplete &&
@@ -4615,7 +4822,7 @@ async function answerLevelPlacementQuestion(worldId, assessmentId, selectedQuest
   const bundle = {
     ...(await makeLevelPlacementBundle(savedJourney, savedSession)),
     correct: Boolean(preview?.answers?.at(-1)?.correct),
-    adaptiveStarted: savedSession.adaptiveRound > Number(preview?.adaptiveRound || 0),
+    adaptiveStarted: Boolean(preview && savedSession.adaptiveRound > Number(preview.adaptiveRound || 0)),
   };
   trace?.stage('bundle-ready').end({
     pageIndex: savedSession.currentQuestionIndex,
@@ -4987,7 +5194,7 @@ function invalidate(scope) {
     cache.gateProgress.clear();
     cache.rankGateProgress.clear();
   }
-  if (target === 'all' || target === 'words') cache.gateWords.clear();
+  if (target === 'all' || target === 'words') window.LootLinguaPublishedContent?.invalidate?.('words');
   if (['all', 'active', 'progress', 'words'].includes(target)) gateNotificationFacts = null;
   if (target === 'all' || target === 'placement') cache.placementSessions.clear();
   if (target === 'all' || target === 'level-placement') cache.levelPlacementSessions.clear();
@@ -5081,6 +5288,7 @@ const API = Object.freeze({
   resolveAccountJourneyDestination,
   hasAnyJourneyProgress,
   getJourney,
+  cachedJourneyForLearning,
   startJourney,
   switchActiveJourney,
   beginJourneyFromStart,
@@ -5103,6 +5311,12 @@ const API = Object.freeze({
   reconcileLevelPlacementJourney,
   resolveActiveJourneyDestination,
   answerLevelPlacementQuestion,
+  stageLevelPlacementAnswer,
+  readPendingLevelPlacement,
+  stageGateClearAnswer,
+  readPendingGateClear,
+  stageLegacyPlacementAnswer,
+  readPendingLegacyPlacement,
   applyPlacementOutcome,
   applyLevelPlacementResult,
   saveLevelPlacementWords,

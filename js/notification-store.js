@@ -13,6 +13,8 @@
   let records = [];
   let cloudAdapter = null;
   const deferredCloudWrites = new Map();
+  const deferredFailures = new Map();
+  const deferredPrefix = ownerId => `lootlingua:notification-sync:v1:${encodeURIComponent(ownerId)}:`;
   let cloudRetryTimer = null;
 
   function cleanText(value) {
@@ -254,6 +256,7 @@
     const normalizedOwner = cleanText(nextOwner) || 'guest';
     owner = normalizedOwner;
     records = readOwner(owner);
+    if (owner !== 'guest') restoreDeferred(owner);
     persist();
     emit('owner-switch');
     return getAll();
@@ -295,14 +298,34 @@
     return `${cleanText(ownerId)}\u0000${cleanText(recordId)}`;
   }
 
+  function restoreDeferred(ownerId) {
+    const prefix = deferredPrefix(ownerId);
+    try {
+      for (let index = 0; index < localStorage.length; index++) {
+        const key = localStorage.key(index);
+        if (!key?.startsWith(prefix)) continue;
+        const saved = JSON.parse(localStorage.getItem(key));
+        if (saved?.record?.ownerId !== ownerId || !saved.record.id) continue;
+        const id = deferredCloudKey(ownerId, saved.record.id);
+        deferredCloudWrites.set(id, mergePair(deferredCloudWrites.get(id), saved.record, ownerId));
+        if (saved.reason) deferredFailures.set(id, saved.reason);
+      }
+    } catch (error) { root.LootLinguaOperations?.syncStorageFailure?.(ownerId, 'notifications', true); }
+  }
+
   function clearDeferredCloudRecords(values, ownerId) {
     (Array.isArray(values) ? values : []).forEach((record) => {
       const key = deferredCloudKey(ownerId, record?.id);
       const deferred = deferredCloudWrites.get(key);
-      if (!deferred || timeValue(deferred.updatedAt) <= timeValue(record?.updatedAt)) {
+      if (!deferredFailures.has(key) && (!deferred || timeValue(deferred.updatedAt) <= timeValue(record?.updatedAt))) {
+        if (deferred) {
+          try { localStorage.removeItem(deferredPrefix(ownerId) + encodeURIComponent(record.id)); }
+          catch (_) { root.LootLinguaOperations?.syncStorageFailure?.(ownerId, 'notifications', true); return; }
+        }
         deferredCloudWrites.delete(key);
       }
     });
+    root.LootLinguaOperations?.syncNotify?.();
   }
 
   function deferCloudRecords(values, ownerId) {
@@ -310,10 +333,13 @@
       const current = owner === ownerId ? records.find((item) => item.id === record?.id) : null;
       const deferredRecord = normalizeRecord(current || record, ownerId);
       const key = deferredCloudKey(ownerId, deferredRecord.id);
-      deferredCloudWrites.set(
-        key,
-        mergePair(deferredCloudWrites.get(key), deferredRecord, ownerId)
-      );
+      const merged = mergePair(deferredCloudWrites.get(key), deferredRecord, ownerId);
+      try {
+        localStorage.setItem(deferredPrefix(ownerId) + encodeURIComponent(merged.id), JSON.stringify({ record: merged }));
+        deferredCloudWrites.set(key, merged);
+        deferredFailures.delete(key);
+        root.LootLinguaOperations?.syncStorageFailure?.(ownerId, 'notifications', false);
+      } catch (error) { root.LootLinguaOperations?.syncStorageFailure?.(ownerId, 'notifications', true); }
     });
   }
 
@@ -322,23 +348,24 @@
     cloudRetryTimer = root.setTimeout(() => {
       cloudRetryTimer = null;
       retryDeferredCloudWrites();
-    }, 15000);
+    }, Math.max(15000, root.LootLinguaCloudBackoff?.remaining?.() || 0));
   }
 
   async function retryDeferredCloudWrites() {
     if (!cloudAdapter?.writeRecords || owner === 'guest') return false;
     const ownerId = owner;
     const pending = [...deferredCloudWrites.entries()]
-      .filter(([key]) => key.startsWith(`${ownerId}\u0000`))
+      .filter(([key]) => key.startsWith(`${ownerId}\u0000`) && !deferredFailures.has(key))
       .map(([, record]) => record);
     if (!pending.length) return true;
+    if (root.LootLinguaCloudBackoff?.reason?.()) { scheduleCloudRetry(); return false; }
     try {
       const saved = await cloudAdapter.writeRecords(pending);
       if (saved === false) throw new Error('Notification cloud adapter did not accept the deferred write.');
       clearDeferredCloudRecords(pending, ownerId);
       return true;
     } catch (error) {
-      console.warn('[NotificationStore] Deferred cloud write retry failed.', error?.message || error);
+      if (!root.LootLinguaCloudBackoff?.classify?.(error).temporary) console.warn('[NotificationStore] Deferred cloud write retry failed.', error?.message || error);
       scheduleCloudRetry();
       return false;
     }
@@ -349,6 +376,7 @@
     const ownerId = owner;
     const outgoing = (Array.isArray(values) ? values : [])
       .map((record) => normalizeRecord(record, ownerId));
+    if (root.LootLinguaOperations) deferCloudRecords(outgoing, ownerId);
     Promise.resolve()
       .then(() => cloudAdapter.writeRecords(outgoing))
       .then((saved) => {
@@ -357,9 +385,20 @@
       })
       .catch((error) => {
         deferCloudRecords(outgoing, ownerId);
-        console.warn(`[NotificationStore] ${label} deferred.`, error?.message || error);
+        if (!root.LootLinguaCloudBackoff?.classify?.(error).temporary) console.warn(`[NotificationStore] ${label} deferred.`, error?.message || error);
         scheduleCloudRetry();
       });
+  }
+
+  function rejectDeferredCloudRecord(record, ownerId, reason) {
+    const key = deferredCloudKey(ownerId, record.id);
+    const saved = deferredCloudWrites.get(key) || normalizeRecord(record, ownerId);
+    try {
+      localStorage.setItem(deferredPrefix(ownerId) + encodeURIComponent(record.id), JSON.stringify({ record: saved, reason }));
+      deferredCloudWrites.set(key, saved);
+      deferredFailures.set(key, reason);
+      root.LootLinguaOperations?.syncNotify?.();
+    } catch (_) { root.LootLinguaOperations?.syncStorageFailure?.(ownerId, 'notifications', true); }
   }
 
   function applyRecords(incoming, reason, options = {}) {
@@ -520,12 +559,24 @@
     refreshVisibility: () => emit('gate-access-changed'),
     registerCloudAdapter,
     retryDeferredCloudWrites,
+    confirmDeferredCloudRecords: clearDeferredCloudRecords,
+    rejectDeferredCloudRecord,
     deferredCloudWriteCount: () => deferredCloudWrites.size,
+    hasDeferredCloudRecord: (ownerId, recordId) => deferredCloudWrites.has(deferredCloudKey(ownerId, recordId)),
     migrateGuestToOwner,
     purgeOwner,
   });
 
   root.addEventListener?.('storage', event => {
+    if (owner !== 'guest' && event.key?.startsWith(deferredPrefix(owner))) {
+      const recordId = decodeURIComponent(event.key.slice(deferredPrefix(owner).length));
+      const key = deferredCloudKey(owner, recordId);
+      deferredCloudWrites.delete(key); deferredFailures.delete(key);
+      restoreDeferred(owner);
+      root.LootLinguaOperations?.syncNotify?.();
+      scheduleCloudRetry();
+      return;
+    }
     if (event.key !== storageKey(owner)) return;
     const shared = readOwner(owner);
     const next = mergeMany(records, shared, owner);
@@ -534,6 +585,17 @@
     if (JSON.stringify(next) !== JSON.stringify(shared)) persist();
     emit('other-tab');
   });
+
+  root.addEventListener?.('lootlingua:auth-state', () => {
+    root.LootLinguaOperations?.setSyncSource?.('notifications', uid => {
+      const keys = [...deferredCloudWrites.keys()].filter(key => key.startsWith(`${uid}\u0000`));
+      const rejected = keys.filter(key => deferredFailures.has(key));
+      return { pending: keys.length - rejected.length, rejected: rejected.length,
+        rejections: rejected.map(key => ({ scope: 'notifications', reason: deferredFailures.get(key) })) };
+    });
+  });
+  root.addEventListener?.('online', () => { void retryDeferredCloudWrites(); });
+  root.addEventListener?.('lootlingua:cloud-capacity-change', scheduleCloudRetry);
 
   Object.defineProperty(root, 'LootLinguaNotificationStore', {
     value: API,

@@ -18,6 +18,7 @@ const auth = getAuth(app);
 let unsubscribeNotifications = null;
 let subscriptionGeneration = 0;
 let trustedQuizCache = null;
+let releaseNotificationListener, notificationSubscriptionSignal, notificationRetry;
 
 function timeValue(value) {
   if (!value) return 0;
@@ -102,7 +103,16 @@ async function writeRecords(values) {
   const unique = [...new Map((Array.isArray(values) ? values : [])
     .filter((record) => record?.id && record.ownerId === uid)
     .map((record) => [String(record.id), record])).values()];
-  for (const record of unique) await writeOne(record, uid);
+  for (const record of unique) {
+    try {
+      if (await writeOne(record, uid) !== true || auth.currentUser?.uid !== uid) return false;
+      window.LootLinguaNotificationStore?.confirmDeferredCloudRecords?.([record], uid);
+    } catch (error) {
+      const failure = window.LootLinguaCloudBackoff?.classify?.(error);
+      if (!failure || failure.temporary) throw error;
+      window.LootLinguaNotificationStore?.rejectDeferredCloudRecord?.(record, uid, failure.reason);
+    }
+  }
   return true;
 }
 
@@ -135,8 +145,13 @@ window.addEventListener('lootlingua:trusted-quiz-completed', () => { trustedQuiz
 
 function stopSubscription() {
   subscriptionGeneration += 1;
+  if (notificationRetry != null) clearTimeout(notificationRetry);
   if (unsubscribeNotifications) unsubscribeNotifications();
   unsubscribeNotifications = null;
+  notificationSubscriptionSignal?.abort();
+  notificationSubscriptionSignal = null;
+  releaseNotificationListener?.();
+  releaseNotificationListener = null;
 }
 
 function subscribeForUser(user) {
@@ -144,6 +159,25 @@ function subscribeForUser(user) {
   if (!user) return;
   const generation = subscriptionGeneration;
   const ownerId = user.uid;
+  const locks = window.navigator?.locks;
+  if (!locks || !window.AbortController) { connectNotificationListener(ownerId, generation); return; }
+  notificationSubscriptionSignal = new window.AbortController();
+  locks.request('lootlingua:notification-listener:' + ownerId, { signal: notificationSubscriptionSignal.signal }, () => {
+    if (generation !== subscriptionGeneration || auth.currentUser?.uid !== ownerId) return;
+    connectNotificationListener(ownerId, generation);
+    return new Promise(resolve => { releaseNotificationListener = resolve; });
+  }).catch(error => {
+    if (error?.name !== 'AbortError' && generation === subscriptionGeneration) connectNotificationListener(ownerId, generation);
+  });
+}
+
+function connectNotificationListener(ownerId, generation) {
+  if (generation !== subscriptionGeneration || auth.currentUser?.uid !== ownerId) return;
+  const backoff = window.LootLinguaCloudBackoff;
+  if (backoff?.reason?.()) {
+    notificationRetry = setTimeout(() => connectNotificationListener(ownerId, generation), Math.max(10000, backoff.remaining()));
+    return;
+  }
   const target = query(
     collection(db, 'users', ownerId, 'notifications'),
     orderBy('updatedAt', 'desc'),
@@ -152,6 +186,7 @@ function subscribeForUser(user) {
   let receivedFirstSnapshot = false;
   unsubscribeNotifications = onSnapshot(target, (snapshot) => {
     if (generation !== subscriptionGeneration || auth.currentUser?.uid !== ownerId) return;
+    if (snapshot.metadata?.fromCache && !receivedFirstSnapshot) return;
     const cloudRecords = snapshot.docs.map((item) => ({
       ...(item.data() || {}),
       id: item.id,
@@ -160,6 +195,7 @@ function subscribeForUser(user) {
     const store = window.LootLinguaNotificationStore;
     const cloudById = new Map(cloudRecords.map(record => [record.id, record]));
     const pending = !receivedFirstSnapshot ? (store?.getAll?.() || []).filter(record => {
+      if (store?.hasDeferredCloudRecord?.(ownerId, record.id)) return false;
       const cloud = cloudById.get(record.id);
       return !cloud || JSON.stringify(serialize(store.mergePair(cloud, record, ownerId), ownerId)) !== JSON.stringify(serialize(cloud, ownerId));
     }) : [];
@@ -174,7 +210,11 @@ function subscribeForUser(user) {
     }
   }, (error) => {
     if (generation !== subscriptionGeneration) return;
-    console.warn('[NotificationCloud] Snapshot unavailable; local cache remains active.', error?.message || error);
+    unsubscribeNotifications = null;
+    if (backoff?.classify?.(error).temporary) {
+      const wait = backoff.pause(error);
+      notificationRetry = setTimeout(() => connectNotificationListener(ownerId, generation), Math.max(10000, wait));
+    } else console.warn('[NotificationCloud] Snapshot unavailable; local cache remains active.', error?.message || error);
   });
 }
 
@@ -200,6 +240,7 @@ onAuthStateChanged(auth, (user) => {
   const ownerId = user?.uid || 'guest';
   window.LootLinguaNotificationStore?.switchOwner(ownerId);
   subscribeForUser(user);
+  if (user) void window.LootLinguaNotificationStore?.retryDeferredCloudWrites?.();
 });
 
 window.addEventListener('beforeunload', stopSubscription, { once: true });

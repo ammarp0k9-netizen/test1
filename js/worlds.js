@@ -418,12 +418,14 @@ function isLootOpeningCurrent(operation) {
 async function revealDailyLootReward(state, reward, operation = captureLootOpening()) {
   if (!isLootOpeningCurrent(operation)) return false;
   if (operation.owner !== 'guest') {
+    if (window.hasPendingProfileIntent?.('loot-open')) return false;
     try {
       if (typeof window.commitProfileIntent !== 'function') throw new Error('Profile sync is not ready.');
       const result = await window.commitProfileIntent({
         type: 'loot-open', eventId: operation.eventId, reward, at: Date.now(), day: todayStr(),
       });
       if (!isLootOpeningCurrent(operation)) return false;
+      if (result?.deferred) { renderTreasureRoom(); return false; }
       if (result?.saved !== true || result?.applied !== true) {
         showToast(result?.saved === true ? 'لم يُفتح صندوق جديد. تم تحديث حالته من حسابك.' :
           'تعذّر تأكيد فتح الصندوق. ستتحدث حالته عند عودة المزامنة.', 'warning', 5000);
@@ -1287,7 +1289,8 @@ async function readPublishedJourneyContext(worldId, options) {
     const retry = () => retryPublishedJourneyReconciliation(worldId);
     setPublishedJourneyError(error, 'journey-reconciliation', retry, worldId);
     return {
-      journey: fallbackJourney,
+      journey: fallbackJourney || (window.LootLinguaCloudBackoff?.classify?.(error).temporary
+        ? window.LootLinguaJourneyCloud?.cachedJourneyForLearning?.(worldId) : null),
       activeJourney: fallbackActiveJourney,
       levelPlacementOverviews: publishedContentState.levelPlacementOverviews,
       graph: publishedContentState.journeyGraph,
@@ -2079,6 +2082,11 @@ async function beginPublishedLevelPlacement(world, cefrLevel) {
 }
 
 async function maybeRenderPublishedLevelPlacementResume(journey, generation) {
+  const pending = window.LootLinguaJourneyCloud?.readPendingLevelPlacement?.(journey?.worldId || publishedContentState.route?.params?.worldId);
+  if (pending) {
+    if (generation === publishedContentState.generation) renderPublishedLevelPlacementAssessment(pending);
+    return true;
+  }
   const placement = getLevelPlacementContract();
   if (!placement.shouldResumeLevelPlacement(null, journey)) return false;
   try {
@@ -2218,6 +2226,18 @@ function renderPublishedLevelPlacementAssessment(bundle) {
   const root = publishedViewRoot();
   if (!root) return;
   const session = bundle.session;
+  if (bundle.pendingCloud && session.status !== 'active') {
+    setPublishedPlacementMode(true);
+    publishedContentState.levelPlacementBundle = bundle;
+    const section = publishedElement('section', 'published-placement-view published-level-placement-view');
+    section.append(
+      publishedElement('h2', '', 'إجابات اختبار المستوى محفوظة'),
+      publishedElement('p', '', 'النتيجة بانتظار الاعتماد السحابي. يمكنك متابعة التعلّم على المحتوى المتاح.'),
+      publishedButton('العودة إلى العوالم', 'published-action-btn', () => window.openPublishedWorldsRoot()),
+    );
+    root.replaceChildren(section);
+    return;
+  }
   if (session.status !== 'active') {
     renderPublishedLevelPlacementResult(bundle);
     return;
@@ -2308,6 +2328,20 @@ async function submitPublishedLevelPlacementAnswer(bundle, question, selectedId)
   const owner = window.auth?.currentUser?.uid;
   const generation = window.__dictionaryNavigationGeneration;
   const current = () => owner === window.auth?.currentUser?.uid && generation === window.__dictionaryNavigationGeneration;
+  const cloud = getJourneyCloudApi();
+  const backoff = window.LootLinguaCloudBackoff;
+  const saveLocally = () => {
+    const draft = cloud.stageLevelPlacementAnswer(bundle, selectedId);
+    if (!current()) return;
+    publishedContentState.levelPlacementPending = false;
+    publishedContentState.levelPlacementFeedback = null;
+    renderPublishedLevelPlacementAssessment(draft);
+  };
+  if ((bundle.pendingCloud || backoff?.reason?.()) && cloud.stageLevelPlacementAnswer) {
+    try { saveLocally(); }
+    catch (error) { showToast('تعذّر حفظ هذه الإجابة على الجهاز. أعد المحاولة.', 'danger', 4800); }
+    return;
+  }
   publishedContentState.levelPlacementPending = true;
   publishedContentState.levelPlacementFeedback = { selectedId: String(selectedId), correct };
   renderPublishedLevelPlacementAssessment(bundle);
@@ -2322,10 +2356,11 @@ async function submitPublishedLevelPlacementAnswer(bundle, question, selectedId)
   try {
     const reduceMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
     const beforeRound = Number(bundle.session.adaptiveRound || 0);
-    const savePromise = getJourneyCloudApi().answerLevelPlacementQuestion(
+    const savePromise = cloud.answerLevelPlacementQuestion(
       bundle.journey.worldId,
       bundle.session.assessmentId,
-      selectedId
+      selectedId,
+      { expectedIndex: Number(bundle.session.currentQuestionIndex) }
     );
     const [next] = await Promise.all([
       savePromise,
@@ -2354,6 +2389,13 @@ async function submitPublishedLevelPlacementAnswer(bundle, question, selectedId)
     operationUi?.clear();
   } catch (error) {
     if (!current()) { operationUi?.clear(); return; }
+    if (backoff?.classify?.(error).temporary && cloud.stageLevelPlacementAnswer) {
+      backoff.pause(error);
+      try { saveLocally(); operationUi?.clear(); return; }
+      catch (localError) {
+        showToast('تعذّر حفظ هذه الإجابة على الجهاز. أعد المحاولة.', 'danger', 4800);
+      }
+    }
     publishedContentState.levelPlacementPending = false;
     publishedContentState.levelPlacementFeedback = null;
     const resultSaveFailed = String(error?.operation || '') === 'apply-placement-outcome';
@@ -2376,6 +2418,17 @@ async function submitPublishedLevelPlacementAnswer(bundle, question, selectedId)
       .end({ failed: true });
   }
 }
+
+window.addEventListener('lootlingua:level-placement-synchronized', event => {
+  const { owner, bundle } = event.detail || {};
+  const previous = publishedContentState.levelPlacementBundle;
+  if (owner !== window.auth?.currentUser?.uid || !previous?.pendingCloud || !bundle?.session ||
+      previous.session.assessmentId !== bundle.session.assessmentId ||
+      !document.querySelector('.published-level-placement-view')) return;
+  publishedContentState.levelPlacementBundle = bundle;
+  publishedContentState.journey = bundle.journey;
+  renderPublishedLevelPlacementAssessment(bundle);
+});
 
 function appendPublishedLevelPlacementStats(section, session) {
   if (!publishedContentState.levelPlacementReviewOpen) return;
@@ -3238,6 +3291,17 @@ function renderPublishedPlacementAssessment(bundle) {
 
 async function submitPublishedPlacementAnswer(bundle, question, selectedId) {
   if (publishedContentState.placementPending || publishedContentState.placementFeedback) return;
+  const cloud = getJourneyCloudApi();
+  const backoff = window.LootLinguaCloudBackoff;
+  const owner = window.auth?.currentUser?.uid;
+  const navigation = window.__dictionaryNavigationGeneration;
+  const current = () => owner === window.auth?.currentUser?.uid && navigation === window.__dictionaryNavigationGeneration;
+  const stage = () => showPendingLegacyPlacement(cloud.stageLegacyPlacementAnswer(bundle, selectedId));
+  if ((bundle.pendingCloud || backoff?.reason?.()) && cloud.stageLegacyPlacementAnswer) {
+    try { stage(); }
+    catch (_) { showToast('تعذّر حفظ هذه الإجابة على الجهاز. أعد المحاولة.', 'danger', 4800); }
+    return;
+  }
   const correct = String(selectedId) === String(question.contentWordId);
   const finalAnswer = question.questionNumber === question.totalQuestions;
   publishedContentState.placementPending = true;
@@ -3247,11 +3311,12 @@ async function submitPublishedPlacementAnswer(bundle, question, selectedId) {
     const reduceMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
     await new Promise((resolve) => setTimeout(resolve, reduceMotion ? 120 : 820));
     if (finalAnswer) renderPublishedPlacementSaving(bundle);
-    const result = await getJourneyCloudApi().answerPlacementQuestion(
+    const result = await cloud.answerPlacementQuestion(
       bundle.journey.worldId,
       bundle.session.assessmentId,
-      selectedId
+      selectedId, { expectedIndex: Number(bundle.session.currentQuestionIndex) }
     );
+    if (!current()) return;
     publishedContentState.placementPending = false;
     publishedContentState.placementFeedback = null;
     publishedContentState.placementFinalizationKey = '';
@@ -3265,8 +3330,14 @@ async function submitPublishedPlacementAnswer(bundle, question, selectedId) {
     }
     renderPublishedPlacementResult(result);
   } catch (error) {
+    if (!current()) return;
     publishedContentState.placementPending = false;
     publishedContentState.placementFeedback = null;
+    if (backoff?.classify?.(error).temporary && cloud.stageLegacyPlacementAnswer) {
+      backoff.pause(error);
+      try { stage(); return; }
+      catch (_) { showToast('تعذّر حفظ هذه الإجابة على الجهاز. أعد المحاولة.', 'danger', 4800); }
+    }
     if (finalAnswer) {
       renderPublishedPlacementSaveError(bundle, selectedId, error);
       return;
@@ -3275,6 +3346,31 @@ async function submitPublishedPlacementAnswer(bundle, question, selectedId) {
     renderPublishedPlacementAssessment(bundle);
   }
 }
+
+function showPendingLegacyPlacement(bundle) {
+  publishedContentState.placementPending = false;
+  publishedContentState.placementFeedback = null;
+  publishedContentState.placementBundle = bundle;
+  if (bundle.session.status === 'active') { renderPublishedPlacementAssessment(bundle); return; }
+  const root = publishedViewRoot();
+  if (!root) return;
+  setPublishedPlacementMode(true);
+  const state = publishedElement('section', 'published-placement-transition');
+  state.append(publishedElement('strong', '', 'إجابات الاختبار محفوظة'),
+    publishedElement('span', '', 'النتيجة بانتظار الاعتماد السحابي.'),
+    publishedButton('العودة إلى العوالم', 'published-action-btn', () => window.openPublishedWorldsRoot()));
+  root.replaceChildren(state);
+}
+
+window.addEventListener('lootlingua:legacy-placement-synchronized', event => {
+  const { owner, bundle: result, assessment } = event.detail || {};
+  const pending = publishedContentState.placementBundle;
+  if (owner !== window.auth?.currentUser?.uid || !pending?.pendingCloud || pending.session.assessmentId !== assessment || !result ||
+      !document.querySelector('.published-placement-view, .published-placement-transition')) return;
+  if (!result.completed) renderPublishedPlacementAssessment(result.bundle);
+  else if (result.continuationAvailable) renderPublishedPlacementDecision(result);
+  else renderPublishedPlacementResult(result);
+});
 
 function renderPublishedPlacementSaving(bundle) {
   const root = publishedViewRoot();
@@ -3558,6 +3654,11 @@ async function abandonPublishedPlacement(bundle) {
 }
 
 async function maybeRenderPublishedPlacementResume(journey, generation) {
+  const pending = window.LootLinguaJourneyCloud?.readPendingLegacyPlacement?.(journey?.worldId || publishedContentState.route?.params?.worldId);
+  if (pending) {
+    if (generation === publishedContentState.generation) showPendingLegacyPlacement(pending);
+    return true;
+  }
   if (!journey || journey.placementStatus !== 'active') return false;
   try {
     const bundle = await getJourneyCloudApi().resumePlacement(journey.worldId);
@@ -3675,8 +3776,8 @@ function publishedErrorMessage(level, error) {
 }
 
 function renderPublishedError(level, error, retry) {
-  console.error(`[published-content:${level}]`, error);
-  console.trace('مكان استدعاء renderPublishedError');
+  const unavailable = window.LootLinguaCloudBackoff?.classify?.(error).temporary;
+  if (!unavailable) console.error(`[published-content:${level}]`, error);
 
 
   const root = publishedViewRoot();
@@ -3688,7 +3789,9 @@ function renderPublishedError(level, error, retry) {
     ? 'fa-solid fa-map-location-dot'
     : 'fa-solid fa-triangle-exclamation'));
   state.append(publishedElement('strong', '', notFound ? 'المحتوى غير موجود' : 'تعذر التحميل'));
-  state.append(publishedElement('p', '', publishedErrorMessage(level, error)));
+  state.append(publishedElement('p', '', unavailable
+    ? 'هذا الجزء غير متاح على الجهاز الآن. أعد المحاولة عند عودة الاتصال أو الخدمة.'
+    : publishedErrorMessage(level, error)));
   if (!notFound && typeof retry === 'function') {
     state.append(publishedButton(
       'إعادة المحاولة',
@@ -4717,6 +4820,8 @@ function makeActiveJourneyBanner(activeJourney, worlds, accountDestination) {
 }
 
 async function beginPublishedGateClear(world, rank, gate) {
+  const pending = window.LootLinguaJourneyCloud?.readPendingGateClear?.(world.worldId, rank.rankId, gate.gateId);
+  if (pending) { renderPublishedGateClearAssessment(world, rank, gate, pending); return; }
   if (publishedContentState.gateClearPending) return null;
   const generation = publishedContentState.generation;
   const navigation = window.__dictionaryNavigationGeneration;
@@ -4750,6 +4855,19 @@ function renderPublishedGateClearAssessment(world, rank, gate, bundle) {
   if (!root || !bundle?.attempt) return;
   if (bundle.result) {
     renderPublishedGateClearResult(world, rank, gate, bundle);
+    return;
+  }
+  publishedContentState.gateClearBundle = bundle;
+  if (bundle.pendingCloud && !bundle.question) {
+    setPublishedPlacementMode(true);
+    const state = publishedElement('section', 'published-placement-view published-gate-clear-view');
+    state.append(publishedElement('h2', '', 'إجابات اجتياز البوابة محفوظة'),
+      publishedElement('p', '', 'اجتياز البوابة بانتظار الاعتماد السحابي.'),
+      publishedButton('العودة للبوابة', 'published-action-btn', () => {
+        setPublishedPlacementMode(false);
+        window.openPublishedGate(world.worldId, rank.rankId, gate.gateId);
+      }));
+    root.replaceChildren(state);
     return;
   }
   const question = bundle.question;
@@ -4818,33 +4936,66 @@ function renderPublishedGateClearAssessment(world, rank, gate, bundle) {
 
 async function submitPublishedGateClearAnswer(world, rank, gate, bundle, selectedId) {
   if (publishedContentState.gateClearPending || publishedContentState.gateClearFeedback) return;
+  const owner = window.auth?.currentUser?.uid;
+  const generation = window.__dictionaryNavigationGeneration;
+  const current = () => owner === window.auth?.currentUser?.uid && generation === window.__dictionaryNavigationGeneration;
+  const cloud = getJourneyCloudApi();
+  const backoff = window.LootLinguaCloudBackoff;
+  function stage() {
+    const draft = cloud.stageGateClearAnswer(world.worldId, rank.rankId, gate.gateId, bundle, selectedId);
+    publishedContentState.gateClearPending = false;
+    publishedContentState.gateClearFeedback = null;
+    renderPublishedGateClearAssessment(world, rank, gate, draft);
+  }
+  if ((bundle.pendingCloud || backoff?.reason?.()) && cloud.stageGateClearAnswer) {
+    try { stage(); }
+    catch (_) { showToast('تعذّر حفظ هذه الإجابة على الجهاز. أعد المحاولة.', 'danger', 4800); }
+    return;
+  }
   const correct = String(selectedId) === String(bundle.question?.correctContentWordId);
   publishedContentState.gateClearPending = true;
   publishedContentState.gateClearFeedback = { selectedId: String(selectedId), correct };
   renderPublishedGateClearAssessment(world, rank, gate, bundle);
   try {
-    const request = getJourneyCloudApi().answerGateClearQuestion(
+    const request = cloud.answerGateClearQuestion(
       world.worldId,
       rank.rankId,
       gate.gateId,
       bundle.attempt.attemptId,
-      selectedId
+      selectedId, { expectedIndex: Number(bundle.attempt.currentQuestionIndex) }
     );
     const [next] = await Promise.all([
       request,
       new Promise((resolve) => setTimeout(resolve, 420)),
     ]);
+    if (!current()) return;
     publishedContentState.gateClearPending = false;
     publishedContentState.gateClearFeedback = null;
     publishedContentState.gateClearBundle = next;
     renderPublishedGateClearAssessment(world, rank, gate, next);
   } catch (error) {
+    if (!current()) return;
     publishedContentState.gateClearPending = false;
     publishedContentState.gateClearFeedback = null;
+    if (backoff?.classify?.(error).temporary && cloud.stageGateClearAnswer) {
+      backoff.pause(error);
+      try { stage(); return; }
+      catch (_) { showToast('تعذّر حفظ هذه الإجابة على الجهاز. أعد المحاولة.', 'danger', 4800); }
+    }
     showToast(publishedJourneyErrorText(error), 'danger', 5200);
     renderPublishedGateClearAssessment(world, rank, gate, bundle);
   }
 }
+
+window.addEventListener('lootlingua:gate-clear-synchronized', event => {
+  const { owner, bundle, world, rank, gate } = event.detail || {};
+  const current = publishedContentState;
+  if (owner !== window.auth?.currentUser?.uid || !current.gateClearBundle?.pendingCloud ||
+      current.world?.worldId !== world || current.rank?.rankId !== rank || current.gate?.gateId !== gate ||
+      current.gateClearBundle.attempt?.attemptId !== bundle?.attempt?.attemptId || !document.querySelector('.published-gate-clear-view')) return;
+  current.gateClearBundle = bundle;
+  renderPublishedGateClearAssessment(current.world, current.rank, current.gate, bundle);
+});
 
 function renderPublishedGateClearResult(world, rank, gate, bundle) {
   const root = publishedViewRoot();
@@ -6831,7 +6982,8 @@ window.saveCustomWorldFromModal = async function() {
   const signedIn = Boolean(uid);
   let cloudSaved = !signedIn;
   let cloudError = '';
-  const offlineAtSave = signedIn && navigator.onLine === false;
+  const backoff = window.LootLinguaCloudBackoff;
+  const offlineAtSave = signedIn && Boolean(backoff?.reason?.() || navigator.onLine === false || existing?.syncStatus === 'pending');
   if (saveBtn) saveBtn.disabled = true;
   if (signedIn) {
     console.info('[LootLingua customWorlds] save requested', {
@@ -6840,9 +6992,18 @@ window.saveCustomWorldFromModal = async function() {
       path: `users/${uid}/customWorlds/${next.id}`,
       mode: existing ? 'edit' : 'create',
     });
-    cloudSaved = window.saveCustomWorldToCloud
-      ? await window.saveCustomWorldToCloud(next)
-      : false;
+    if (!offlineAtSave) {
+      try { cloudSaved = await window.saveCustomWorldToCloud?.(next, { propagate: true }); }
+      catch (error) {
+        if (!backoff?.classify?.(error).temporary) {
+          if (saveBtn) saveBtn.disabled = false;
+          showToast('تعذّر حفظ العالم في الحساب. تحقق من الصلاحية أو البيانات وأعد المحاولة.', 'danger', 5200);
+          return;
+        }
+        backoff.pause(error);
+      }
+    }
+    if (window.auth?.currentUser?.uid !== uid) { if (saveBtn) saveBtn.disabled = false; return; }
     if (cloudSaved === true && !offlineAtSave) {
       clearPendingCustomWorld(next.id, uid);
       delete next.syncStatus;
@@ -6851,7 +7012,15 @@ window.saveCustomWorldFromModal = async function() {
       cloudError = offlineAtSave ? 'offline-pending-server-confirmation' : (window.__lastCustomWorldSaveError || 'cloud-save-failed');
       next.syncStatus = 'pending';
       next.lastSyncError = cloudError;
-      upsertPendingCustomWorld(next, cloudError, uid);
+      next.syncBase = existing?.syncStatus === 'pending' ? existing.syncBase : existing
+        ? { name: existing.name, description: existing.description, emoji: existing.emoji } : null;
+      try { upsertPendingCustomWorld(next, cloudError, uid); }
+      catch (error) {
+        if (saveBtn) saveBtn.disabled = false;
+        showToast('تعذّر حفظ العالم على الجهاز. أعد المحاولة بعد التحقق من مساحة التخزين.', 'danger', 5200);
+        return;
+      }
+      scheduleCustomWorldSync();
     }
   }
   if (existing) {
@@ -6878,9 +7047,7 @@ window.saveCustomWorldFromModal = async function() {
     return;
   }
   if (isCustomWorldView() && String(activeCustomWorldId) === String(next.id)) updateCustomWorldHeader();
-  if (signedIn && (cloudSaved !== true || offlineAtSave)) {
-    showToast('تم حفظ العالم على هذا الجهاز، لكن تعذرت مزامنته مع السحابة. سنحتفظ به حتى تنجح المزامنة.', 'warning', 6200);
-  } else {
+  if (!signedIn || cloudSaved === true) {
     showToast(existing ? 'تم تعديل العالم' : 'تم إنشاء العالم', 'success');
   }
 };
@@ -7194,13 +7361,31 @@ function showSkippedDuplicateWordsNotice(skipped, targetId = 'personal', operati
 let worldManageOperationPromise = null;
 
 window.applyWorldManageToTarget = async function(targetId, action = pendingWorldManageAction) {
-  if (await window.LootLinguaDictionaryPages?.requireComplete() === false) return false;
   if (worldManageOperationPromise) return worldManageOperationPromise;
   const selected = getSelectedWordsForWorldManage();
   if (!selected.length) return Promise.resolve(false);
   const mode = action === 'copy' ? 'copy' : 'move';
   const sourceCustomWorldId = isCustomWorldView() ? String(activeCustomWorldId) : '';
   const operationId = getWorldManageOperationId(targetId, mode, selected);
+  const sync = window.LootLinguaDictionarySync;
+  if (window.auth?.currentUser && sync?.unavailable()) {
+    const target = targetId === 'personal' ? '' : String(targetId);
+    try {
+      for (const word of selected) sync.transfer(sourceCustomWorldId, target, {
+        ...word,
+        personalDictionaryState: target === '' ? 'active' : !sourceCustomWorldId && mode === 'move'
+          ? 'moved-to-private-world' : window.LootLinguaWordLifecycle?.getPersonalDictionaryState?.(word) || 'active',
+      }, mode === 'move', operationId);
+    } catch (error) {
+      showToast('تعذّر حفظ كل عمليات النقل على الجهاز. راجع حالة المزامنة.', 'danger', 5200);
+      return false;
+    }
+    hideModal('worldManageModal');
+    hideModal('worldManageChoiceModal');
+    window.exitSelectionMode({ renderView: false });
+    return true;
+  }
+  if (await window.LootLinguaDictionaryPages?.requireComplete() === false) return false;
   const operationScope = `world-manage:${operationId}`;
   const wrap = document.getElementById('worldManageTargets');
   const buttons = [...document.querySelectorAll('#worldManageTargets .world-manage-target')];
@@ -7411,6 +7596,15 @@ window.confirmDeleteCustomWorld = async function(action) {
     const worldWords = window.isActiveCustomWorld?.(worldId)
       ? [...window.words]
       : readCustomWorldWordsFromStorage(worldId, uid);
+    const candidate = customWorlds.find(world => String(world.id) === String(worldId));
+    if (uid && window.LootLinguaCloudBackoff?.reason?.() && queueCustomWorldRemoval(candidate, worldWords.map(word => word.id), action)) {
+      customWorlds = customWorlds.filter(world => String(world.id) !== String(worldId));
+      hideModal('deleteWorldModal');
+      pendingDeleteWorldId = null;
+      renderCustomWorldCards();
+      if (window.isActiveCustomWorld?.(worldId)) loadWorldsView();
+      return;
+    }
     let skippedDuplicates = [];
     if (action === 'move' && worldWords.length) {
       const { movable, skipped } = splitWordsByExistingInTarget('personal', worldWords);
@@ -7499,7 +7693,6 @@ window.loadTreasureView = function() {
 
 // ── Starred Words View ──
 window.loadStarredView = async function() {
-  if (await window.LootLinguaDictionaryPages?.requireComplete() === false) return;
   window.saveActiveAddFormDraft?.();
   cleanupQuizSessionIfActive();
   if (window.LootLinguaGuidedFirstJourney?.shouldAllowSurface?.('starred') === false) return;
@@ -7508,13 +7701,24 @@ window.loadStarredView = async function() {
     refreshFeatureUnlockUI();
     return;
   }
+  const uid = window.auth?.currentUser?.uid;
+  const navigation = window.__dictionaryNavigationGeneration;
+  let learned;
+  if (uid && window.loadStarredPersonalWords) {
+    try { learned = await window.loadStarredPersonalWords(); }
+    catch (_) { showToast('تعذّر تحميل الكلمات المميزة من حسابك.', 'warning', 4500); return; }
+    if (uid !== window.auth?.currentUser?.uid || navigation !== window.__dictionaryNavigationGeneration) return;
+  }
   if (currentView === 'personal' || currentView === 'worlds') animateWorldsRoute('next');
   beginViewSwitch();
   saveCurrentViewScroll();
   closeSidebarIfOpen();
   if (window.stopCustomWorldWordsCloudListener) window.stopCustomWorldWordsCloudListener();
   activeCustomWorldId = null;
-  window.words = applyStoredWordOrder(readWordsFromStorage('normal', window.auth?.currentUser?.uid));
+  let base = learned || readWordsFromStorage('normal', uid);
+  window.__lootlinguaStarredViewSource = { owner: uid, words: new Map(base.filter(word => word.starred).map(word => [String(word.id), word])) };
+  base = window.LootLinguaDictionarySync?.project(base, uid, '') || base;
+  window.words = applyStoredWordOrder(base);
   currentView = 'starred';
   viewBackTarget = 'worlds';
 

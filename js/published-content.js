@@ -19,17 +19,100 @@ const app = getApps()[0];
 const db = app ? getFirestore(app) : null;
 const PAGE_SIZE = 25;
 const PUBLISHED = 'published';
+const CACHE_PREFIX = 'lootlingua:published-cache:v1:' + String(app?.options?.projectId || '') + ':';
+const FRESH_MS = 5 * 60 * 1000;
+const OFFLINE_MS = 14 * 86400000;
+const MAX_SAVED_CHARS = 750000;
+const publicReads = new Map();
+const publicPending = new Map();
+let cacheGeneration = 0;
 
-const cache = {
-  worlds: null,
-  ranks: new Map(),
-  gates: new Map(),
-  records: {
-    worlds: new Map(),
-    ranks: new Map(),
-    gates: new Map(),
-  },
-};
+function savedPublicRead(key) {
+  try { return JSON.parse(window.localStorage?.getItem(CACHE_PREFIX + key) || 'null'); }
+  catch (_) { return null; }
+}
+
+function rememberPublicRead(key, value, persist = true) {
+  const at = Date.now();
+  const entry = { at, value };
+  publicReads.delete(key);
+  publicReads.set(key, entry);
+  if (publicReads.size > 180) publicReads.delete(publicReads.keys().next().value);
+  if (!persist) return;
+  try {
+    const storage = window.localStorage;
+    if (!storage) return;
+    const serialized = JSON.stringify(entry);
+    if (serialized.length > MAX_SAVED_CHARS) return;
+    const keys = [];
+    const storageKey = CACHE_PREFIX + key;
+    for (let offset = 0; offset < storage.length; offset++) {
+      const candidate = storage.key(offset);
+      if (!candidate?.startsWith(CACHE_PREFIX) || candidate === storageKey) continue;
+      const raw = storage.getItem(candidate);
+      keys.push({ key: candidate, size: raw?.length || 0, at: JSON.parse(raw || '{}').at || 0 });
+    }
+    let total = serialized.length;
+    for (const item of keys.sort((a, b) => b.at - a.at)) {
+      total += item.size;
+      if (total > MAX_SAVED_CHARS || at - item.at > OFFLINE_MS) storage.removeItem(item.key);
+    }
+    storage.setItem(storageKey, serialized);
+  } catch (_) { /* Storage limits never prevent an online read. */ }
+}
+
+function temporaryPublicRead(error) {
+  const backoff = window.LootLinguaCloudBackoff;
+  if (backoff?.classify) return backoff.classify(error).temporary;
+  return /(^|\/)(resource-exhausted|unavailable|deadline-exceeded|offline)$/.test(String(error?.cause?.code || error?.code || ''));
+}
+
+async function readPublic(scope, args, loader, { force = false, requireFresh = false } = {}) {
+  const key = scope + ':' + JSON.stringify(args);
+  const now = Date.now();
+  const saved = publicReads.get(key) || savedPublicRead(key);
+  if (!force && !requireFresh && saved && now - saved.at < FRESH_MS) return saved.value;
+  const generation = cacheGeneration;
+  const pendingKey = force || requireFresh ? key + ':server' : key;
+  let pending = publicPending.get(pendingKey);
+  if (!pending) {
+    const refresh = async () => {
+      if (!force && !requireFresh) {
+        const shared = savedPublicRead(key);
+        if (shared && Date.now() - shared.at < FRESH_MS) return shared.value;
+      }
+      window.LootLinguaCloudBackoff?.assertAvailable();
+      const value = await loader();
+      if (generation === cacheGeneration) rememberPublicRead(key, value);
+      return value;
+    };
+    const locks = window.navigator?.locks;
+    pending = Promise.resolve().then(() => {
+      if (locks && !force && !requireFresh) return locks.request(CACHE_PREFIX + key, refresh);
+      return refresh();
+    }).catch(error => {
+      window.LootLinguaCloudBackoff?.pause(error);
+      throw error;
+    }).finally(() => {
+      if (publicPending.get(pendingKey) === pending) publicPending.delete(pendingKey);
+    });
+    publicPending.set(pendingKey, pending);
+  }
+  try { return await pending; }
+  catch (error) {
+    if (!requireFresh && generation === cacheGeneration && saved && now - saved.at < OFFLINE_MS && temporaryPublicRead(error)) return saved.value;
+    if (error?.code === 'published/not-found') {
+      publicReads.delete(key);
+      try { window.localStorage?.removeItem(CACHE_PREFIX + key); } catch (_) {}
+    }
+    throw error;
+  }
+}
+
+function confirmedPublicSnapshot(snapshot) {
+  if (snapshot.metadata?.fromCache) throw publishedError('unavailable', 'A server snapshot is unavailable.');
+  return snapshot;
+}
 
 function publishedError(code, message, cause) {
   const error = new Error(message || code);
@@ -75,10 +158,6 @@ function worldRecord(snapshot) {
   };
 }
 
-function recordKey(...parts) {
-  return parts.map((part) => String(part || '')).join('/');
-}
-
 function mapReadError(error, exactRead) {
   const sourceCode = String(error && error.code || '');
   const message = String(error && error.message || '');
@@ -121,44 +200,35 @@ function orderedPublishedQuery(reference) {
   );
 }
 
-async function listPublishedWorlds(options) {
-  const force = Boolean(options && options.force);
-  if (!force && cache.worlds) return cache.worlds.slice();
+async function fetchPublishedWorlds() {
   try {
-    const snapshot = await getDocs(orderedPublishedQuery(contentWorldsCollection()));
+    const snapshot = confirmedPublicSnapshot(await getDocs(orderedPublishedQuery(contentWorldsCollection())));
     const items = snapshot.docs.map(worldRecord);
-    cache.worlds = items;
-    items.forEach((item) => cache.records.worlds.set(item.worldId, item));
+    items.forEach(item => rememberPublicRead('world:' + JSON.stringify([item.worldId]), item, false));
     return items.slice();
   } catch (error) {
     throw mapReadError(error, false);
   }
 }
 
-async function getPublishedWorld(worldId) {
+async function fetchPublishedWorld(worldId) {
   const id = requireId(worldId, 'World');
-  if (cache.records.worlds.has(id)) return cache.records.worlds.get(id);
   try {
-    const snapshot = await getDoc(doc(contentWorldsCollection(), id));
+    const snapshot = confirmedPublicSnapshot(await getDoc(doc(contentWorldsCollection(), id)));
     if (!snapshot.exists() || snapshot.data().status !== PUBLISHED) {
       throw publishedError('published/not-found', 'Published world was not found.');
     }
     const item = worldRecord(snapshot);
-    cache.records.worlds.set(id, item);
     return item;
   } catch (error) {
     throw mapReadError(error, true);
   }
 }
 
-async function listPublishedRanks(worldId, options) {
+async function fetchPublishedRanks(worldId) {
   const parentWorldId = requireId(worldId, 'World');
-  const force = Boolean(options && options.force);
-  if (!force && cache.ranks.has(parentWorldId)) {
-    return cache.ranks.get(parentWorldId).slice();
-  }
   try {
-    const snapshot = await getDocs(orderedPublishedQuery(ranksCollection(parentWorldId)));
+    const snapshot = confirmedPublicSnapshot(await getDocs(orderedPublishedQuery(ranksCollection(parentWorldId))));
     const items = snapshot.docs.map((item) =>
       record(item, 'rankId', { worldId: parentWorldId })
     ).sort((left, right) => {
@@ -167,68 +237,54 @@ async function listPublishedRanks(worldId, options) {
         ? compare(left, right)
         : Number(left.order || 0) - Number(right.order || 0);
     });
-    cache.ranks.set(parentWorldId, items);
-    items.forEach((item) =>
-      cache.records.ranks.set(recordKey(parentWorldId, item.rankId), item)
-    );
+    items.forEach(item => rememberPublicRead('rank:' + JSON.stringify([parentWorldId, item.rankId]), item, false));
     return items.slice();
   } catch (error) {
     throw mapReadError(error, false);
   }
 }
 
-async function getPublishedRank(worldId, rankId) {
+async function fetchPublishedRank(worldId, rankId) {
   const parentWorldId = requireId(worldId, 'World');
   const id = requireId(rankId, 'Rank');
-  const key = recordKey(parentWorldId, id);
-  if (cache.records.ranks.has(key)) return cache.records.ranks.get(key);
   try {
-    const snapshot = await getDoc(doc(ranksCollection(parentWorldId), id));
+    const snapshot = confirmedPublicSnapshot(await getDoc(doc(ranksCollection(parentWorldId), id)));
     if (!snapshot.exists() || snapshot.data().status !== PUBLISHED) {
       throw publishedError('published/not-found', 'Published rank was not found.');
     }
     const item = record(snapshot, 'rankId', { worldId: parentWorldId });
-    cache.records.ranks.set(key, item);
     return item;
   } catch (error) {
     throw mapReadError(error, true);
   }
 }
 
-async function listPublishedGates(worldId, rankId, options) {
+async function fetchPublishedGates(worldId, rankId) {
   const parentWorldId = requireId(worldId, 'World');
   const parentRankId = requireId(rankId, 'Rank');
-  const key = recordKey(parentWorldId, parentRankId);
-  const force = Boolean(options && options.force);
-  if (!force && cache.gates.has(key)) return cache.gates.get(key).slice();
   try {
-    const snapshot = await getDocs(orderedPublishedQuery(
+    const snapshot = confirmedPublicSnapshot(await getDocs(orderedPublishedQuery(
       gatesCollection(parentWorldId, parentRankId)
-    ));
+    )));
     const items = snapshot.docs.map((item) =>
       record(item, 'gateId', { worldId: parentWorldId, rankId: parentRankId })
     );
-    cache.gates.set(key, items);
-    items.forEach((item) =>
-      cache.records.gates.set(recordKey(parentWorldId, parentRankId, item.gateId), item)
-    );
+    items.forEach(item => rememberPublicRead('gate:' + JSON.stringify([parentWorldId, parentRankId, item.gateId]), item, false));
     return items.slice();
   } catch (error) {
     throw mapReadError(error, false);
   }
 }
 
-async function getPublishedGate(worldId, rankId, gateId) {
+async function fetchPublishedGate(worldId, rankId, gateId) {
   const parentWorldId = requireId(worldId, 'World');
   const parentRankId = requireId(rankId, 'Rank');
   const id = requireId(gateId, 'Gate');
-  const key = recordKey(parentWorldId, parentRankId, id);
-  if (cache.records.gates.has(key)) return cache.records.gates.get(key);
   try {
-    const snapshot = await getDoc(doc(
+    const snapshot = confirmedPublicSnapshot(await getDoc(doc(
       gatesCollection(parentWorldId, parentRankId),
       id
-    ));
+    )));
     if (!snapshot.exists() || snapshot.data().status !== PUBLISHED) {
       throw publishedError('published/not-found', 'Published gate was not found.');
     }
@@ -236,7 +292,6 @@ async function getPublishedGate(worldId, rankId, gateId) {
       worldId: parentWorldId,
       rankId: parentRankId,
     });
-    cache.records.gates.set(key, item);
     return item;
   } catch (error) {
     throw mapReadError(error, true);
@@ -264,7 +319,7 @@ function wordCursor(item) {
   } : null;
 }
 
-async function listPublishedGateWords(worldId, rankId, gateId, options) {
+async function fetchPublishedGateWords(worldId, rankId, gateId, options) {
   const parentWorldId = requireId(worldId, 'World');
   const parentRankId = requireId(rankId, 'Rank');
   const parentGateId = requireId(gateId, 'Gate');
@@ -298,10 +353,10 @@ async function listPublishedGateWords(worldId, rankId, gateId, options) {
   );
 
   try {
-    const snapshot = await getDocs(query(
+    const snapshot = confirmedPublicSnapshot(await getDocs(query(
       wordsCollection(parentWorldId, parentRankId, parentGateId),
       ...constraints
-    ));
+    )));
     const overflow = snapshot.docs.length > settings.pageSize;
     const pageDocs = settings.direction === 'backward' && overflow
       ? snapshot.docs.slice(1)
@@ -337,7 +392,19 @@ async function listPublishedGateWords(worldId, rankId, gateId, options) {
   }
 }
 
-async function listAllPublishedGateWords(worldId, rankId, gateId) {
+const listPublishedWorlds = options => readPublic('worlds', [], fetchPublishedWorlds, options).then(items => items.slice());
+const getPublishedWorld = (world, options) => readPublic('world', [world], () => fetchPublishedWorld(world), options);
+const listPublishedRanks = (world, options) => readPublic('ranks', [world], () => fetchPublishedRanks(world), options).then(items => items.slice());
+const getPublishedRank = (world, rank, options) => readPublic('rank', [world, rank], () => fetchPublishedRank(world, rank), options);
+const listPublishedGates = (world, rank, options) => readPublic('gates', [world, rank], () => fetchPublishedGates(world, rank), options).then(items => items.slice());
+const getPublishedGate = (world, rank, gate, options) => readPublic('gate', [world, rank, gate], () => fetchPublishedGate(world, rank, gate), options);
+const listPublishedGateWords = (world, rank, gate, options = {}) => {
+  const settings = normalizeWordPageOptions(options);
+  return readPublic('words', [world, rank, gate, settings], () => fetchPublishedGateWords(world, rank, gate, settings), options)
+    .then(page => ({ ...page, items: page.items.slice() }));
+};
+
+async function listAllPublishedGateWords(worldId, rankId, gateId, options = {}) {
   const items = [];
   const seen = new Set();
   let cursor = null;
@@ -348,6 +415,8 @@ async function listAllPublishedGateWords(worldId, rankId, gateId) {
       pageSize: PAGE_SIZE,
       direction: 'forward',
       cursor,
+      force: options.force,
+      requireFresh: options.requireFresh,
     });
     page.items.forEach((item) => {
       const id = String(item.contentWordId || '');
@@ -374,18 +443,18 @@ async function listAllPublishedGateWords(worldId, rankId, gateId) {
 
 function invalidate(scope) {
   const target = String(scope || 'all');
-  if (target === 'all' || target === 'worlds') {
-    cache.worlds = null;
-    cache.records.worlds.clear();
-  }
-  if (target === 'all' || target === 'ranks') {
-    cache.ranks.clear();
-    cache.records.ranks.clear();
-  }
-  if (target === 'all' || target === 'gates') {
-    cache.gates.clear();
-    cache.records.gates.clear();
-  }
+  cacheGeneration++;
+  const aliases = { worlds: ['worlds', 'world'], ranks: ['ranks', 'rank'], gates: ['gates', 'gate', 'words'] };
+  const invalid = key => target === 'all' || (aliases[target] || [target]).includes(key.split(':', 1)[0]);
+  for (const key of publicReads.keys()) if (invalid(key)) publicReads.delete(key);
+  for (const key of publicPending.keys()) if (invalid(key)) publicPending.delete(key);
+  try {
+    const storage = window.localStorage;
+    for (let index = (storage?.length || 0) - 1; index >= 0; index--) {
+      const key = storage.key(index);
+      if (key?.startsWith(CACHE_PREFIX) && invalid(key.slice(CACHE_PREFIX.length))) storage.removeItem(key);
+    }
+  } catch (_) {}
 }
 
 const API = Object.freeze({

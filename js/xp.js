@@ -194,19 +194,27 @@ function getXPEventLogStorageKey() {
 function getPendingXPEventsStorageKey() {
   return `${PENDING_XP_EVENTS_KEY}_${getStorageUserId()}`;
 }
+window.LootLinguaOperations?.setSyncSource?.('xp', uid => ({
+  pending: (loadJSON(`${PENDING_XP_EVENTS_KEY}_${uid}`, []) || []).length,
+}));
 
 function queuePendingXPEvent(amount, reason, metadata) {
   if (!metadata?.queueOnFailure || !metadata.eventId) return;
   const key = getPendingXPEventsStorageKey();
   const pending = loadJSON(key, []);
   if (pending.some(event => event?.eventId === metadata.eventId)) return;
-  saveJSON(key, [...pending, {
+  try { saveJSON(key, [...pending, {
     amount,
     reason,
     eventId: metadata.eventId,
     wordKey: metadata.wordKey || '',
     sessionId: metadata.sessionId || '',
-  }].slice(-100));
+  }]);
+    window.LootLinguaOperations?.syncStorageFailure?.(getStorageUserId(), 'xp', false);
+  } catch (error) {
+    window.LootLinguaOperations?.syncStorageFailure?.(getStorageUserId(), 'xp', true);
+    throw error;
+  }
 }
 
 async function retryPendingXPEvents() {
@@ -214,23 +222,36 @@ async function retryPendingXPEvents() {
   const key = getPendingXPEventsStorageKey();
   const pending = loadJSON(key, []);
   if (!Array.isArray(pending) || !pending.length) return;
-  const remaining = [];
+  if (window.LootLinguaCloudBackoff?.reason?.()) return;
+  const confirmed = new Set();
   for (const event of pending) {
     if (!isXPAwardOwnerCurrent(owner)) return;
     const metadata = { ...event, queueOnFailure: false };
     await awardXP(event.amount, event.reason, metadata);
     if (!isXPAwardOwnerCurrent(owner)) return;
-    if (metadata.awardStatus !== 'awarded' && metadata.awardStatus !== 'duplicate') {
-      remaining.push(event);
-    }
+    if (metadata.awardStatus === 'awarded' || metadata.awardStatus === 'duplicate') confirmed.add(event.eventId);
+    if (window.LootLinguaCloudBackoff?.reason?.()) break;
   }
   if (!isXPAwardOwnerCurrent(owner)) return;
-  saveJSON(key, remaining);
+  if (confirmed.size) saveJSON(key, loadJSON(key, []).filter(event => !confirmed.has(event.eventId)));
+  window.LootLinguaOperations?.syncNotify?.();
 }
-window.retryPendingXPEvents = retryPendingXPEvents;
+window.retryPendingXPEvents = () => {
+  const owner = captureXPAwardOwner();
+  if (!owner.uid) return Promise.resolve();
+  return window.navigator?.locks
+    ? window.navigator.locks.request('lootlingua:xp:' + owner.uid, { ifAvailable: true }, lock => lock && retryPendingXPEvents())
+    : window.LootLinguaOperations?.runExclusive?.('xp:' + owner.uid, retryPendingXPEvents) || retryPendingXPEvents();
+};
 window.addEventListener('online', () => {
-  retryPendingXPEvents();
+  window.retryPendingXPEvents();
   evaluateChestXPUnlock();
+});
+let xpCapacityRetry;
+window.addEventListener('lootlingua:cloud-capacity-change', () => {
+  clearTimeout(xpCapacityRetry);
+  if (!loadJSON(getPendingXPEventsStorageKey(), []).length) return;
+  xpCapacityRetry = setTimeout(() => window.retryPendingXPEvents(), Math.max(800, window.LootLinguaCloudBackoff?.remaining() || 0));
 });
 
 function recordXPEvent(reason, amount, metadata = {}) {

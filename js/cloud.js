@@ -335,6 +335,10 @@
     const reference = collection(db, 'users', listenerUid, 'words');
     let lastRows = null;
     const queryMode = ['newest', 'oldest'].includes(requestedMode) ? requestedMode : 'auto';
+    const backoff = window.LootLinguaCloudBackoff;
+    const backupKey = 'lootlingua:dictionary-preview:v1:' + encodeURIComponent(listenerUid) + ':' + queryMode;
+    let recoveryTimer;
+    let backupTimer;
     const chronological = queryMode !== 'auto', direction = queryMode === 'oldest' ? 'asc' : 'desc';
     const dateBounds = [
       [where('createdAt', '>=', ''), where('createdAt', '<=', '\uf8ff')],
@@ -357,6 +361,27 @@
       window.SmartLoadingOverlay?.onUserDataLoaded?.();
       window.markInitialFeatureLoadPartDone?.('words');
     };
+    function restoreOfflineDictionary() {
+      const complete = window.readPersonalDictionaryBackup?.(listenerUid);
+      if (complete) { store.restoreBackup(complete); return; }
+      let saved = null;
+      try {
+        saved = JSON.parse(localStorage.getItem(backupKey) || 'null');
+      } catch (_) {}
+      store.restoreBackup(Array.isArray(saved) ? saved : [], { complete: false });
+    }
+
+    function scheduleRecovery(delay = 10000) {
+      clearTimeout(recoveryTimer);
+      if (window.navigator?.onLine === false) return;
+      recoveryTimer = setTimeout(() => {
+        if (!current()) return;
+        if (backoff?.remaining()) { scheduleRecovery(); return; }
+        wordsUnsubscribe?.();
+        loadWordsFromCloud(user, queryMode);
+      }, Math.max(delay, backoff?.remaining() || 0));
+    }
+    const recoverOnline = () => { if (store.state().offline || store.state().error) scheduleRecovery(100); };
     const store = window.LootLinguaDictionaryPages.activate({
       ownerId: listenerUid,
       pageSize,
@@ -440,12 +465,29 @@
         if (!current()) return;
         if (rows !== lastRows && !window.__suppressCloudWordsSnapshot) {
           lastRows = rows;
-          window.applyCloudWordsFromSnapshot?.(rows, { paged: true });
+          window.applyCloudWordsFromSnapshot?.(rows, { paged: true, fromOfflineCache: state.offline });
+          if (!state.loading && (rows.length || state.complete) && !state.offline && !state.error) {
+            clearTimeout(backupTimer);
+            backupTimer = setTimeout(() => {
+              if (!current()) return;
+              try { localStorage.setItem(backupKey, JSON.stringify(rows.slice(0, 160))); }
+              catch (_) { /* This is a read cache, not a save acknowledgement. */ }
+            }, 600);
+          }
         }
         window.dispatchEvent(new CustomEvent('lootlingua:dictionary-page-state', { detail: state }));
         if (!state.loading && (state.loaded || state.complete || state.error)) finishInitial();
       },
     });
+    if (backoff?.reason?.()) {
+      restoreOfflineDictionary(); finishInitial(); scheduleRecovery();
+      window.addEventListener?.('online', recoverOnline);
+      wordsUnsubscribe = () => {
+        clearTimeout(recoveryTimer); clearTimeout(backupTimer); store.dispose();
+        window.removeEventListener?.('online', recoverOnline);
+      };
+      return;
+    }
     window.watchPersonalDictionaryRows = function(ids = []) {
       if (!current()) return;
       const wanted = [...new Set(ids.map(String))].filter(id => !headIds.has(id)).sort();
@@ -480,9 +522,8 @@
       do { await store.next(); } while (!store.words().length && !store.state().complete);
     })().catch(error => {
       console.warn('loadWordsFromCloud:', error.code || error.message);
-      if (current() && error.code === 'dictionary/offline') {
-        const backup = window.readPersonalDictionaryBackup?.(listenerUid);
-        if (backup) store.restoreBackup(backup);
+      if (current() && (error.code === 'dictionary/offline' || backoff?.classify?.(error).temporary)) {
+        restoreOfflineDictionary();
       }
       finishInitial();
     });
@@ -516,9 +557,16 @@
         } catch (_) { /* The next explicit refresh retries; do not infer deletion offline. */ }
       });
       store.refreshCounts().catch(() => {});
-    }, error => { clearTimeout(initialWaitTimer); rejectHead(error); window.LootLinguaCloudBackoff?.pause(error); console.warn('[Dictionary] Head listener:', error.code); }));
+    }, error => {
+      clearTimeout(initialWaitTimer); rejectHead(error);
+      if (backoff?.classify?.(error).temporary) { backoff.pause(error); scheduleRecovery(); }
+      else console.warn('[Dictionary] Head listener:', error.code);
+    }));
+    window.addEventListener?.('online', recoverOnline);
     wordsUnsubscribe = () => {
-      clearTimeout(initialWaitTimer); clearTimeout(visibleTimer); visibleStops.forEach(entry => entry.stop()); stopHeads.forEach(stop => stop());
+      clearTimeout(initialWaitTimer); clearTimeout(visibleTimer); clearTimeout(recoveryTimer); clearTimeout(backupTimer);
+      window.removeEventListener?.('online', recoverOnline);
+      visibleStops.forEach(entry => entry.stop()); stopHeads.forEach(stop => stop());
       rejectHead(Object.assign(new Error('Dictionary owner changed.'), { code: 'dictionary/stale' })); store.dispose();
     };
   }
@@ -531,6 +579,79 @@
     wordsUnsubscribe?.();
     loadWordsFromCloud(user, mode);
     return true;
+  };
+
+  window.addEventListener?.('lootlingua:dictionary-outbox-confirmed', event => {
+    const { item, result } = event.detail || {};
+    if (item?.owner !== auth.currentUser?.uid || !result?.wordId) return;
+    if (item.payload.worldId) return;
+    const favorites = window.__lootlinguaStarredViewSource;
+    if (favorites?.owner === item.owner && favorites.words) {
+      if (result.removed || result.hidden || item.payload.patch?.starred === false) favorites.words.delete(result.wordId);
+      else if (item.payload.patch?.starred === true) favorites.words.set(result.wordId, { ...result.word, id: result.wordId });
+    }
+    if (result.removed || result.hidden || Object.hasOwn(item.payload.patch || {}, 'starred')) {
+      try { localStorage.removeItem('lootlingua:personal-starred-preview:v1:' + encodeURIComponent(item.owner)); } catch (_) {}
+    }
+    const store = window.LootLinguaDictionaryPages?.current(item.owner);
+    if (!store) return;
+    const prior = store.words().find(word => String(word.id) === result.wordId);
+    if (result.removed || result.hidden) {
+      store.merge([], [result.wordId]);
+    } else if (item.type === 'edit') {
+      const patch = item.payload.patch;
+      store.merge([{ ...(prior || item.payload.word), ...patch, id: result.wordId,
+        ...(Object.hasOwn(patch, 'meaning') ? { translation: patch.meaning } : {}) }]);
+    } else if (!prior) store.merge([{ ...result.word, id: result.wordId }]);
+  });
+  window.addEventListener?.('lootlingua:dictionary-outbox', event => {
+    const user = auth.currentUser;
+    if (!user || event.detail?.owner !== user.uid) return;
+    const store = window.LootLinguaDictionaryPages?.current(user.uid);
+    if (store) window.applyCloudWordsFromSnapshot?.(store.words(), { paged: true, fromOfflineCache: store.state().offline });
+  });
+
+  const starredReads = new Map();
+  window.loadStarredPersonalWords = async function() {
+    const user = auth.currentUser;
+    if (!user) return [];
+    const uid = user.uid;
+    const generation = Number(window.__lootlinguaAuthGeneration) || 0;
+    const current = () => auth.currentUser?.uid === uid && generation === (Number(window.__lootlinguaAuthGeneration) || 0);
+    const store = window.LootLinguaDictionaryPages?.current(uid);
+    if (store?.state().complete) return store.words();
+    const backoff = window.LootLinguaCloudBackoff;
+    const savedKey = 'lootlingua:personal-starred-preview:v1:' + encodeURIComponent(uid);
+    const remembered = () => {
+      try { return JSON.parse(localStorage.getItem(savedKey) || 'null'); }
+      catch (_) { return null; }
+    };
+    const combine = (starred, authoritative) => {
+      const ids = new Set(starred.map(word => String(word.id)));
+      const available = store?.words() || [];
+      return [...available.filter(word => !ids.has(String(word.id))).map(word => authoritative && word.starred ? { ...word, starred: false } : word), ...starred];
+    };
+    const saved = remembered();
+    if (saved && Date.now() - saved.at < 30000 && !backoff?.reason?.()) return combine(saved.words, true);
+    if (starredReads.has(uid)) return starredReads.get(uid);
+    const promise = Promise.resolve().then(async () => {
+      try {
+        backoff?.assertAvailable?.();
+        const snapshot = await getDocs(query(collection(db, 'users', uid, 'words'), where('starred', '==', true)));
+        if (!current()) return [];
+        if (snapshot.metadata?.fromCache) return combine(snapshot.docs.map(mapWordDoc), false);
+        const words = snapshot.docs.map(mapWordDoc);
+        try { localStorage.setItem(savedKey, JSON.stringify({ at: Date.now(), words })); } catch (_) {}
+        return combine(words, true);
+      } catch (error) {
+        if (!current()) return [];
+        if (!backoff?.classify?.(error).temporary) throw error;
+        backoff.pause(error);
+        return combine(saved?.words || [], false);
+      }
+    }).finally(() => { if (starredReads.get(uid) === promise) starredReads.delete(uid); });
+    starredReads.set(uid, promise);
+    return promise;
   };
 
   function mapWordDoc(d) {
@@ -802,7 +923,7 @@
     const assertCurrent = () => {
       if (auth.currentUser?.uid !== user.uid || generation !== (Number(window.__lootlinguaAuthGeneration) || 0)) throw wordLifecycleError('auth/identity-changed', 'The account changed during the word write.');
     };
-    await window.LootLinguaDictionaryPages?.current(user.uid)?.ensureComplete();
+    window.LootLinguaCloudBackoff?.assertAvailable();
     if (auth.currentUser?.uid !== user.uid) throw wordLifecycleError('word-lifecycle/user-mismatch', 'Word owner changed.');
     if (input.uid && String(input.uid) !== user.uid) {
       throw wordLifecycleError('word-lifecycle/user-mismatch', 'Word owner does not match the signed-in user.');
@@ -844,7 +965,19 @@
         removePrivateMembershipId
       )
       : null;
-    const localWord = lifecycle.findUserWordByKey(window.words || [], identity.wordKey);
+    const pages = window.LootLinguaDictionaryPages?.current(user.uid);
+    let localWord = lifecycle.findUserWordByKey((pages?.words() || window.words || []).filter(row => !String(row.id || '').startsWith('pending-word-')), identity.wordKey);
+    if (!input.existingWordId && !localWord) {
+      if (pages && !pages.state().complete) {
+        const candidate = await getDoc(canonicalRef);
+        assertCurrent();
+        if (!candidate.exists()) {
+          if (pages.state().offline) throw wordLifecycleError('dictionary/offline', 'The server dictionary is still reconnecting.');
+          await pages.ensureComplete();
+        }
+        localWord = lifecycle.findUserWordByKey(pages.words(), identity.wordKey);
+      }
+    }
     const splitLegacyProjection = source.type === 'published-gate' ||
       source.type === 'level-placement';
     const trace = window.LootLinguaOperations?.startTrace('word-source-upsert', {
@@ -864,7 +997,7 @@
         trace?.count('firestoreReads', removePrivateSourceRef ? 3 : 2);
         const canonical = canonicalSnapshot.exists() ? canonicalSnapshot.data() : null;
         const legacyWordId = String(
-          input.existingWordId || canonical?.legacyWordId || localWord?.id ||
+          input.existingWordId || canonical?.legacyWordId || (String(localWord?.id || '').startsWith('pending-word-') ? '' : localWord?.id) ||
           deterministicUserWordId(identity.wordKey)
         );
         const legacyRef = doc(db, 'users', user.uid, 'words', legacyWordId);
@@ -880,6 +1013,16 @@
           1 + (membershipRef ? 1 : 0) + (removePrivateMembershipRef ? 1 : 0)
         );
         const legacy = legacySnapshot.exists() ? legacySnapshot.data() : null;
+        if (input.replayTransfer === true && removePrivateSource && !removePrivateMembershipSnapshot?.exists()) {
+          const same = source.type === 'manual' && sourceSnapshot.exists() && legacy &&
+            lifecycle.getPersonalDictionaryState(legacy) === 'active' &&
+            (legacy.word || legacy.text) === (word.word || word.text) &&
+            (legacy.meaning ?? legacy.translation ?? '') === (word.meaning ?? word.translation ?? '');
+          if (same || (membershipSnapshot?.exists() && sourceSnapshot.exists())) {
+            return { wordId: legacyWordId, membershipWordId: membershipRef?.id || '', wordKey: identity.wordKey };
+          }
+          throw wordLifecycleError('failed-precondition', 'The source membership is no longer in this world.');
+        }
         const incomingLegacy = legacyWordPayload(user.uid, word, identity, input);
         const educationalPatch = legacy ? missingEducationalPatch(legacy, incomingLegacy) : {};
         const movedDictionaryFields = {};
@@ -1926,7 +2069,7 @@
     };
   };
 
-  window.saveCustomWorldToCloud = async function(world) {
+  window.saveCustomWorldToCloud = async function(world, options = {}) {
     const user = auth.currentUser;
     if (!user || !world?.id) return false;
     const worldId = String(world.id).replace(/\//g, '_').slice(0, 500);
@@ -1939,18 +2082,34 @@
       hasAuth: Boolean(user),
     });
     try {
-      await setDoc(doc(db, "users", user.uid, "customWorlds", worldId), {
+      window.LootLinguaCloudBackoff?.assertAvailable?.();
+      const reference = doc(db, "users", user.uid, "customWorlds", worldId);
+      const fields = {
         name: world.name || 'عالم جديد',
         description: world.description || '',
         emoji: world.emoji || '📘',
         userId: user.uid,
         createdAt: world.createdAt || new Date(),
         updatedAt: new Date(),
-      }, { merge: true });
+      };
+      if (options.reconcile) {
+        await runTransaction(db, async transaction => {
+          const snapshot = await transaction.get(reference);
+          if (auth.currentUser?.uid !== user.uid) throw Object.assign(new Error('The account changed.'), { code: 'auth/identity-changed' });
+          const same = (a, b) => ['name', 'description', 'emoji'].every(field => String(a?.[field] || '') === String(b?.[field] || ''));
+          const data = snapshot.data();
+          if (data && same(data, fields)) return;
+          if ((data && (!world.syncBase || !same(data, world.syncBase))) || (!data && world.syncBase)) {
+            throw Object.assign(new Error('The private world changed on another device.'), { code: 'failed-precondition' });
+          }
+          transaction.set(reference, fields, { merge: true });
+        });
+      } else await setDoc(reference, fields, { merge: true });
       console.info("[LootLingua customWorlds] setDoc success", { uid: user.uid, worldId, path });
       return true;
     } catch (e) {
       window.__lastCustomWorldSaveError = `${e.code || 'unknown'}: ${e.message || e}`;
+      if (options.propagate) throw e;
       console.warn("[LootLingua customWorlds] setDoc failed", {
         uid: user.uid,
         worldId,
@@ -1966,9 +2125,23 @@
     const user = auth.currentUser;
     if (!user || !worldId) return false;
     try {
+      window.LootLinguaCloudBackoff?.assertAvailable?.();
+      const worldRef = doc(db, 'users', user.uid, 'customWorlds', String(worldId));
       const wordsRef = collection(db, "users", user.uid, "customWorlds", String(worldId), "words");
+      const sameWorld = data => !data || ['name', 'description', 'emoji'].every(field => String(data[field] || '') === String(options.base?.[field] || ''));
+      if (options.base && !sameWorld((await getDoc(worldRef)).data())) throw wordLifecycleError('failed-precondition', 'The world changed on another device.');
       const snap = await getDocs(wordsRef);
-      await Promise.all(snap.docs.map(async (item) => {
+      if (options.wordIds && snap.docs.some(item => !options.wordIds.includes(item.id))) {
+        throw wordLifecycleError('failed-precondition', 'New words appeared in this world before removal.');
+      }
+      const remove = async (item) => {
+        if (auth.currentUser?.uid !== user.uid) throw wordLifecycleError('auth/identity-changed', 'The account changed.');
+        if (options.base && options.action === 'move') {
+          await upsertUserWordWithSource({ word: item.data(), source: { type: 'manual' },
+            restoreHidden: true, personalDictionaryState: 'active', removePrivateWorldId: String(worldId),
+            removePrivateMembershipId: item.id, replayTransfer: true, operationId: `remove-world:${worldId}` });
+          return;
+        }
         const impact = await getPrivateWorldRemovalImpact(String(worldId), item.data());
         const disposition = options.action === 'move'
           ? 'return-personal'
@@ -1990,10 +2163,23 @@
             wordLifecycleApi().summarizeSources(remainingSources)
           );
         }
-      }));
-      await deleteDoc(doc(db, "users", user.uid, "customWorlds", String(worldId)));
+      };
+      if (options.base) {
+        for (const item of snap.docs) await remove(item);
+        if (!(await getDocs(wordsRef)).empty) throw wordLifecycleError('failed-precondition', 'The private world has newer words.');
+        await runTransaction(db, async transaction => {
+          const observed = await transaction.get(worldRef);
+          if (auth.currentUser?.uid !== user.uid) throw wordLifecycleError('auth/identity-changed', 'The account changed.');
+          if (!sameWorld(observed.data())) throw wordLifecycleError('failed-precondition', 'The world changed before removal was confirmed.');
+          if (observed.exists()) transaction.delete(worldRef);
+        });
+      } else {
+        await Promise.all(snap.docs.map(remove));
+        await deleteDoc(worldRef);
+      }
       return true;
     } catch (e) {
+      if (options.propagate) throw e;
       console.warn("deleteCustomWorldFromCloud:", e.message);
       return false;
     }
@@ -2074,7 +2260,7 @@
     return update;
   }
 
-  async function updateDictionaryWordDocument(docId, data, worldId) {
+  async function updateDictionaryWordDocument(docId, data, worldId, options = {}) {
     const user = auth.currentUser;
     if (!user) {
       const error = new Error('Sign in before updating a dictionary word.');
@@ -2094,35 +2280,53 @@
       : ['users', owner.uid, 'customWorlds', dictionaryWordDocumentId(worldId), 'words', wordId];
     const update = buildDictionaryWordCloudUpdate(data);
     const ref = doc(db, ...path);
-    if (Object.prototype.hasOwnProperty.call(update, 'word')) {
-      const snapshot = await getDoc(ref);
+    const hasRename = Object.prototype.hasOwnProperty.call(update, 'word');
+    function checkedExisting(snapshot) {
       assertCurrentOwner();
       if (!snapshot.exists()) {
         throw dictionaryWordWriteError('Dictionary word no longer exists.', 'dictionary/missing-document');
       }
       const existing = snapshot.data() || {};
+      if (!hasRename) return existing;
       const lifecycle = wordLifecycleApi();
       const existingKey = String(existing.wordKey || lifecycle.normalizeIdentity(existing).wordKey || '');
       const nextKey = lifecycle.normalizeIdentity(update.word).wordKey;
       // Renaming an identity also requires migrating sources and learning data.
-      // This API permits display corrections only; it never transfers progress.
-      if (!existingKey || !nextKey || existingKey !== nextKey) {
-        throw dictionaryWordWriteError('Add a different word as a new entry.', 'dictionary/identity-change');
-      }
+      if (!existingKey || !nextKey || existingKey !== nextKey) throw dictionaryWordWriteError('Add a different word as a new entry.', 'dictionary/identity-change');
+      return existing;
     }
+    window.LootLinguaCloudBackoff?.assertAvailable?.();
+    if (options.expected) {
+      await runTransaction(db, async transaction => {
+        const existing = checkedExisting(await transaction.get(ref));
+        const value = key => key === 'word' ? existing.text || existing.word || ''
+          : key === 'meaning' ? existing.meaning ?? existing.translation ?? ''
+            : existing[key] ?? (key === 'starred' ? false : '');
+        const changed = Object.keys(data).filter(key => value(key) !== data[key]);
+        if (changed.some(key => value(key) !== options.expected[key])) {
+          throw dictionaryWordWriteError('The word was changed on another device.', 'failed-precondition');
+        }
+        if (changed.length) transaction.update(ref, update);
+      });
+      return true;
+    }
+    if (hasRename) checkedExisting(await getDoc(ref));
     assertCurrentOwner();
     // Propagate failures: callers decide whether to keep or roll back local edits.
     await updateDoc(ref, update);
+    if (worldId === undefined && Object.hasOwn(update, 'starred')) {
+      try { localStorage.removeItem('lootlingua:personal-starred-preview:v1:' + encodeURIComponent(owner.uid)); } catch (_) {}
+    }
     return true;
   }
 
-  window.updateDictionaryWordInCloud = async function(docId, data) {
-    return updateDictionaryWordDocument(docId, data);
+  window.updateDictionaryWordInCloud = async function(docId, data, options) {
+    return updateDictionaryWordDocument(docId, data, undefined, options);
   };
 
-  window.updateCustomWorldDictionaryWordInCloud = async function(worldId, docId, data) {
+  window.updateCustomWorldDictionaryWordInCloud = async function(worldId, docId, data, options) {
     // A missing custom-world ID must never fall back to the personal dictionary.
-    return updateDictionaryWordDocument(docId, data, dictionaryWordDocumentId(worldId));
+    return updateDictionaryWordDocument(docId, data, dictionaryWordDocumentId(worldId), options);
   };
 
   window.deleteCustomWorldWordFromCloud = async function(worldId, id, word, options = {}) {
@@ -2189,6 +2393,62 @@
 
   let activeQuizSessionWriteChain = Promise.resolve();
 
+  const quizDraftKey = uid => 'lootlingua:quiz-checkpoint:v1:' + encodeURIComponent(uid);
+  const readQuizDraft = uid => {
+    try { return JSON.parse(localStorage.getItem(quizDraftKey(uid)) || 'null'); }
+    catch (_) { return null; }
+  };
+  window.LootLinguaOperations?.setSyncSource?.('quiz-result', uid => {
+    const session = readQuizDraft(uid)?.session;
+    const total = session?.runtimeWords?.length || session?.words?.length || 0;
+    return { pending: total > 0 && Number(session.quizIndex) === total && session.quizSessionResults?.length ? 1 : 0 };
+  });
+  const quizDraftOutbox = window.LootLinguaOperations?.createOutbox?.('quiz-draft', async (item, current) => {
+    const draft = readQuizDraft(item.owner);
+    if (!draft?.revision) throw Object.assign(new Error('The local quiz checkpoint is missing.'), { code: 'sync/local-storage' });
+    const reference = doc(db, 'users', item.owner, 'meta', 'active_quiz_session');
+    const accepted = await runTransaction(db, async transaction => {
+      const snapshot = await transaction.get(reference);
+      if (!current()) throw Object.assign(new Error('The quiz account changed.'), { code: 'auth/identity-changed' });
+      const remote = snapshot.data();
+      if (!draft.session) {
+        if (remote?.id === draft.removedId) transaction.delete(reference);
+        return null;
+      }
+      if (remote?.id !== draft.session.id && Number(remote?.createdAt || 0) > Number(draft.session.createdAt || 0)) return remote;
+      if (remote?.id === draft.session.id && Number(remote.quizIndex || 0) > Number(draft.session.quizIndex || 0)) return remote;
+      if (!remote || JSON.stringify(remote) !== JSON.stringify(draft.session)) transaction.set(reference, draft.session);
+      return draft.session;
+    });
+    if (!current()) return;
+    if (readQuizDraft(item.owner)?.revision !== draft.revision) return { retryLatest: true };
+    localStorage.setItem(quizDraftKey(item.owner), JSON.stringify({ ...draft, session: accepted, confirmed: true }));
+  });
+
+  window.stageActiveQuizCheckpoint = function(session, expectedId) {
+    const user = auth.currentUser;
+    if (!user || !quizDraftOutbox) return false;
+    const existing = readQuizDraft(user.uid);
+    const removedId = expectedId || existing?.session?.id || existing?.removedId;
+    if (!session && !removedId) return false;
+    if (existing && JSON.stringify(existing.session) === JSON.stringify(session) && (session || removedId === existing.removedId)) return true;
+    const revision = window.crypto?.randomUUID?.() || String(Date.now()) + Math.random();
+    try {
+      localStorage.setItem(quizDraftKey(user.uid), JSON.stringify({ revision, session, removedId }));
+      quizDraftOutbox.enqueue('checkpoint', {}, { id: 'active', lane: 'active' });
+      quizDraftOutbox.schedule(session ? 2500 : 600);
+      window.LootLinguaOperations?.syncStorageFailure?.(user.uid, 'quiz-checkpoint', false);
+      return true;
+    } catch (error) {
+      window.LootLinguaOperations?.syncStorageFailure?.(user.uid, 'quiz-checkpoint', true);
+      throw error;
+    }
+  };
+  window.hasLocalQuizCheckpoint = function(sessionId) {
+    const uid = auth.currentUser?.uid;
+    return Boolean(uid && sessionId && readQuizDraft(uid)?.session?.id === sessionId);
+  };
+
   window.saveActiveQuizSessionToCloud = async function(session) {
     const user = auth.currentUser;
     if (!user || !session) return false;
@@ -2210,10 +2470,16 @@
   window.loadActiveQuizSessionFromCloud = async function() {
     const user = auth.currentUser;
     if (!user) return null;
+    const local = readQuizDraft(user.uid);
+    if (local && !local.confirmed) return local.session;
     try {
+      window.LootLinguaCloudBackoff?.assertAvailable();
       const snap = await getDoc(doc(db, "users", user.uid, "meta", "active_quiz_session"));
+      if (auth.currentUser?.uid !== user.uid) return null;
       return snap.exists() ? snap.data() : null;
     } catch (e) {
+      const backoff = window.LootLinguaCloudBackoff;
+      if (backoff?.classify?.(e).temporary && auth.currentUser?.uid === user.uid) return readQuizDraft(user.uid)?.session || null;
       console.warn("activeQuizSession load:", e.message);
       return null;
     }

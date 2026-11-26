@@ -104,7 +104,7 @@
       publish();
     }
     return { ownerId, state, words: () => snapshot, next, ensureComplete, refreshCounts, replaceLoaded, merge,
-      restoreBackup(words) { replaceLoaded(words); complete = true; offline = true; error = null; publish(); },
+      restoreBackup(words, { complete: full = true } = {}) { replaceLoaded(words); complete = full; offline = true; error = null; publish(); },
       reset() { rows.clear(); cursor = null; complete = false; offline = false; error = null; counts = null; publish(); },
       dispose() { disposed = true; rows.clear(); snapshot = []; } };
   }

@@ -37,7 +37,7 @@ test('gate loading reads every public page and never depends on the visible 25-w
   assert.match(published, /async function listAllPublishedGateWords/);
   assert.match(published, /while \(pageCount < 100\)/);
   assert.match(published, /cursor = page\.endCursor/);
-  assert.match(cloud, /listAllPublishedGateWords\(worldId, rankId, gateId\)/);
+  assert.match(cloud, /listAllPublishedGateWords\(worldId, rankId, gateId, \{ requireFresh: options\?\.force === true \}\)/);
   assert.doesNotMatch(cloud, /wordSnapshot|wordPager/);
 });
 

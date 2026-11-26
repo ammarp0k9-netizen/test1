@@ -131,7 +131,12 @@ function saveActiveQuizSession() {
   const session = serializeActiveQuizSession();
   if (!session || !isVerifiedQuizMode(session.mode)) return;
   if (hasSignedInUser()) {
-    window.saveActiveQuizSessionToCloud?.(session);
+    try {
+      if (!window.stageActiveQuizCheckpoint?.(session)) window.saveActiveQuizSessionToCloud?.(session);
+    } catch (error) {
+      console.error('[Quiz] Local checkpoint could not be saved.', error?.name);
+      window.saveActiveQuizSessionToCloud?.(session);
+    }
   } else {
     localStorage.setItem(ACTIVE_QUIZ_SESSION_KEY, JSON.stringify(session));
     if (typeof markGuestDataDirty === 'function') markGuestDataDirty();
@@ -173,7 +178,12 @@ function isResumableQuizSession(session) {
 
 function clearActiveQuizSessionStorage() {
   localStorage.removeItem(ACTIVE_QUIZ_SESSION_KEY);
-  if (hasSignedInUser()) window.clearActiveQuizSessionFromCloud?.();
+  if (hasSignedInUser()) {
+    const id = activeQuizSession?.id || window.__pendingQuizResumeSession?.id;
+    try {
+      if (!window.stageActiveQuizCheckpoint?.(null, id)) window.clearActiveQuizSessionFromCloud?.();
+    } catch (error) { console.error('[Quiz] Could not persist the closed checkpoint.', error?.name); }
+  }
 }
 
 function showQuizResumePrompt() {
@@ -323,6 +333,10 @@ async function canOpenGateQuiz(source, stored = false) {
   const context = lesson.gateContext(source) || lesson.gateContext(source?.officialReviewGate);
   if (!context) return false;
   const owner = window.auth?.currentUser?.uid;
+  if (stored && owner && window.LootLinguaCloudBackoff?.reason?.() && window.hasLocalQuizCheckpoint?.(source?.id)) {
+    const local = window.LootLinguaGateLessonView?.status?.(context);
+    if (lesson.complete(local?.state)) return true;
+  }
   try {
     const access = await window.LootLinguaJourneyCloud.getGateLessonAccess(context, stored ? { session: source } : {});
     if (owner !== window.auth?.currentUser?.uid) return false;

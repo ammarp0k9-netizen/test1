@@ -2,6 +2,7 @@ let quizResultMasteryBaseline = null;
 
 async function commitVerifiedQuizResults(trace, onStage) {
   if (!activeQuizSession || !isVerifiedQuizMode(activeQuizSession.mode)) return { xp: 0, masteredCount: 0, correctCount: 0, total: 0 };
+  if (window.auth?.currentUser) window.LootLinguaCloudBackoff?.assertAvailable?.();
   window.LootLinguaOperations?.diagnostic?.('commitVerifiedQuizResults', {
     ownerId: window.auth?.currentUser?.uid || 'guest',
     sessionId: String(activeQuizSession.id || ''),
@@ -475,14 +476,38 @@ function finishQuizRun() {
   })().catch((error) => {
     trace?.warn(error?.code || error?.message || 'quiz-finish-failed').end({ failed: true });
     quizFinishPromise = null;
+    const backoff = window.LootLinguaCloudBackoff;
+    const failure = backoff?.classify?.(error);
+    const retained = window.hasLocalQuizCheckpoint?.(activeQuizSession?.id);
+    quizRetrySessionId = retained && failure?.temporary ? activeQuizSession?.id : '';
+    if (quizRetrySessionId) backoff.pause(error);
     setQuizFinishState('save-failed', {
-      message: 'تعذر حفظ النتيجة. إجاباتك ما زالت محفوظة للمحاولة من جديد.',
+      message: retained && failure?.temporary ? 'إجاباتك محفوظة على الجهاز، والنتيجة بانتظار الاعتماد.'
+        : retained ? 'تعذّر اعتماد النتيجة. بقيت الإجابات على الجهاز.'
+          : 'تعذّر اعتماد النتيجة. أبقِ الصفحة مفتوحة وأعد المحاولة.',
       retry: () => finishQuizRun(),
     });
+    if (quizRetrySessionId) scheduleQuizResultRetry();
     return null;
   });
   return quizFinishPromise;
 }
+
+let quizResultRetry;
+let quizRetrySessionId = '';
+function scheduleQuizResultRetry() {
+  clearTimeout(quizResultRetry);
+  if (!activeQuizSession || activeQuizSession.id !== quizRetrySessionId || quizFinishState !== 'save-failed' || window.navigator?.onLine === false) return;
+  const sessionId = activeQuizSession.id;
+  const uid = window.auth?.currentUser?.uid;
+  quizResultRetry = setTimeout(() => {
+    if (activeQuizSession?.id !== sessionId || window.auth?.currentUser?.uid !== uid || quizFinishState !== 'save-failed') return;
+    if (window.LootLinguaCloudBackoff?.reason?.()) { scheduleQuizResultRetry(); return; }
+    void finishQuizRun();
+  }, Math.max(2500, window.LootLinguaCloudBackoff?.remaining?.() || 0));
+}
+window.addEventListener?.('online', scheduleQuizResultRetry);
+window.addEventListener?.('lootlingua:cloud-capacity-change', scheduleQuizResultRetry);
 
 function markForgot() {
   currentStreak = 0;

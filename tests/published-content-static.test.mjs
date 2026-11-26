@@ -42,7 +42,7 @@ test('published records preserve Admin unlock configuration for journey access c
 });
 
 test('published world reads expose the central interest contract with a legacy fallback', () => {
-  const worldRecord = sourceSection(apiSource, 'function worldRecord', 'function recordKey');
+  const worldRecord = sourceSection(apiSource, 'function worldRecord', 'function mapReadError');
   assert.match(worldRecord, /LootLinguaContentSchema/);
   assert.match(worldRecord, /normalizeWorldInterest\(item\.primaryInterest\)/);
   assert.match(worldRecord, /normalizeWorldInterestTags\(item\.interestTags\)/);
@@ -61,7 +61,7 @@ test('published word reads use real 25-item bidirectional pagination', () => {
   assert.match(apiSource, /order: item\.order/);
   assert.match(apiSource, /const cursorOrder = settings\.cursor\.order/);
   assert.doesNotMatch(
-    sourceSection(apiSource, 'function wordCursor', 'async function listPublishedGateWords'),
+    sourceSection(apiSource, 'function wordCursor', 'async function fetchPublishedGateWords'),
     /Number\(item\.order\)/
   );
   assert.match(worldsSource, /sourceType: 'published-gate-words'/);
@@ -77,7 +77,8 @@ test('published UI is separate from the existing custom-world panel', () => {
   assert.match(worldsSource, /const publishedContentState = \{/);
   assert.match(worldsSource, /window\.showCustomWorldsTab/);
   assert.match(worldsSource, /renderCustomWorldCards\(\)/);
-  assert.doesNotMatch(apiSource, /innerHTML|localStorage|ui\.words|adminPager|stagingPager/);
+  assert.doesNotMatch(apiSource, /innerHTML|ui\.words|adminPager|stagingPager/);
+  assert.match(apiSource, /lootlingua:published-cache:v1:/);
 });
 
 test('Worlds presents Gates directly under CEFR Levels while retaining rankId only internally', () => {

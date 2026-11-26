@@ -207,6 +207,7 @@ async function load(user) {
   if (!db) throw entryError('entry/storage-unavailable', 'Entry Experience storage is unavailable.');
   const current = requireUser(user);
   try {
+    window.LootLinguaCloudBackoff?.assertAvailable?.();
     const snapshot = await getDoc(entryRef(current.uid));
     requireUser(current);
     if (!snapshot.exists()) return { exists: false, state: null };
@@ -301,6 +302,7 @@ async function save(state, user, options) {
       }
     }
     phase = 'firestore-write';
+    window.LootLinguaCloudBackoff?.assertAvailable?.();
     await setDoc(reference, payload);
     phase = 'auth-readiness';
     requireUser(current);
@@ -314,7 +316,11 @@ async function save(state, user, options) {
     }
     return contract().normalizeEntryState({ ...normalized, updatedAt: Date.now() });
   } catch (error) {
-    const diagnostic = reportEntryFailure(operation, phase, error, contractShape);
+    const backoff = window.LootLinguaCloudBackoff;
+    const temporarilyUnavailable = backoff?.classify?.(error).temporary;
+    if (temporarilyUnavailable) backoff.pause(error);
+    const diagnostic = temporarilyUnavailable ? entryFailureDiagnostic(operation, phase, error, contractShape)
+      : reportEntryFailure(operation, phase, error, contractShape);
     if (['entry/auth-required', 'entry/auth-changed', 'entry/storage-unavailable'].includes(error?.code)) {
       error.diagnostic = diagnostic;
       throw error;
@@ -328,7 +334,42 @@ async function save(state, user, options) {
   }
 }
 
-const API = Object.freeze({ load, loadLegacyPreferences, save });
+const entryOutbox = window.LootLinguaOperations?.createOutbox?.('entry', async (item, isCurrent) => {
+  const user = requireUser({ uid: item.owner });
+  const { state, verify, appearance } = item.payload;
+  const remote = (await load(user)).state;
+  const api = contract();
+  const withoutClock = value => JSON.stringify({ ...value, updatedAt: null });
+  if (remote && withoutClock(remote) === withoutClock(state)) return remote;
+  if (remote && (api.isTerminalState(remote) || (Number(remote.updatedAt) > Number(state.updatedAt) &&
+      api.STEPS.indexOf(remote.currentStep) > api.STEPS.indexOf(state.currentStep)))) {
+    throw entryError('failed-precondition', 'This entry step was updated on another device.');
+  }
+  if (appearance) {
+    const saved = await window.saveProfilePreferencesToCloud?.(appearance, { verify: true });
+    if (saved !== true) throw entryError(window.__lootlinguaLastProfileSaveFailure?.code || 'unavailable', 'Could not confirm the appearance.');
+  }
+  if (!isCurrent()) throw entryError('entry/auth-changed');
+  const next = remote ? { ...state, audience: remote.audience, classification: remote.classification, startedAt: remote.startedAt } : state;
+  return save(next, user, { verify, operation: verify ? 'entry-completion' : 'entry-checkpoint' });
+}, {
+  onConfirmed(item, state) {
+    window.dispatchEvent(new CustomEvent('lootlingua:entry-synchronized', { detail: { owner: item.owner, state } }));
+  },
+});
+
+function saveLater(state, user, options = {}) {
+  requireUser(user);
+  if (!entryOutbox) return false;
+  const normalized = contract().normalizeEntryState(state);
+  if (!normalized) throw entryError('entry/invalid-state');
+  entryOutbox.enqueue('checkpoint', { state: normalized, verify: options.verify === true, appearance: options.appearance }, {
+    id: `${normalized.status}:${normalized.currentStep}:${normalized.updatedAt}`, lane: String(normalized.experienceVersion),
+  });
+  return true;
+}
+
+const API = Object.freeze({ load, loadLegacyPreferences, save, saveLater });
 
 Object.defineProperty(window, 'LootLinguaEntryExperienceCloud', {
   value: API,

@@ -155,7 +155,7 @@ test('Entry cloud adapter scopes every version by owner and writes only its curr
     /function entryRef\(uid, version = contract\(\)\.EXPERIENCE_VERSION\)[\s\S]*?`v\$\{version\}`/
   );
   assert.match(cloudSource, /getDoc\(entryRef\(current\.uid, 1\)\)/);
-  assert.match(cloudSource, /const API = Object\.freeze\(\{ load, loadLegacyPreferences, save \}\)/);
+  assert.match(cloudSource, /const API = Object\.freeze\(\{ load, loadLegacyPreferences, save, saveLater \}\)/);
   assert.equal(occurrences(cloudSource, /\bsetDoc\s*\(/g), 1);
   assert.doesNotMatch(cloudSource, /onboarding\.completed|hasCompletedOnboarding/);
 

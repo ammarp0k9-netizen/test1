@@ -157,7 +157,7 @@ test('Level Placement overlaps feedback with the write and avoids two forced rer
     journeyCloudSource.indexOf('async function answerLevelPlacementQuestion'),
     journeyCloudSource.indexOf('async function saveLevelPlacementWords')
   );
-  assert.match(uiBlock, /const savePromise = getJourneyCloudApi\(\)\.answerLevelPlacementQuestion/);
+  assert.match(uiBlock, /const savePromise = cloud\.answerLevelPlacementQuestion/);
   assert.match(uiBlock, /Promise\.all\(\[\s*savePromise/);
   assert.match(uiBlock, /setTimeout\(resolve, reduceMotion \? 100 : 520\)/);
   assert.doesNotMatch(cloudBlock, /getJourney\(world, \{ force: true \}\)/);

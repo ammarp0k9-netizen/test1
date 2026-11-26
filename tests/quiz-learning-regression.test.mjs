@@ -581,7 +581,9 @@ test('account Matching finish is single-flight and leaves loading on the complet
   assert.equal(result.total, 10);
   assert.equal(harness.commits, 1);
   assert.equal(harness.context.getFinishState(), 'completed');
-  assert.deepEqual(harness.learningStats.activityIntents, [{ type: 'quiz-activity', eventId: 'quiz:matching-session', day: '2026-11-05', answers: 10, perfect: true, advanceAfterFreeze: true, personalAt: 0 }]);
+  const [{ streakAt, ...activity }] = harness.learningStats.activityIntents;
+  assert.ok(Number.isFinite(streakAt) && streakAt > 0);
+  assert.deepEqual([activity], [{ type: 'quiz-activity', eventId: 'quiz:matching-session', day: '2026-11-05', answers: 10, perfect: true, advanceAfterFreeze: true, personalAt: 0 }]);
   assert.ok(harness.statuses.includes('completed'));
   assert.equal(harness.scheduled.filter((timer) => !timer.cleared).length, 1);
 });

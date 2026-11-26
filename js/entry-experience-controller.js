@@ -847,7 +847,10 @@
     setBusy(true, label);
     runtime.savePromise = runtime.savePromise.catch(() => {}).then(() => {
       if (!current()) throw Object.assign(new Error('Account changed.'), { code: 'entry/auth-changed' });
-      return cloud().save(state, user);
+      return cloud().save(state, user).catch(error => {
+        if (root.LootLinguaCloudBackoff?.classify?.(error).temporary && cloud()?.saveLater?.(state, user)) return state;
+        throw error;
+      });
     });
     try {
       const saved = await runtime.savePromise;
@@ -872,6 +875,10 @@
     }
     setBusy(true, label);
     try {
+      if (user && root.LootLinguaCloudBackoff?.reason?.() && cloud()?.saveLater?.(normalized, user, {
+        verify: true, appearance: options?.applyAppearance && normalized.themeExplicit
+          ? { theme: normalized.themeId, oasisMode: normalized.oasisMode || 'light' } : null,
+      })) throw Object.assign(new Error('Completion waiting for confirmation.'), { code: 'entry/pending' });
       if (options?.applyAppearance) {
         applyExplicitAppearance(normalized);
         if (runtime.user && normalized.themeExplicit) {
@@ -1015,13 +1022,24 @@
         focusEntryHeading();
       }
       const status = document.getElementById('entryExperienceStatus');
-      if (status) status.textContent = error?.code === 'entry/write-failed'
+      if (status) status.textContent = error?.code === 'entry/pending' ? 'آخر خطوة محفوظة على هذا الجهاز وبانتظار الاعتماد.'
+        : error?.code === 'entry/write-failed'
         ? 'تعذّر حفظ الخطوة في الحساب. بقيت التجربة مفتوحة واختياراتك محفوظة على هذا الجهاز؛ حاول مرة أخرى.'
         : (error?.code === 'entry/profile-write-failed'
           ? 'تعذّر حفظ المظهر في حسابك. بقيت التجربة مفتوحة ولم نعتبرها مكتملة.'
           : 'تعذّر إكمال الخطوة. راجع اختيارك وحاول مرة أخرى.');
     }
   }
+
+  root.addEventListener?.('lootlingua:entry-synchronized', event => {
+    const { owner, state } = event.detail || {};
+    if (!state || owner !== runtime.user?.uid || owner !== root.auth?.currentUser?.uid) return;
+    if (!api().isTerminalState(state)) return;
+    runtime.state = state;
+    persistLocalState(state, runtime.user);
+    announceEntryState();
+    if (runtime.opened) close();
+  });
 
   function applyExplicitAppearance(state) {
     const selected = state || runtime.state;

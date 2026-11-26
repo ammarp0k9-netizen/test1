@@ -44,7 +44,7 @@ async function commit(command) {
   try {
     if (uid !== 'guest') {
       const result = await root.commitProfileIntent?.(command);
-      return isCurrent() && result?.saved ? result : { reason: isCurrent() ? 'save-failed' : 'owner-changed' };
+      return isCurrent() && (result?.saved || result?.deferred) ? result : { reason: isCurrent() ? 'save-failed' : 'owner-changed' };
     }
     const work = () => {
       if (!isCurrent()) return { reason: 'owner-changed' };
@@ -187,7 +187,7 @@ function draw() {
         time.dataset.chestTime = '';
         slot.append(name, time);
         slot.addEventListener('click', () => {
-          if (chest.readyAt <= Date.now()) void runAction({ type: 'treasure-open', chestId: chest.id, eventId: root.crypto.randomUUID() });
+          if (chest.readyAt <= Date.now()) void runAction({ type: 'treasure-open', chestId: chest.id, eventId: `open:${chest.id}` });
           else root.showToast?.(`${describe(chest)}. يفتح بعد ${formatLootTime(chest.readyAt - Date.now())}.`, 'info', { persist: false });
         });
       } else slot.setAttribute('aria-label', 'خانة فارغة');

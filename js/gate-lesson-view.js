@@ -14,6 +14,34 @@
     catch (_) { return null; }
   }
 
+  const outbox = root.LootLinguaOperations?.createOutbox?.('gate-lesson', async (item, current) => {
+    const context = item.payload.context;
+    const saved = read(item.owner, context);
+    if (!saved?.state) throw Object.assign(new Error('The lesson checkpoint is missing.'), { code: 'sync/local-storage' });
+    const key = contract.checkpointKey(saved.state);
+    const confirmed = await root.LootLinguaJourneyCloud.saveGateLessonState(context, saved.state);
+    if (!current()) return;
+    const latest = read(item.owner, context);
+    const newer = contract.checkpointKey(latest?.state) !== key;
+    const staged = newer ? latest : saved;
+    const state = contract.merge(staged.state, confirmed);
+    let streakAt = staged.streakAt;
+    if (streakAt && contract.complete(confirmed) && !newer) {
+      if (!root.recordCloudStreakLearningDay?.(streakAt)) throw Object.assign(new Error('Profile sync is not ready.'), { code: 'unavailable' });
+      streakAt = 0;
+    }
+    localStorage.setItem(storageKey(item.owner, context), JSON.stringify({ ...staged, state, streakAt }));
+    const view = active;
+    if (view?.uid === item.owner && contract.keyFor(view.context) === contract.keyFor(context)) {
+      view.state = contract.merge(view.state, state);
+      view.confirmedKey = contract.checkpointKey(confirmed);
+      if (view.notice?.isConnected) view.notice.textContent = '';
+    }
+    observed.delete(gateKey(item.owner, context));
+    dispatch(context, item.owner);
+    return { retryLatest: newer };
+  });
+
   function store(uid, context, state, words, interaction = false) {
     try {
       const previous = read(uid, context);
@@ -25,8 +53,12 @@
       const streakAt = (sameWords && previous?.streakAt) || (interaction && contract.complete(draft) &&
         !contract.complete(sameWords ? previous.state : null) ? Date.now() : 0);
       localStorage.setItem(storageKey(uid, context), JSON.stringify({ state: draft, words, activityAt, streakAt }));
+      root.LootLinguaOperations?.syncStorageFailure?.(uid, 'lesson-checkpoint', false);
       return draft;
-    } catch (_) { return null; }
+    } catch (_) {
+      root.LootLinguaOperations?.syncStorageFailure?.(uid, 'lesson-checkpoint', true);
+      return null;
+    }
   }
 
   function status(context) {
@@ -73,6 +105,16 @@
 
   function sync(view, immediate = false) {
     clearTimeout(view.timer);
+    if (outbox && view.localSaved) {
+      const key = contract.keyFor(view.context);
+      if (view.confirmedKey !== contract.checkpointKey(view.state)) {
+        try { outbox.enqueue('save', { context: view.context }, { id: key, lane: key }); }
+        catch (_) { return Promise.resolve(false); }
+        if (!immediate) { outbox.schedule(2400); return Promise.resolve(false); }
+        return Promise.resolve(outbox.flush()).then(() => view.confirmedKey === contract.checkpointKey(view.state));
+      }
+      return Promise.resolve(true);
+    }
     if (immediate) return flush(view);
     view.timer = setTimeout(() => void flush(view), 450);
     return Promise.resolve(false);
@@ -81,6 +123,7 @@
   async function flush(view) {
     clearTimeout(view.timer);
     if (owner() !== view.uid) return false;
+    if (outbox && view.localSaved) return sync(view, true);
     const key = gateKey(view.uid, view.context);
     const previous = tasks.get(key) || Promise.resolve();
     const snapshot = view.state;
@@ -826,6 +869,7 @@
       const creditedIds = prior || remote ? [] : await cloud.getLegacyLessonWordIds(context, progress).catch(() => []);
       if (active !== view || owner() !== uid) return false;
       view.state = contract.merge(remote, prior) || contract.start(view.words, creditedIds);
+      if (remote && access?.confirmed) view.confirmedKey = contract.checkpointKey(remote);
       update(view, view.state);
       render(view);
       if (prepare) view.preparing = Promise.resolve().then(prepare).catch(() => {}).finally(() => {

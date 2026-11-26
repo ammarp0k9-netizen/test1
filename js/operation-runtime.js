@@ -11,6 +11,166 @@
   const inFlight = new Map();
   const report = [];
   const MAX_REPORT_ITEMS = 120;
+  const syncSources = new Map();
+  const syncFailures = new Map();
+  const syncSourceState = new Map();
+  const getOwner = () => root.auth?.currentUser?.uid || '';
+  const syncEvent = () => root.dispatchEvent?.(new CustomEvent('lootlingua:sync-state'));
+
+  function syncStatus(owner = getOwner()) {
+    const status = { pending: 0, rejected: 0, active: false, localFailure: false, reason: '', rejections: [] };
+    if (!owner) return status;
+    for (const [scope, read] of syncSources) {
+      let pending;
+      try { pending = read(owner) || {}; }
+      catch (_) { status.localFailure = true; continue; }
+      const source = syncSourceState.get(`${owner}:${scope}`) || {};
+      status.pending += Number(pending.pending || 0);
+      status.rejected += Number(pending.rejected || 0);
+      status.rejections.push(...(pending.rejections || []));
+      if (source.failure) { status.rejected++; status.rejections.push({ scope, reason: source.failure }); }
+      status.active ||= Boolean(source.active);
+      status.reason ||= source.reason || '';
+    }
+    status.localFailure ||= [...syncFailures.keys()].some(key => key.startsWith(owner + ':'));
+    return status;
+  }
+
+  function setSyncSource(scope, read) { syncSources.set(scope, read); syncEvent(); }
+  function syncActivity(owner, scope, state) { syncSourceState.set(`${owner}:${scope}`, state); syncEvent(); }
+  function syncStorageFailure(owner, scope, failed) {
+    const key = `${owner}:${scope}`;
+    if (syncFailures.has(key) === Boolean(failed)) { syncEvent(); return; }
+    if (failed) syncFailures.set(key, true);
+    else syncFailures.delete(key);
+    syncEvent();
+  }
+
+  function createOutbox(scope, replay, config = {}) {
+    const prefix = 'lootlingua:sync-outbox:v1:' + scope + ':';
+    let running = null;
+    let timer = null;
+    const uidPrefix = owner => prefix + encodeURIComponent(owner) + ':';
+    const opKey = (owner, id) => uidPrefix(owner) + encodeURIComponent(id);
+    const list = owner => {
+      const storage = root.localStorage;
+      const items = [];
+      try {
+        for (let index = 0; index < storage.length; index++) {
+          const key = storage.key(index);
+          if (!key?.startsWith(uidPrefix(owner))) continue;
+          const item = JSON.parse(storage.getItem(key));
+          if (item?.owner === owner && item.id && item.lane) items.push(item);
+        }
+      } catch (error) {
+        syncFailures.set(`${owner}:${scope}`, true);
+        console.error('[Sync] Could not read local operations.', scope, error?.name);
+      }
+      return items.sort((a, b) => a.at - b.at || a.id.localeCompare(b.id));
+    };
+    function write(item) {
+      try {
+        root.localStorage.setItem(opKey(item.owner, item.id), JSON.stringify(item));
+        syncStorageFailure(item.owner, scope, false);
+      } catch (error) {
+        syncStorageFailure(item.owner, scope, true);
+        throw Object.assign(new Error('Could not save this change on the device.'), { code: 'sync/local-storage', cause: error });
+      }
+    }
+    function enqueue(type, payload, { id, lane } = {}) {
+      const owner = getOwner();
+      if (!owner || !lane || !id) throw Object.assign(new Error('The account or operation is missing.'), { code: 'sync/identity' });
+      const prior = list(owner).find(item => item.id === id);
+      if (prior) { schedule(); return prior; }
+      const at = Math.max(Date.now(), 1 + Math.max(0, ...list(owner).filter(item => item.lane === lane).map(item => item.at)));
+      const item = { owner, id, lane, type, payload, at };
+      write(item);
+      config.onChange?.(owner);
+      schedule();
+      return item;
+    }
+    function schedule(delay = 400) {
+      clearTimeout(timer);
+      timer = null;
+      const owner = getOwner();
+      if (!owner || root.navigator?.onLine === false || !list(owner).some(item => !item.rejected)) return;
+      timer = setTimeout(() => { timer = null; void flush(); }, Math.max(delay, root.LootLinguaCloudBackoff?.remaining() || 0));
+    }
+    async function flush() {
+      const owner = getOwner();
+      if (!owner || running || root.navigator?.onLine === false) return running;
+      const generation = Number(root.__lootlinguaAuthGeneration) || 0;
+      const current = () => getOwner() === owner && (Number(root.__lootlinguaAuthGeneration) || 0) === generation;
+      const backoff = root.LootLinguaCloudBackoff;
+      const work = async lock => {
+        if (!lock || !current()) return;
+        const items = list(owner);
+        const blocked = new Set();
+        if (!items.some(item => !item.rejected)) return;
+        syncActivity(owner, scope, { active: true });
+        let reason;
+        try {
+          for (const item of items) {
+            if (!current()) break;
+            if (item.rejected) { blocked.add(item.lane); continue; }
+            if (blocked.has(item.lane)) continue;
+            try {
+              backoff?.assertAvailable();
+              const result = await replay(item, current);
+              if (!current()) break;
+              if (result?.retryLatest === true) { reason = 'pending'; continue; }
+              config.onConfirmed?.(item, result);
+              root.localStorage.removeItem(opKey(owner, item.id));
+              backoff?.recovered();
+              config.onChange?.(owner);
+            } catch (error) {
+              if (!current()) break;
+              const failure = backoff?.classify(error) || {};
+              if (failure.temporary) {
+                reason = failure.reason;
+                backoff?.pause(error);
+                break;
+              }
+              blocked.add(item.lane);
+              write({ ...item, rejected: true, reason: failure.reason || 'unexpected', code: String(error?.code || '') });
+              config.onChange?.(owner);
+            }
+          }
+        } finally {
+          syncActivity(owner, scope, { reason: reason === 'pending' ? '' : reason });
+          if (reason) schedule(reason === 'pending' ? 400 : 10000);
+        }
+      };
+      const locks = root.navigator?.locks;
+      running = Promise.resolve().then(() => locks
+        ? locks.request(prefix + owner, { ifAvailable: true }, lock => { if (!lock) schedule(5000); return work(lock); })
+        : work(true)).catch(error => {
+        syncStorageFailure(owner, scope, true);
+        console.error('[Sync] Could not update durable operations.', scope, error?.name);
+      }).finally(() => {
+        running = null;
+        const items = getOwner() === owner ? list(owner) : [];
+        const rejected = new Set(items.filter(item => item.rejected).map(item => item.lane));
+        if (!timer && items.some(item => !item.rejected && !rejected.has(item.lane))) schedule();
+      });
+      return running;
+    }
+    setSyncSource(scope, owner => {
+      const items = list(owner);
+      const rejected = items.filter(item => item.rejected);
+      return { pending: items.length - rejected.length, rejected: rejected.length,
+        rejections: rejected.map(item => ({ scope, type: item.type, reason: item.reason,
+          name: String(item.payload?.word?.word || item.payload?.base?.name || '').trim().slice(0, 70) })) };
+    });
+    for (const event of ['online', 'lootlingua:auth-state', 'lootlingua:cloud-capacity-change']) {
+      root.addEventListener?.(event, () => schedule());
+    }
+    root.addEventListener?.('storage', event => {
+      const owner = getOwner();
+      if (owner && event.key?.startsWith(uidPrefix(owner))) { config.onChange?.(owner); syncEvent(); schedule(); }
+    });
+    return { enqueue, flush, list, schedule };
+  }
 
   root.__lootlinguaPerformanceReport = report;
 
@@ -247,5 +407,11 @@
     setButtonsBusy,
     nextPaint,
     diagnostic,
+    setSyncSource,
+    syncStatus,
+    syncActivity,
+    syncNotify: syncEvent,
+    syncStorageFailure,
+    createOutbox,
   });
 })(typeof window !== 'undefined' ? window : globalThis);
