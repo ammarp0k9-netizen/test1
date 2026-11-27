@@ -159,7 +159,8 @@ body.treasure-mode:not(.quiz-active) .main-content {
 .sync-status-bar { max-width: none; }
 .main-content:has(#personalControls:not([style*="none"])) {
   position: relative;
-  --dictionary-glass: color-mix(in srgb, var(--card-bg) 76%, transparent);
+  --dictionary-glass: color-mix(in srgb, var(--legend-glass-bg) 78%, transparent);
+  --dictionary-glass-blur: blur(20px) saturate(168%);
   --dictionary-tools-gap: 8px;
 }
 .main-content:has(#personalControls:not([style*="none"])) :is(.page-header, .header-top) { display: contents; }
@@ -170,9 +171,7 @@ body.treasure-mode:not(.quiz-active) .main-content {
   width: fit-content;
   max-inline-size: min(100%, 30ch);
   margin-block: 0 var(--dictionary-tools-gap);
-  padding: 6px 10px;
-  border: 1px solid var(--legend-glass-border);
-  border-radius: 11px;
+  padding: 3px 0;
   color: var(--accent);
   -webkit-text-fill-color: currentColor;
   overflow-wrap: anywhere;
@@ -191,15 +190,20 @@ body.treasure-mode:not(.quiz-active) .main-content {
   inset-block-start: calc(var(--dictionary-tools-top, 76px) + var(--dictionary-title-height, 36px) + var(--dictionary-tools-gap));
   margin-block-end: var(--dictionary-tools-gap);
 }
-.main-content:has(#personalControls:not([style*="none"])) :is(#pageTitle, .dictionary-filter-search, #dictionarySortBtn, #selectionModeBtn) {
+.main-content:has(#personalControls:not([style*="none"])) :is(.dictionary-filter-search, #dictionarySortBtn, #selectionModeBtn, .custom-world-title-action) {
   background: var(--dictionary-glass);
   border-color: var(--legend-glass-border);
-  backdrop-filter: var(--legend-glass-blur);
-  -webkit-backdrop-filter: var(--legend-glass-blur);
+  backdrop-filter: var(--dictionary-glass-blur) !important;
+  -webkit-backdrop-filter: var(--dictionary-glass-blur) !important;
   box-shadow: var(--legend-glass-shadow);
 }
-body:is(.perf-stable, .perf-turbo, .low-end-device) .main-content:has(#personalControls:not([style*="none"])) {
-  --dictionary-glass: color-mix(in srgb, var(--card-bg) 90%, transparent);
+body:is(.perf-balanced, .perf-stable) .main-content:has(#personalControls:not([style*="none"])) {
+  --dictionary-glass: color-mix(in srgb, var(--card-bg) 67%, transparent);
+  --dictionary-glass-blur: blur(9px) saturate(140%);
+}
+body:is(.perf-turbo, .low-end-device) .main-content:has(#personalControls:not([style*="none"])) {
+  --dictionary-glass: color-mix(in srgb, var(--card-bg) 76%, transparent);
+  --dictionary-glass-blur: blur(5px) saturate(125%);
 }
 @media (max-width: 939px) {
   body.view-has-back .main-content:has(#personalControls:not([style*="none"])) #pageTitle { max-inline-size: calc(100% - 54px); }
@@ -444,7 +448,7 @@ body:is(.perf-stable, .perf-turbo, .low-end-device) .main-content:has(#personalC
 
 .viewport-edges, .workspace-edges {
   pointer-events: none;
-  --edge-color: var(--bg, var(--card-bg));
+  --edge-color: var(--main-bg, var(--card-bg));
   --edge-depth: clamp(54px, 10dvh, 94px);
 }
 .viewport-edges { position: fixed; inset: 0; z-index: 990; }
@@ -455,9 +459,10 @@ body:is(.perf-stable, .perf-turbo, .low-end-device) .main-content:has(#personalC
   inset-inline: 0;
   height: var(--edge-depth);
   --edge-gradient: linear-gradient(var(--edge-direction),
-    var(--edge-color) 0%, color-mix(in srgb, var(--edge-color) 82%, transparent) 23%,
-    color-mix(in srgb, var(--edge-color) 39%, transparent) 57%,
-    color-mix(in srgb, var(--edge-color) 9%, transparent) 83%, transparent 100%);
+    color-mix(in srgb, var(--edge-color) 66%, transparent) 0%,
+    color-mix(in srgb, var(--edge-color) 49%, transparent) 23%,
+    color-mix(in srgb, var(--edge-color) 22%, transparent) 57%,
+    color-mix(in srgb, var(--edge-color) 5%, transparent) 83%, transparent 100%);
   opacity: 0;
   transition: opacity 160ms ease;
 }
