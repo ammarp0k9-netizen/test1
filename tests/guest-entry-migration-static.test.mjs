@@ -307,6 +307,13 @@ test('the real full profile payload retains the current theme and learning-state
     `${payloadBlock}\nreturn window.getLootlinguaProfilePayload;`
   );
   const storageValues = new Map([['lootlinguaDisplayName', 'Legacy Player']]);
+  const streakState = { timeZone: 'Asia/Amman', settledThrough: '2026-08-02' };
+  const profileValues = new Map([
+    ['lootlinguaDailyStreakState', streakState],
+    ['lootlinguaMaxStreak', 7],
+    ['lootlinguaStreakFreezes', 2],
+    ['lootlinguaFreezeSaves', 1],
+  ]);
   const getPayload = buildPayload(
     {},
     { documentElement: { getAttribute: (name) => name === 'data-theme' ? 'ocean' : 'dark' } },
@@ -316,8 +323,8 @@ test('the real full profile payload retains the current theme and learning-state
     4,
     '2026-08-01',
     () => '2026-08-01',
-    (_key, fallback) => fallback,
-    (_key, fallback) => fallback,
+    (key, fallback) => profileValues.get(key) ?? fallback,
+    (key, fallback) => profileValues.get(key) ?? fallback,
     () => [{ sessionId: 'quiz-session-a', at: 1 }],
     () => ['lootlingua', 'ocean'],
     () => ({ totalOpens: 2, rewards: [] }),
@@ -330,12 +337,17 @@ test('the real full profile payload retains the current theme and learning-state
     'dailyQuestDate', 'dailyQuestState', 'dailyStreak', 'displayName',
     'extraChests', 'freezeSaves', 'gameDictAdds', 'lastActivityDate',
     'maxStreak', 'motivationRewards', 'oasisMode', 'perfectQuizzes', 'quizExposureHistory',
-    'runnerBestDistance', 'runnerCoins', 'streakFreezes', 'theme',
+    'runnerBestDistance', 'runnerCoins', 'streakFreezes', 'streakState', 'theme',
     'themeIntroSeen', 'titlesState', 'userXP', 'xpEconomyVersion',
   ].sort());
   assert.equal(payload.theme, 'ocean');
   assert.equal(payload.oasisMode, 'dark');
   assert.deepEqual(payload.themeIntroSeen, ['lootlingua', 'ocean']);
+  assert.deepEqual(payload.streakState, streakState);
+  assert.deepEqual([payload.dailyStreak, payload.lastActivityDate, payload.maxStreak, payload.streakFreezes, payload.freezeSaves],
+    [4, '2026-08-01', 7, 2, 1]);
+  profileValues.delete('lootlinguaDailyStreakState');
+  assert.equal(getPayload().streakState, null);
 });
 
 test('an account quiz session wins without losing the guest resumable draft', () => {

@@ -17,7 +17,7 @@
   import { mountAppAuth } from './app-auth-ui.js?v=saved-guest-1';
   import { createGuestJourneyAuth, isPermanentAccount } from './guest-journey-auth.js?v=saved-guest-1';
   import { firebaseDemoConfig, firebaseEmulatorSelected } from './firebase-emulator-mode.js';
-  import { createSavedGuestFlow, useGoogleRedirect } from './saved-guest-flow.js?v=streak-days-1';
+  import { createSavedGuestFlow, useGoogleRedirect } from './saved-guest-flow.js?v=streak-migration-1';
 
   const firebaseConfig = {
     apiKey:            "AIzaSyDQB5N4wxJw69-tb8suI2T2SfEfCpwFA2c",

@@ -21,7 +21,8 @@ function harness() {
   const context = vm.createContext({
     window: root, JSON, Math, Object, Array, Map, Set,
     document: { documentElement: { getAttribute: (key) => attrs.get(key), setAttribute: (key, value) => attrs.set(key, value) }, getElementById: () => ({ style: { display: 'none' } }) },
-    localStorage: { getItem: (key) => values.get(key) ?? null, setItem: (key, value) => values.set(key, String(value)) },
+    localStorage: { getItem: (key) => values.get(key) ?? null, setItem: (key, value) => values.set(key, String(value)),
+      removeItem: (key) => values.delete(key) },
     loadInt: (key, fallback = 0) => Number(values.get(key) ?? fallback), saveInt: (key, value) => values.set(key, String(value)),
     loadJSON: (key, fallback) => JSON.parse(values.get(key) || JSON.stringify(fallback)), saveJSON: (key, value) => values.set(key, JSON.stringify(value)),
     XP_ECONOMY_VERSION: 2, THEME_USE_MESSAGES: { ocean: '', lootlingua: '' },
@@ -62,4 +63,18 @@ test('partial profile hydration retains authenticated appearance/name and does n
   const renders = h.renders;
   h.apply({ streakFreezes: 1, runnerCoins: 7 });
   assert.equal(h.renders, renders, 'identical acknowledgements must not rerender the same profile');
+});
+
+test('canonical hydration caches the confirmed settlement and clears it for a legacy streak tuple', () => {
+  const h = harness();
+  const key = 'lootlinguaDailyStreakState';
+  h.values.set(key, JSON.stringify({ timeZone: 'UTC', settledThrough: '2026-11-27' }));
+  const streakState = { timeZone: 'Asia/Amman', settledThrough: '2026-11-24' };
+  h.apply({ dailyStreak: 5, lastActivityDate: '2026-11-23', streakFreezes: 1, freezeSaves: 1, streakState });
+  assert.deepEqual(JSON.parse(h.values.get(key)), streakState);
+  h.apply({ displayName: 'Account' });
+  assert.deepEqual(JSON.parse(h.values.get(key)), streakState);
+  h.apply({ dailyStreak: 2, lastActivityDate: '2026-11-21', streakFreezes: 0 });
+  assert.equal(h.values.has(key), false);
+  assert.equal(h.values.get('lootlinguaStreakFreezes'), '0');
 });

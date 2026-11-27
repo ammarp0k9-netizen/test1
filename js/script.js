@@ -1971,7 +1971,8 @@ window.applyCanonicalLootlinguaProfile = function(d) {
       userXP = nextXP;
       put('userXP', userXP);
     }
-    if (d.dailyStreak !== undefined || d.lastActivityDate !== undefined) {
+    const hasStreakTuple = d.dailyStreak !== undefined || d.lastActivityDate !== undefined;
+    if (hasStreakTuple) {
       const nextStreak = Math.max(0, Number(d.dailyStreak) || 0);
       const nextActivity = String(d.lastActivityDate || '');
       if (dailyStreak !== nextStreak || lastActivity !== nextActivity) changed = true;
@@ -1979,6 +1980,12 @@ window.applyCanonicalLootlinguaProfile = function(d) {
       lastActivity = nextActivity;
       put('dailyStreak', dailyStreak);
       put('lastActivityDate', lastActivity);
+    }
+    if (d.streakState?.settledThrough) {
+      put('lootlinguaDailyStreakState', JSON.stringify(d.streakState));
+    } else if ((hasStreakTuple || Object.hasOwn(d, 'streakState')) && localStorage.getItem('lootlinguaDailyStreakState') !== null) {
+      localStorage.removeItem('lootlinguaDailyStreakState');
+      changed = true;
     }
     const integers = {
       streakFreezes: 'lootlinguaStreakFreezes', runnerCoins: 'lootlingua.runner.coins.v1',

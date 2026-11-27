@@ -36,7 +36,7 @@ export function createSavedGuestFlow({ app, appSdk, auth, sdk, guestAuth, emulat
     if (progress) return progress;
     const [firestore, imports] = await Promise.all([
       import('https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js'),
-      import('./guest-progress-merge.js?v=streak-days-1'),
+      import('./guest-progress-merge.js?v=streak-migration-1'),
     ]);
     const configured = new WeakSet();
     progress = imports.createGuestProgressMerge({

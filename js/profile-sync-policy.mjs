@@ -14,6 +14,33 @@ function calendarTime(day) {
   const date = new Date(`${day}T12:00:00Z`);
   return Number.isFinite(date.getTime()) && date.toISOString().slice(0, 10) === day ? date.getTime() : NaN;
 }
+
+function streakSettlementDay(profile) {
+  const settled = profile.streakState?.settledThrough;
+  return Number.isFinite(calendarTime(settled)) && settled > profile.lastActivityDate
+    ? settled : profile.lastActivityDate;
+}
+
+function mergeGuestStreak(profile, guest) {
+  const guestDay = calendarTime(guest.lastActivityDate);
+  if (!Number.isFinite(guestDay)) return;
+  const savedDay = calendarTime(profile.lastActivityDate);
+  const guestSettlement = streakSettlementDay(guest);
+  const savedSettlement = streakSettlementDay(profile);
+  // Keep the streak and its calendar together. For the same learning day,
+  // use the more recent settlement so already-protected days aren't charged again.
+  const sameDayWithNewerState = guestDay === savedDay && (
+    guestSettlement > savedSettlement ||
+    (guestSettlement === savedSettlement && number(guest.dailyStreak) > number(profile.dailyStreak))
+  );
+  if (Number.isFinite(savedDay) && guestDay <= savedDay && !sameDayWithNewerState) return;
+  profile.lastActivityDate = guest.lastActivityDate;
+  profile.dailyStreak = number(guest.dailyStreak);
+  profile.streakState = {
+    settledThrough: guestSettlement,
+    timeZone: streakTimeZone(guest, streakTimeZone(profile)),
+  };
+}
 export const PROFILE_SYNC_VERSION = 1;
 export const TREASURE_CAPACITY = 4;
 export const TREASURE_TYPES = Object.freeze({
@@ -343,17 +370,7 @@ export function applyProfileIntent(remote, intent, context = {}) {
         profile.lastPersonalTrustedQuizAt = Math.max(number(profile.lastPersonalTrustedQuizAt), number(guest.lastPersonalTrustedQuizAt));
       }
       if (guest.lootBots) profile.lootBots = mergeBotsProgress(profile.lootBots, guest.lootBots);
-      if (String(guest.lastActivityDate || '') > String(profile.lastActivityDate || '')) {
-        profile.lastActivityDate = guest.lastActivityDate;
-        profile.dailyStreak = number(guest.dailyStreak);
-        if (Number.isFinite(calendarTime(guest.lastActivityDate))) {
-          const settled = guest.streakState?.settledThrough;
-          profile.streakState = {
-            settledThrough: Number.isFinite(calendarTime(settled)) && settled > guest.lastActivityDate ? settled : guest.lastActivityDate,
-            timeZone: streakTimeZone(profile, guest.streakState?.timeZone),
-          };
-        }
-      }
+      mergeGuestStreak(profile, guest);
       for (const [day, amount] of Object.entries(guest.activityMap || {})) profile.activityMap = { ...(profile.activityMap || {}), [day]: Math.max(number(profile.activityMap?.[day]), number(amount)) };
       profile.addedGameWords = unique([...(profile.addedGameWords || []), ...(guest.addedGameWords || [])]);
       const titles = applyProfileIntent(profile, { type: 'titles', state: guest.titlesState || {} }).profile;

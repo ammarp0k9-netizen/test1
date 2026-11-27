@@ -4,7 +4,7 @@ import { getApps }  from "https://www.gstatic.com/firebasejs/10.12.0/firebase-ap
 import { getFirestore, doc, getDoc, runTransaction, onSnapshot } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
 import { getAuth, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js";
 import { GUIDE_TOUR, guideStorageKey } from './guide-coverage.mjs';
-import { applyProfileIntent, profileOperationId, profileStorageIntents, mergeOnboardingProgress } from './profile-sync-policy.mjs?v=streak-days-1';
+import { applyProfileIntent, profileOperationId, profileStorageIntents, mergeOnboardingProgress } from './profile-sync-policy.mjs?v=streak-migration-1';
 import { needsStreakSettlement, streakCalendar, streakTimeZone } from './daily-streak.mjs?v=streak-days-1';
 
 // استخدم التطبيق الموجود فقط بدون إعادة تعريف إذا كان معرف مسبقًا

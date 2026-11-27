@@ -295,6 +295,60 @@ test('guest snapshot receipts remain permanent after recovery cleanup and later 
   assert.equal(db.profile().lastPersonalTrustedQuizAt, personalAt + 86400000);
 });
 
+test('a guest migration with the same learning day retains the confirmed settlement and freeze balance across retries', async () => {
+  const day = '2026-11-23';
+  const streakState = { timeZone: 'Asia/Amman', settledThrough: '2026-11-24' };
+  const db = database({ userXP: 100, dailyStreak: 5, maxStreak: 7, lastActivityDate: day,
+    streakState: { timeZone: 'Asia/Amman', settledThrough: day }, streakFreezes: 1, freezeSaves: 0 });
+  const guest = {
+    userXP: 200, dailyStreak: 5, maxStreak: 8, lastActivityDate: day,
+    streakState, streakFreezes: 2, freezeSaves: 1,
+  };
+  const key = 'lootlingua:guest-profile-migration:v1:user:A';
+  const migration = { version: 1, uid: 'A', guestSnapshotId: 'guest-streak-snapshot', profile: guest };
+  const a = client(db);
+  a.localStorage.setItem(key, JSON.stringify(migration));
+  assert.equal(await a.root.commitPendingGuestProfileMigration({ uid: 'A' }), true);
+  assert.deepEqual(db.profile().streakState, streakState);
+  assert.deepEqual([db.profile().userXP, db.profile().dailyStreak, db.profile().maxStreak,
+    db.profile().streakFreezes, db.profile().freezeSaves], [200, 5, 8, 3, 1]);
+  assert.deepEqual(a.local.streakState, streakState);
+  const reloaded = client(db, { storage: a.localStorage });
+  assert.equal(await reloaded.root.commitPendingGuestProfileMigration({ uid: 'A' }), true);
+  await reloaded.root.commitProfileIntent({ type: 'streak-check', day: '2026-11-25', eventId: 'after-import' });
+  assert.deepEqual([db.profile().dailyStreak, db.profile().streakFreezes, db.profile().freezeSaves], [5, 3, 1]);
+  await reloaded.root.commitProfileIntent({ type: 'streak-check', day: '2026-11-26', eventId: 'new-missed-day' });
+  assert.deepEqual([db.profile().dailyStreak, db.profile().streakFreezes, db.profile().freezeSaves], [5, 2, 2]);
+  a.localStorage.setItem(key, JSON.stringify(migration));
+  assert.equal(await a.root.commitPendingGuestProfileMigration({ uid: 'A' }), true);
+  assert.deepEqual([db.profile().streakFreezes, db.profile().freezeSaves], [2, 2]);
+});
+
+test('guest streak reconciliation keeps newer account progress and accepts legacy guests', () => {
+  const saved = { dailyStreak: 0, lastActivityDate: '2026-11-23', maxStreak: 8, streakFreezes: 0,
+    streakState: { timeZone: 'Asia/Amman', settledThrough: '2026-11-25' } };
+  const { profile: stale } = applyProfileIntent(saved, { type: 'guest-import', profile: {
+    dailyStreak: 7, lastActivityDate: saved.lastActivityDate, streakFreezes: 2,
+    streakState: { timeZone: 'Asia/Amman', settledThrough: '2026-11-24' },
+  } });
+  assert.equal(stale.dailyStreak, 0);
+  assert.equal(stale.streakFreezes, 2);
+  assert.deepEqual(stale.streakState, saved.streakState);
+  const { profile: legacy } = applyProfileIntent(saved, { type: 'guest-import', profile: {
+    dailyStreak: 1, lastActivityDate: '2026-11-26', streakFreezes: 2, streakState: null,
+  } });
+  assert.equal(legacy.dailyStreak, 1);
+  assert.equal(legacy.streakFreezes, 2);
+  assert.deepEqual(legacy.streakState, { timeZone: 'Asia/Amman', settledThrough: '2026-11-26' });
+  const { profile: otherZone } = applyProfileIntent(legacy, { type: 'guest-import', profile: {
+    dailyStreak: 3, lastActivityDate: '2026-11-27', streakFreezes: 1,
+    streakState: { timeZone: 'America/New_York', settledThrough: '2026-11-27' },
+  } });
+  assert.equal(otherZone.dailyStreak, 3);
+  assert.equal(otherZone.streakFreezes, 3);
+  assert.deepEqual(otherZone.streakState, { timeZone: 'America/New_York', settledThrough: '2026-11-27' });
+});
+
 test('simultaneous chest openings confirm at most one reward and spent freezes do not reappear', async () => {
   const db = database({ streakFreezes: 0, dailyLootState: {} });
   const a = client(db), b = client(db);
