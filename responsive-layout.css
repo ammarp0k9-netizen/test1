@@ -391,7 +391,6 @@ body.treasure-mode:not(.quiz-active) .main-content {
   pointer-events: none;
   --edge-color: color-mix(in srgb, var(--bg, var(--card-bg)) 74%, transparent);
   --edge-depth: clamp(22px, 4.4dvh, 44px);
-  --edge-blur: 1.65px;
 }
 .viewport-edges { position: fixed; inset: 0; z-index: 10052; }
 .viewport-edges::before, .viewport-edges::after,
@@ -417,13 +416,13 @@ body.treasure-mode:not(.quiz-active) .main-content {
 .viewport-edges[data-top]::before, .viewport-edges[data-bottom]::after,
 .workspace-edges[data-top]::before, .workspace-edges[data-bottom]::after { opacity: 1; }
 body:is(.quiz-active, .runner-input-active) > .viewport-edges { display: none; }
-body.perf-balanced :is(.viewport-edges, .workspace-edges) { --edge-blur: 1px; }
+body.perf-balanced :is(.viewport-edges, .workspace-edges) { --edge-depth: clamp(20px, 4dvh, 39px); }
 body.perf-stable :is(.viewport-edges, .workspace-edges) { --edge-depth: clamp(19px, 3.8dvh, 34px); }
 body:is(.perf-turbo, .low-end-device) :is(.viewport-edges, .workspace-edges) { --edge-depth: clamp(16px, 3.1dvh, 28px); }
 @supports ((backdrop-filter: blur(1px)) and (mask-image: linear-gradient(black, transparent))) {
-  body:is(.perf-ultra, .perf-balanced):not(.low-end-device) :is(.viewport-edges, .workspace-edges)::before,
-  body:is(.perf-ultra, .perf-balanced):not(.low-end-device) :is(.viewport-edges, .workspace-edges)::after {
-    backdrop-filter: blur(var(--edge-blur));
+  body.perf-ultra:not(.low-end-device) :is(.viewport-edges, .workspace-edges)::before,
+  body.perf-ultra:not(.low-end-device) :is(.viewport-edges, .workspace-edges)::after {
+    backdrop-filter: blur(1.65px);
     mask-image: linear-gradient(var(--edge-direction), #000c, transparent);
   }
 }
@@ -448,8 +447,9 @@ body:is(.perf-turbo, .low-end-device) :is(.viewport-edges, .workspace-edges) { -
   }
 }
 @media (prefers-reduced-motion: reduce) {
-  .viewport-edges::before, .viewport-edges::after, .workspace-edges::before, .workspace-edges::after,
-  .dictionary-detail { transition: none !important; }
+  body :is(.viewport-edges, .workspace-edges)::before,
+  body :is(.viewport-edges, .workspace-edges)::after,
+  body .dictionary-detail { transition: none !important; }
 }
 
 @media (max-height: 660px) {
