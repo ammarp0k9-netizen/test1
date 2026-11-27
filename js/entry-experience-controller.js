@@ -564,9 +564,9 @@
       const owner = identityFor(user).uid || 'guest';
       if (runtime.returnedOwner !== owner) {
         runtime.returnedOwner = owner;
-        const resumed = await consumePendingJourneyIntent();
         const route = typeof parseAppRoute === 'function' ? parseAppRoute() : null;
-        const explicitRoute = route && (route.kind !== 'view' || route.key !== 'personal');
+        const explicitRoute = root.shouldPreserveEntryRoute?.() || (route && (route.kind !== 'view' || route.key !== 'personal'));
+        const resumed = await consumePendingJourneyIntent({ preserveRoute: explicitRoute });
         if (!resumed && !explicitRoute && token === runtime.bootToken && !root.isDictionarySelectionActive?.()) {
           if (signals.resumableQuiz) root.loadQuizView?.();
           else if (signals.activeJourney?.worldId) {
@@ -1273,6 +1273,9 @@
     }
     const intent = selection.intent;
     if (!intent) return false;
+    // A saved sign-in action can resume on the page where it was requested.
+    // Loading an unrelated page leaves the action available for its own route.
+    if (options?.preserveRoute && intent.returnTo?.split(/[?#]/, 1)[0] !== root.location?.pathname) return false;
     if (intent.status === 'consumed' || intent.status === 'cancelled') {
       if (
         selection.source === 'guest' ||

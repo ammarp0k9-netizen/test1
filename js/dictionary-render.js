@@ -295,7 +295,8 @@ function renderDictionaryWordDetail(indexMap, { hoverOnly = false } = {}) {
   const find = id => lookup ? window.words[lookup.get(id)] : window.words.find(word => String(word.id) === id);
   const selectionId = enabled && dictionaryDetailSelection?.scope === scope && find(dictionaryDetailSelection.id)
     ? dictionaryDetailSelection.id : null;
-  if (!enabled || dictionaryDetailHover?.scope !== scope || !dictionaryHoverAvailable()) dictionaryDetailHover = null;
+  if (!enabled || dictionaryDetailHover?.scope !== scope || !dictionaryDetailHover?.card.isConnected ||
+      !dictionaryHoverAvailable()) dictionaryDetailHover = null;
   const hoverId = dictionaryDetailHover?.id;
   const shownId = hoverId && find(hoverId) ? hoverId : selectionId;
   const word = shownId && find(shownId);
@@ -379,20 +380,16 @@ window.addEventListener('lootlingua:dictionary-navigation', () => {
 {
   const list = document.getElementById('list');
   const workspace = document.querySelector('.dictionary-workspace');
-  function leaveDictionaryHover(event) {
-    if (event.pointerType !== 'mouse' || workspace.contains(event.relatedTarget)) return;
-    clearTimeout(dictionaryHoverTimer);
-    dictionaryHoverTimer = setTimeout(resetDictionaryHover, 205);
-  }
+  const cardAt = node => node?.closest?.('#list .word-card[data-id]');
   list.addEventListener('pointerover', event => {
-    const card = event.target.closest('.word-card[data-id]');
+    const card = cardAt(event.target);
     if (event.pointerType !== 'mouse' || !card || card.contains(event.relatedTarget) || !dictionaryHoverAvailable()) return;
     const scope = getAddFormDraftScope();
     const id = card.dataset.id;
     clearTimeout(dictionaryHoverTimer);
     dictionaryHoverTimer = setTimeout(() => {
       if (!card.isConnected || card.dataset.id !== id || !dictionaryHoverAvailable() || getAddFormDraftScope() !== scope) return;
-      dictionaryDetailHover = { scope, id };
+      dictionaryDetailHover = { scope, id, card };
       renderDictionaryWordDetail(undefined, { hoverOnly: true });
       if (dictionaryDetailSelection?.scope !== scope || dictionaryDetailSelection.id !== id) {
         void positionDictionaryDetail({ preview: true });
@@ -400,13 +397,14 @@ window.addEventListener('lootlingua:dictionary-navigation', () => {
     }, 100);
   });
   list.addEventListener('pointerout', event => {
-    const from = event.target.closest('.word-card[data-id]');
-    if (from && !from.contains(event.relatedTarget)) leaveDictionaryHover(event);
+    if (event.pointerType !== 'mouse' || !cardAt(event.target) || cardAt(event.relatedTarget)) return;
+    clearTimeout(dictionaryHoverTimer);
+    dictionaryHoverTimer = setTimeout(resetDictionaryHover, 75);
   });
-  workspace.addEventListener('pointerenter', event => {
-    if (event.pointerType === 'mouse') clearTimeout(dictionaryHoverTimer);
+  document.addEventListener('pointerover', event => {
+    if (event.pointerType === 'mouse' && dictionaryDetailHover && !cardAt(event.target)) resetDictionaryHover();
   });
-  workspace.addEventListener('pointerleave', leaveDictionaryHover);
+  window.addEventListener('blur', resetDictionaryHover);
   const keepPosition = () => { dictionaryHoverScrollHome = null; dictionaryDetailScrollRequest++; };
   workspace.addEventListener('wheel', keepPosition, { passive: true });
   workspace.addEventListener('pointerdown', keepPosition, { passive: true });

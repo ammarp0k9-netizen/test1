@@ -76,7 +76,10 @@ test('private worlds show the account cache immediately and ignore an empty unco
   const source = read('cloud.js');
   const code = source.slice(source.indexOf('  function loadCustomWorldsFromCloud'), source.indexOf('  function loadGlobalWordMasteryFromCloud'));
   vm.runInNewContext('let customWorldsUnsubscribe=null;' + code, { window: root, auth, db: {}, console: { info() {}, warn() {} },
-    collection() {}, onSnapshot(_query, callback) { subscriptions++; listener = callback; return () => {}; },
+    collection() {}, onSnapshot(_query, options, callback) {
+      assert.equal(options.includeMetadataChanges, true);
+      subscriptions++; listener = callback; return () => {};
+    },
   });
   root.ensureCustomWorldsFromCloud(); root.ensureCustomWorldsFromCloud();
   assert.equal(subscriptions, 1); assert.equal(calls.length, 1); assert.equal(calls[0][0].id, 'saved');

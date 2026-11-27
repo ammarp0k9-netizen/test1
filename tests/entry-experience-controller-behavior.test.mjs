@@ -507,6 +507,7 @@ async function createHarness(options = {}) {
     words: clone(options.words || []),
     auth: { currentUser: initialUser },
     navigator: {},
+    shouldPreserveEntryRoute: () => options.preserveEntryRoute === true,
     isDictionarySelectionActive: () => options.dictionarySelectionActive === true,
     crypto: { randomUUID: () => `operation-${Math.random().toString(36).slice(2)}` },
     prepareGuestMigrationForUser: async () => 'none',
@@ -1077,6 +1078,19 @@ test('startup leaves an active dictionary selection in place when a journey is a
   assert.equal(harness.controller.isActive(), false);
   assert.deepEqual(harness.calls.resumedWorlds, []);
   assert.equal(harness.calls.resumeIntents.length, 0);
+});
+
+test('an explicit dictionary reload stays in the dictionary with an active Journey', async () => {
+  const harness = await createHarness({
+    user: oldUser('dictionary-reload'),
+    preserveEntryRoute: true,
+    hasJourneyProgress: true,
+    activeJourney: { worldId: 'world-active', activeRankId: 'rank-a1', activeGateId: 'gate-a1', status: 'active' },
+    journeyDestination: { type: 'gate', reason: 'started' },
+  });
+  assert.equal(harness.controller.isActive(), false);
+  assert.deepEqual(harness.calls.resumedWorlds, []);
+  assert.equal(harness.calls.worlds, 0);
 });
 
 test('matrix: a completed-only World gets the terminal shortcut with no fake Journey preview', async () => {

@@ -1274,12 +1274,25 @@ const APP_PROJECT_BASE_PATH = (() => {
 })();
 let appRouteSyncing = false;
 let appRoutingReady = false;
+let pendingPrivateWorldRoute = null;
+const appStartupPath = location.pathname.replace(/\/+$/, '');
+const startupHasDestination = appStartupPath !== APP_PROJECT_BASE_PATH &&
+  appStartupPath !== APP_PROJECT_BASE_PATH + '/index.html';
+
+window.shouldPreserveEntryRoute = () => startupHasDestination ||
+  window.performance?.getEntriesByType?.('navigation')[0]?.type === 'reload' ||
+  Boolean(history.state?.lootlingua && history.state.source !== 'initial');
 
 function getAppBasePath() {
   return APP_PROJECT_BASE_PATH;
 }
 
-function getAppRoutePath(kind, key) {
+function getAppRoutePath(kind, key, options = {}) {
+  if (kind === 'view' && key === 'customWorld') {
+    const worldId = options.params?.worldId;
+    return getAppBasePath() + '/private-worlds' + (worldId ? '/' + encodeURIComponent(worldId) : '');
+  }
+  if (kind === 'view' && key === 'worlds' && options.tab === 'custom') return getAppBasePath() + '/private-worlds';
   if (kind === 'published') {
     const params = key && typeof key === 'object' ? key : {};
     const parts = ['worlds'];
@@ -1298,7 +1311,7 @@ function getAppRoutePath(kind, key) {
 
 function parseAppRoute() {
   const basePath = getAppBasePath();
-  let pathname = decodeURIComponent(location.pathname || '');
+  let pathname = location.pathname || '';
   if (basePath && (pathname === basePath || pathname === basePath + '/')) {
     pathname = '';
   } else if (basePath && pathname.startsWith(basePath + '/')) {
@@ -1306,7 +1319,13 @@ function parseAppRoute() {
   }
   const slug = pathname.replace(/^\/+|\/+$/g, '');
   if (!slug) return { kind: 'view', key: 'personal' };
-  const parts = slug.split('/').filter(Boolean);
+  let parts;
+  try { parts = slug.split('/').filter(Boolean).map(decodeURIComponent); }
+  catch (_) { return { kind: 'view', key: 'personal' }; }
+  if (parts[0] === 'private-worlds') {
+    if (parts.length === 2 && parts[1]) return { kind: 'view', key: 'customWorld', params: { worldId: parts[1] } };
+    return { kind: 'view', key: 'worlds', tab: 'custom' };
+  }
   if (parts[0] === APP_VIEW_ROUTES.worlds && parts.length > 1) {
     if (parts.length === 2) {
       const assessmentId = history.state?.params?.worldId === parts[1] ? history.state.params.assessmentId : '';
@@ -1351,7 +1370,7 @@ function setAppRoute(kind, key, options = {}) {
     lootlingua: true,
     kind,
     key,
-    ...(kind === 'published' ? { params: routeKey } : {}),
+    ...(kind === 'published' ? { params: routeKey } : options.params ? { params: options.params } : {}),
     ...(options.tab ? { tab: options.tab } : {}),
     source: options.source || (options.replace ? 'replace' : 'push')
   };
@@ -1364,10 +1383,10 @@ function setAppRoute(kind, key, options = {}) {
     });
   }
   if (!appRoutingReady || appRouteSyncing) return;
-  const path = getAppRoutePath(kind, routeKey);
+  const path = getAppRoutePath(kind, routeKey, options);
   try {
     if (location.pathname === path) {
-      history.replaceState({ ...state, source: history.state?.source || state.source }, '', path);
+      history.replaceState({ ...state, source: history.state?.source || state.source }, '', location.href);
       return;
     }
     history[options.replace ? 'replaceState' : 'pushState'](state, '', path);
@@ -1377,6 +1396,7 @@ function setAppRoute(kind, key, options = {}) {
 }
 
 function setAppViewRoute(viewKey, options = {}) {
+  if (viewKey === 'customWorld' && !options.params) options = { ...options, params: { worldId: activeCustomWorldId } };
   setAppRoute('view', viewKey, options);
 }
 
@@ -1543,10 +1563,23 @@ function applyAppRoute(route = parseAppRoute()) {
     return false;
   }
   appRouteSyncing = true;
+  pendingPrivateWorldRoute = null;
   closeRouteOverlays();
   if (route.kind === 'view') {
-    openRouteView(route.key);
-    if (route.key === 'worlds' && route.tab === 'custom') window.showCustomWorldsTab?.();
+    if (route.key === 'customWorld' || route.tab === 'custom') {
+      const worldId = route.params?.worldId;
+      if (worldId && customWorlds.some(world => String(world.id) === worldId)) {
+        window.loadCustomWorld(worldId);
+      } else {
+        prepareWorldsShell();
+        window.showCustomWorldsTab?.();
+        if (worldId && customWorlds.some(world => String(world.id) === worldId)) {
+          window.loadCustomWorld(worldId);
+        } else if (worldId && window.auth?.currentUser?.uid) {
+          pendingPrivateWorldRoute = { worldId, uid: window.auth.currentUser.uid, pathname: location.pathname };
+        }
+      }
+    } else openRouteView(route.key);
   } else if (route.kind === 'published') {
     if (typeof window.loadPublishedContentRoute === 'function') {
       window.loadPublishedContentRoute(route);
@@ -1561,11 +1594,18 @@ function applyAppRoute(route = parseAppRoute()) {
   return true;
 }
 
+window.addEventListener('lootlingua:custom-worlds-updated', event => {
+  const pending = pendingPrivateWorldRoute;
+  if (!pending || pending.uid !== event.detail.uid || pending.pathname !== location.pathname) return;
+  if (customWorlds.some(world => String(world.id) === pending.worldId)) applyAppRoute();
+  else if (event.detail.confirmedServer) pendingPrivateWorldRoute = null;
+});
+
 function handleInitialRouting() {
   if (appRoutingReady) return;
   const route = parseAppRoute();
-  if (route.kind === 'view' && route.key === 'quiz' && !window.__lootlinguaInitialDataReady) {
-    // Quiz availability and a saved attempt both depend on the current owner.
+  if (!window.__lootlinguaInitialDataReady && (route.key === 'quiz' || route.key === 'customWorld' || window.auth)) {
+    // Auth can replace guest data and reset currentView before the owner is ready.
     window.addEventListener('lootlingua:initial-data-ready', handleInitialRouting, { once: true });
     return;
   }
@@ -1573,13 +1613,14 @@ function handleInitialRouting() {
   try {
     const path = getAppRoutePath(
       route.kind,
-      route.kind === 'published' ? route.params : route.key
+      route.kind === 'published' ? route.params : route.key,
+      route
     );
     const state = { lootlingua: true, ...route, source: 'initial' };
     if (location.pathname === path) {
       history.replaceState(state, '', location.href);
     } else {
-      history.replaceState(state, '', path);
+      history.replaceState(state, '', path + (location.search || '') + (location.hash || ''));
     }
   } catch (err) {
     console.warn('route:', err.message);

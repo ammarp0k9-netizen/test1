@@ -93,7 +93,7 @@
   <link rel="stylesheet" href="motivation.css?v=20261106-motivation-1">
   <link rel="stylesheet" href="glass-theme.css?v=20261106-materials-1">
   <link rel="stylesheet" href="saved-guest.css?v=full-merge-1">
-  <link rel="stylesheet" href="responsive-layout.css?v=dictionary-flow-2">
+  <link rel="stylesheet" href="responsive-layout.css?v=dictionary-controls-1">
 </head>
 <body class="legend-dock-visible">
 <div class="viewport-edges" aria-hidden="true"></div>
@@ -352,7 +352,7 @@
         <button type="button" data-sort-mode="oldest" onclick="setDictionarySortMode('oldest')">الأقدم</button>
         <button type="button" data-sort-mode="alpha" onclick="setDictionarySortMode('alpha')">حسب الأحرف</button>
         <div class="sort-submenu-wrap">
-          <button type="button" class="sort-submenu-toggle" onclick="toggleSortCategorySubmenu(event)">
+          <button type="button" class="sort-submenu-toggle" onclick="toggleSortCategorySubmenu(event)" aria-controls="dictionarySortCategoryMenu" aria-expanded="false">
             ترتيب حسب النوع
             <i class="fa-solid fa-chevron-down" aria-hidden="true"></i>
           </button>
@@ -1281,13 +1281,13 @@
 <script src="js/entry-experience-contract.js?v=20261113-resumable-guide"></script>
   <script src="js/guided-first-journey-contract.js?v=20261113-resumable-guide"></script>
   <script src="js/feature-discovery-contract.js?v=20261104-discovery-1"></script>
-<script data-startup-critical src="js/entry-experience-controller.js?v=dictionary-polish-2"></script>
+<script data-startup-critical src="js/entry-experience-controller.js?v=dictionary-controls-1"></script>
 <script src="js/personal-dictionary-onboarding.js?v=guide-final-1"></script>
   <script src="js/feature-discovery-controller.js?v=guide-discovery-1"></script>
 <script src="js/feature-mini-onboarding.js?v=guide-final-1"></script>
   <script src="js/smart-onboarding.js?v=guide-sections-2"></script>
   <script type="module" src="js/lootlingua-guide.js?v=guide-sections-2"></script>
-<script data-startup-critical type="module" src="js/cloud.js?v=workspace-2"></script>
+<script data-startup-critical type="module" src="js/cloud.js?v=dictionary-controls-1"></script>
 <script data-startup-critical type="module" src="js/entry-experience-cloud.js?v=reliable-sync-2"></script>
 <script type="module" src="js/guided-first-journey-cloud.js?v=20260827-1"></script>
 
@@ -1339,7 +1339,7 @@
 <script src="js/operation-runtime.js?v=reliable-sync-2"></script>
 <script src="js/sync-status.js?v=workspace-1"></script>
 <script src="js/dictionary-sync.js?v=reliable-sync-2"></script>
-    <script data-startup-critical src="js/storage.js?v=workspace-1"></script>
+    <script data-startup-critical src="js/storage.js?v=dictionary-controls-1"></script>
   <script src="js/content-schema.js?v=20260722-1"></script>
 <script src="js/word-lifecycle.js?v=20260722-1"></script>
 <script src="js/quiz-core.js?v=20260811-1"></script>
@@ -1351,7 +1351,7 @@
 <script src="js/placement.js?v=20260720-1"></script>
 <script src="js/level-placement.js?v=20260728-1"></script>
 <script src="js/word-list-data.js?v=20261106-admin-fixes-1"></script>
-<script data-startup-critical src="js/script.js?v=workspace-1"></script>
+<script data-startup-critical src="js/script.js?v=dictionary-controls-1"></script>
 <script type="module" src="js/daily-streak.mjs?v=streak-days-1"></script>
 <script src="js/xp.js?v=workspace-1"></script>
 <script src="js/xp-batch.js?v=20261105-integrity-1"></script>
@@ -1359,10 +1359,10 @@
 <script src="js/gate-game-migration.js?v=20261007-1"></script>
 <script src="js/gate-runner.js?v=quiz-classification-1"></script>
 <script src="js/loot-bots.js?v=20261113-automatic-performance"></script>
-<script src="js/worlds.js?v=workspace-1"></script>
+<script src="js/worlds.js?v=dictionary-controls-1"></script>
 <script src="js/dictionary-window.js?v=20261105-render-1"></script>
-<script src="js/dictionary-render.js?v=dictionary-flow-1"></script>
-<script src="js/workspace-edges.js?v=dictionary-flow-1"></script>
+<script src="js/dictionary-render.js?v=dictionary-controls-1"></script>
+<script src="js/workspace-edges.js?v=dictionary-controls-1"></script>
 <script src="js/srs.js?v=reliable-sync-2"></script>
 <script src="js/popover-overrides.js?v=20260817-1"></script>
 <script src="js/quiz.js?v=reliable-sync-2"></script>

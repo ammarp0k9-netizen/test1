@@ -784,7 +784,9 @@ window.loadGuestDictionaryState = function({ renderView = true } = {}) {
 window.applyCustomWorldsFromCloud = function(worlds, meta = {}) {
   const uid = window.auth?.currentUser?.uid;
   const confirmedServer = meta.fromCache === false && meta.hasPendingWrites === false;
+  const activeWorld = isCustomWorldView() ? getActiveCustomWorld() : null;
   customWorlds = mergeCloudAndPendingCustomWorlds(worlds, uid, { confirmedServer });
+  if (activeWorld && !confirmedServer && !getActiveCustomWorld()) customWorlds.push(activeWorld);
   writeCustomWorldsToStorage(customWorlds, uid);
   renderCustomWorldCards();
   if (isCustomWorldView() && !getActiveCustomWorld()) {
@@ -798,6 +800,7 @@ window.applyCustomWorldsFromCloud = function(worlds, meta = {}) {
     refreshQuizSettingsSummary();
   }
   retryPendingCustomWorlds('worlds-snapshot');
+  window.dispatchEvent(new CustomEvent('lootlingua:custom-worlds-updated', { detail: { uid, confirmedServer } }));
 };
 
 window.applyCustomWorldWordsFromSnapshot = function(worldId, cloudWords, meta = {}) {

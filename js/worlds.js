@@ -7139,7 +7139,7 @@ window.loadCustomWorld = function(worldId) {
   restoreViewScroll(getActiveDictionaryStorageScope());
   refreshFeatureUnlockUI();
   if (window.listenCustomWorldWordsFromCloud) window.listenCustomWorldWordsFromCloud(activeCustomWorldId);
-  setAppViewRoute('worlds');
+  setAppViewRoute('customWorld', { params: { worldId: activeCustomWorldId } });
 };
 
 function getSelectedWordsForWorldManage() {

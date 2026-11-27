@@ -1677,7 +1677,7 @@
       uid: listenerUid,
       path: `users/${listenerUid}/customWorlds`,
     });
-    customWorldsUnsubscribe = onSnapshot(q, (snapshot) => {
+    customWorldsUnsubscribe = onSnapshot(q, { includeMetadataChanges: true }, (snapshot) => {
       if (auth.currentUser?.uid !== listenerUid) return;
       // An empty SDK memory cache is not a confirmed deletion of the saved
       // account list. Keep the instant local list until the server responds.

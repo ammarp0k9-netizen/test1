@@ -163,14 +163,16 @@ body.treasure-mode:not(.quiz-active) .main-content {
   --dictionary-glass-blur: blur(20px) saturate(168%);
   --dictionary-tools-gap: 8px;
 }
-.main-content:has(#personalControls:not([style*="none"])) :is(.page-header, .header-top) { display: contents; }
-.main-content:has(#personalControls:not([style*="none"])) #pageTitle {
-  position: sticky;
-  inset-block-start: var(--dictionary-tools-top, 76px);
-  z-index: 31;
+.main-content:has(#personalControls:not([style*="none"])) > .page-header { display: contents; }
+.main-content:has(#personalControls:not([style*="none"])) > .page-header > .header-top {
   width: fit-content;
   max-inline-size: min(100%, 30ch);
   margin-block: 0 var(--dictionary-tools-gap);
+  align-items: center;
+  flex-wrap: nowrap;
+  gap: 8px;
+}
+.main-content:has(#personalControls:not([style*="none"])) #pageTitle {
   padding: 3px 0;
   color: var(--accent);
   -webkit-text-fill-color: currentColor;
@@ -180,22 +182,101 @@ body.treasure-mode:not(.quiz-active) .main-content {
   color: var(--text-white);
 }
 .main-content:has(#personalControls:not([style*="none"])) #viewNavBar {
-  position: absolute;
-  inset-block-start: max(var(--shell-content-top, 0px), calc(var(--legend-top-h) + var(--shell-padding, 26px) + var(--sync-status-offset, 0px)));
-  inset-inline-end: 24px;
-  z-index: 32;
+  position: relative;
+}
+.main-content:has(#personalControls:not([style*="none"])) #viewBackBar {
+  inline-size: 34px;
+  block-size: 34px;
+  min-block-size: 34px;
+  border-radius: 10px;
 }
 .main-content:has(#personalControls:not([style*="none"])) .search-bar-row {
-  position: sticky;
-  inset-block-start: calc(var(--dictionary-tools-top, 76px) + var(--dictionary-title-height, 36px) + var(--dictionary-tools-gap));
   margin-block-end: var(--dictionary-tools-gap);
 }
-.main-content:has(#personalControls:not([style*="none"])) :is(.dictionary-filter-search, #dictionarySortBtn, #selectionModeBtn, .custom-world-title-action) {
+.main-content:has(#personalControls:not([style*="none"])) :is(
+  #voiceSearchBtn, #searchFilterBtn, #dictionarySortBtn, #selectionModeBtn,
+  .custom-world-title-action, #viewBackBar, #searchFilterMenu, #dictionarySortMenu, #dictionarySortCategoryMenu
+) {
   background: var(--dictionary-glass);
   border-color: var(--legend-glass-border);
   backdrop-filter: var(--dictionary-glass-blur) !important;
   -webkit-backdrop-filter: var(--dictionary-glass-blur) !important;
   box-shadow: var(--legend-glass-shadow);
+}
+.main-content:has(#personalControls:not([style*="none"])) .dictionary-filter-search {
+  background: transparent;
+  box-shadow: var(--legend-glass-shadow);
+  border-color: var(--legend-glass-border);
+}
+.main-content:has(#personalControls:not([style*="none"])) .dictionary-filter-search::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  border-radius: inherit;
+  background: var(--dictionary-glass);
+  backdrop-filter: var(--dictionary-glass-blur) !important;
+  -webkit-backdrop-filter: var(--dictionary-glass-blur) !important;
+  pointer-events: none;
+}
+.main-content:has(#personalControls:not([style*="none"])) :is(#voiceSearchBtn, #searchFilterBtn, #viewBackBar, .custom-world-title-action) {
+  color: var(--text-white);
+}
+.main-content:has(#personalControls:not([style*="none"])) :is(#viewBackBar, #voiceSearchBtn, #searchFilterBtn):hover {
+  color: var(--accent);
+}
+.main-content:has(#personalControls:not([style*="none"])) #voiceSearchBtn.is-listening {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+.search-bar-row:has(.app-dropdown-menu.open) { z-index: 35; }
+.main-content:has(#personalControls:not([style*="none"])) :is(#searchFilterMenu, #dictionarySortMenu) {
+  box-sizing: border-box;
+  inset-inline: auto 0;
+  inset-block-start: calc(100% + 7px);
+  inset-block-end: auto;
+  inline-size: min(12.5rem, calc(100vw - 32px));
+  min-inline-size: 0;
+  max-block-size: var(--dictionary-menu-room, 56dvh);
+  translate: var(--dictionary-menu-shift, 0px) 0;
+  overflow: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+  border-radius: 12px;
+}
+.main-content:has(#personalControls:not([style*="none"])) :is(#searchFilterMenu, #dictionarySortMenu)[data-open-up] {
+  inset-block-start: auto;
+  inset-block-end: calc(100% + 7px);
+}
+.main-content:has(#personalControls:not([style*="none"])) :is(#searchFilterMenu, #dictionarySortMenu) button {
+  text-align: start;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  min-block-size: 34px;
+}
+.main-content:has(#personalControls:not([style*="none"])) #dictionarySortCategoryMenu {
+  min-inline-size: 0;
+  border: 1px solid var(--legend-glass-border);
+  border-radius: 9px;
+  padding: 3px;
+}
+.dictionary-tooltip {
+  position: fixed;
+  z-index: 10210;
+  max-inline-size: min(18rem, calc(100vw - 16px));
+  padding: 5px 10px;
+  border: 1px solid var(--legend-glass-border);
+  border-radius: 9px;
+  background: var(--card-bg);
+  box-shadow: 0 4px 14px #0004;
+  color: var(--text-white);
+  font-size: .75rem;
+  text-align: center;
+  pointer-events: none;
+}
+@media (any-hover: hover) {
+  :is(#list, #dictionaryWordDetail) :is(.icon-circle, .star-btn)[data-tip]::after,
+  .main-content:has(#personalControls:not([style*="none"])) #viewBackBar::after { content: none; }
 }
 body:is(.perf-balanced, .perf-stable) .main-content:has(#personalControls:not([style*="none"])) {
   --dictionary-glass: color-mix(in srgb, var(--card-bg) 67%, transparent);
@@ -206,7 +287,7 @@ body:is(.perf-turbo, .low-end-device) .main-content:has(#personalControls:not([s
   --dictionary-glass-blur: blur(5px) saturate(125%);
 }
 @media (max-width: 939px) {
-  body.view-has-back .main-content:has(#personalControls:not([style*="none"])) #pageTitle { max-inline-size: calc(100% - 54px); }
+  .main-content:has(#personalControls:not([style*="none"])) > .page-header > .header-top { max-inline-size: 100%; }
 }
 .published-back-btn { min-height: 40px; border-radius: 9px; }
 .quiz-panel-header, #quizView .quiz-card-meta {
@@ -257,6 +338,7 @@ body:is(.perf-turbo, .low-end-device) .main-content:has(#personalControls:not([s
 }
 
 @media (min-width: 769px) {
+  #legendTopBar { width: min(1168px, calc(100vw - 28px)); }
   body:has(#worldsView:not([style*="none"]), #quizView:not([style*="none"]),
     #personalControls:not([style*="none"])) {
     --content-max: 1168px;
@@ -323,6 +405,18 @@ body:is(.perf-turbo, .low-end-device) .main-content:has(#personalControls:not([s
   }
 }
 
+@media (min-width: 940px) and (hover: hover) and (pointer: fine) {
+  .main-content:has(#personalControls:not([style*="none"])) > .page-header > .header-top {
+    position: sticky;
+    inset-block-start: var(--dictionary-tools-top, 76px);
+    z-index: 31;
+  }
+  .main-content:has(#personalControls:not([style*="none"])) .search-bar-row {
+    position: sticky;
+    inset-block-start: var(--dictionary-tools-top, 76px);
+  }
+}
+
 @media (min-width: 940px) {
   .dictionary-layout:has(#personalControls:not([style*="none"])) {
     display: grid;
@@ -334,9 +428,7 @@ body:is(.perf-turbo, .low-end-device) .main-content:has(#personalControls:not([s
     display: block;
     min-width: 0;
   }
-  .main-content:has(#personalControls:not([style*="none"])) #pageTitle { max-inline-size: 45%; }
-  .main-content:has(#personalControls:not([style*="none"])) .search-bar-row { inset-block-start: var(--dictionary-tools-top, 76px); }
-  .main-content:has(#personalControls:not([style*="none"])) #viewNavBar { inset-inline-end: calc(53% + 16px); }
+  .main-content:has(#personalControls:not([style*="none"])) > .page-header > .header-top { max-inline-size: 45%; }
   .dictionary-layout:has(#personalControls:not([style*="none"])) .dictionary-workspace {
     position: sticky;
     top: var(--workspace-top, calc(var(--legend-top-h) + 24px + var(--sync-status-offset, 0px)));
