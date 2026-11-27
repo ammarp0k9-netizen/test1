@@ -87,3 +87,14 @@ test('private worlds show the account cache immediately and ignore an empty unco
   auth.currentUser = { uid: 'b' }; listener({ docs: [], metadata: { fromCache: false } });
   assert.equal(calls.length, 2, 'an old account cannot change the new account list');
 });
+
+test('the existing private-world listener receives server confirmation even if cached words are identical', () => {
+  const cloud = read('cloud.js');
+  const first = cloud.indexOf('window.listenCustomWorldWordsFromCloud =');
+  const last = cloud.indexOf('window.stopCustomWorldWordsCloudListener =', first);
+  assert.ok(first >= 0 && last > first);
+  const listener = cloud.slice(first, last);
+  assert.match(listener, /onSnapshot\(q,\s*\{\s*includeMetadataChanges:\s*true\s*\}/);
+  assert.match(listener, /listener:\s*true/);
+  assert.equal((listener.match(/\bonSnapshot\(/g) || []).length, 1);
+});

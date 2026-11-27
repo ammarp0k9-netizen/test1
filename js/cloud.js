@@ -2089,7 +2089,8 @@
     const listenerUid = user.uid;
     const listenerWorldId = String(worldId);
     const q = query(collection(db, "users", user.uid, "customWorlds", listenerWorldId, "words"), orderBy("createdAt", "desc"));
-    customWorldWordsUnsubscribe = onSnapshot(q, (snapshot) => {
+    // The SDK can confirm identical cached rows with a metadata-only event.
+    customWorldWordsUnsubscribe = onSnapshot(q, { includeMetadataChanges: true }, (snapshot) => {
       if (auth.currentUser?.uid !== listenerUid) return;
       if (window.__suppressCloudWordsSnapshot) return;
       if (typeof window.isActiveCustomWorld !== 'function' || !window.isActiveCustomWorld(listenerWorldId)) return;
