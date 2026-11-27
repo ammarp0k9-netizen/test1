@@ -7227,10 +7227,10 @@ function renderWorldManageTargets() {
   if (summary) summary.textContent = `الكلمات المحددة: ${bulkSelectedWordIds.size}`;
   const targets = getWorldManageTargets();
   const targetHtml = targets.filter(target => target.id !== 'personal' || worldManageFlow?.mode !== 'copy').map(target => `
-    <button type="button" class="world-manage-target${String(target.id) === worldManageFlow?.targetId ? ' is-selected' : ''}" data-world-target="${escapeHtml(String(target.id))}">
-      <span>${escapeHtml(target.emoji)}</span>
-      <strong>${escapeHtml(target.label)}</strong>
-      <small>${escapeHtml(target.desc)}</small>
+    <button type="button" class="world-manage-target${String(target.id) === worldManageFlow?.targetId ? ' is-selected' : ''}" data-world-target="${escapeHtml(String(target.id))}" aria-pressed="${String(target.id) === worldManageFlow?.targetId}">
+      <span aria-hidden="true">${escapeHtml(target.emoji)}</span>
+      <strong dir="auto">${escapeHtml(target.label)}</strong>
+      <small dir="auto">${escapeHtml(target.desc)}</small>
     </button>
   `).join('');
   wrap.innerHTML = `
@@ -7289,7 +7289,8 @@ function renderWorldManageFlow() {
     if (inline) {
       host.append(content);
       const focus = phase === 'create' ? document.getElementById('customWorldNameInput') : title;
-      focus?.focus();
+      focus?.focus({ preventScroll: true });
+      if (focus) focus.scrollIntoView({ block: 'nearest' });
     } else {
       const onEscape = phase === 'create' ? window.closeCustomWorldModal :
         phase === 'choice' ? window.closeWorldManageChoiceModal : window.closeWorldManageFlow;

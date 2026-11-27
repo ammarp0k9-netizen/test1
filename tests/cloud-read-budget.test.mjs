@@ -52,12 +52,16 @@ test('notification fact evaluations share the latest-quiz read until an actual c
 
 test('rendering newest/oldest pages does not trigger a complete-dictionary scan', () => {
   const source = read('dictionary-render.js');
-  const prefix = source.slice(source.indexOf('function renderDictionaryWindow'), source.indexOf("  const searchType =", source.indexOf('function renderDictionaryWindow')));
+  const start = source.indexOf('function renderDictionaryWindow');
+  const end = source.indexOf('  const snapshot = getDictionaryListSnapshot(', start);
+  assert.ok(start >= 0 && end > start);
+  const prefix = source.slice(start, end);
   for (const mode of ['newest', 'oldest']) {
     let scans = 0;
     const root = { cancelDictionaryFullDataRequest() {}, LootLinguaDictionaryPages: { current: () => ({ ownerId: 'a', state: () => ({ complete: false, queryMode: mode }), ensureComplete() { scans++; return Promise.resolve(); } }) } };
     vm.runInNewContext('let dictionaryFullDataRequest=null;' + prefix + '}renderDictionaryWindow()', {
       window: root, document: { getElementById: () => ({ value: '' }) }, AbortController,
+      readDictionaryListControls: () => ({ query: '', searchType: 'all' }),
       isEditableDictionaryView: () => true, isCustomWorldView: () => false,
       dictionarySortMode: mode, dictionarySortCategory: 'all', currentFilter: 'all',
     });

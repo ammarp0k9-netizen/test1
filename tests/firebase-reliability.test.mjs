@@ -38,7 +38,7 @@ test('quota, service interruption, local connectivity and rejection are distinct
   assert.throws(() => api.assertAvailable(), { code: 'offline' });
 });
 
-test('the sync banner waits for confirmation and keeps its green state after ordinary background work', () => {
+test('the sync banner shows the offline notice and resumes ordinary background work silently', () => {
   const h = runtime();
   const makeNode = () => ({ hidden: false, style: { setProperty() {} }, dataset: {}, offsetHeight: 35,
     getBoundingClientRect: () => ({ width: 360, bottom: 60 }), getClientRects: () => [{}], setAttribute() {}, addEventListener() {} });
@@ -46,7 +46,6 @@ test('the sync banner waits for confirmation and keeps its green state after ord
   const dialog = new Map();
   bar.querySelector = key => { if (!dialog.has(key)) dialog.set(key, makeNode()); return dialog.get(key); };
   const header = makeNode();
-  h.root.sessionStorage = storage();
   h.context.document = { body: makeNode(), documentElement: { lang: 'ar', clientWidth: 400 },
     getElementById: id => id === 'syncStatusBar' ? bar : id === 'legendTopBar' ? header : null };
   let pending = 1;
@@ -57,16 +56,16 @@ test('the sync banner waits for confirmation and keeps its green state after ord
   assert.equal(bar.querySelector('button').hidden, true);
   h.root.navigator.onLine = true;
   h.root.LootLinguaOperations.syncNotify();
-  assert.equal(bar.dataset.state, 'active');
+  assert.equal(bar.hidden, true);
   pending = 0;
   h.root.LootLinguaOperations.syncNotify();
-  assert.equal(bar.dataset.state, 'success');
+  assert.equal(bar.hidden, true);
   pending = 1;
   h.root.LootLinguaOperations.syncNotify();
-  assert.equal(bar.dataset.state, 'active');
+  assert.equal(bar.hidden, true);
   pending = 0;
   h.root.LootLinguaOperations.syncNotify();
-  assert.equal(bar.dataset.state, 'success');
+  assert.equal(bar.hidden, true);
 });
 
 test('pending changes survive reopening and account changes; rejection blocks only its own dependent lane', async () => {

@@ -9,14 +9,18 @@
   const close = bar.querySelector('button');
   const quizBar = document.getElementById('quizSyncStatus');
   let owner = '';
-  let awaiting = false;
-  let done = false;
-  const phaseKey = uid => 'lootlingua:sync-banner:v1:' + encodeURIComponent(uid);
-  function rememberPhase() {
-    if (!owner) return;
+  let phase = '';
+  const phaseKey = uid => 'lootlingua:quota-recovery:v1:' + encodeURIComponent(uid);
+  function readPhase(uid) {
+    try { return uid && root.localStorage?.getItem(phaseKey(uid)) || ''; }
+    catch (_) { return ''; }
+  }
+  function setPhase(next) {
+    if (phase === next) return;
+    phase = next;
     try {
-      if (awaiting || done) root.sessionStorage?.setItem(phaseKey(owner), awaiting ? 'waiting' : 'done');
-      else root.sessionStorage?.removeItem(phaseKey(owner));
+      if (next) root.localStorage?.setItem(phaseKey(owner), next);
+      else root.localStorage?.removeItem(phaseKey(owner));
     } catch (_) {}
   }
   const arabic = () => !document.documentElement.lang?.toLowerCase().startsWith('en');
@@ -61,12 +65,13 @@
     if (visible) {
       const bounds = header.getBoundingClientRect();
       bar.style.top = Math.round(bounds.bottom + 5) + 'px';
-      bar.style.width = Math.min(Math.round(bounds.width), Math.max(0, document.documentElement.clientWidth - 20)) + 'px';
+      bar.style.left = (bounds.left + bounds.width / 2) + 'px';
+      bar.style.width = bounds.width + 'px';
     }
     document.body.style.setProperty('--sync-status-offset', visible ? `${bar.offsetHeight + 6}px` : '0px');
   }
 
-  function presentation(status, unavailable, text) {
+  function presentation(status, unavailable, recovering, text) {
     let kind = '', heading = '', message = '';
     if (status?.localFailure) {
       kind = 'error'; heading = text.fail; message = text.failCopy;
@@ -80,13 +85,10 @@
         : ['invalid-argument', 'failed-precondition', 'not-found'].includes(reason) ? text.invalid : text.unexpected;
       const description = text.actions[rejection?.type] || text.scopes[rejection?.scope];
       if (description) message = description + (rejection.name ? ` «${rejection.name}»` : '') + '. ' + message;
-    } else if (status?.pending) {
-      const reason = unavailable;
-      if (!reason) {
-        kind = 'active'; heading = text.active; message = text.activeCopy;
-      } else {
-        kind = 'pending'; heading = text.waiting; message = text[reason] || text.service;
-      }
+    } else if (status?.pending && unavailable) {
+      kind = 'pending'; heading = text.waiting; message = text[unavailable] || text.service;
+    } else if (recovering && !unavailable && (status?.pending || status?.active)) {
+      kind = 'active'; heading = text.active; message = text.activeCopy;
     }
     return { kind, heading, message };
   }
@@ -94,29 +96,30 @@
   function render() {
     const uid = root.auth?.currentUser?.uid || '';
     if (uid !== owner) {
-      owner = uid; awaiting = false; done = false;
-      try {
-        const previous = owner && root.sessionStorage?.getItem(phaseKey(owner));
-        awaiting = previous === 'waiting';
-        done = previous === 'done';
-      } catch (_) {}
+      owner = uid; phase = readPhase(uid);
     }
     const status = root.LootLinguaOperations?.syncStatus(uid);
     const text = labels[arabic() ? 'ar' : 'en'];
     let kind = '', heading = '', message = '';
-    const unavailable = root.LootLinguaCloudBackoff?.reason() || status?.reason;
-    if (status?.pending && unavailable) { awaiting = true; done = false; }
-    else if (awaiting && !status?.pending && !status?.localFailure && !status?.rejected && !status?.active && uid) { done = true; awaiting = false; }
-    rememberPhase();
-    ({ kind, heading, message } = presentation(status, unavailable, text));
-    if (!kind && done) {
+    const unavailable = root.navigator?.onLine === false ? 'offline' : root.LootLinguaCloudBackoff?.reason() || '';
+    // Pending counts come from durable queues. Normal writes never open a recovery.
+    if (uid && status && !status.localFailure) {
+      if (status.pending && unavailable === 'quota') setPhase('waiting');
+      else if (phase === 'waiting' && !unavailable && status.pending && status.active) setPhase('recovering');
+      else if (!status.pending && !status.rejected && !status.active && document.readyState === 'complete') {
+        if (phase === 'recovering') setPhase('success');
+        else if (phase === 'waiting' && !unavailable) setPhase('');
+      }
+    }
+    ({ kind, heading, message } = presentation(status, unavailable, phase === 'recovering', text));
+    if (!kind && phase === 'success') {
       kind = 'success'; heading = text.success;
     }
     bar.hidden = !kind;
     bar.dataset.state = kind;
     bar.dir = arabic() ? 'rtl' : 'ltr';
-    title.textContent = heading;
-    copy.textContent = message;
+    if (title.textContent !== heading) title.textContent = heading;
+    if (copy.textContent !== message) copy.textContent = message;
     copy.hidden = !message;
     close.hidden = kind !== 'success';
     close.setAttribute('aria-label', text.close);
@@ -124,22 +127,26 @@
     if (quizBar) {
       const quizActive = document.body.classList?.contains('quiz-active');
       const assessment = root.LootLinguaOperations?.syncStatus(uid, ['quiz-result', 'quiz-draft', 'quiz-checkpoint', 'level-placement']);
-      const state = presentation(assessment, root.LootLinguaCloudBackoff?.reason() || assessment?.reason, text);
+      const state = presentation(assessment, unavailable, phase === 'recovering', text);
       quizBar.hidden = !quizActive || !state.kind;
       quizBar.dataset.state = state.kind;
       quizBar.dir = bar.dir;
       quizBar.querySelector('i').className = 'fa-solid ' + ({ error: 'fa-triangle-exclamation', active: 'fa-rotate' }[state.kind] || 'fa-cloud');
-      quizBar.querySelector('[data-sync-title]').textContent = state.heading;
+      const quizTitle = quizBar.querySelector('[data-sync-title]');
+      if (quizTitle.textContent !== state.heading) quizTitle.textContent = state.heading;
       const quizCopy = quizBar.querySelector('[data-sync-copy]');
-      quizCopy.textContent = state.message;
+      if (quizCopy.textContent !== state.message) quizCopy.textContent = state.message;
       quizCopy.hidden = !state.message;
       const exit = document.querySelector?.('[data-quiz-result-exit]');
       if (exit) exit.textContent = arabic() ? 'متابعة التعلّم' : 'Keep learning';
     }
     layout();
   }
-  close.addEventListener('click', () => { done = false; rememberPhase(); render(); });
-  for (const event of ['lootlingua:sync-state', 'lootlingua:quiz-mode-changed', 'lootlingua:auth-state', 'lootlingua:cloud-capacity-change', 'online', 'offline']) {
+  close.addEventListener('click', () => { setPhase(''); render(); });
+  root.addEventListener('storage', event => {
+    if (owner && event.key === phaseKey(owner)) { phase = readPhase(owner); render(); }
+  });
+  for (const event of ['load', 'lootlingua:sync-state', 'lootlingua:quiz-mode-changed', 'lootlingua:auth-state', 'lootlingua:cloud-capacity-change', 'online', 'offline']) {
     root.addEventListener(event, render);
   }
   root.addEventListener('resize', layout);

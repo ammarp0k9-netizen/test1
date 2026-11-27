@@ -664,6 +664,24 @@ function readCustomWorldWordsFromStorage(worldId, uid) {
   }
 }
 
+function hasPrivateWorldWordsCache(worldId, uid) {
+  try { return localStorage.getItem(getCustomWorldWordsStorageKey(worldId, uid)) !== null; }
+  catch (_) { return false; }
+}
+
+function getPrivateWorldCompleteKey(worldId, uid) {
+  return 'lootlingua:complete:' + getCustomWorldWordsStorageKey(worldId, uid);
+}
+
+function getActivePrivateWorldWordCount() {
+  const uid = window.auth?.currentUser?.uid;
+  if (!uid) return window.words.length;
+  try {
+    const complete = localStorage.getItem(getPrivateWorldCompleteKey(activeCustomWorldId, uid)) === '1';
+    return complete && hasPrivateWorldWordsCache(activeCustomWorldId, uid) ? window.words.length : '—';
+  } catch (_) { return '—'; }
+}
+
 function writeCustomWorldWordsToStorage(worldId, words = window.words, uid) {
   if (!worldId) return false;
   const ownerId = getStorageUserId(uid);
@@ -685,6 +703,7 @@ function writeCustomWorldWordsToStorage(worldId, words = window.words, uid) {
 function removeCustomWorldWordsFromStorage(worldId, uid) {
   if (!worldId) return;
   localStorage.removeItem(getCustomWorldWordsStorageKey(worldId, uid));
+  localStorage.removeItem(getPrivateWorldCompleteKey(worldId, uid));
 }
 
 function isCustomWorldView() {
@@ -783,9 +802,23 @@ window.applyCustomWorldsFromCloud = function(worlds, meta = {}) {
 
 window.applyCustomWorldWordsFromSnapshot = function(worldId, cloudWords, meta = {}) {
   const uid = window.auth?.currentUser?.uid;
+  const unconfirmed = meta.listener && meta.fromCache;
+  // The SDK cache may only hold part of the collection. Prefer our last
+  // complete snapshot and never promote a partial result to a full count.
+  if (unconfirmed && (hasPrivateWorldWordsCache(worldId, uid) || !cloudWords.length)) return;
   const projected = window.LootLinguaDictionarySync?.project(cloudWords, uid, worldId, meta.fromCache === true) || cloudWords;
+  const rememberComplete = () => {
+    if (!meta.listener || unconfirmed) return;
+    try {
+      const key = getPrivateWorldCompleteKey(worldId, uid);
+      if (localStorage.getItem(key) !== '1') localStorage.setItem(key, '1');
+    } catch (_) {}
+  };
   if (!window.isActiveCustomWorld(worldId)) {
-    writeCustomWorldWordsToStorage(worldId, applyStoredWordOrder(cloudWords), window.auth?.currentUser?.uid);
+    if (!unconfirmed) {
+      writeCustomWorldWordsToStorage(worldId, applyStoredWordOrder(cloudWords), uid);
+      rememberComplete();
+    }
     return;
   }
   loadDictionarySortPrefs();
@@ -795,8 +828,12 @@ window.applyCustomWorldWordsFromSnapshot = function(worldId, cloudWords, meta = 
     normalized = sortDictionaryWords(normalized);
   }
   window.words = normalized;
-  writeCustomWorldWordsToStorage(worldId, projected === cloudWords ? normalized : applyStoredWordOrder(cloudWords), uid);
+  if (!unconfirmed) {
+    writeCustomWorldWordsToStorage(worldId, projected === cloudWords ? normalized : applyStoredWordOrder(cloudWords), uid);
+    rememberComplete();
+  }
   const needsFullRender = wordsSnapshotNeedsFullRender(prev, normalized) || isReorderMode || isBulkDeleteMode;
+  if (!needsFullRender) renderProfileModalStats();
   if (needsFullRender) {
     renderLimit = 20;
     render();

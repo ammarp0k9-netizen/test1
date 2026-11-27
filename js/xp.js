@@ -223,18 +223,23 @@ async function retryPendingXPEvents() {
   const pending = loadJSON(key, []);
   if (!Array.isArray(pending) || !pending.length) return;
   if (window.LootLinguaCloudBackoff?.reason?.()) return;
-  const confirmed = new Set();
-  for (const event of pending) {
+  const operations = window.LootLinguaOperations;
+  operations?.syncActivity?.(owner.uid, 'xp', { active: true });
+  try {
+    const confirmed = new Set();
+    for (const event of pending) {
+      if (!isXPAwardOwnerCurrent(owner)) return;
+      const metadata = { ...event, queueOnFailure: false };
+      await awardXP(event.amount, event.reason, metadata);
+      if (!isXPAwardOwnerCurrent(owner)) return;
+      if (metadata.awardStatus === 'awarded' || metadata.awardStatus === 'duplicate') confirmed.add(event.eventId);
+      if (window.LootLinguaCloudBackoff?.reason?.()) break;
+    }
     if (!isXPAwardOwnerCurrent(owner)) return;
-    const metadata = { ...event, queueOnFailure: false };
-    await awardXP(event.amount, event.reason, metadata);
-    if (!isXPAwardOwnerCurrent(owner)) return;
-    if (metadata.awardStatus === 'awarded' || metadata.awardStatus === 'duplicate') confirmed.add(event.eventId);
-    if (window.LootLinguaCloudBackoff?.reason?.()) break;
+    if (confirmed.size) saveJSON(key, loadJSON(key, []).filter(event => !confirmed.has(event.eventId)));
+  } finally {
+    operations?.syncActivity?.(owner.uid, 'xp', {});
   }
-  if (!isXPAwardOwnerCurrent(owner)) return;
-  if (confirmed.size) saveJSON(key, loadJSON(key, []).filter(event => !confirmed.has(event.eventId)));
-  window.LootLinguaOperations?.syncNotify?.();
 }
 window.retryPendingXPEvents = () => {
   const owner = captureXPAwardOwner();

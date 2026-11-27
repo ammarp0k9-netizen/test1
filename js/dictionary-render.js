@@ -65,8 +65,10 @@ window.updateDictionarySelectAllUi = function() {
   const managing = Boolean(window.isWorldManageBusy?.());
   select.textContent = busy ? 'جارٍ تجهيز النتائج…' : filtered ? 'تحديد كل النتائج' : 'تحديد الكل';
   select.disabled = busy || managing;
+  select.hidden = isReorderMode;
   select.setAttribute('aria-busy', String(busy));
   clear.disabled = managing || (!bulkSelectedWordIds.size && !busy);
+  clear.hidden = isReorderMode || (!bulkSelectedWordIds.size && !busy);
   const outside = document.getElementById('dictionarySelectionOutside');
   if (outside) {
     let count = 0;
@@ -205,54 +207,74 @@ function renderWordCardDetails(w) {
 }
 
 const dictionaryDetailMedia = window.matchMedia('(min-width: 940px)');
+const dictionaryHoverMedia = window.matchMedia('(min-width: 940px) and (any-hover: hover) and (any-pointer: fine)');
+const dictionaryMotionMedia = window.matchMedia('(prefers-reduced-motion: reduce)');
 let dictionaryDetailSelection = null;
+let dictionaryDetailHover = null;
+let dictionaryHoverTimer = 0;
 let dictionaryDetailMarkup = '';
+let dictionaryDetailSizeAnimation = null;
+let dictionaryDetailContentAnimation = null;
+
+function dictionaryHoverAvailable() {
+  return dictionaryHoverMedia.matches && isEditableDictionaryView() && !editId && !isBulkDeleteMode &&
+    !isReorderMode && !document.getElementById('personalControls').classList.contains('is-expanded') &&
+    !document.querySelector('#suggestionsList .dict-suggestions-results, #searchBtn[aria-busy="true"]');
+}
+
+function resetDictionaryHover() {
+  clearTimeout(dictionaryHoverTimer);
+  if (!dictionaryDetailHover) return;
+  dictionaryDetailHover = null;
+  renderDictionaryWordDetail();
+}
 
 function selectDictionaryWordDetail(id, { toggle = false, focus = false } = {}) {
   if (!dictionaryDetailMedia.matches) return;
   const scope = getAddFormDraftScope();
   const key = String(id);
   const selected = dictionaryDetailSelection;
+  clearTimeout(dictionaryHoverTimer);
+  dictionaryDetailHover = null;
   dictionaryDetailSelection = toggle && selected?.scope === scope && selected.id === key ? null : { scope, id: key };
   renderDictionaryWordDetail();
   const title = document.getElementById('dictionaryDetailTitle');
   if (title) {
-    const workspace = title.closest('.dictionary-workspace');
-    workspace.scrollTop = 0;
+    const workspace = title.closest('.dictionary-workspace-scroll');
     const headingBounds = title.getBoundingClientRect();
     const workspaceBounds = workspace.getBoundingClientRect();
-    if (headingBounds.bottom > workspaceBounds.bottom) {
-      workspace.scrollTop = headingBounds.top - workspaceBounds.top - 12;
+    if (headingBounds.bottom > workspaceBounds.bottom || headingBounds.top < workspaceBounds.top) {
+      workspace.scrollTop += headingBounds.top - workspaceBounds.top - 15;
     }
     if (focus) title.focus({ preventScroll: true });
   }
 }
 
-function renderDictionaryWordDetail(indexMap) {
+function renderDictionaryWordDetail(indexMap, { hoverOnly = false } = {}) {
   const panel = document.getElementById('dictionaryWordDetail');
   if (!panel) return;
-  const selection = dictionaryDetailSelection;
-  const showSelection = dictionaryDetailMedia.matches && isEditableDictionaryView() && !editId && !isBulkDeleteMode &&
-    selection?.scope === getAddFormDraftScope();
-  const word = showSelection && (indexMap
-    ? window.words[indexMap.get(selection.id)]
-    : window.words.find(item => String(item.id) === selection.id));
-  panel.hidden = !word;
-  const selectionId = word ? selection.id : null;
-  document.querySelectorAll('#list .word-card').forEach(card => {
+  const scope = getAddFormDraftScope();
+  const enabled = dictionaryDetailMedia.matches && isEditableDictionaryView() && !editId && !isBulkDeleteMode;
+  const lookup = indexMap || (dictionaryListCache?.source === window.words ? dictionaryListCache.indexMap : null);
+  const find = id => lookup ? window.words[lookup.get(id)] : window.words.find(word => String(word.id) === id);
+  const selectionId = enabled && dictionaryDetailSelection?.scope === scope && find(dictionaryDetailSelection.id)
+    ? dictionaryDetailSelection.id : null;
+  if (!enabled || dictionaryDetailHover?.scope !== scope || !dictionaryHoverAvailable()) dictionaryDetailHover = null;
+  const hoverId = dictionaryDetailHover?.id;
+  const shownId = hoverId && find(hoverId) ? hoverId : selectionId;
+  const word = shownId && find(shownId);
+  const temporary = Boolean(word && shownId !== selectionId);
+  const wasTemporary = panel.dataset.preview === 'true';
+  panel.dataset.preview = String(temporary);
+  if (!hoverOnly) document.querySelectorAll('#list .word-card').forEach(card => {
     const selected = card.dataset.id === selectionId;
     card.classList.toggle('dictionary-detail-selected', selected);
     card.setAttribute('aria-expanded', String(dictionaryDetailMedia.matches ? selected : card.classList.contains('show-example')));
     if (dictionaryDetailMedia.matches) card.setAttribute('aria-controls', 'dictionaryWordDetail');
     else card.removeAttribute('aria-controls');
   });
-  if (!word) {
-    if (panel.firstElementChild) panel.replaceChildren();
-    dictionaryDetailMarkup = '';
-    return;
-  }
-  const id = escapeHtml(selectionId);
-  const markup = `
+  const id = escapeHtml(shownId || '');
+  const markup = word ? `
     <header class="dictionary-detail-header">
       <div class="dictionary-detail-word">
         <button type="button" class="star-btn ${word.starred ? 'active' : ''}" aria-label="كلمة صعبة" aria-pressed="${Boolean(word.starred)}" data-action="star" data-id="${id}"><i class="fas fa-star" aria-hidden="true"></i></button>
@@ -268,15 +290,81 @@ function renderDictionaryWordDetail(indexMap) {
     ${word.category ? `<span class="cat-tag tag-${safeClassToken(word.category)}">${escapeHtml(word.category)}</span>` : ''}
     ${word.partOfSpeech ? `<span class="pos-tag" dir="auto">${escapeHtml(word.partOfSpeech)}</span>` : ''}
     ${renderWordCardDetails(word)}
-  `;
-  if (dictionaryDetailMarkup === markup) return;
-  const focused = panel.contains(document.activeElement) ? document.activeElement.dataset.action : '';
-  panel.innerHTML = markup;
-  dictionaryDetailMarkup = markup;
-  if (focused) panel.querySelector(`[data-action="${focused}"]`)?.focus({ preventScroll: true });
+  ` : '';
+  if (dictionaryDetailMarkup !== markup) {
+    const slot = panel.parentElement;
+    const start = slot.getBoundingClientRect().height;
+    dictionaryDetailSizeAnimation?.cancel();
+    dictionaryDetailContentAnimation?.cancel();
+    const focused = !temporary && panel.contains(document.activeElement) ? document.activeElement.dataset.action : '';
+    dictionaryDetailMarkup = markup;
+    const animate = enabled && typeof slot.animate === 'function' && !dictionaryMotionMedia.matches &&
+      !document.body.matches('.perf-turbo, .low-end-device');
+    const hide = () => { panel.hidden = true; panel.replaceChildren(); };
+    if (word) {
+      panel.hidden = false;
+      panel.innerHTML = markup;
+      if (focused) panel.querySelector(`[data-action="${focused}"]`)?.focus({ preventScroll: true });
+    } else if (!animate || !wasTemporary) hide();
+    if (animate) {
+      const end = word ? slot.getBoundingClientRect().height : 0;
+      if (Math.abs(start - end) > 1) {
+        dictionaryDetailSizeAnimation = slot.animate([
+          { height: `${start}px`, overflow: 'clip', paddingBottom: 0 },
+          { height: `${end}px`, overflow: 'clip', paddingBottom: 0 },
+        ], { duration: 175, easing: 'cubic-bezier(.2,.75,.25,1)' });
+      }
+      if (!panel.hidden) {
+        dictionaryDetailContentAnimation = panel.animate(word
+          ? [{ opacity: .52 }, { opacity: temporary ? .87 : 1 }]
+          : [{ opacity: .87 }, { opacity: 0 }], { duration: 170, easing: 'ease-out' });
+        if (!word) dictionaryDetailContentAnimation.onfinish = hide;
+      }
+    }
+  } else if (word && wasTemporary !== temporary) {
+    dictionaryDetailContentAnimation?.cancel();
+  }
+  panel.querySelectorAll('.dictionary-detail-actions, .dictionary-detail-word .star-btn').forEach(node => {
+    node.inert = temporary || !word;
+  });
 }
 
 dictionaryDetailMedia.addEventListener('change', () => renderDictionaryWordDetail());
+dictionaryHoverMedia.addEventListener('change', resetDictionaryHover);
+window.addEventListener('lootlingua:auth-state', resetDictionaryHover);
+
+{
+  const list = document.getElementById('list');
+  const workspace = document.querySelector('.dictionary-workspace');
+  function leaveDictionaryHover(event) {
+    if (event.pointerType !== 'mouse' || workspace.contains(event.relatedTarget)) return;
+    clearTimeout(dictionaryHoverTimer);
+    dictionaryHoverTimer = setTimeout(resetDictionaryHover, 205);
+  }
+  list.addEventListener('pointerover', event => {
+    const card = event.target.closest('.word-card[data-id]');
+    if (event.pointerType !== 'mouse' || !card || card.contains(event.relatedTarget) || !dictionaryHoverAvailable()) return;
+    const scope = getAddFormDraftScope();
+    const id = card.dataset.id;
+    clearTimeout(dictionaryHoverTimer);
+    dictionaryHoverTimer = setTimeout(() => {
+      if (!card.isConnected || card.dataset.id !== id || !dictionaryHoverAvailable() || getAddFormDraftScope() !== scope) return;
+      dictionaryDetailHover = { scope, id };
+      renderDictionaryWordDetail(undefined, { hoverOnly: true });
+    }, 100);
+  });
+  list.addEventListener('pointerout', event => {
+    const from = event.target.closest('.word-card[data-id]');
+    if (from && !from.contains(event.relatedTarget)) leaveDictionaryHover(event);
+  });
+  workspace.addEventListener('pointerenter', event => {
+    if (event.pointerType === 'mouse') clearTimeout(dictionaryHoverTimer);
+  });
+  workspace.addEventListener('pointerleave', leaveDictionaryHover);
+  workspace.addEventListener('focusin', event => {
+    if (!event.target.closest('#dictionaryWordDetail')) resetDictionaryHover();
+  });
+}
 
 function renderWordCard(w, query, indexMap) {
   const ri   = indexMap?.get(String(w.id)) ?? window.words.findIndex(x => x.id === w.id);
@@ -529,10 +617,11 @@ function renderDictionaryWindow(options = {}) {
 }
 
 function render(options = {}) {
+  if (isReorderMode) refreshDictionaryReorderDraft();
   updateDictionaryPageStatus();
   const stats = document.getElementById('dictionaryQuickStats');
-  if (stats) stats.hidden = currentView !== 'personal';
-  if (currentView === 'personal') renderProfileModalStats();
+  if (stats) stats.hidden = !isEditableDictionaryView();
+  if (isEditableDictionaryView()) renderProfileModalStats();
   const run = () => renderDictionaryWindow(options);
   return typeof window.withWordMasterySnapshot === 'function' ? window.withWordMasterySnapshot(run) : run();
 }

@@ -554,14 +554,23 @@ function updateBulkDeleteBar() {
   if (bar) {
     bar.hidden = !isBulkDeleteMode;
     bar.dataset.count = String(count);
+    bar.dataset.reorder = String(isReorderMode);
   }
+  const heading = document.getElementById('dictionarySelectionTitle');
+  if (heading) heading.textContent = isReorderMode ? 'ترتيب الكلمات' : 'إدارة الكلمات المحددة';
   const countLabel = document.getElementById('dictionarySelectionCount');
   const countText = `${count} محددة`;
   if (countLabel && countLabel.textContent !== countText) countLabel.textContent = countText;
   const busy = Boolean(window.isWorldManageBusy?.() || window.isDictionarySelectionLoading?.());
   bar?.querySelectorAll('[data-selection-required]').forEach(button => { button.disabled = !count || busy; });
-  if (reorderBtn) reorderBtn.disabled = busy || (!count && !isReorderMode);
-  if (reorderBtn) reorderBtn.textContent = isReorderMode ? 'حفظ الترتيب' : 'ترتيب يدوي';
+  bar?.querySelectorAll('[data-manage-selected]').forEach(button => { button.hidden = isReorderMode || !count; });
+  if (reorderBtn) {
+    reorderBtn.disabled = busy;
+    reorderBtn.hidden = !isReorderMode && !count;
+    reorderBtn.querySelector('span').textContent = isReorderMode ? 'حفظ الترتيب' : 'ترتيب يدوي';
+  }
+  document.getElementById('dictionaryExitSelectionBtn').hidden = isReorderMode;
+  document.getElementById('dictionaryCancelReorderBtn').hidden = !isReorderMode;
   document.querySelectorAll('.selection-reorder-step').forEach(btn => {
     btn.hidden = !isBulkDeleteMode || !isReorderMode;
   });
@@ -630,7 +639,10 @@ window.isDictionarySelectionActive = () => isBulkDeleteMode && isEditableDiction
 window.exitBulkDeleteMode = function(options = {}) {
   window.closeWorldManageFlow?.({ force: true });
   window.cancelDictionarySelectAll?.();
-  if (isReorderMode) isReorderMode = false;
+  if (isReorderMode) {
+    discardDictionaryReorder();
+    isReorderMode = false;
+  }
   isBulkDeleteMode = false;
   bulkSelectedWordIds.clear();
   selectedIndices = [];

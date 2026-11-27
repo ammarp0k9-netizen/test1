@@ -359,6 +359,7 @@
       .map(([, record]) => record);
     if (!pending.length) return true;
     if (root.LootLinguaCloudBackoff?.reason?.()) { scheduleCloudRetry(); return false; }
+    root.LootLinguaOperations?.syncActivity?.(ownerId, 'notifications', { active: true });
     try {
       const saved = await cloudAdapter.writeRecords(pending);
       if (saved === false) throw new Error('Notification cloud adapter did not accept the deferred write.');
@@ -368,6 +369,8 @@
       if (!root.LootLinguaCloudBackoff?.classify?.(error).temporary) console.warn('[NotificationStore] Deferred cloud write retry failed.', error?.message || error);
       scheduleCloudRetry();
       return false;
+    } finally {
+      root.LootLinguaOperations?.syncActivity?.(ownerId, 'notifications', {});
     }
   }
 

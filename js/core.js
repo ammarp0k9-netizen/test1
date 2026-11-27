@@ -1069,10 +1069,11 @@ document.addEventListener('keydown', (e) => {
 function renderProfileModalStats() {
   const words = getDictionaryWordCount();
   const streak = loadInt('lootlinguaMaxStreak', dailyStreak) + ' يوم';
-  for (const id of ['profileStatWords', 'dictionaryStatWords']) {
-    const field = document.getElementById(id);
-    if (field) field.textContent = words;
-  }
+  const profileWords = document.getElementById('profileStatWords');
+  if (profileWords) profileWords.textContent = words;
+  const dictionaryWords = document.getElementById('dictionaryStatWords');
+  // A private-world snapshot contains its full membership, while the list only renders a window of it.
+  if (dictionaryWords) dictionaryWords.textContent = isCustomWorldView() ? getActivePrivateWorldWordCount() : words;
   for (const id of ['profileStatStreak', 'dictionaryStatStreak']) {
     const field = document.getElementById(id);
     if (field) field.textContent = streak;
@@ -1095,7 +1096,7 @@ function getPersonalDictionaryWordsSnapshot() {
       if (Array.isArray(stored)) return stored;
     } catch (_) {}
   }
-  return Array.isArray(window.words) ? window.words : [];
+  return !isCustomWorldView() && Array.isArray(window.words) ? window.words : [];
 }
 
 function getDictionaryWordCount() {

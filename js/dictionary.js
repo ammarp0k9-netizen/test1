@@ -562,6 +562,7 @@ function setAddFormExpanded(expanded) {
   isExpanded = Boolean(expanded);
   window.isExpanded = isExpanded;
   syncAddFormExpanded();
+  if (isExpanded && typeof resetDictionaryHover === 'function') resetDictionaryHover();
   if (typeof window.saveActiveAddFormDraft === 'function') window.saveActiveAddFormDraft();
 }
 
@@ -732,7 +733,7 @@ window.editWord = function(id, event) {
   btn.innerHTML = 'تحديث الكلمة <i class="fa-solid fa-floppy-disk"></i>';
   btn.style.background = 'var(--accent)';
   if (dictionaryDetailMedia.matches) {
-    document.querySelector('.dictionary-workspace')?.scrollTo({ top: 0 });
+    document.querySelector('.dictionary-workspace-scroll')?.scrollTo({ top: 0 });
     document.getElementById('wordInput')?.focus({ preventScroll: true });
   } else {
     window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -1860,6 +1861,7 @@ const slowSearchFacts = [
 
 function renderNormalSearch(scope) {
   if (!isEditableDictionaryView() || getAddFormDraftScope() !== scope) return;
+  if (typeof resetDictionaryHover === 'function') resetDictionaryHover();
   const input = document.getElementById('wordInput');
   const button = document.getElementById('searchBtn');
   const box = document.getElementById('suggestionsBox');
@@ -2452,16 +2454,61 @@ function setFilter(f) {
 // ═══════════════════════════════════════════════════════
 // Reorder (Drag & Drop)
 // ═══════════════════════════════════════════════════════
+let dictionaryReorderDraft = null;
+
+function dictionaryOrderIds() {
+  return window.words.map(word => String(word.id));
+}
+
+function arrangeDictionaryDraft(ids) {
+  const byId = new Map(window.words.map(word => [String(word.id), word]));
+  const ordered = [];
+  for (const id of ids) {
+    if (byId.has(id)) ordered.push(byId.get(id));
+    byId.delete(id);
+  }
+  return ordered.concat([...byId.values()]);
+}
+
+function refreshDictionaryReorderDraft() {
+  const draft = dictionaryReorderDraft;
+  if (!draft || draft.scope !== getAddFormDraftScope() || draft.rows === window.words) return;
+  draft.before = dictionaryOrderIds();
+  draft.rows = window.words = arrangeDictionaryDraft(draft.order);
+  syncSelectedIndicesFromBulkSelection();
+}
+
+function discardDictionaryReorder() {
+  refreshDictionaryReorderDraft();
+  const draft = dictionaryReorderDraft;
+  if (draft?.scope === getAddFormDraftScope()) window.words = arrangeDictionaryDraft(draft.before);
+  dictionaryReorderDraft = null;
+}
+
+window.cancelDictionaryReorder = function() {
+  if (!isReorderMode) return;
+  discardDictionaryReorder();
+  isReorderMode = false;
+  syncSelectedIndicesFromBulkSelection();
+  updateBulkDeleteBar();
+  render();
+};
+
 async function toggleReorderMode() {
+  const scope = getAddFormDraftScope();
   if (!isReorderMode && await window.LootLinguaDictionaryPages?.requireComplete({ personal: !isCustomWorldView() }) === false) return;
-  if (!isEditableDictionaryView()) return;
+  if (!isEditableDictionaryView() || getAddFormDraftScope() !== scope) return;
   if (!isReorderMode && !isBulkDeleteMode) {
     window.enterSelectionMode();
   }
   isReorderMode = !isReorderMode;
   if (isReorderMode) {
+    const before = dictionaryOrderIds();
+    dictionaryReorderDraft = { rows: window.words, before, order: before, scope };
     syncSelectedIndicesFromBulkSelection();
   } else {
+    refreshDictionaryReorderDraft();
+    dictionaryReorderDraft = null;
     dictionarySortMode = 'auto';
     reindexWordOrder(window.words);
     saveDictionarySortPrefs();
@@ -2493,11 +2540,7 @@ window.moveSelectedWordsByStep = function(direction) {
       }
     }
   }
-  reindexWordOrder(window.words);
-  dictionarySortMode = 'auto';
-  saveDictionarySortPrefs();
-  persistDictionary();
-  scheduleWordOrderCloudSync();
+  if (dictionaryReorderDraft) dictionaryReorderDraft.order = dictionaryOrderIds();
   syncSelectedIndicesFromBulkSelection();
   render();
 };
@@ -2517,11 +2560,7 @@ function drop(ev, dropIndex) {
   let target    = dropIndex;
   dragged.forEach(i => { if (i < dropIndex) target--; });
   window.words.splice(Math.max(target, 0), 0, ...items);
-  reindexWordOrder(window.words);
-  dictionarySortMode = 'auto';
-  saveDictionarySortPrefs();
-  persistDictionary();
-  scheduleWordOrderCloudSync();
+  if (dictionaryReorderDraft) dictionaryReorderDraft.order = dictionaryOrderIds();
   syncSelectedIndicesFromBulkSelection();
   render();
 }

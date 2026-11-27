@@ -2095,7 +2095,7 @@
       if (typeof window.isActiveCustomWorld !== 'function' || !window.isActiveCustomWorld(listenerWorldId)) return;
       const cloudWords = snapshot.docs.map(mapWordDoc);
       if (typeof window.applyCustomWorldWordsFromSnapshot === 'function') {
-        window.applyCustomWorldWordsFromSnapshot(listenerWorldId, cloudWords, { fromCache: snapshot.metadata.fromCache });
+        window.applyCustomWorldWordsFromSnapshot(listenerWorldId, cloudWords, { fromCache: snapshot.metadata.fromCache, listener: true });
       }
     }, (error) => {
       console.warn("listenCustomWorldWordsFromCloud:", error.code || error.message, error);
