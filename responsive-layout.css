@@ -1,4 +1,4 @@
-.dictionary-workspace, .dictionary-workspace-scroll, .dictionary-list-panel { display: contents; }
+.dictionary-workspace, .dictionary-workspace-scroll, .dictionary-workspace-content, .dictionary-list-panel { display: contents; }
 .workspace-edges { display: none; }
 .dictionary-detail, .dictionary-detail[hidden], #dictionaryCancelEdit[hidden] { display: none; }
 #dictionaryCancelEdit { margin-block: 6px; min-height: 36px; }
@@ -157,6 +157,53 @@ body.treasure-mode:not(.quiz-active) .main-content {
   padding-block-start: max(70px, var(--shell-content-top, 0px)) !important;
 }
 .sync-status-bar { max-width: none; }
+.main-content:has(#personalControls:not([style*="none"])) {
+  position: relative;
+  --dictionary-glass: color-mix(in srgb, var(--card-bg) 76%, transparent);
+  --dictionary-tools-gap: 8px;
+}
+.main-content:has(#personalControls:not([style*="none"])) :is(.page-header, .header-top) { display: contents; }
+.main-content:has(#personalControls:not([style*="none"])) #pageTitle {
+  position: sticky;
+  inset-block-start: var(--dictionary-tools-top, 76px);
+  z-index: 31;
+  width: fit-content;
+  max-inline-size: min(100%, 30ch);
+  margin-block: 0 var(--dictionary-tools-gap);
+  padding: 6px 10px;
+  border: 1px solid var(--legend-glass-border);
+  border-radius: 11px;
+  color: var(--accent);
+  -webkit-text-fill-color: currentColor;
+  overflow-wrap: anywhere;
+}
+.main-content:has(#personalControls:not([style*="none"])) #pageTitle:has(.custom-world-title-emoji) {
+  color: var(--text-white);
+}
+.main-content:has(#personalControls:not([style*="none"])) #viewNavBar {
+  position: absolute;
+  inset-block-start: max(var(--shell-content-top, 0px), calc(var(--legend-top-h) + var(--shell-padding, 26px) + var(--sync-status-offset, 0px)));
+  inset-inline-end: 24px;
+  z-index: 32;
+}
+.main-content:has(#personalControls:not([style*="none"])) .search-bar-row {
+  position: sticky;
+  inset-block-start: calc(var(--dictionary-tools-top, 76px) + var(--dictionary-title-height, 36px) + var(--dictionary-tools-gap));
+  margin-block-end: var(--dictionary-tools-gap);
+}
+.main-content:has(#personalControls:not([style*="none"])) :is(#pageTitle, .dictionary-filter-search, #dictionarySortBtn, #selectionModeBtn) {
+  background: var(--dictionary-glass);
+  border-color: var(--legend-glass-border);
+  backdrop-filter: var(--legend-glass-blur);
+  -webkit-backdrop-filter: var(--legend-glass-blur);
+  box-shadow: var(--legend-glass-shadow);
+}
+body:is(.perf-stable, .perf-turbo, .low-end-device) .main-content:has(#personalControls:not([style*="none"])) {
+  --dictionary-glass: color-mix(in srgb, var(--card-bg) 90%, transparent);
+}
+@media (max-width: 939px) {
+  body.view-has-back .main-content:has(#personalControls:not([style*="none"])) #pageTitle { max-inline-size: calc(100% - 54px); }
+}
 .published-back-btn { min-height: 40px; border-radius: 9px; }
 .quiz-panel-header, #quizView .quiz-card-meta {
   display: flex;
@@ -283,6 +330,9 @@ body.treasure-mode:not(.quiz-active) .main-content {
     display: block;
     min-width: 0;
   }
+  .main-content:has(#personalControls:not([style*="none"])) #pageTitle { max-inline-size: 45%; }
+  .main-content:has(#personalControls:not([style*="none"])) .search-bar-row { inset-block-start: var(--dictionary-tools-top, 76px); }
+  .main-content:has(#personalControls:not([style*="none"])) #viewNavBar { inset-inline-end: calc(53% + 16px); }
   .dictionary-layout:has(#personalControls:not([style*="none"])) .dictionary-workspace {
     position: sticky;
     top: var(--workspace-top, calc(var(--legend-top-h) + 24px + var(--sync-status-offset, 0px)));
@@ -294,11 +344,16 @@ body.treasure-mode:not(.quiz-active) .main-content {
     scrollbar-width: thin;
     scrollbar-color: color-mix(in srgb, var(--text-gray) 45%, transparent) transparent;
     scrollbar-gutter: stable;
-    scroll-padding-block: 12px;
+    scroll-padding-block: 16px 34px;
     overflow-anchor: none;
-    padding: 2px 4px 9px;
+    padding: 2px 4px 12px;
+    border-radius: 14px;
+    direction: ltr;
   }
-  .dictionary-workspace-scroll > #personalControls { margin-block: 0 12px; }
+  .dictionary-workspace-content { display: block; direction: rtl; }
+  [dir="ltr"] .dictionary-workspace-scroll { direction: rtl; }
+  [dir="ltr"] .dictionary-workspace-content { direction: ltr; }
+  .dictionary-workspace-content > #personalControls { margin-block: 0 12px; }
   .dictionary-detail-slot:has(.dictionary-detail:not([hidden])) { padding-block-end: 12px; }
   .dictionary-workspace:has(#personalControls:not([style*="none"]):not(.selection-hidden)) .dictionary-detail:not([hidden]) {
     display: block;
@@ -389,16 +444,20 @@ body.treasure-mode:not(.quiz-active) .main-content {
 
 .viewport-edges, .workspace-edges {
   pointer-events: none;
-  --edge-color: color-mix(in srgb, var(--bg, var(--card-bg)) 74%, transparent);
-  --edge-depth: clamp(22px, 4.4dvh, 44px);
+  --edge-color: var(--bg, var(--card-bg));
+  --edge-depth: clamp(54px, 10dvh, 94px);
 }
-.viewport-edges { position: fixed; inset: 0; z-index: 10052; }
+.viewport-edges { position: fixed; inset: 0; z-index: 990; }
 .viewport-edges::before, .viewport-edges::after,
 .workspace-edges::before, .workspace-edges::after {
   content: '';
   position: absolute;
   inset-inline: 0;
   height: var(--edge-depth);
+  --edge-gradient: linear-gradient(var(--edge-direction),
+    var(--edge-color) 0%, color-mix(in srgb, var(--edge-color) 82%, transparent) 23%,
+    color-mix(in srgb, var(--edge-color) 39%, transparent) 57%,
+    color-mix(in srgb, var(--edge-color) 9%, transparent) 83%, transparent 100%);
   opacity: 0;
   transition: opacity 160ms ease;
 }
@@ -411,38 +470,41 @@ body.treasure-mode:not(.quiz-active) .main-content {
   --edge-direction: to top;
 }
 .viewport-edges::before, .viewport-edges::after {
-  background: linear-gradient(var(--edge-direction), var(--edge-color), transparent);
+  background: var(--edge-gradient);
 }
 .viewport-edges[data-top]::before, .viewport-edges[data-bottom]::after,
 .workspace-edges[data-top]::before, .workspace-edges[data-bottom]::after { opacity: 1; }
 body:is(.quiz-active, .runner-input-active) > .viewport-edges { display: none; }
-body.perf-balanced :is(.viewport-edges, .workspace-edges) { --edge-depth: clamp(20px, 4dvh, 39px); }
-body.perf-stable :is(.viewport-edges, .workspace-edges) { --edge-depth: clamp(19px, 3.8dvh, 34px); }
-body:is(.perf-turbo, .low-end-device) :is(.viewport-edges, .workspace-edges) { --edge-depth: clamp(16px, 3.1dvh, 28px); }
+body.perf-balanced .viewport-edges { --edge-depth: clamp(50px, 9.4dvh, 82px); }
+body.perf-stable .viewport-edges { --edge-depth: clamp(44px, 8.6dvh, 74px); }
+body:is(.perf-turbo, .low-end-device) .viewport-edges { --edge-depth: clamp(38px, 7.6dvh, 66px); }
 @supports ((backdrop-filter: blur(1px)) and (mask-image: linear-gradient(black, transparent))) {
   body.perf-ultra:not(.low-end-device) :is(.viewport-edges, .workspace-edges)::before,
   body.perf-ultra:not(.low-end-device) :is(.viewport-edges, .workspace-edges)::after {
-    backdrop-filter: blur(1.65px);
-    mask-image: linear-gradient(var(--edge-direction), #000c, transparent);
+    backdrop-filter: blur(4px);
+    mask-image: linear-gradient(var(--edge-direction), #000, #000a 35%, #0003 68%, transparent);
   }
 }
 @media (min-width: 940px) and (min-height: 421px) {
+  .dictionary-workspace-scroll[data-end-buffer] { padding-block-end: calc(12px + clamp(30px, 8dvh, 58px)); }
   .dictionary-layout:has(#personalControls:not([style*="none"])) .workspace-edges {
     display: block;
     position: absolute;
-    inset: 0 10px 0 0;
-    inset-inline: 0 10px;
-    --edge-depth: 17px;
+    inset-block: 0;
+    inset-inline: 0 9px;
+    border-radius: 14px;
+    overflow: clip;
+    --edge-depth: 38px;
   }
   .workspace-edges::before, .workspace-edges::after {
-    background: linear-gradient(var(--edge-direction), var(--edge-color), transparent);
+    background: var(--edge-gradient);
   }
   @supports (mask-image: linear-gradient(black, transparent)) {
     .dictionary-workspace-scroll { --workspace-mask-start: #000; --workspace-mask-end: #000; }
-    .dictionary-workspace-scroll[data-top] { --workspace-mask-start: #0002; }
-    .dictionary-workspace-scroll[data-bottom] { --workspace-mask-end: #0002; }
+    .dictionary-workspace-scroll[data-top] { --workspace-mask-start: transparent; }
+    .dictionary-workspace-scroll[data-bottom] { --workspace-mask-end: transparent; }
     .dictionary-workspace-scroll:is([data-top], [data-bottom]) {
-      mask-image: linear-gradient(to bottom, var(--workspace-mask-start), #000 16px, #000 calc(100% - 16px), var(--workspace-mask-end));
+      mask-image: linear-gradient(to bottom, var(--workspace-mask-start), #000 34px, #000 calc(100% - 34px), var(--workspace-mask-end));
     }
   }
 }

@@ -22,6 +22,7 @@ let dictionaryRenderWidth = 0;
 let dictionaryFullDataRequest = null;
 let dictionarySelectAllRequest = null;
 let dictionaryDraggedCard = null;
+let dictionaryQueryOrigin = null;
 window.releaseDictionaryDraggedCard = function() {
   if (dictionaryDraggedCard?.classList.contains('dictionary-drag-parked')) dictionaryDraggedCard.remove();
   dictionaryDraggedCard = null;
@@ -38,6 +39,7 @@ window.addEventListener('lootlingua:auth-state', () => {
   window.cancelDictionarySelectAll?.();
   window.releaseDictionaryDraggedCard();
   dictionaryListCache = null;
+  dictionaryQueryOrigin = null;
   dictionaryMeasurements.clear();
   dictionaryRenderRevision += 1;
 });
@@ -160,7 +162,6 @@ function getDictionaryListSnapshot(query, searchType) {
     key, scope, source, revision: dictionaryRenderRevision, filtered, heights,
     indexMap: new Map(source.map((word, index) => [String(word.id), index])),
     filteredIndex: new Map(filtered.map((word, index) => [String(word.id), index])),
-    queryChanged: Boolean(previous && previous.scope === scope && previous.key !== key),
   };
   renderLimit = WORD_DOM_WINDOW_SIZE;
   window.LootLinguaOperations?.diagnostic?.('dictionary-filter-pass', { wordCount: source.length });
@@ -215,18 +216,57 @@ let dictionaryHoverTimer = 0;
 let dictionaryDetailMarkup = '';
 let dictionaryDetailSizeAnimation = null;
 let dictionaryDetailContentAnimation = null;
+let dictionaryDetailScrollRequest = 0;
+let dictionaryPinnedScrollHome = null;
+let dictionaryHoverScrollHome = null;
 
 function dictionaryHoverAvailable() {
-  return dictionaryHoverMedia.matches && isEditableDictionaryView() && !editId && !isBulkDeleteMode &&
-    !isReorderMode && !document.getElementById('personalControls').classList.contains('is-expanded') &&
-    !document.querySelector('#suggestionsList .dict-suggestions-results, #searchBtn[aria-busy="true"]');
+  return dictionaryHoverMedia.matches && isEditableDictionaryView() && !editId && !isBulkDeleteMode && !isReorderMode;
+}
+
+async function positionDictionaryDetail({ preview = false, home = null, focus = false } = {}) {
+  const request = ++dictionaryDetailScrollRequest;
+  try { await dictionaryDetailSizeAnimation?.finished; }
+  catch (_) { return; }
+  if (request !== dictionaryDetailScrollRequest || !isEditableDictionaryView()) return;
+  const scroller = document.querySelector('.dictionary-workspace-scroll');
+  const behavior = dictionaryMotionMedia.matches ? 'instant' : 'smooth';
+  if (home !== null) {
+    scroller.scrollTo({ top: home, behavior });
+    return;
+  }
+  const title = document.getElementById('dictionaryDetailTitle');
+  if (!title) return;
+  if (focus) title.focus({ preventScroll: true });
+  const panel = title.closest('.dictionary-detail').getBoundingClientRect();
+  const heading = title.getBoundingClientRect();
+  const scrollerBounds = scroller.getBoundingClientRect();
+  const internalScroll = scroller.scrollHeight > scroller.clientHeight + 2 && getComputedStyle(scroller).overflowY === 'auto';
+  if (!internalScroll && preview) return;
+  const top = internalScroll ? scrollerBounds.top : document.getElementById('legendTopBar').getBoundingClientRect().bottom;
+  const bottom = Math.min(internalScroll ? scrollerBounds.bottom : innerHeight, innerHeight) - 38;
+  if (preview && heading.bottom + 24 < bottom) return;
+  const end = preview ? heading.bottom + 46 : panel.bottom;
+  let distance = Math.max(0, end - bottom);
+  if (panel.top < top + 12 || panel.top - distance < top + 12) distance = panel.top - top - 12;
+  if (Math.abs(distance) < 2) return;
+  if (internalScroll) {
+    if (preview && dictionaryHoverScrollHome === null) dictionaryHoverScrollHome = scroller.scrollTop;
+    scroller.scrollTo({ top: scroller.scrollTop + distance, behavior });
+  } else if (!preview && (heading.bottom > bottom || heading.top < top)) {
+    window.scrollBy({ top: distance, behavior });
+  }
 }
 
 function resetDictionaryHover() {
   clearTimeout(dictionaryHoverTimer);
   if (!dictionaryDetailHover) return;
   dictionaryDetailHover = null;
+  const home = dictionaryHoverScrollHome;
+  dictionaryHoverScrollHome = null;
   renderDictionaryWordDetail();
+  if (home !== null) void positionDictionaryDetail({ home });
+  else dictionaryDetailScrollRequest++;
 }
 
 function selectDictionaryWordDetail(id, { toggle = false, focus = false } = {}) {
@@ -234,20 +274,16 @@ function selectDictionaryWordDetail(id, { toggle = false, focus = false } = {}) 
   const scope = getAddFormDraftScope();
   const key = String(id);
   const selected = dictionaryDetailSelection;
+  const scroller = document.querySelector('.dictionary-workspace-scroll');
+  const closing = toggle && selected?.scope === scope && selected.id === key;
+  if (selected?.scope !== scope) dictionaryPinnedScrollHome = dictionaryHoverScrollHome ?? scroller.scrollTop;
   clearTimeout(dictionaryHoverTimer);
   dictionaryDetailHover = null;
-  dictionaryDetailSelection = toggle && selected?.scope === scope && selected.id === key ? null : { scope, id: key };
+  dictionaryHoverScrollHome = null;
+  dictionaryDetailSelection = closing ? null : { scope, id: key };
   renderDictionaryWordDetail();
-  const title = document.getElementById('dictionaryDetailTitle');
-  if (title) {
-    const workspace = title.closest('.dictionary-workspace-scroll');
-    const headingBounds = title.getBoundingClientRect();
-    const workspaceBounds = workspace.getBoundingClientRect();
-    if (headingBounds.bottom > workspaceBounds.bottom || headingBounds.top < workspaceBounds.top) {
-      workspace.scrollTop += headingBounds.top - workspaceBounds.top - 15;
-    }
-    if (focus) title.focus({ preventScroll: true });
-  }
+  void positionDictionaryDetail({ focus, home: closing ? dictionaryPinnedScrollHome : null });
+  if (closing) dictionaryPinnedScrollHome = null;
 }
 
 function renderDictionaryWordDetail(indexMap, { hoverOnly = false } = {}) {
@@ -298,26 +334,26 @@ function renderDictionaryWordDetail(indexMap, { hoverOnly = false } = {}) {
     dictionaryDetailContentAnimation?.cancel();
     const focused = !temporary && panel.contains(document.activeElement) ? document.activeElement.dataset.action : '';
     dictionaryDetailMarkup = markup;
-    const animate = enabled && typeof slot.animate === 'function' && !dictionaryMotionMedia.matches &&
-      !document.body.matches('.perf-turbo, .low-end-device');
+    const animate = enabled && typeof slot.animate === 'function' && !dictionaryMotionMedia.matches;
+    const transitionTime = document.body.matches('.perf-turbo, .low-end-device') ? 130 : 185;
     const hide = () => { panel.hidden = true; panel.replaceChildren(); };
     if (word) {
       panel.hidden = false;
       panel.innerHTML = markup;
       if (focused) panel.querySelector(`[data-action="${focused}"]`)?.focus({ preventScroll: true });
-    } else if (!animate || !wasTemporary) hide();
+    } else if (!animate) hide();
     if (animate) {
       const end = word ? slot.getBoundingClientRect().height : 0;
       if (Math.abs(start - end) > 1) {
         dictionaryDetailSizeAnimation = slot.animate([
           { height: `${start}px`, overflow: 'clip', paddingBottom: 0 },
           { height: `${end}px`, overflow: 'clip', paddingBottom: 0 },
-        ], { duration: 175, easing: 'cubic-bezier(.2,.75,.25,1)' });
+        ], { duration: transitionTime, easing: 'cubic-bezier(.2,.75,.25,1)' });
       }
       if (!panel.hidden) {
         dictionaryDetailContentAnimation = panel.animate(word
           ? [{ opacity: .52 }, { opacity: temporary ? .87 : 1 }]
-          : [{ opacity: .87 }, { opacity: 0 }], { duration: 170, easing: 'ease-out' });
+          : [{ opacity: .87 }, { opacity: 0 }], { duration: transitionTime, easing: 'ease-out' });
         if (!word) dictionaryDetailContentAnimation.onfinish = hide;
       }
     }
@@ -332,6 +368,13 @@ function renderDictionaryWordDetail(indexMap, { hoverOnly = false } = {}) {
 dictionaryDetailMedia.addEventListener('change', () => renderDictionaryWordDetail());
 dictionaryHoverMedia.addEventListener('change', resetDictionaryHover);
 window.addEventListener('lootlingua:auth-state', resetDictionaryHover);
+window.addEventListener('lootlingua:dictionary-navigation', () => {
+  clearTimeout(dictionaryHoverTimer);
+  dictionaryDetailHover = null;
+  dictionaryHoverScrollHome = null;
+  dictionaryPinnedScrollHome = null;
+  dictionaryDetailScrollRequest++;
+});
 
 {
   const list = document.getElementById('list');
@@ -351,6 +394,9 @@ window.addEventListener('lootlingua:auth-state', resetDictionaryHover);
       if (!card.isConnected || card.dataset.id !== id || !dictionaryHoverAvailable() || getAddFormDraftScope() !== scope) return;
       dictionaryDetailHover = { scope, id };
       renderDictionaryWordDetail(undefined, { hoverOnly: true });
+      if (dictionaryDetailSelection?.scope !== scope || dictionaryDetailSelection.id !== id) {
+        void positionDictionaryDetail({ preview: true });
+      }
     }, 100);
   });
   list.addEventListener('pointerout', event => {
@@ -361,9 +407,9 @@ window.addEventListener('lootlingua:auth-state', resetDictionaryHover);
     if (event.pointerType === 'mouse') clearTimeout(dictionaryHoverTimer);
   });
   workspace.addEventListener('pointerleave', leaveDictionaryHover);
-  workspace.addEventListener('focusin', event => {
-    if (!event.target.closest('#dictionaryWordDetail')) resetDictionaryHover();
-  });
+  const keepPosition = () => { dictionaryHoverScrollHome = null; dictionaryDetailScrollRequest++; };
+  workspace.addEventListener('wheel', keepPosition, { passive: true });
+  workspace.addEventListener('pointerdown', keepPosition, { passive: true });
 }
 
 function renderWordCard(w, query, indexMap) {
@@ -580,6 +626,23 @@ function renderDictionaryWindow(options = {}) {
     snapshot.heights = window.LootLinguaDictionaryWindow.createHeightIndex(snapshot.filtered.length);
   }
   dictionaryRenderWidth = width;
+  const listTop = list.getBoundingClientRect().top + window.scrollY;
+  let scrollY = typeof options.scrollYOverride === 'number' ? options.scrollYOverride : window.scrollY;
+  if (listWasCleared && typeof viewScrollY !== 'undefined' && typeof viewScrollY[getActiveDictionaryStorageScope()] === 'number') {
+    scrollY = options.scrollYOverride ?? viewScrollY[getActiveDictionaryStorageScope()];
+  }
+  if (dictionaryQueryOrigin?.scope !== snapshot.scope) dictionaryQueryOrigin = null;
+  let restoreQueryOrigin = false;
+  if (query && !dictionaryQueryOrigin) {
+    dictionaryQueryOrigin = { scope: snapshot.scope, top: scrollY };
+    const toolbarBottom = document.querySelector('.search-bar-row').getBoundingClientRect().bottom;
+    scrollY = Math.min(scrollY, Math.max(0, listTop - toolbarBottom - 8));
+    if (window.scrollY > scrollY) window.scrollTo({ top: scrollY, behavior: 'instant' });
+  } else if (!query && dictionaryQueryOrigin) {
+    scrollY = dictionaryQueryOrigin.top;
+    dictionaryQueryOrigin = null;
+    restoreQueryOrigin = true;
+  }
   if (!snapshot.filtered.length) {
     dictionaryResizeObserver?.disconnect();
     if (list.dataset.emptyKey !== snapshot.key || listWasCleared) {
@@ -593,19 +656,10 @@ function renderDictionaryWindow(options = {}) {
     return;
   }
   delete list.dataset.emptyKey;
-  const listTop = list.getBoundingClientRect().top + window.scrollY;
-  let scrollY = typeof options.scrollYOverride === 'number' ? options.scrollYOverride : window.scrollY;
-  if (listWasCleared && typeof viewScrollY !== 'undefined' && typeof viewScrollY[getActiveDictionaryStorageScope()] === 'number') {
-    scrollY = options.scrollYOverride ?? viewScrollY[getActiveDictionaryStorageScope()];
-  }
-  if (snapshot.queryChanged) {
-    scrollY = Math.min(scrollY, Math.max(0, listTop - 100));
-    if (window.scrollY > scrollY) window.scrollTo({ top: scrollY, behavior: 'instant' });
-    snapshot.queryChanged = false;
-  }
   const range = snapshot.heights.range(Math.max(0, scrollY - listTop), window.innerHeight, 12);
   const displayWords = snapshot.filtered.slice(range.start, range.end);
   reconcileDictionaryCards(list, displayWords, snapshot, query, range.start, range.end);
+  if (restoreQueryOrigin) window.scrollTo({ top: scrollY, behavior: 'instant' });
   renderDictionaryWordDetail(snapshot.indexMap);
   if (pages) {
     const buckets = [...new Set(displayWords.map(word => Math.floor(snapshot.indexMap.get(String(word.id)) / 80)))];

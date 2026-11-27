@@ -1,10 +1,11 @@
 (function bindWorkspaceEdges() {
   const header = document.getElementById('legendTopBar');
-  const dock = document.getElementById('legendDock');
   const status = document.getElementById('syncStatusBar');
+  const title = document.getElementById('pageTitle');
   const viewportEdges = document.querySelector('.viewport-edges');
   const workspace = document.querySelector('.dictionary-workspace');
   const scroller = document.querySelector('.dictionary-workspace-scroll');
+  const content = scroller.firstElementChild;
   const workspaceEdges = workspace.querySelector('.workspace-edges');
   const desktop = matchMedia('(min-width: 940px) and (min-height: 421px)');
   let frame = 0;
@@ -25,16 +26,21 @@
     const height = document.documentElement.clientHeight;
     const statusBounds = status.getBoundingClientRect();
     const headerBottom = Math.max(header.getBoundingClientRect().bottom, statusBounds.bottom);
-    const dockTop = dock.getBoundingClientRect().top;
-    const stickyTop = Math.ceil(headerBottom + 12);
+    const toolsTop = Math.ceil(headerBottom + 8);
+    const titleHeight = Math.ceil(title.getBoundingClientRect().height);
+    const stickyTop = toolsTop + titleHeight + 8;
     const available = desktop.matches && scroller.offsetWidth > 0;
     const workspaceTop = available ? Math.max(workspace.getBoundingClientRect().top, stickyTop) : 0;
-    const room = Math.floor((dockTop > 0 && dockTop < height ? dockTop : height) - workspaceTop - 15);
+    const room = Math.floor(height - workspaceTop - 12);
     markEdges(viewportEdges, page.scrollTop, page.scrollHeight - page.scrollTop - height);
     setPixels(document.body, '--shell-content-top', headerBottom + 14);
+    setPixels(document.body, '--dictionary-tools-top', toolsTop);
+    setPixels(document.body, '--dictionary-title-height', titleHeight);
     if (!available) return;
     setPixels(workspace, '--workspace-top', stickyTop);
-    setPixels(workspace, '--workspace-height', Math.max(110, room));
+    const workspaceHeight = Math.max(110, room);
+    setPixels(workspace, '--workspace-height', workspaceHeight);
+    scroller.toggleAttribute('data-end-buffer', content.offsetHeight + 14 > workspaceHeight);
     const position = scroller.scrollTop;
     const remaining = scroller.scrollHeight - scroller.clientHeight - position;
     markEdges(workspaceEdges, position, remaining);
@@ -49,7 +55,7 @@
   desktop.addEventListener('change', schedule);
   if (window.ResizeObserver) {
     const resize = new ResizeObserver(schedule);
-    for (const node of [document.body, header, dock, status, scroller, ...scroller.children]) resize.observe(node);
+    for (const node of [document.body, header, title, status, scroller, ...scroller.children]) resize.observe(node);
   }
   schedule();
 })();

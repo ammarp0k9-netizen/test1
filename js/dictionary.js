@@ -562,7 +562,6 @@ function setAddFormExpanded(expanded) {
   isExpanded = Boolean(expanded);
   window.isExpanded = isExpanded;
   syncAddFormExpanded();
-  if (isExpanded && typeof resetDictionaryHover === 'function') resetDictionaryHover();
   if (typeof window.saveActiveAddFormDraft === 'function') window.saveActiveAddFormDraft();
 }
 
@@ -1861,7 +1860,6 @@ const slowSearchFacts = [
 
 function renderNormalSearch(scope) {
   if (!isEditableDictionaryView() || getAddFormDraftScope() !== scope) return;
-  if (typeof resetDictionaryHover === 'function') resetDictionaryHover();
   const input = document.getElementById('wordInput');
   const button = document.getElementById('searchBtn');
   const box = document.getElementById('suggestionsBox');
